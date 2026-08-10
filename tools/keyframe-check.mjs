@@ -100,15 +100,15 @@ const halfStep = (spec) => spec.step / 2 + 1e-9;
 const MUTATIONS = {
   // Ease handles stop bending the timing, so every scalar segment is a straight
   // lerp whatever its handles say.
-  'ease-ignored': [[
+  'ease-ignored': { file: 'web/curve.js', edits: [[
     `function easeAt(a, b, x) {
   const u = easeParam(a[0], b[0], x);
   return bez(a[1], b[1], u);
 }`,
     'function easeAt(a, b, x) { return x; }',
-  ]],
+  ]] },
   // A step track interpolates, which is the one thing a boolean cannot do.
-  'step-lerps': [[
+  'step-lerps': { file: 'web/curve.js', edits: [[
     `function stepAt(keys, t) {
   const i = keyBefore(keys, t);
   return keys[i < 0 ? 0 : i].value;
@@ -119,9 +119,9 @@ const MUTATIONS = {
   const u = (t - keys[i].t) / Math.max(1e-9, keys[i + 1].t - keys[i].t);
   return u < 0.5 ? keys[i].value : keys[i + 1].value;
 }`,
-  ]],
+  ]] },
   // The camera corners on straight lines between its keys.
-  'pose-linear': [[
+  'pose-linear': { file: 'web/main.js', edits: [[
     `  const position = [0, 1, 2].map((axis) => hermite(
     a.value.position[axis], b.value.position[axis],
     tangentAt(keys, i, axis), tangentAt(keys, i + 1, axis),
@@ -129,11 +129,11 @@ const MUTATIONS = {
   ));`,
     `  const position = [0, 1, 2].map((axis) => a.value.position[axis]
     + (b.value.position[axis] - a.value.position[axis]) * u);`,
-  ]],
+  ]] },
   // The carried finding, put back: the pre-roll reads the slope at the target and
   // multiplies, instead of asking how far back the curve covers the span. A hold
   // then answers "no frames needed" for the case that needs the most.
-  'preroll-slope-at-target': [[
+  'preroll-slope-at-target': { file: 'web/main.js', edits: [[
     '    const back = retime.framesBackFor(programSec, surfaceSec, this.outputFps, this.lastFrame);',
     `    // Step 4's two lines restored verbatim, zero-slope branch and all: the slope
     // at a point times a frame count, and a hold answering "no frames needed" for
@@ -141,16 +141,16 @@ const MUTATIONS = {
     // shape of the finding - a tangent has no window to ask about.
     const sourcePerFrame = Math.abs(retime.slopeAt(programSec)) / this.outputFps;
     const back = { frames: sourcePerFrame > 0 ? Math.ceil(surfaceSec / sourcePerFrame) : 0, covered: true };`,
-  ]],
+  ]] },
   // The retime stops being a curve and goes back to a constant slope.
-  'retime-ignores-keys': [[
+  'retime-ignores-keys': { file: 'web/main.js', edits: [[
     `    if (keys.length === 1) return keys[0].value + (programSec - keys[0].t) * this.rate;
     return scalarAt(keys, programSec, EXTEND_ENDS);`,
     '    return programSec * this.rate;',
-  ]],
+  ]] },
   // The evaluator announces its writes, so every evaluated frame schedules an
   // accurate seek, which evaluates, which schedules more.
-  'evaluator-repaints': [[
+  'evaluator-repaints': { file: 'web/main.js', edits: [[
     `  withoutRepaint(() => {
     for (const track of tracks.values()) {
       if (track.keys.length === 0) continue;
@@ -163,7 +163,7 @@ const MUTATIONS = {
     if (borrowed && borrowed.has(track.name)) continue;
     params.set(track.name, track.valueAt(t));
   }`,
-  ]],
+  ]] },
   // The undo snapshot takes the whole registry rather than document state, so
   // dropping render scale for performance lands on the stack and pressing undo
   // puts it back.
@@ -172,10 +172,10 @@ const MUTATIONS = {
   // tool refused the mutation - correctly, and silently as far as anything reading only
   // the exit code was concerned. The claim is unchanged: the snapshot is document state,
   // so widening it to the whole registry has to be caught.
-  'undo-includes-view': [[
+  'undo-includes-view': { file: 'web/main.js', edits: [[
     "      params: params.values(params.names('look')),",
     '      params: params.values(params.names()),',
-  ]],
+  ]] },
   // Undo pushes on every input event rather than on the end of the interaction, so
   // one slider drag is two hundred levels.
   // Re-anchored: the listener's local was renamed `el` to `input`, and a one-word rename
@@ -183,16 +183,16 @@ const MUTATIONS = {
   // undo step, and it had stopped running while reading as though it had. Caught by
   // `syntax-check`'s anchor row rather than by anybody noticing; `docs/instruments.md`
   // carries the case file.
-  'undo-on-input': [[
+  'undo-on-input': { file: 'web/main.js', edits: [[
     "      input.addEventListener('input', () => writeFromControl(name, Number(input.value)));",
     "      input.addEventListener('input', () => { writeFromControl(name, Number(input.value)); history.commit(); });",
-  ]],
+  ]] },
   // A seek plans its span once and never looks again, which is what the code did
   // before a curve could move under it. The hazard is older than step 5 - the speed
   // slider mutates `retime.rate` outside the transport's exclusive queue, so a
   // committed step 4 could hit it too - it is only far harder to reach without a
   // drag rewriting the curve on every pointer move.
-  'seek-plans-once': [[
+  'seek-plans-once': { file: 'web/main.js', edits: [[
     `    let planned = this.planSeek(programSec, options.frames);
     for (let attempt = 0; !this.source.resident(planned.from, planned.to); attempt++) {
       if (attempt >= SEEK_REPLANS) {
@@ -219,56 +219,56 @@ const MUTATIONS = {
     }`,
     `    const planned = this.planSeek(programSec, options.frames);
     await this.source.ensure(planned.from, planned.to);`,
-  ]],
+  ]] },
   // The pre-roll goes back to reading the uniforms, which hold the look at wherever
   // the playhead was parked rather than the look at the target.
   // The surface half alone. It used to carry the trails half too, which made it two
   // claims in one mutation and left it stale the moment the trails half changed
   // shape - and a stale mutation is refused rather than run, which is the guard
   // working but not a catch. `trails-damp-at-target` is the trails half's own.
-  'preroll-reads-uniforms': [[
+  'preroll-reads-uniforms': { file: 'web/main.js', edits: [[
     `    const surfaceSec = (valueAtProgram('fade', programSec)
       + valueAtProgram('wake', programSec)) / 1000;`,
     '    const surfaceSec = uniforms.fadeTime.value + uniforms.wakeTime.value;',
-  ]],
+  ]] },
   // The trails half of the pre-roll goes back to the closed form, which is the
   // product over the window only while damp is constant.
-  'trails-damp-at-target': [[
+  'trails-damp-at-target': { file: 'web/main.js', edits: [[
     `    const back2 = this.trailsFramesBack(programSec);
     const trails = back2.frames;`,
     `    const dampNow = valueAtProgram('trails', programSec);
     const back2 = { covered: true };
     const trails = dampNow > 0 ? Math.ceil(Math.log(AFTERIMAGE_RESIDUAL) / Math.log(dampNow)) : 0;`,
-  ]],
+  ]] },
   // Orientation stops interpolating and holds the earlier key. Every quaternion is
   // still a unit quaternion and every key is still hit exactly, which is what made
   // this invisible while the test rotations were identities.
-  'pose-no-slerp': [[
+  'pose-no-slerp': { file: 'web/main.js', edits: [[
     `  slerpA.fromArray(a.value.quaternion);
   slerpB.fromArray(b.value.quaternion);
   slerpA.slerp(slerpB, u);`,
     '  slerpA.fromArray(a.value.quaternion);',
-  ]],
+  ]] },
   // The retime's editing doors stop holding a key inside its neighbours, so a drag
   // can author a curve that runs downhill.
-  'retime-unclamped': [
+  'retime-unclamped': { file: 'web/main.js', edits: [
     [`  const floor = i > 0 ? keys[i - 1].value : 0;
   const ceiling = i < keys.length - 1 ? keys[i + 1].value : timeline.source.duration;
   key.value = Math.max(floor, Math.min(ceiling, key.value));`,
       '  key.value = Math.max(0, Math.min(timeline.source.duration, key.value));'],
     ['      if (keys[i].value < keys[i - 1].value) {', '      if (false) {'],
-  ],
+  ] },
   // The handle half of the retime guard goes away while the key-value half stays, so
   // a curve whose keys ascend can still be bent downhill inside a segment. Its own
   // mutation rather than part of `retime-unclamped`, because they are two claims:
   // one is about where a key may sit, the other about where its handles may.
-  'retime-handle-unchecked': [[
+  'retime-handle-unchecked': { file: 'web/main.js', edits: [[
     '        if (!h.every((c) => c >= 0 && c <= 1)) {',
     '        if (false) {',
-  ]],
+  ]] },
   // The animation loop stops catching, so the pair source's refusal escapes it and
   // three never asks for another frame.
-  'tick-uncaught': [[
+  'tick-uncaught': { file: 'web/main.js', edits: [[
     `    try {
       this.tickNow(nowMs);
     } catch (err) {`,
@@ -279,10 +279,10 @@ const MUTATIONS = {
     try {
       this.tickNow(nowMs);
     } catch (err) {`,
-  ]],
+  ]] },
   // The furniture goes back inside the frame, which is where it was first written
   // and where it broke step 4.
-  'chrome-in-frame': [[
+  'chrome-in-frame': { file: 'web/main.js', edits: [[
     `    if (postEnabled()) composer.render(dt);
     else renderer.render(scene, viewCamera);`,
     `    if (postEnabled()) composer.render(dt);
@@ -305,24 +305,48 @@ const MUTATIONS = {
   renderer.setClearColor(held, heldAlpha);
 }
 function drawChrome() {`,
-  ]],
+  ]] },
 };
 
+// **The spec names the file it edits, and the interception is derived from that name.**
+// This used to read the literal `web/main.js` regardless of what the table said, which
+// was true of every entry and true by coincidence: the page is built from more than one
+// module, so an anchor that moves into a neighbouring one would leave a hardcoded route
+// matching nothing, the browser loading the unmutated build, and the run recorded as
+// this tool having missed a bug it was never shown. That is the failure direction
+// `docs/instruments.md` keeps the case file for, and it is silent.
+//
+// Returned with its file rather than as a bare string so the caller can install the
+// route for the right URL and refuse when that URL is never asked for.
 function mutatedSource() {
-  const path = join(REPO, 'web/main.js');
-  let source = readFileSync(path, 'utf8');
-  const edits = MUTATIONS[MUTATE];
-  if (!edits) {
+  const spec = MUTATIONS[MUTATE];
+  if (!spec) {
     throw new Error(`unknown mutation ${MUTATE} - have ${Object.keys(MUTATIONS).join(', ')}`);
   }
-  for (const [from, to] of edits) {
+  let source = readFileSync(join(REPO, spec.file), 'utf8');
+  for (const [from, to] of spec.edits) {
     const hits = source.split(from).length - 1;
     if (hits !== 1) {
-      throw new Error(`mutation ${MUTATE} matched ${hits} times, expected exactly 1: ${from.slice(0, 70)}…`);
+      throw new Error(`mutation ${MUTATE} matched ${hits} times in ${spec.file}, expected exactly 1: ${from.slice(0, 70)}…`);
     }
     source = source.replace(from, to);
   }
-  return source;
+  return { file: spec.file, body: source };
+}
+
+/**
+ * Where a file under `web/` is reached from a browser.
+ *
+ * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
+ * on the basename is a claim about a filename where the server's rule is about a path -
+ * two modules could end in the same name and the wrong one would be served without
+ * anything failing.
+ */
+function servedAt(file) {
+  if (!file.startsWith('web/')) {
+    throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
+  }
+  return `/${file.slice('web/'.length)}`;
 }
 
 // ------------------------------------------------------------------- playwright
@@ -749,12 +773,20 @@ page.on('console', (msg) => { if (msg.type() === 'error') note(msg.text()); });
 page.on('response', (res) => { if (!res.ok()) note(`${res.status()} ${res.url()}`); });
 await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
+// Counted rather than assumed, and read after the page has loaded. A route that
+// matches nothing fulfils nothing and throws no error - the page simply loads the
+// tree's own source - so the only way to tell a mutation that was delivered from one
+// that was never asked for is to watch the interception fire.
+let mutantServed = 0;
+let mutantPath = null;
 if (MUTATE) {
-  const source = mutatedSource();
-  await page.route('**/main.js', (route) => route.fulfill({
-    contentType: 'text/javascript; charset=utf-8', body: source,
-  }));
-  console.log(`[keyframe] MUTATED BUILD: ${MUTATE} - this run is expected to FAIL`);
+  const { file, body } = mutatedSource();
+  mutantPath = servedAt(file);
+  await page.route((url) => url.pathname === mutantPath, (route) => {
+    mutantServed++;
+    route.fulfill({ contentType: 'text/javascript; charset=utf-8', body });
+  });
+  console.log(`[keyframe] MUTATED BUILD: ${MUTATE} in ${file} at ${mutantPath} - this run is expected to FAIL`);
 }
 
 // The editor, which `/?take=` opened until the main menu took `/`. The take stays in
@@ -763,6 +795,19 @@ if (MUTATE) {
 // timing out on a page that was never going to answer.
 await page.goto(`${URL_BASE}/edit?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
 await page.waitForFunction(() => !!globalThis.__kinect);
+
+// **Exit 2, not a failed assertion.** A suite that fails one row on a mutation run reads
+// as a catch, so a mutation the page never asked for has to be the harness declining to
+// run rather than a claim going red - that is what 2 means everywhere else in this
+// suite, and `c507eb7` records the same refusal being added to `library-check` for the
+// same reason. The case it exists for is a module this page does not import: the route
+// is installed, nothing ever requests it, and every row below would pass on the tree's
+// own build while the output said MUTATED at the top.
+if (MUTATE && mutantServed === 0) {
+  console.log(`\n[keyframe] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
+    + 'requested it, so this run would have measured the unmutated build');
+  process.exit(2);
+}
 // **The page frames at the stage this tool asked for.** The editor letterboxes
 // itself to the export aspect now, so a viewport alone no longer decides the
 // drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit

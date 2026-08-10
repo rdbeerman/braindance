@@ -122,7 +122,11 @@ if (mutateAt !== -1 && !MUTATIONS[mutation]) {
 
 // The server, the tools and the browser bundle. Everything else with a .js in it is
 // either vendored, built or a capture, and none of those are ours to parse.
-const FLOORS = { server: 5, tools: 12, web: 2 };
+// A floor per directory rather than a total, so a walk that stops finding a tree says so
+// instead of being covered by another tree having grown. `web` moved off 2 as `main.js`
+// started being split - the floor is a claim that the walk still reaches the modules,
+// and one left at 2 would go on passing with eighteen of them deleted.
+const FLOORS = { server: 5, test: 2, tools: 12, web: 4 };
 
 // **Two different questions, so two different sets, and the difference is the point.**
 // `PARSES` is what `node --check` can be handed and have its answer mean anything - a
