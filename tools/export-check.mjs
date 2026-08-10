@@ -504,6 +504,24 @@ function mutatedSource(name) {
   return { file: spec.file, body: source };
 }
 
+/**
+ * Where a file under `web/` is reached from a browser.
+ *
+ * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
+ * on the basename is a claim about a filename where the server's rule is about a path -
+ * two modules could end in the same name and the wrong one would be served without
+ * anything failing. A mutation whose `file` is not under `web/` - the two that patch
+ * `server/export.js` - never reaches this function, because there is nothing for a
+ * browser to request: those are proved against the render worker's own process, not
+ * against a page.
+ */
+function servedAt(file) {
+  if (!file.startsWith('web/')) {
+    throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
+  }
+  return `/${file.slice('web/'.length)}`;
+}
+
 // ------------------------------------------------------------------- playwright
 
 async function loadPlaywright() {
@@ -907,8 +925,24 @@ const RES_ARM = `async ({ label, look, at, resLook, camera }) => {
 const { chromium } = await loadPlaywright();
 const mutation = MUTATE ? mutatedSource(MUTATE) : null;
 // Only a page mutation is served into the browser. A server mutation leaves every
-// page on the tree's own build, because the claim it breaks is one no page can see.
-const mutatedBody = mutation?.file === 'web/main.js' ? mutation.body : null;
+// page on the tree's own build, because the claim it breaks is one no page can see -
+// `prores-writes-h264`, `pngseq-writes-one-file` and `export-fail-unlinks-output` all
+// patch `server/export.js`, which the render worker imports directly and no browser
+// ever requests.
+const mutatedBody = mutation && mutation.file.startsWith('web/') ? mutation.body : null;
+// The path this mutation would arrive at if a browser asked for it, read off the
+// spec rather than assumed to be `main.js` - the assumption every mutation here has
+// satisfied so far, but coincidentally, the way `registry-check` and `keyframe-check`
+// record the same coincidence for the same reason. `openPage` below reuses this for
+// every page it opens on the current tree; the cross-build arms pass their own
+// explicit `source` and are routed at `web/main.js` regardless, because a cross-build
+// arm is always this tree's older `main.js` whatever mutation happens to be active.
+const mutantPath = mutatedBody !== null ? servedAt(mutation.file) : null;
+// Counted rather than assumed, across every page this file opens on the current
+// tree: `main`, the determinism arms and the resolution sweep all default to
+// `mutatedBody`, and any one of them failing to request the mutated module would
+// leave the others carrying a run that never happened.
+let mutantServed = 0;
 if (MUTATE) console.log(`[export] MUTATED BUILD: ${MUTATE} in ${mutation.file} - this run is expected to FAIL`);
 
 const pageErrors = [];
@@ -964,9 +998,20 @@ async function openPage(viewport, source = mutatedBody, html = null) {
       (route) => { servedHtml = true; return route.fulfill({ contentType: 'text/html; charset=utf-8', body: html }); });
   }
   if (source) {
-    await page.route('**/main.js', (route) => route.fulfill({
-      contentType: 'text/javascript; charset=utf-8', body: source,
-    }));
+    // `source === mutatedBody` for every call that did not pass its own explicit
+    // source, which is every page opened on the current tree under `--mutate` - so
+    // the path it is routed at is the one the active mutation actually names, and
+    // the counter below only ever counts requests for that mutation rather than
+    // requests a cross-build arm made for an unrelated reason. A cross-build arm
+    // always passes its own `src`: an older revision's text, which is not the string
+    // `mutatedBody` holds even on a run with no mutation active, so it falls through
+    // to the fixed path - it is always this tree's older `main.js`, whatever mutation
+    // happens to be active this run.
+    const path = source === mutatedBody ? mutantPath : servedAt('web/main.js');
+    await page.route((url) => url.pathname === path, (route) => {
+      if (source === mutatedBody) mutantServed++;
+      route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source });
+    });
   }
   await page.goto(`${URL_BASE}${EDITOR_PATH}?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
   // The interception, enforced rather than assumed - and this is the exact
@@ -1115,6 +1160,18 @@ async function setStage(page, size) {
 }
 
 const main = await openPage(STAGE);
+// **Exit 2, not a failed assertion.** A suite that fails a row on a mutation run reads
+// as a catch, so a mutation the page never asked for has to be the harness declining to
+// run rather than a claim going red - that is what 2 means everywhere else in this
+// suite, and `c507eb7` records the same refusal being added to `library-check` for the
+// same reason. `main` is the first page this file opens on the current tree, and every
+// later page installs the same route the same way, so if this one never asked for the
+// mutated module, none of them will either.
+if (MUTATE && mutatedBody !== null && mutantServed === 0) {
+  console.log(`\n[export] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
+    + 'requested it, so this run would have measured the unmutated build');
+  process.exit(2);
+}
 console.log(`[export] ${main.gpu.renderer}`);
 console.log(`[export] take ${TAKE}: ${stamps.length} frames, ${DURATION.toFixed(2)}s source, `
   + `${index.hash}`);

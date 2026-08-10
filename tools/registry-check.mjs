@@ -107,8 +107,11 @@ const MUTATIONS = {
   // spelling of `mix-ignores-normalisation`, indistinguishable from it by the rows that
   // went red, so it could not tell anybody which claim was load-bearing.
   'rgb-contributes-no-alpha': {
-    from: '    alphaFactor += readRgb;',
-    to: '    alphaFactor += 0.0;',
+    file: 'web/main.js',
+    edits: [[
+      '    alphaFactor += readRgb;',
+      '    alphaFactor += 0.0;',
+    ]],
     fails: 'the readRgb row of 1b, alone - the other four readings are untouched',
   },
   // Section 1b, the readGhost row and only that row. The three alpha-writing readings
@@ -116,8 +119,11 @@ const MUTATIONS = {
   // there is transcription rather than arithmetic - and a check that compared only
   // colour would pass a build that dropped a term from one of them.
   'ghost-alpha-term-dropped': {
-    from: '    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * readGhost;',
-    to: '    alphaFactor += (0.25 + 0.75 * rim) * readGhost;',
+    file: 'web/main.js',
+    edits: [[
+      '    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * readGhost;',
+      '    alphaFactor += (0.25 + 0.75 * rim) * readGhost;',
+    ]],
     fails: 'the readGhost row of 1b, alone - so 1b compares alpha and not just colour',
   },
   // Section 8b: the mix stops being a ratio while every single reading stays exactly
@@ -125,8 +131,11 @@ const MUTATIONS = {
   // weight is 1 and the rest are 0. This is the mutation section 1b cannot see and the
   // whole reason 8b exists.
   'mix-ignores-normalisation': {
-    from: 'float norm = readSum > 0.0 ? 1.0 / readSum : 0.0;',
-    to: 'float norm = readSum > 0.0 ? 1.0 : 0.0;',
+    file: 'web/main.js',
+    edits: [[
+      'float norm = readSum > 0.0 ? 1.0 / readSum : 0.0;',
+      'float norm = readSum > 0.0 ? 1.0 : 0.0;',
+    ]],
     fails: 'the scale-cancels row of 8b, with every row of 1b still passing',
   },
   // Section 8's falsification sweep: one weight reaches no pixel. Dropping it from the
@@ -139,8 +148,11 @@ const MUTATIONS = {
   // in that bucket rather than one is the right answer here, and a fourth would mean a
   // parameter had quietly become reachable only from ghost.
   'weight-ignored': {
-    from: '  if (readGhost > 0.0) {',
-    to: '  if (false) {',
+    file: 'web/main.js',
+    edits: [[
+      '  if (readGhost > 0.0) {',
+      '  if (false) {',
+    ]],
     fails: 'readGhost, ghostRim and ghostFill in the drop-one sweep, plus readGhost\'s 1b row',
   },
   // The duotone's amount reaches no pixel, and it takes the hue, the split and the motion
@@ -150,8 +162,11 @@ const MUTATIONS = {
   // right answer and a fifth would mean some other parameter had quietly become reachable
   // only through the duotone.
   'duotone-ignored': {
-    from: '  if (duotoneDepth > 0.0) {',
-    to: '  if (false) {',
+    file: 'web/main.js',
+    edits: [[
+      '  if (duotoneDepth > 0.0) {',
+      '  if (false) {',
+    ]],
     fails: 'duotoneDepth, duotoneHue, duotoneSplit and duotoneMotion in the drop-one sweep, '
       + 'plus the planted section\'s two motion rows, which the block being off takes with it',
   },
@@ -162,8 +177,11 @@ const MUTATIONS = {
   // cannot draw the silhouette this parameter exists for, which is exactly the shape of
   // failure that ships looking like a control that works.
   'duotone-ignores-depth': {
-    from: '    float k = smoothstep(duotoneSplit - w * 0.5, duotoneSplit + w * 0.5, t);',
-    to: '    float k = 0.5;',
+    file: 'web/main.js',
+    edits: [[
+      '    float k = smoothstep(duotoneSplit - w * 0.5, duotoneSplit + w * 0.5, t);',
+      '    float k = 0.5;',
+    ]],
     fails: 'duotoneSplit and duotoneSpan in the drop-one sweep - the amount and the hue still '
       + 'reach pixels, and the span goes with the split because the ramp it widens is gone - '
       + 'plus the metre section\'s control row, since a ramp replaced by a constant cannot be '
@@ -173,8 +191,11 @@ const MUTATIONS = {
   // lands in a uniform nothing reads. The plain shape, and the drop-one sweep is what sees
   // it: a parameter whose picture never changes when you take it away.
   'duotone-span-ignored': {
-    from: '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
-    to: '    float w = 1.0;',
+    file: 'web/main.js',
+    edits: [[
+      '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
+      '    float w = 1.0;',
+    ]],
     fails: 'duotoneSpan in the drop-one sweep - every other duotone term still reaches pixels, '
       + 'since the ramp goes on running at the width it had before this parameter - and the whole '
       + 'of the metre section, whose two invariance rows read a ramp that is once again a share '
@@ -189,8 +210,11 @@ const MUTATIONS = {
   // parameter was added to remove, reinstated in a form nothing that renders one range can
   // detect.
   'duotone-span-against-a-frozen-range': {
-    from: '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
-    to: '    float w = duotoneSpan / 5.95;',
+    file: 'web/main.js',
+    edits: [[
+      '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
+      '    float w = duotoneSpan / 5.95;',
+    ]],
     fails: 'the duotone span\'s two invariance rows, which render the same take at two clip '
       + 'ranges and hold the graded band still in metres - and nothing else, because at the '
       + 'default range this mutation is the shipped arithmetic',
@@ -201,8 +225,11 @@ const MUTATIONS = {
   // section's motion rows too, and those are the rows that say the sweep is measuring the
   // speed rather than something else that moved with it.
   'vspeed-ignored': {
-    from: '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
-    to: '    vSpeed = 0.0;',
+    file: 'web/main.js',
+    edits: [[
+      '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
+      '    vSpeed = 0.0;',
+    ]],
     fails: 'duotoneMotion in the drop-one sweep and the proven-parameter count beneath it, '
       + 'plus the planted section\'s two motion rows - the one that says a planted pair moves '
       + 'the picture and the one that says it moves it toward the hot pole',
@@ -214,8 +241,11 @@ const MUTATIONS = {
   // in. Nothing here could see it before the planted section existed, because both arms
   // of every comparison in this file run at the same frame rate by construction.
   'vspeed-unnormalised': {
-    from: '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
-    to: '    vSpeed = paired ? abs(mmC - mmP) : 0.0;',
+    file: 'web/main.js',
+    edits: [[
+      '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
+      '    vSpeed = paired ? abs(mmC - mmP) : 0.0;',
+    ]],
     fails: 'the same-speed-over-two-spans row of the planted section, alone - the drop-one '
       + 'sweep stays green, and so do the two rows either side of it',
   },
@@ -225,8 +255,11 @@ const MUTATIONS = {
   // few for any hashed run over it to notice, so the only thing that can see this is a
   // pair planted across the threshold on purpose.
   'vspeed-ignores-the-gate': {
-    from: '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
-    to: '    vSpeed = mmP > 0.0 ? abs(mmC - mmP) / spanSec : 0.0;',
+    file: 'web/main.js',
+    edits: [[
+      '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
+      '    vSpeed = mmP > 0.0 ? abs(mmC - mmP) / spanSec : 0.0;',
+    ]],
     fails: 'the row that says a jump past the snap threshold is a different surface, alone',
   },
   // The speed read off one fixed texel rather than the point's own, which is the failure a
@@ -237,8 +270,11 @@ const MUTATIONS = {
   // question at all. The blend keeps the point's own sample, so nothing about the geometry
   // moves and section 1b is untouched.
   'vspeed-reads-one-texel': {
-    from: '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
-    to: '    vSpeed = paired ? abs(mmC - depthAt(depthPrev, ivec2(0))) / spanSec : 0.0;',
+    file: 'web/main.js',
+    edits: [[
+      '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
+      '    vSpeed = paired ? abs(mmC - depthAt(depthPrev, ivec2(0))) / spanSec : 0.0;',
+    ]],
     fails: 'the two chequered-plant rows of the planted section - the one that says the '
       + 'chequer is neither of the uniform frames and the one that says its mean red sits '
       + 'between them',
@@ -249,8 +285,11 @@ const MUTATIONS = {
   // in this file can fail on a default that leaks, because every other comparison here either
   // has the term raised on both sides or has the block switched off entirely.
   'motion-leaks-at-zero': {
-    from: '    k = mix(k, 1.0, duotoneMotion * smoothstep(0.0, 1200.0, vSpeed));',
-    to: '    k = mix(k, 1.0, (duotoneMotion + 0.02) * smoothstep(0.0, 1200.0, vSpeed));',
+    file: 'web/main.js',
+    edits: [[
+      '    k = mix(k, 1.0, duotoneMotion * smoothstep(0.0, 1200.0, vSpeed));',
+      '    k = mix(k, 1.0, (duotoneMotion + 0.02) * smoothstep(0.0, 1200.0, vSpeed));',
+    ]],
     fails: 'the motion-of-0-is-inert row, alone - every other row has the term raised on '
       + 'both sides or has nothing moving on either',
   },
@@ -261,8 +300,11 @@ const MUTATIONS = {
   // they write the span themselves, which is what makes this a probe that has to sit
   // somewhere else: on the real transport, against the times the drive reports.
   'spansec-nominal': {
-    from: '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: span };',
-    to: '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: 1 / 30 };',
+    file: 'web/main.js',
+    edits: [[
+      '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: span };',
+      '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: 1 / 30 };',
+    ]],
     fails: 'the row that holds spanSec against the gaps between the pinned frames, alone',
   },
   // The unit conversion dropped, which is a defect no image comparison can see the shape
@@ -270,8 +312,11 @@ const MUTATIONS = {
   // whether the slider reaches a pixel goes on passing. What separates the two builds is
   // the number at the uniform, so the landing row is the only thing that can fail here.
   'duotone-hue-in-degrees': {
-    from: '    apply: (v) => { uniforms.duotoneHue.value = THREE.MathUtils.degToRad(v); } },',
-    to: '    apply: (v) => { uniforms.duotoneHue.value = v; } },',
+    file: 'web/main.js',
+    edits: [[
+      '    apply: (v) => { uniforms.duotoneHue.value = THREE.MathUtils.degToRad(v); } },',
+      '    apply: (v) => { uniforms.duotoneHue.value = v; } },',
+    ]],
     fails: 'the duotoneHue row of the one-at-a-time landing sweep, reporting "landed 47 want '
       + '0.8203047484373349", and the all-at-once row beside it - that second one is the same '
       + 'comparison over the whole set rather than a separate finding',
@@ -281,8 +326,11 @@ const MUTATIONS = {
   // the only row that can see it is the drop-one sweep, where reverting a parameter that
   // reaches nothing changes no pixel.
   'crush-ignored': {
-    from: '      col = max(col - crush, 0.0) * 1.12;',
-    to: '      col = max(col - 0.018, 0.0) * 1.12;',
+    file: 'web/main.js',
+    edits: [[
+      '      col = max(col - crush, 0.0) * 1.12;',
+      '      col = max(col - 0.018, 0.0) * 1.12;',
+    ]],
     fails: 'crush in the drop-one sweep, alone',
   },
   // The guard around the raster's default path removed, so the general form computes what
@@ -296,20 +344,29 @@ const MUTATIONS = {
   // bearing, green means it does not and the branch should come out, because a fast path
   // that is bit-identical to the slow one is the second implementation this repo refuses.
   'raster-recomputes-the-default': {
-    from: '        if (scanAxis.x == 0.0 && scanAxis.y == 1.0 && scanPitch == 1.3 && scanHard == 0.0) {',
-    to: '        if (false) {',
+    file: 'web/main.js',
+    edits: [[
+      '        if (scanAxis.x == 0.0 && scanAxis.y == 1.0 && scanPitch == 1.3 && scanHard == 0.0) {',
+      '        if (false) {',
+    ]],
     fails: 'the raster-at-0.35 row against the pinned build, and nothing else',
   },
   // The lattice switched off at its own guard: a cell that quantises nothing.
   'lattice-ignored': {
-    from: '  if (lattice > 0.0) {',
-    to: '  if (false) {',
+    file: 'web/main.js',
+    edits: [[
+      '  if (lattice > 0.0) {',
+      '  if (false) {',
+    ]],
     fails: 'lattice and latticeCell in the drop-one sweep',
   },
   // The ripple switched off the same way.
   'ripple-ignored': {
-    from: '  if (ripple > 0.0 && rw > 0.0) {',
-    to: '  if (false) {',
+    file: 'web/main.js',
+    edits: [[
+      '  if (ripple > 0.0 && rw > 0.0) {',
+      '  if (false) {',
+    ]],
     fails: 'ripple, rippleFreq and rippleSpeed in the drop-one sweep, and the ripple-alone row',
   },
   // The gate put back the way it was before the ripple existed, so the region weight is
@@ -317,8 +374,11 @@ const MUTATIONS = {
   // cannot see this**: the scrambled set raises all four at once, so the weight is there
   // anyway and the ripple goes on working. Only the arm that raises it alone reddens.
   'ripple-outside-the-gate': {
-    from: '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0 || ripple > 0.0)',
-    to: '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0)',
+    file: 'web/main.js',
+    edits: [[
+      '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0 || ripple > 0.0)',
+      '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0)',
+    ]],
     fails: 'the ripple-alone row, and nothing else - the drop-one sweep stays green',
   },
   // The stepped clock made continuous, which is the term's whole character: a machine
@@ -326,8 +386,11 @@ const MUTATIONS = {
   // off the eighths it steps in, so the smooth phase lands somewhere the stepped one never
   // does rather than agreeing with it by luck at one instant.
   'ripple-clock-continuous': {
-    from: '      float cycles = dist * rippleFreq - floor(time * rippleSpeed * 8.0) * 0.125;',
-    to: '      float cycles = dist * rippleFreq - time * rippleSpeed;',
+    file: 'web/main.js',
+    edits: [[
+      '      float cycles = dist * rippleFreq - floor(time * rippleSpeed * 8.0) * 0.125;',
+      '      float cycles = dist * rippleFreq - time * rippleSpeed;',
+    ]],
     fails: 'the stepped-clock row, and nothing else - the drop-one sweep stays green',
   },
   // The band axis nailed back to the sensor's rows, which is what it was before this
@@ -337,8 +400,11 @@ const MUTATIONS = {
   // reverted. A build that quietly lost it tears horizontally under a green run, which is
   // the whole of what this control was added to stop being the only option.
   'glitch-axis-ignored': {
-    from: '      ? floor(mix(position.y, position.x, glitchAxis) / glitchBands)',
-    to: '      ? floor(position.y / glitchBands)',
+    file: 'web/main.js',
+    edits: [[
+      '      ? floor(mix(position.y, position.x, glitchAxis) / glitchBands)',
+      '      ? floor(position.y / glitchBands)',
+    ]],
     fails: 'glitchAxis in the drop-one sweep, alone',
   },
   // The streak switched off at its own guard, which is the plainest thing that can go
@@ -346,8 +412,11 @@ const MUTATIONS = {
   // change. The drop-one sweep is where that shows, because reverting a parameter nothing
   // reads leaves the image where it was.
   'streak-ignored': {
-    from: '      if (streak > 0.0) {',
-    to: '      if (false) {',
+    file: 'web/main.js',
+    edits: [[
+      '      if (streak > 0.0) {',
+      '      if (false) {',
+    ]],
     // Six rows and not the one this first claimed, taken off the run rather than
     // predicted - and it has grown twice, which is the argument for taking it off a run
     // every time rather than reasoning about it. The drop-one sweep names both `streak`
@@ -376,8 +445,11 @@ const MUTATIONS = {
   // is the sharper half of `duotone-ignored`: that one asks whether the term is wired up at
   // all, this one asks whether it does the thing it is named for.
   'streak-ignores-angle': {
-    from: '          vec3 tap = texture2D(tDiffuse, vUv + d * texel * streakAxis).rgb;',
-    to: '          vec3 tap = texture2D(tDiffuse, vUv + vec2(0.0, d * texel.y)).rgb;',
+    file: 'web/main.js',
+    edits: [[
+      '          vec3 tap = texture2D(tDiffuse, vUv + d * texel * streakAxis).rgb;',
+      '          vec3 tap = texture2D(tDiffuse, vUv + vec2(0.0, d * texel.y)).rgb;',
+    ]],
     fails: 'streakAngle in the drop-one sweep and the proven-parameter count beneath it, '
       + 'and all three of the direction section\'s pair rows - a nailed build renders the '
       + 'same frame at every angle, so each pair differs by exactly nothing',
@@ -405,8 +477,11 @@ const MUTATIONS = {
   // prediction come true - the failure `docs/instruments.md` records twice, both times
   // arriving with a written justification that stopped anybody looking again.
   'streak-angle-in-degrees': {
-    from: '      grade.uniforms.streakAxis.value.set(Math.sin(r), Math.cos(r));',
-    to: '      grade.uniforms.streakAxis.value.set(Math.sin(v), Math.cos(v));',
+    file: 'web/main.js',
+    edits: [[
+      '      grade.uniforms.streakAxis.value.set(Math.sin(r), Math.cos(r));',
+      '      grade.uniforms.streakAxis.value.set(Math.sin(v), Math.cos(v));',
+    ]],
     fails: 'the streakAngle row of the one-at-a-time landing sweep, reporting "landed '
       + '[-0.097181906,0.995266636] want [0.920504853,-0.390731128]", and the all-at-once '
       + 'row beside it - that second one is the same comparison over the whole set rather '
@@ -421,16 +496,22 @@ const MUTATIONS = {
   // is reverted. This is the vertical column grille the whole of D1 is for, so a build
   // that quietly lost it would be drawing television scanlines under a green run.
   'raster-ignores-angle': {
-    from: '          float coord = dot(vUv * ref, scanAxis);',
-    to: '          float coord = vUv.y * ref.y;',
+    file: 'web/main.js',
+    edits: [[
+      '          float coord = dot(vUv * ref, scanAxis);',
+      '          float coord = vUv.y * ref.y;',
+    ]],
     fails: 'scanAngle in the drop-one sweep, alone',
   },
   // The pitch back to the literal it was promoted from. Its default *is* that literal, so
   // nothing about the shipped picture moves - which is the point, and which leaves the
   // drop-one sweep as the only thing that can tell the two builds apart.
   'raster-pitch-fixed': {
-    from: '          float wave = sin(coord * scanPitch + time * 2.0) * 0.5 + 0.5;',
-    to: '          float wave = sin(coord * 1.3 + time * 2.0) * 0.5 + 0.5;',
+    file: 'web/main.js',
+    edits: [[
+      '          float wave = sin(coord * scanPitch + time * 2.0) * 0.5 + 0.5;',
+      '          float wave = sin(coord * 1.3 + time * 2.0) * 0.5 + 0.5;',
+    ]],
     fails: 'scanPitch in the drop-one sweep, alone',
   },
   // The duty cycle dropped, leaving the sine the term has always drawn. This is the
@@ -438,8 +519,11 @@ const MUTATIONS = {
   // and a build without it draws rotated softness at every setting - which looks like a
   // raster right up until you compare it against a reference frame.
   'raster-hard-ignored': {
-    from: '          line = mix(wave, smoothstep(0.5 - w, 0.5 + w, wave), scanHard);',
-    to: '          line = wave;',
+    file: 'web/main.js',
+    edits: [[
+      '          line = mix(wave, smoothstep(0.5 - w, 0.5 + w, wave), scanHard);',
+      '          line = wave;',
+    ]],
     fails: 'scanHard in the drop-one sweep, alone',
   },
   // The tempting edit, planted: `crush` joins the four terms that gate the grade pass, so
@@ -458,8 +542,11 @@ const MUTATIONS = {
   // failing is exactly where a new defect hides, so the count is not the reading - the
   // frame tally is.
   'crush-gates-the-grade': {
-    from: '  return grade.uniforms.rgbSplit.value > 0',
-    to: '  return grade.uniforms.crush.value > 0 || grade.uniforms.rgbSplit.value > 0',
+    file: 'web/main.js',
+    edits: [[
+      '  return grade.uniforms.rgbSplit.value > 0',
+      '  return grade.uniforms.crush.value > 0 || grade.uniforms.rgbSplit.value > 0',
+    ]],
     fails: 'the pass-gate row for crush, all five rows of 1b (readGhost widening from 2 of 6 '
       + 'frames to 6 of 6), and the boot comparison naming all four gating terms',
   },
@@ -500,16 +587,92 @@ process.on('uncaughtException', (err) => {
 // recorded as the check having missed a bug it was never shown. And a mutation is a
 // piece of source text, so it stops matching the moment the code it names is edited -
 // the refusal is what surfaces that rather than a silent pass.
+// **The target comes off the spec rather than out of this function.** Every entry used
+// to be a bare `{ from, to }` and the file was the literal `web/main.js` written here,
+// which was true of all of them and true by coincidence rather than by declaration:
+// `syntax-check`'s anchor row had to infer the same fact from the shape to check these
+// anchors at all, and `docs/instruments.md` records that inference being wrong within
+// days of being written. So the spec says where it edits, the way every other tool in
+// the suite says it, and a mutation that moves to another file moves by editing its own
+// entry rather than by this function learning a second path.
 const mutatedSource = (() => {
   if (!MUTATE) return null;
-  const js = readFileSync(join(REPO, 'web/main.js'), 'utf8');
-  const { from, to } = MUTATIONS[MUTATE];
-  const hits = js.split(from).length - 1;
-  if (hits !== 1) {
-    throw new Error(`mutation ${MUTATE} matched its anchor ${hits} times, not once: ${JSON.stringify(from)}`);
+  const spec = MUTATIONS[MUTATE];
+  if (!spec) throw new Error(`unknown mutation ${MUTATE} - have ${Object.keys(MUTATIONS).join(', ')}`);
+  const staged = new Map();
+  const read = (rel) => {
+    if (!staged.has(rel)) staged.set(rel, readFileSync(join(REPO, rel), 'utf8'));
+    return staged.get(rel);
+  };
+  for (const [from, to] of spec.edits) {
+    const body = read(spec.file);
+    const hits = body.split(from).length - 1;
+    if (hits !== 1) {
+      throw new Error(`mutation ${MUTATE} matched its anchor ${hits} times in ${spec.file}, not once: `
+        + `${JSON.stringify(from)}`);
+    }
+    staged.set(spec.file, body.replace(from, to));
   }
-  return { js: js.replace(from, to), html: readFileSync(join(REPO, 'web/index.html'), 'utf8') };
+  return { js: read('web/main.js'), html: read('web/index.html') };
 })();
+
+// The staging above edits whichever file the spec names, but what it *returns* is
+// fixed at the two files this tool has always paired: the panel and the module a
+// registry write has to reach. A spec landing on a third file - a module `main.js`
+// has since split a claim into - would stage its edit into the map and then have it
+// discarded at that last line, while `mutantPath` below still comes out as that
+// module's own path and the route below still gets a real request for it: the
+// browser asks for the mutation's file, the interception fires, `mutantServed`
+// counts it, and the guard is satisfied - by main.js's unmutated bytes, handed over
+// as if they were the module that was actually asked for. That is worse than the
+// silence this file exists to close, because it does not even print MUTATED and
+// stop: it runs, and whatever it asserts is about code nobody wrote. So this is
+// refused before any page opens, the same way an anchor that stopped matching is -
+// fixing the pairing above to serve a third file is out of scope here and stays
+// that way until something needs it; until then this is the honest failure.
+if (MUTATE && MUTATIONS[MUTATE].file !== 'web/main.js' && MUTATIONS[MUTATE].file !== 'web/index.html') {
+  console.log(`\n[registry] DID NOT RUN - ${MUTATE} edits ${MUTATIONS[MUTATE].file}, which this tool only `
+    + 'stages for web/main.js and web/index.html - serving it would hand a page the wrong file\'s bytes');
+  process.exit(2);
+}
+
+/**
+ * Where a file under `web/` is reached from a browser.
+ *
+ * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
+ * on the basename is a claim about a filename where the server's rule is about a path -
+ * two modules could end in the same name and the wrong one would be served without
+ * anything failing. `timeline-check` carries the same function for the same reason;
+ * this file keeps its own copy rather than importing one, the way every tool here
+ * resolves its own `REPO` rather than sharing it.
+ */
+function servedAt(file) {
+  if (!file.startsWith('web/')) {
+    throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
+  }
+  return `/${file.slice('web/'.length)}`;
+}
+
+// The route below used to be a bare `'**/main.js'` glob, true of every mutation this
+// file has ever carried and true by coincidence: every entry in `MUTATIONS` names
+// `web/main.js`, so a glob on that basename happened to be a path. It stayed a
+// coincidence right up until the tree it patches was about to stop being one file -
+// at which point a mutation whose anchor moved into a neighbouring module would have
+// gone on matching the glob's basename while matching no request any browser makes,
+// which is silent in exactly the way `docs/instruments.md` keeps case files for. So
+// the target is read off the mutation's own declared file, the way `timeline-check`
+// reads it, and it is computed here rather than at every call site because every
+// call site wants the same answer under `--mutate`: which file, if any, is the
+// mutated one.
+const mutantPath = MUTATE ? servedAt(MUTATIONS[MUTATE].file) : servedAt('web/main.js');
+// Counted rather than assumed. A route that matches nothing fulfils nothing and
+// throws no error - the page simply loads the tree's own source - so the only way to
+// tell a mutation that was delivered from one that was never asked for is to watch
+// the interception fire, and it has to be watched across every page this file opens
+// under `--mutate`, not just the first: the after-arm, the pin arm and the panel arm
+// all default to the current tree's source, and any one of them failing to ask for
+// the mutated module would leave the others carrying a run that never happened.
+let mutantServed = 0;
 
 const HEADED = argv.includes('--headed');
 const SOURCE_FRAMES = Number(flag('--frames', '6'));
@@ -1279,9 +1442,16 @@ async function openPage({
     // under a heading that says they came from different code.
     await page.route((url) => url.pathname === RECORDER_PATH,
       (route) => { servedHtml = true; return route.fulfill({ contentType: 'text/html; charset=utf-8', body: source.html }); });
-    await page.route('**/main.js', (route) => route.fulfill({
-      contentType: 'text/javascript; charset=utf-8', body: source.js,
-    }));
+    await page.route((url) => url.pathname === mutantPath, (route) => {
+      // Only the current tree's own default source is the mutation - `beforeArm` and
+      // the mode-comparison arms pass an explicit historical `source` of their own,
+      // and a request for their module is not evidence that the mutation reached
+      // anything. Counting it anyway would make the guard below pass on the strength
+      // of a page that never asked for the mutated tree at all, as long as it opened
+      // *some* page with a source after the after-arm did.
+      if (source === mutatedSource) mutantServed++;
+      return route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source.js });
+    });
   }
   if (pin) {
     await page.route('**/__pinned.bin', (route) => route.fulfill({
@@ -1399,8 +1569,24 @@ async function bootState(opts, reader = landingReader) {
 
 // **The after arm goes first, because it is what says how tall the bar is.** The
 // before arm's viewport is derived from that measurement, so the order is a
-// dependency rather than a preference.
+// dependency rather than a preference. It is also the first page this file opens on
+// the current tree, which makes it the earliest point the delivery guard below can
+// answer honestly: every later arm installs the same route the same way, so if this
+// one never asked for the mutated module, none of them will either.
 const afterArm = await bootState({});
+// **Exit 2, not a failed assertion.** A suite that fails a row on a mutation run
+// reads as a catch, so a mutation the page never asked for has to be the harness
+// declining to run rather than a claim going red - the same convention every other
+// tool in this suite uses for the same reason, `c507eb7` records it arriving at
+// `library-check`, and it holds here even though this file's own convention for an
+// ordinary catch is inverted (0 caught, 1 not caught): a run that tested nothing is
+// neither of those, and reusing either code would make it unrecoverably ambiguous
+// with a real verdict.
+if (MUTATE && mutantServed === 0) {
+  console.log(`\n[registry] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
+    + 'requested it, so this run would have measured the unmutated build');
+  process.exit(2);
+}
 const measuredBar = await afterArm.page.evaluate(
   "Math.round(document.getElementById('appBar').getBoundingClientRect().height)");
 await afterArm.page.close();
