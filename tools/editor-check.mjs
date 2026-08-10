@@ -9636,12 +9636,23 @@ try {
     }
 
     if (!recorder) {
-      // Skipped rather than attempted, and said out loud with its reason. Every row in
-      // the arm below is about the recorder, so a page that never opened leaves them
-      // untested rather than failed - counting a harness failure as a finding is the
-      // mistake `monitor-check` made and `docs/instruments.md` keeps. **When this line
-      // appears, read the rows this section printed rather than its total**: six are
-      // missing and the total is six short of what a clean run reports.
+      // Not a finding, and not a pass either. Every row in the arm below is about the
+      // recorder, so a page that never opened leaves them untested rather than failed -
+      // counting a harness failure as a finding is the mistake `monitor-check` made and
+      // `docs/instruments.md` keeps, and reddening a row here would be exactly that
+      // mistake. But the shape this branch shipped with was the other one: it printed a
+      // note and let the file run on to `PASS`, so a build where `/record` cannot boot
+      // reports a green baseline with six of section 21's rows silently absent, and the
+      // only thing standing between a reader and that reading was an instruction to add
+      // up the total by hand.
+      //
+      // `untested` is what this file already has for it and had never once been set -
+      // exit 2, `docs/proof-tools.md`'s third code, "the harness did not run, or a claim
+      // went unproven". The run finishes so the sections after this one still answer;
+      // the verdict at the foot is what refuses.
+      untested = 'the recorder arm never opened, so the six dock rows section 21 owns did not run'
+        + ` - ${recWhy}`
+        + (recErrors.length ? ` - the page said: ${recErrors.slice(0, 3).join(' | ')}` : '');
       note('the recorder arm did not run', recWhy
         + (recErrors.length ? ` - the page said: ${recErrors.slice(0, 3).join(' | ')}` : ''));
     } else {
@@ -9836,8 +9847,19 @@ if (crashed) {
   if (fired.length) console.log(`[editor] rows that had already fired: ${fired.join('; ')}`);
   process.exit(2);
 }
+// Above the mutation verdict on purpose, and it prints what that verdict would have.
+// A run missing rows is not a verdict on a mutation - the rows it is short of may be
+// the rows that answer it, and "caught" claimed off the others is a catch recorded for
+// a reason nobody checked. So it says neither caught nor missed. What it must not also
+// do is swallow the reading `CLAUDE.md` asks for: count failed assertions, never exit
+// codes, and read which ones fired. This branch was written printing only its reason,
+// which is the one verdict path in this file a reader could not count, so it carries
+// the same three lines the crash branch above carries.
 if (untested) {
   console.log(`\n[editor] UNTESTED - ${untested}`);
+  console.log(`[editor] ${checks} assertions ran, ${failures} failed`);
+  if (fired.length) console.log(`[editor] rows that fired: ${fired.join('; ')}`);
+  if (MUTATE) console.log(`[editor] ${MUTATE} is neither caught nor missed here - the run never reached every row that answers it`);
   process.exit(2);
 }
 

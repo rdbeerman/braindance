@@ -54,6 +54,18 @@ not run" rather than "the harness found something", so a mutation that failed to
 never be recorded as a mutation that was caught. `guard-check` and `vendor-check` use it the
 same way. The convention was reached independently several times and it is one rule.
 
+`editor-check` is the fifth, and it is the one that shows what the rule is worth, because it
+carried the machinery for a year without ever setting it. Section 21 opens a second page on
+`/record` to read the dock the editor withholds, and a page that fails to boot, settle or take
+its route interception left six rows unrun behind a printed note — so a build with a broken
+recorder reported `PASS`, and the only thing between a reader and that reading was a comment
+asking them to add the total up by hand. It now exits **2** naming the arm and its reason. Two
+consequences worth having in front of you before reading one: a mutation run that lands here is
+reported as *neither* caught nor missed, because the rows it is short of may be the rows that
+answer the mutation, and the verdict prints the assertion count and the rows that fired the way
+the crash branch does, since an outcome nobody can count is the thing the exit-code rule at the
+top of this file exists to refuse.
+
 ## Mutations
 
 `--mutate <name>` serves a deliberately broken `main.js` into the running server, or for the

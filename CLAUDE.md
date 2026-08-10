@@ -353,9 +353,11 @@ node tools/registration-check.mjs                    # our registration == upstr
 node tools/registration-check.mjs --mutate one-lsb   # ... and must FAIL mutated
 ```
 
-The two below are what CI runs. `syntax-check` needs nothing at all; `release-gate-check` needs the
-registry and exits 2 when it cannot reach it, because it proves the gate by npm's refusal
-rather than by reading a config key:
+The two below are two of CI's three jobs. `syntax-check` needs nothing at all;
+`release-gate-check` needs the registry and exits 2 when it cannot reach it, because it proves
+the gate by npm's refusal rather than by reading a config key. The third is `npm run test:unit`,
+which is `test/` rather than `tools/` and so is not in the arithmetic below — it needs no server,
+no sensor, no browser and no install, and `test/runner-control.test.mjs` is its control:
 
 ```
 node tools/syntax-check.mjs                          # every JS file this repo ships parses, and the two

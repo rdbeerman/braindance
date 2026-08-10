@@ -52,6 +52,38 @@ jobs:
       # shown to work on this runner rather than an assumption that it does.
       - run: node tools/syntax-check.mjs
 
+  unit:
+    name: the scalar maths, called directly
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same two as above, and the floor is again the interesting one. Measured
+        # rather than assumed, because the suite reaches for two things Node 18 is the
+        # boundary for: `node --test` taking file paths, and `--test-reporter`, which the
+        # runner control below spawns a child with. Both are present in 18.15.0 - twelve
+        # tests, twelve passed, on a v18.15.0 darwin-arm64 tarball run against this tree.
+        # If a test added later needs something newer, this arm is where it says so.
+        node: ['18.15.0', 'lts/*']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+      # `test:unit` rather than `npm test`, which is `test:offline` and chains
+      # `release-gate-check` - that one needs the npm the job below pins, so running it
+      # here would go red on the runner's own npm while the gate was armed the whole
+      # time, which is the exact failure the comment on that job records.
+      #
+      # It needs no install: both files import `node:test` and the tree's own modules,
+      # and nothing else. And it arrives with its own falsification control -
+      # `test/runner-control.test.mjs` plants a failing test, runs the real runner on it
+      # in a directory of its own, and reddens if the run comes back green or unnamed. So
+      # a tick here is the runner having been shown to report failures on this machine
+      # rather than an assumption that it does, which is the same thing `syntax-check`'s
+      # canary buys the job above.
+      - run: npm run test:unit
+
   supply-chain-gate:
     name: the minimum release age is armed
     runs-on: ubuntu-latest
