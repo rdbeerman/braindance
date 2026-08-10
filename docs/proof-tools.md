@@ -196,17 +196,54 @@ arithmetic around those lines differently, an effect `web/main.js` already recor
 three false regressions in `registry-check` when the flare was guarded, and one that
 reverting at HEAD cannot undo because the surrounding code has moved 40 commits since.
 
-**The five cross-build rows against `f14b4be…^` are still red and deliberately were not
-re-baselined.** They are the same difference seen against a build that predates it rather
-than against a second output size, which is why they read so much larger — the worst of
-forty tile means is 24.297/255, which is visible rather than sub-LSB. Moving a 0.02 ratio
-band past 1.03 would delete the claim rather than re-baseline it. What they need is either
-the cause found or the comparison moved off parameter defaults onto what the shipped look
-names, which is the lesson `docs/instruments.md` already draws from the `glitchTint` case.
-Nothing in the mirror work touched them: with the historical arm normalised for the sign,
-the two Blackwall arms read 1.21 and 1.12 of 255 on the worst of forty tile means, against
-1.02 and 0.95 for the same rows at HEAD — run-to-run noise — where an un-normalised arm
-reports 22.19 and 22.14. The normalisation is what makes that comparison possible at all,
+**The five cross-build rows against `f14b4be…^` were red, and the cause has been found:
+the two builds were rendering through different post chains.** That paragraph used to end
+"what they need is either the cause found or the comparison moved off parameter defaults" —
+it was the first, and the second would have hidden it.
+
+`gradeNeeded()` here is true if any of `rgbSplit`, `scanlines`, `grain`, `vignette` or
+`streak` is up. At the pinned rev it knows only the first three, because the vignette was a
+baked `0.55` inside the pass rather than a parameter. Blackwall carries `vignette: 0.55`,
+and the `OFF` look those arms spread zeroes exactly the three names both builds share — so
+the grade switched **off** over there and stayed **on** here, and the cross-build rows have
+been comparing a graded image against an ungraded one for as long as they have existed. The
+grade adds the vignette, a Reinhard `col / (1 + col)` and a toe subtracting 0.018 linear
+from every pixel, and the toe is the term the numbers were about: it pushes the faint edge
+of every splat under the tool's own `lum > 8` threshold.
+
+**The reading that named it was a coverage deficit of 7.7% and 7.8% at an identical drawn
+point size**, which is a difference a point-size reference cannot produce. Confirmed by
+removal, one arm at a time against unchanged old arms: 960x600 goes from luminance ratio
+1.06344 / worst 24.297 to **1.00258 / 0.602**, 16:9 from lit 0.92265 / lum 0.43720 / worst
+6.997 to **1.00043 / 1.00079 / 0.070**, 4:3 from 0.92220 / 0.55736 / 10.121 to **1.00043 /
+1.00101 / 0.071**. The control that says it is the pass rather than one term inside it:
+zeroing `crush` alone with the grade still on moves the same row the *other* way, to lit
+1.22463 and worst 23.343, because the lift without the toe adds coverage.
+
+The repair is `CROSS_BUILD_OFF`, which is `OFF` with the vignette taken out, reaching only
+the arms that render one look through two builds. **It is deliberately not in `OFF`**: eleven
+within-build rows spread that, and their bands in `RES_TOLERANCE` were measured with the
+grade running. The two `rebase-full` rows spread nothing and were already green — because
+Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both sides, so both builds run the
+grade — and that table came out that way rather than being fitted, which is the reason to
+believe the diagnosis.
+
+**The class is closed rather than the instance.** Whether a pass runs is *derived*, so a
+build that adds one name to a gate silently changes which arms are comparable and the only
+symptom is a ratio. `RES_ARM` now returns the composer's own pass list, and every cross-build
+row requires the two builds to have run the same chain — printed in the row's message either
+way. `UnrealBloomPass` becoming `BloomPass` is normalised by name rather than skipped, so a
+rename nobody knew about fails loudly instead of passing quietly.
+
+One row beside them **could not fail on any input**: "every parameter every row asks for
+exists on this build" read `Object.entries` over a `Map`, which is `[]`, so it printed a pass
+whatever the arms had dropped. Nothing was hiding behind it — `dropped` is genuinely empty on
+every arm — but the thing that would have said so was the broken one. It now reads 13 arms.
+
+Nothing in the mirror work touched these rows: with the historical arm normalised for the
+sign, the two Blackwall arms read 1.21 and 1.12 of 255 on the worst of forty tile means,
+against 1.02 and 0.95 for the same rows at HEAD — run-to-run noise — where an un-normalised
+arm reports 22.19 and 22.14. The normalisation is what makes that comparison possible at all,
 and it is why the sign appears in this tool as well as in `registry-check`.
 
 **`registry-check` is red on one row, `readGhost`, and it predates this branch.** The claim is

@@ -2269,3 +2269,59 @@ offers neither `record` nor `mark` — and the dock, which is that panel collaps
 both, over a `recordState` frozen at the object it was declared as, with the click still
 reaching `POST /record/start`. A control with no state behind it, on the surface where nobody
 is watching the sensor. `--mutate dock-offers-the-take-on-the-editor` is that bug put back.
+
+## A settled flag that could not see the end of what it was settling
+
+`editor-check` section 9 compares the picture a released orbit leaves against the picture an
+accurate seek to the same moment gives. Its control demanded that the signature be able to
+tell *two moments of the capture* apart by more than 2 of 255 on the worst of forty tile
+means. That row had already gone red once, been diagnosed as "the subject had not moved" and
+patched by walking outwards through candidate moments; it went red again at 0.32.
+
+**The control's answer was a property of what happened in the room, not of the build.** No
+pair among nine moments spread over a 75.6s fixture reads further than 0.32 apart, and the
+widest pair anywhere in the take is 0.19. The seeks all landed — program time exact, every
+frame index distinct, the render and frame-fetch counters climbing at each one — and the
+pictures genuinely do differ: up to 76/255 on individual pixels, with 0.18–0.26% of pixels
+more than 8/255 apart. The subject moved. A mean over a fortieth of the region is a low-pass
+filter and averaged it away. Every fixture this repo can build is that capture looped, so no
+walk outwards can ever answer it, and a band re-derived to suit today's footage would have
+been the same defect with a newer number in it.
+
+The repair was to stop asking one question through two instruments. The **moment** comes off
+the transport, which knows it exactly; the **picture** becomes an equality against an accurate
+seek to that same moment, which is enforceable because the renderer is bit-deterministic at a
+settled program time; and the falsification control becomes a scrub draft of that moment,
+which is a property of the renderer rather than of the room and reads 16.46/255 here.
+
+**Chasing the residual is what found the real bug, and the residual was the finding.** The
+released picture sat 0.03 from the accurate one where a deterministic renderer owes 0.0000.
+It was not the release: two *consecutive* clean seeks to the identical program time disagreed
+by the same amount, and the disagreement accumulated with the number of intervening seeks.
+`orbitSettling` and `orbitRedrawWanted` both come off OrbitControls' `change` event, which is
+raised on a displacement threshold; damping is asymptotic, so below that threshold the camera
+goes on creeping and nothing says so. Every `seekNow` then runs `advanceNavigation`, which is
+another `controls.update()`, which moves it again — so each seek rendered from a slightly
+different pose. Measured at the shipped `dampingFactor` of 0.07: after `settled()` returns,
+hand-driving `update(0)` moved the camera 8.376e-4, 7.789e-4 then 7.243e-4 m, a ratio of
+0.92993 every step — exactly `1 - dampingFactor` — and it took 356 to 496 further updates to
+reach a pose that renders bit-identical twice.
+
+`finishOrbitDrift` is the door this file already had for it, and five gestures already used
+it; its own comment says the loop's settle branch "now seeks to a pose that has finished
+moving instead of one that is still travelling", which was true of every caller except that
+branch. With the call in, `landed` reads 0.0000.
+
+Three lessons, and the second is the one that generalises:
+
+- **A flag named for a state usually names an event.** `settled` meant "the controls stopped
+  telling us they were moving". The gap between that and "stopped moving" was invisible
+  because it was below the threshold of the thing doing the telling — which is where every
+  such gap lives, by construction.
+- **Ask whether a control's answer is a property of the build or of the fixture.** A control
+  whose value the footage decides cannot fail a build; it can only fail a shoot. The
+  repository already knows this shape for looks and sizes, and this is the same thing in the
+  time axis.
+- **A residual an order of magnitude below the band is worth explaining before the band is
+  chosen.** The 0.03 would have been covered by any tolerance anybody picked, and the picking
+  is what would have buried it. It was the whole bug.

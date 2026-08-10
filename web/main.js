@@ -9821,9 +9821,35 @@ function pumpParkedDraft() {
       .finally(() => { draftBusy = false; });
     return;
   }
-  // Nothing armed and nothing in flight, so the controls have stopped moving.
+  // Nothing armed and nothing in flight, so the controls have stopped *raising events*
+  // - which is not the same fact as the controls having stopped moving, and the two
+  // were read as one here.
   if (orbitSettling && !draftBusy) {
     orbitSettling = false;
+    // **The damping is finished before the seek, because these flags cannot see the end
+    // of it.** `orbitRedrawWanted` and `orbitSettling` both come off OrbitControls'
+    // `change` event, which is raised on a displacement threshold; damping is
+    // asymptotic, so below that threshold the camera goes on creeping and nothing says
+    // so. Every `seekNow` then runs `advanceNavigation`, which is another
+    // `controls.update()`, which moves it again - so each seek renders from a slightly
+    // different pose and no two pictures after a release are comparable.
+    //
+    // Measured on the editor with the shipped `dampingFactor` of 0.07: after
+    // `settled()` returns, hand-driving `update(0)` moved the camera 8.376e-4, 7.789e-4
+    // then 7.243e-4 m, a ratio of 0.92993 every step - exactly `1 - dampingFactor` -
+    // and it took 356 to 496 further updates to reach a pose that renders bit-identical
+    // twice. Two consecutive accurate seeks to the *same* program time came back 0.010
+    // to 0.045 of 255 apart on the worst of forty tile means, with program time, frame
+    // index, draft flag and the whole pre-roll plan byte-identical on both. Drain the
+    // residual first and the same pair reads 0.0000 in every cycle.
+    //
+    // `finishOrbitDrift` is the door this file already has for it and five other
+    // gestures already use, and its own comment says the loop's settle branch "now
+    // seeks to a pose that has finished moving instead of one that is still
+    // travelling" - which was true of every caller except this one. Safe after the
+    // flags are down: `onNav('change')` returns early unless one of them is up, so the
+    // movement this applies cannot re-arm the branch it is inside.
+    finishOrbitDrift();
     // The redraws above are already accurate. This last seek closes the race between
     // the final redraw and the last damping step and makes release an explicit
     // accuracy boundary, the same rule the scrubber follows.

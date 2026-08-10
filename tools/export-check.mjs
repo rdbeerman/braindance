@@ -917,6 +917,20 @@ const RES_ARM = `async ({ label, look, at, resLook, camera }) => {
     sizes: ex.drawnPointSizes(kScale),
     tiles: ex.tiles(label, 8, 5),
     pointRange: Array.from(gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)),
+    // **Which post passes actually ran, read off the composer rather than inferred
+    // from the look that was applied.** Two builds handed the same look can still
+    // render through different chains, because whether a pass runs is a *derived*
+    // fact - and the three cross-build rows were red for exactly that. gradeNeeded()
+    // gained a vignette term and a streak term; Blackwall carries vignette 0.55; the
+    // look those arms spread zeroes rgbSplit, scanlines and grain and nothing else,
+    // so the grade switched off on the pinned build and stayed on here, adding a
+    // vignette, a Reinhard and a toe that subtracts 0.018 linear from every pixel.
+    // That toe is what took the faint splat fringes under the lit threshold: 7.7% of
+    // the coverage at an identical drawn point size, which is the reading that says a
+    // reference cannot be the cause. A row comparing a ratio could only report the
+    // difference; a row comparing this names it, and names it for any pass anybody
+    // puts a derived gate on next.
+    passes: k.composer.passes.map((p) => p.constructor.name + ':' + (p.enabled ? 'on' : 'off')),
   };
 }`;
 
@@ -1265,6 +1279,48 @@ const CROP_OPEN = { left: -7, right: 7, bottom: -7, top: 7 };
 const OFF = { bloom: 0, trails: 0, rgbSplit: 0, scanlines: 0, grain: 0, ...REGION_OFF, ...CROP_OPEN };
 
 /**
+ * `OFF` with the vignette taken out too, for the arms that render the same look
+ * through two different builds.
+ *
+ * **Whether the grade pass runs is derived, and the two builds derive it from
+ * different sets.** `gradeNeeded()` here is true if any of `rgbSplit`, `scanlines`,
+ * `grain`, `vignette` or `streak` is up; at the pinned rev it knows only the first
+ * three, because the vignette was a baked `0.55` inside the pass rather than a
+ * parameter. Blackwall carries `vignette: 0.55` and `OFF` names neither of the two
+ * terms this build added - so an arm spreading `OFF` switched the whole pass off over
+ * there and left it running over here, and the cross-build rows have been comparing a
+ * graded image against an ungraded one for as long as they have existed.
+ *
+ * The grade is not a small difference: it adds the vignette, a Reinhard `col / (1 + col)`
+ * and a toe subtracting 0.018 linear from every pixel, and the toe is the term the
+ * numbers were about. It pushes the faint edge of every splat under the tool's own
+ * `lum > 8` threshold, which is why the 16:9 and 4:3 arms reported **7.7% and 7.8% less
+ * coverage at an identical drawn point size** - a reading a point-size reference cannot
+ * produce, and the one that says the reference was never the cause.
+ *
+ * Measured by removal, one arm at a time, against unchanged old arms: 960x600 goes from
+ * luminance ratio 1.06344 and a worst tile of 24.297/255 to **1.00258 and 0.602**; 16:9
+ * from lit 0.92265 / lum 0.43720 / worst 6.997 to **1.00043 / 1.00079 / 0.070**; 4:3 from
+ * 0.92220 / 0.55736 / 10.121 to **1.00043 / 1.00101 / 0.071**. Every band cleared with
+ * margin. The control that says it is the pass rather than one term inside it: zeroing
+ * `crush` alone with the grade still on moves the same row the *other* way, to lit
+ * 1.22463 and worst 23.343, because the lift without the toe adds coverage.
+ *
+ * **It is deliberately not in `OFF`.** Eleven within-build rows spread `OFF`, and their
+ * coarse-mean bands in `RES_TOLERANCE` were all measured with the grade running; putting
+ * the zero there would silently re-baseline every one of them while looking like a fix
+ * to three others. The two `rebase-full` rows do not spread `OFF` at all and are left
+ * exactly as they are - they are the two cross-build rows that already pass, and they
+ * pass because Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both sides, so
+ * both builds run the grade. That table came out that way rather than being fitted, and
+ * it is the reason to believe this.
+ *
+ * `asOldBuild` needs nothing: the old module has never heard of `vignette`, so
+ * `RES_ARM`'s drop-unknown filter takes it off that arm by itself.
+ */
+const CROSS_BUILD_OFF = { ...OFF, vignette: 0 };
+
+/**
  * The same look with the crop planes taken out, for the arms that run against the
  * pinned older build.
  *
@@ -1283,6 +1339,34 @@ const asOldBuild = (look) => {
   for (const name of Object.keys(CROP_OPEN)) delete out[name];
   return out;
 };
+
+/**
+ * Whether two arms rendered through the same chain of post passes.
+ *
+ * **Closing the class the vignette opened rather than the instance.** Handing two builds
+ * the same look does not put them in the same pipeline, because every pass here decides
+ * for itself whether it is needed and decides it from a *set* of parameters - so a build
+ * that adds one name to that set silently changes which arms are comparable, and the only
+ * symptom is a ratio. The vignette did exactly that and the three rows it broke could
+ * only report the size of the difference. Read the chain back off both pages and a row
+ * says which pass, on which side, and does it for whatever gets a derived gate next.
+ *
+ * Compared as the ordered list of passes that actually ran, not as a count of them. A
+ * count is what the vignette looked like from here - one pass on against one pass off -
+ * so a count would catch that instance and miss a build that swapped one enabled pass for
+ * another, which is the same defect wearing different names.
+ *
+ * The one difference that is *not* a finding is `UnrealBloomPass` becoming `BloomPass`;
+ * that rename is in the range these arms span and the pass is the same pass. It is
+ * normalised away by name rather than skipped, so a rename nobody knew about does not
+ * pass quietly - it fails, with both chains printed in the row's own message, which is
+ * an instrument asking a question rather than assuming an answer.
+ */
+const chainOf = (arm) => (arm.passes ?? [])
+  .filter((p) => p.endsWith(':on'))
+  .map((p) => p.split(':')[0].replace(/^Unreal/, ''))
+  .join('+');
+const sameChain = (a, b) => chainOf(a) === chainOf(b);
 
 // The region itself, on the subject. Everything here is metres in the sensor frame, and
 // that is the claim the two rows using it exist to enforce: not one of these is a
@@ -1306,7 +1390,7 @@ const REGION_AT_SUBJECT = {
 // the point size is the only screen-space term left standing, which is the term the
 // mutation moves. The normalisation has its own mutation - `vsize-framebuffer` -
 // and the splat pipeline above is where that one lands.
-const HD_LOOK = { ...OFF, additive: false, pointSize: HD_POINT_SIZE };
+const HD_LOOK = { ...CROSS_BUILD_OFF, additive: false, pointSize: HD_POINT_SIZE };
 const PIPELINES = [
   ['points', { look: OFF }],
   // **A smaller point than the default, and the clamp is the reason.** The shader
@@ -1625,11 +1709,18 @@ await main.page.evaluate(`globalThis.__kinect.params.apply(${JSON.stringify(CROP
 // difference between a look holding across output sizes and a look that was never
 // applied. Reported here so the permission to drop cannot spread past the one arm
 // that needs it.
+//
+// **And it read nothing at all until now.** `resolutionSweep` returns a `Map`, and
+// `Object.entries` on a `Map` is `[]` - so `leaked` was empty on every run whatever the
+// arms had dropped, and the row printed a pass it could not have failed. `dropped` is
+// genuinely empty on every arm of this build, so nothing was hiding behind it; what was
+// broken is the only thing that would have said so. Spreading the entries is the repair.
 {
-  const leaked = Object.entries(after).flatMap(([name, arms]) => Object.entries(arms)
-    .flatMap(([size, arm]) => (arm?.dropped ?? []).map((p) => `${name}@${size}:${p}`)));
+  const leaked = [...after.entries()].flatMap(([label, arm]) => (arm?.dropped ?? [])
+    .map((p) => `${label}:${p}`));
   check(leaked.length === 0,
-    'every parameter every row asks for exists on this build', leaked.join(' '));
+    'every parameter every row asks for exists on this build',
+    leaked.length ? leaked.join(' ') : `${after.size} arms, none dropped a name`);
 }
 
 // This build's whole look at two sizes, against the graded look at 600 below.
@@ -1754,7 +1845,7 @@ let rebaseNon169Old = null;
   // would be asking the re-tune to answer for something else.
   await setStage(before.page, SMALL);
   rebaseOld = await armAt(before.page, {
-    label: 'rebase-old', look: asOldBuild({ ...OFF, pointSize: RES_LOOK.pointSize }),
+    label: 'rebase-old', look: asOldBuild({ ...CROSS_BUILD_OFF, pointSize: RES_LOOK.pointSize }),
   });
   // And the same question asked of the whole look rather than of the point pass.
   // The points-only arm above cannot see the grade or the bloom - deliberately,
@@ -1824,7 +1915,8 @@ for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFu
 {
   await setStage(main.page, SMALL);
   const newLook = await armAt(main.page, {
-    label: 'rebase-new', look: { ...OFF, pointSize: RES_LOOK.pointSize * POINT_SIZE_REBASE },
+    label: 'rebase-new',
+    look: { ...CROSS_BUILD_OFF, pointSize: RES_LOOK.pointSize * POINT_SIZE_REBASE },
   });
   const worst = Math.max(...newLook.tiles.map((v, i) => Math.abs(v - rebaseOld.tiles[i])));
   const ratio = newLook.lum.mean / rebaseOld.lum.mean;
@@ -1834,12 +1926,14 @@ for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFu
   // works, and it would keep reading that way forever.
   const twoBuilds = rebaseOld.kScale === 1 && newLook.kScale === SMALL.height / 1080
     && rebaseOld.pointSize === RES_LOOK.pointSize
-    && newLook.pointSize === RES_LOOK.pointSize * POINT_SIZE_REBASE;
+    && newLook.pointSize === RES_LOOK.pointSize * POINT_SIZE_REBASE
+    && sameChain(newLook, rebaseOld);
   check(twoBuilds && Math.abs(ratio - 1) <= 0.01 && worst <= 1.0,
     `the 1080p-referred preset is the old preset, both drawn at 960x600: same size, same image`,
     `pointSize ${rebaseOld.pointSize} with no reference at ${BEFORE} against ${newLook.pointSize} `
     + `at k=${fixed(newLook.kScale, 4)} here: luminance ratio ${fixed(ratio, 5)}, `
-    + `worst of 40 tile means ${fixed(worst)}/255`);
+    + `worst of 40 tile means ${fixed(worst)}/255; chain ${chainOf(newLook)} against `
+    + `${chainOf(rebaseOld)}`);
 }
 
 // And the same question at 16:9, which is the only arm here that can answer it.
@@ -1889,7 +1983,8 @@ for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFu
   const litRatio = hdNew.lum.litPct / rebaseHdOld.lum.litPct;
   // Both registries have to have taken the size they were asked for - the old
   // build's step is 0.5 and this one's 0.1 - or this is a comparison about a snap.
-  const asked = hdNew.pointSize === HD_POINT_SIZE && rebaseHdOld.pointSize === HD_POINT_SIZE;
+  const asked = hdNew.pointSize === HD_POINT_SIZE && rebaseHdOld.pointSize === HD_POINT_SIZE
+    && sameChain(hdNew, rebaseHdOld);
   const clear = [hdNew, rebaseHdOld].every((a) => a.sizes.smallest >= 1 && a.sizes.largest <= 64);
   check(asked && clear && Math.abs(litRatio - 1) <= 0.01 && Math.abs(ratio - 1) <= 0.01 && worst <= 1.0,
     'and it holds at 16:9, where a width reference and a height reference are different numbers',
@@ -1899,7 +1994,8 @@ for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFu
     + `drawn ${hdNew.sizes.smallest.toFixed(2)}..${hdNew.sizes.largest.toFixed(1)}px; `
     + `lit ${fixed(hdNew.lum.litPct, 4)}% against ${fixed(rebaseHdOld.lum.litPct, 4)}% is a ratio of `
     + `${fixed(litRatio, 5)}, luminance ratio ${fixed(ratio, 5)}, `
-    + `worst of 40 tile means ${fixed(worst)}/255`);
+    + `worst of 40 tile means ${fixed(worst)}/255; chain ${chainOf(hdNew)} against `
+    + `${chainOf(rebaseHdOld)}`);
 }
 
 // The same cross-build question at 4:3. The 16:9 arm is not enough on its own:
@@ -1914,7 +2010,8 @@ for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFu
   const worst = Math.max(...non169New.tiles.map((v, i) => Math.abs(v - rebaseNon169Old.tiles[i])));
   const ratio = non169New.lum.mean / rebaseNon169Old.lum.mean;
   const litRatio = non169New.lum.litPct / rebaseNon169Old.lum.litPct;
-  const asked = non169New.pointSize === HD_POINT_SIZE && rebaseNon169Old.pointSize === HD_POINT_SIZE;
+  const asked = non169New.pointSize === HD_POINT_SIZE && rebaseNon169Old.pointSize === HD_POINT_SIZE
+    && sameChain(non169New, rebaseNon169Old);
   const clear = [non169New, rebaseNon169Old].every((a) => a.sizes.smallest >= 1 && a.sizes.largest <= 64);
   check(asked && clear && Math.abs(litRatio - 1) <= 0.01 && Math.abs(ratio - 1) <= 0.01 && worst <= 1.0,
     'and it holds at 4:3, where a width reference and a height reference are also different numbers',
@@ -1924,7 +2021,8 @@ for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFu
     + `drawn ${non169New.sizes.smallest.toFixed(2)}..${non169New.sizes.largest.toFixed(1)}px; `
     + `lit ${fixed(non169New.lum.litPct, 4)}% against ${fixed(rebaseNon169Old.lum.litPct, 4)}% is a ratio of `
     + `${fixed(litRatio, 5)}, luminance ratio ${fixed(ratio, 5)}, `
-    + `worst of 40 tile means ${fixed(worst)}/255`);
+    + `worst of 40 tile means ${fixed(worst)}/255; chain ${chainOf(non169New)} against `
+    + `${chainOf(rebaseNon169Old)}`);
 }
 
 console.log('\n[3] the crop box is editing furniture and cannot reach an exported pixel');

@@ -5244,6 +5244,12 @@ try {
     const poseBefore = await poseOf();
     const before = await page.evaluate(
       '({ redraws: __kinect.timeline.counters.navigationRedraws, frames: globalThis.__orbitFrames })');
+    // Where the playhead is parked before the hand touches anything, read rather than
+    // written down. The rows about the released picture compare against this, and a
+    // second spelling of the seek at the head of this block is a number that drifts
+    // away from the seek the moment either one is edited.
+    const releaseTarget = await read();
+    const RELEASE_AT = releaseTarget.programSec;
     await page.mouse.move(stage.x, stage.y);
     await page.mouse.down();
     const MOVES = 24;
@@ -5398,47 +5404,100 @@ try {
     check(released.drafted === false, 'and the release leaves no draft standing on the stage',
       `drafted ${released.drafted}, playhead ${released.programSec.toFixed(3)}s`);
 
+    // **The moment is asserted as a number and the picture as a picture, and splitting
+    // them is what took this block off the footage.**
+    //
+    // It used to ask both through pixels: find some other moment in the capture whose
+    // picture differs, then require the released picture to be four times closer to an
+    // accurate seek than that other moment is. The control for it demanded the two
+    // moments read more than 2/255 apart on the worst of forty tile means - and that
+    // number is a property of *what happened in the room*, not of the build. It had
+    // already gone red once for that reason and been patched by walking outwards
+    // through candidate moments; it went red again at 0.32.
+    //
+    // Measured on a 75.6s fixture: no pair among 4, 5, 6, 8, 12, 20, 32, 2 and 0.5
+    // seconds reads further than 0.32 apart, and the widest pair anywhere in the take
+    // is 0.19. The seeks all landed - program time exact, every frame index distinct,
+    // the render and frame-fetch counters climbing each time - and the pictures do
+    // differ: up to 76/255 on individual pixels, with 0.18-0.26% of pixels more than
+    // 8/255 apart. The subject moved; a mean over a fortieth of the region is a
+    // low-pass filter and averaged it away. Every fixture this repo can build is that
+    // capture looped, so no walk outwards can ever answer it, and a band re-derived to
+    // suit today's footage would be the same defect with a newer number in it.
+    //
+    // So the moment comes off the transport, which knows it exactly, and the picture
+    // question becomes equality: the release must leave *the same picture* an accurate
+    // seek to the same moment leaves. That is enforceable because the renderer is
+    // bit-deterministic at a settled program time - the claim `determinism-check`
+    // exists for - and measured here rather than assumed: `sameMomentTwice` seeks away
+    // and back and reads 0.0000. The falsification control is a scrub draft at that
+    // same moment, which is a property of the renderer instead of the room and reads
+    // ~30/255 on any footage.
     await page.evaluate('__kinect.timeline.transport().seek(4.0)');
     await settle();
     const intendedSig = await signature();
-    // **Somewhere else in the capture, and how far away is asked of the capture.** This
-    // was a fixed second, and a second is only a different picture if the room moved
-    // in it. The sample this repo ships is nearly static - `docs/architecture.md`
-    // records 0.06% of pixels crossing the snap threshold between frames - so one
-    // second away came back 0.07/255 apart against a control demanding more than 2,
-    // and the row that exists to prove the instrument can see anything reddened
-    // because the *subject* had not moved. Walking outwards until the picture is
-    // genuinely different asks the same question of a capture that holds the answer
-    // further along.
-    let elsewhereSig = null;
-    let elsewhereAt = null;
-    for (const at of [5.0, 6.0, 8.0, 12.0, 20.0, 32.0, 2.0, 0.5]) {
-      if (at > (await page.evaluate('__kinect.timeline.transport().duration'))) continue;
-      await page.evaluate(`__kinect.timeline.transport().seek(${at})`);
-      await settle();
-      const sig = await signature();
-      if (elsewhereSig === null || apart(intendedSig, sig) > apart(intendedSig, elsewhereSig)) {
-        elsewhereSig = sig;
-        elsewhereAt = at;
-      }
-      if (apart(intendedSig, elsewhereSig) > 2) break;
-    }
+    await page.evaluate('__kinect.timeline.transport().seek(20.0)');
+    await settle();
+    await page.evaluate('__kinect.timeline.transport().seek(4.0)');
+    await settle();
+    const sameMomentTwice = apart(intendedSig, await signature());
+    // The wrong picture at the *right* moment, which is the failure this block is
+    // actually about: a release that leaves the degraded scrub preview standing.
+    //
+    // **Under a look with temporal content in it, and that is the control rather than
+    // dressing.** A scrub draft differs from an accurate render by skipping the
+    // accumulation pre-roll, so with `fade`, `wake` and `trails` all at zero there is
+    // nothing for it to skip and the two are the same picture: measured at the shipped
+    // defaults, a draft of this moment sits 0.07/255 from an accurate seek to it, which
+    // is a control that would have passed nothing. The neighbouring block applies the
+    // same three for the same reason. They are applied here and put straight back, so
+    // the equality rows above are measured at the look the release happened under and
+    // this one is measured where the difference it is about can exist at all.
+    const temporalBefore = await page.evaluate("__kinect.params.values(['fade', 'wake', 'trails'])");
+    await page.evaluate('__kinect.params.apply({ fade: 400, wake: 900, trails: 0.5 })');
+    await settle();
+    await page.evaluate('__kinect.timeline.transport().seek(4.0)');
+    await settle();
+    const accurateUnderTemporal = await signature();
+    await page.evaluate('__kinect.timeline.transport().draft(4.0)');
+    await settle();
+    const draftSig = await signature();
+    await page.evaluate(`__kinect.params.apply(${JSON.stringify(temporalBefore)})`);
+    await settle();
     await page.evaluate('__kinect.timeline.transport().seek(4.0)');
     await settle();
 
-    const canSee = apart(intendedSig, elsewhereSig);
+    const draftCosts = apart(draftSig, accurateUnderTemporal);
     const landed = apart(releasedSig, intendedSig);
     note('the released picture against an accurate seek to the same moment',
-      `worst tile ${landed.toFixed(2)}/255, where a seek to ${elsewhereAt}s differs by ${canSee.toFixed(2)}`);
+      `worst tile ${landed.toFixed(4)}/255, where the same moment read twice differs by `
+      + `${sameMomentTwice.toFixed(4)} and a scrub draft of it by ${draftCosts.toFixed(2)}`);
+    // Where the release actually parked, asked of the transport rather than of the
+    // pixels. `release-seeks-past-target` is the build this refuses: it seeks
+    // accurately to the wrong moment, which clears `drafted` and leaves the row above
+    // green while the viewport sits somewhere else.
+    check(near(released.programSec, RELEASE_AT, 1e-6) && released.frame === releaseTarget.frame,
+      'and it parked on the moment the hand let go of, read off the transport rather than guessed from pixels',
+      `playhead ${released.programSec.toFixed(6)}s against ${RELEASE_AT.toFixed(6)}s before the drag, `
+      + `frame ${released.frame} against ${releaseTarget.frame}`);
     // The control for the row below, and it has to come first for the same reason the
-    // drafts row's does: a signature that could not tell two moments apart would make
-    // the comparison below pass on every build there is, including one that released
-    // to the wrong second.
-    check(canSee > 2, 'the renderer signature can tell this moment from another one in the capture',
-      `worst tile ${canSee.toFixed(2)}/255 apart, at 4.0s against ${elsewhereAt}s`);
-    check(landed < canSee / 4,
+    // drafts row's does: a signature blind to the difference between a draft and the
+    // real image would make the comparison below pass on every build there is.
+    check(draftCosts > 1,
+      'the renderer signature can tell a scrub draft of this moment from the accurate picture of it',
+      `worst tile ${draftCosts.toFixed(2)}/255, against ${sameMomentTwice.toFixed(4)} for the same picture twice`);
+    // The floor is a row rather than a term inside the band below, because it is a claim
+    // and not a tolerance: the renderer is bit-deterministic at a settled program time,
+    // so a moment read twice has to come back *identical*, and a build where it does not
+    // has broken the property the equality below rests on. It reads 0.0000 - which is why
+    // the band below is the panel control's 0.01 and that number binds, every time.
+    check(sameMomentTwice < 0.01,
+      'the same moment renders the same picture twice, which is what makes the row below an equality',
+      `worst tile ${sameMomentTwice.toFixed(4)}/255 over a seek away to 20.0s and back`);
+    check(landed < 0.01,
       'and the release lands the picture an accurate seek to that moment gives, not merely an accurate seek',
-      `worst tile ${landed.toFixed(2)}/255 against the ${canSee.toFixed(2)} a wrong moment would cost`);
+      `worst tile ${landed.toFixed(4)}/255 against a ${sameMomentTwice.toFixed(4)} floor and the `
+      + `${draftCosts.toFixed(2)} a draft would cost`);
 
     // The renderer-level half of the bug, separated from the editor transport. A
     // camera change is rendered once through the live seam with trails enabled, then
