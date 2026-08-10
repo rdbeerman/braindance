@@ -2173,8 +2173,12 @@ const DRIVER_RULES = [
     //
     // A menu is now what the rule may claim: a trigger or a command inside an `.appmenu`
     // wrapper, plus the links, which is precisely what section 1 opens and drives. A
-    // bare button dropped in the row beside them is uncovered until something drives it,
-    // and `panelToggle` is in `DRIVER_IDS` because section 22 is what drives it.
+    // bare button dropped in the row beside them is uncovered until something drives it.
+    //
+    // The collapse control has since moved off the row and into the View menu as
+    // `menuShowSidebar` (fb03887), so it is inside `.appmenu` and this rule would now
+    // claim it. It stays in `DRIVER_IDS` anyway, for the reason given there: it is the
+    // one command in that popover whose press moves the layout every later section reads.
     match: (row) => inGroup(row, '#navRow') && (inGroup(row, '.appmenu') || row.tag === 'A'),
   },
   {
@@ -2264,7 +2268,13 @@ const DRIVER_IDS = {
   // given a rule over `#panelDock`, and the difference matters: a rule would cover a
   // fifth dock button the day somebody added one, and the dock is four buttons because
   // four is what a thumb can find without looking. A new one should arrive here red.
-  panelToggle: 'section 21 - collapses the panel from the bar and restores it from the key, '
+  // Named here rather than left to the `.appmenu` rule above, even though the control
+  // now sits inside that wrapper and the rule would claim it. The rule's claim is that
+  // section 1 opens a menu and drives its commands, and this is the one command in the
+  // popover whose press changes the page's layout - crediting it to a sweep that presses
+  // every entry it finds would have section 1 collapsing the panel underneath the twenty
+  // sections after it. Section 21 drives it deliberately, and says so.
+  menuShowSidebar: 'section 21 - collapses the panel from the View menu and restores it from the key, '
     + 'and reads the class, the control and the buffer back across the round trip',
   dockCentre: 'section 21 - presses it and reads the pose against the one the View menu\'s own reset lands',
   dockSensor: 'section 21 - presses it and reads the pose against the one Framing\'s own sensor view lands',
@@ -9336,26 +9346,43 @@ try {
   }
 
   // =====================================================================
-  console.log('\n[21] the panel collapses to a dock, and the dock presses the panel\'s own controls');
+  console.log('\n[21] the panel collapses, and what it collapses to is a fact about the surface');
   // =====================================================================
   //
   // **The enumeration was never the hole here, and that is worth stating because it was
-  // predicted to be one.** The dock's buttons exist only while the panel is collapsed,
-  // which has exactly the shape of the object every observation skips - so the warning
-  // was that section 1's sweep would have to visit the collapsed state to see them. It
-  // does not: the sweep is a `querySelectorAll` over `#panel` and friends with no
-  // visibility filter, so a `display: none` button is enumerated like any other, and the
-  // four uncovered rows this feature produced on its first run are the proof that they
-  // were seen. The first row below pins that down rather than trusting it, because the
-  // property it depends on is that the dock lives *inside* `#panel` - move it out to a
-  // bar of its own and the sweep stops seeing it while every other row here still
-  // passes, which is the "passes by disappearing" shape section 1 exists to refuse.
+  // predicted to be one.** The dock's buttons are drawn only while the panel is
+  // collapsed, which has exactly the shape of the object every observation skips - so
+  // the warning was that section 1's sweep would have to visit the collapsed state to
+  // see them. It does not: the sweep is a `querySelectorAll` over `#panel` and friends
+  // with no visibility filter, so a `display: none` button is enumerated like any other,
+  // and the four uncovered rows this feature produced on its first run are the proof
+  // that they were seen. The first row below pins that down rather than trusting it,
+  // because the property it depends on is that the dock lives *inside* `#panel` - move
+  // it out to a bar of its own and the sweep stops seeing it while every other row here
+  // still passes, which is the "passes by disappearing" shape section 1 exists to refuse.
   //
-  // What does need the collapsed state is the *driving*. A `display: none` button cannot
-  // be pressed the way a thumb presses it, so the rows that press one collapse first and
-  // use a real click rather than `el.click()` - the second would fire the handler on a
-  // button no operator could have reached, and a control that works only when driven by
-  // something no hand can do is the row passing for the wrong reason.
+  // **What the dock is has since become a question with two answers, and this section is
+  // built on the difference.** The dock is the panel's collapsed form rather than a
+  // second set of controls, so a surface with no panel has no dock: 2727dfb takes the
+  // whole bar off the editor in one rule and gives the picture back the 72px it was
+  // occupying, where the recorder - whose panel is most of what is on screen - goes on
+  // collapsing to the bar it was designed as. Every row about the bar therefore has to
+  // say which surface it is asking about, and the two are driven here as two pages of
+  // one build.
+  //
+  // **The recorder arm is not a convenience, and that is the load-bearing part.** The
+  // editor's rows here are *absences*, and an absence measured on one surface alone is
+  // satisfied by a build with no dock in the markup at all - the row goes on printing
+  // green straight through the deletion of the feature it is watching. Asked of the same
+  // five ids, in the same build, under the same collapse, the recorder answers with five
+  // controls drawn. So the editor's five withheld ones are a difference between the two
+  // surfaces rather than a dock that nothing anywhere has.
+  //
+  // What still needs the collapsed state is the *driving*. A `display: none` button
+  // cannot be pressed the way a thumb presses it, so the rows that press one collapse
+  // first and use a real click rather than `el.click()` - the second would fire the
+  // handler on a button no operator could have reached, and a control that works only
+  // when driven by something no hand can do is the row passing for the wrong reason.
   //
   // The two view buttons are read as outcomes and the two recorder buttons are not, and
   // the asymmetry is about what is reachable rather than about what is worth asking.
@@ -9365,13 +9392,18 @@ try {
   // reach without either writing a take into `captures/` or driving the server into a
   // refusal, and the note at the end of the section says what that costs.
   {
-    const DOCK_IDS = ['panelToggle', 'dockCentre', 'dockSensor', 'dockMark', 'dockRec'];
+    const DOCK_IDS = ['menuShowSidebar', 'dockCentre', 'dockSensor', 'dockMark', 'dockRec'];
     const swept = DOCK_IDS.filter((id) => sweep.some((row) => row.id === id));
     check(swept.length === DOCK_IDS.length,
       'the collapse and its dock are inside the enumeration section 1 sweeps',
       `${swept.length} of ${DOCK_IDS.length}: ${swept.join(', ') || 'none'}`);
 
-    const geometry = () => page.evaluate(`(() => {
+    // One reader for both pages. The recorder arm at the foot of the section asks the
+    // same questions of the same ids, and a second copy of this evaluate is a second
+    // thing to keep in step - which is how two arms of one comparison end up measuring
+    // two different quantities and agreeing about it.
+    const BAR_IDS = ['panelDock', 'dockCentre', 'dockSensor', 'dockRec', 'dockMark'];
+    const GEOMETRY = `(() => {
       const box = (id) => {
         const el = document.getElementById(id);
         if (!el) return null;
@@ -9379,148 +9411,77 @@ try {
         return { top: Math.round(r.top), bottom: Math.round(r.bottom),
                  w: Math.round(r.width), h: Math.round(r.height) };
       };
+      // Whether a control is drawn, and separately what its own cascade says about it.
+      // Those are two questions and this section needs both, because everything inside a
+      // hidden bar is undrawn whatever its own rules say - so a row asking only the first
+      // cannot tell a control the surface withholds from one the bar took away with it.
+      // The take-pair row below is that distinction and nothing else.
+      const isDrawn = (id) => {
+        const el = document.getElementById(id);
+        return Boolean(el) && el.checkVisibility({ checkVisibilityCSS: true });
+      };
+      const displayOf = (id) => {
+        const el = document.getElementById(id);
+        return el ? getComputedStyle(el).display : 'absent';
+      };
+      const ids = ${JSON.stringify(BAR_IDS)};
       const canvas = document.querySelector('canvas');
       const r = canvas.getBoundingClientRect();
+      const panel = document.getElementById('panel');
       return {
         collapsed: document.body.classList.contains('panelcollapsed'),
-        pressed: document.getElementById('panelToggle').getAttribute('aria-pressed'),
+        // aria-checked on the View menu's entry, and it reads the opposite way round to
+        // the aria-pressed this used to ask for. The control moved off the app bar into
+        // the menu in fb03887 and became a checkbox item saying whether the sidebar is
+        // shown, where the button it replaced said whether the panel was shut - main.js
+        // sets it as String(!collapsed). Reading the old id here threw on null and took
+        // the rest of this file down with it, so the two states are named apart rather
+        // than left to a reader to invert. No backticks anywhere in this evaluate: it is
+        // a template literal and one would end the string early.
+        shown: document.getElementById('menuShowSidebar').getAttribute('aria-checked'),
+        drawn: Object.fromEntries(ids.map((id) => [id, isDrawn(id)])),
+        display: Object.fromEntries(ids.map((id) => [id, displayOf(id)])),
         panel: box('panel'), dock: box('panelDock'), timeline: box('timeline'),
+        // What a collapsed editor's panel is allowed to be and no more, read off the
+        // panel rather than written down as a 1 - a border drawn a pixel wider would
+        // otherwise fail a row about the inspector's tab rail for a reason that is
+        // about the border.
+        panelBorder: Math.round(parseFloat(getComputedStyle(panel).borderTopWidth) || 0),
         canvasBottom: Math.round(r.bottom), buffer: canvas.height,
       };
-    })()`);
+    })()`;
+    const geometry = () => page.evaluate(GEOMETRY);
 
     const open = await geometry();
-    check(open.collapsed === false && open.pressed === 'false' && open.dock.h === 0,
+    check(open.collapsed === false && open.shown === 'true' && open.dock.h === 0,
       'the panel opens as the column it has always been, with no dock drawn',
-      `panel ${open.panel.w}x${open.panel.h}, dock ${open.dock.h}px, aria-pressed ${open.pressed}`);
+      `panel ${open.panel.w}x${open.panel.h}, dock ${open.dock.h}px, aria-checked ${open.shown}`);
 
-    await page.locator('#panelToggle').click();
+    // Through the menu it now lives in, which is two presses rather than one. Driven the
+    // way section 1 drives every other entry in this popover rather than with a synthetic
+    // click on a hidden item: a command inside a closed menu is one no operator can reach,
+    // and pressing it anyway is the row passing for a reason that is not the feature.
+    await page.locator('#viewMenuButton').click();
+    await page.locator('#menuShowSidebar').click();
     await settle();
     const shut = await geometry();
-    check(shut.collapsed === true && shut.pressed === 'true' && shut.dock.h > 0,
-      'the bar\'s toggle shuts it, and the control says which way it is',
-      `aria-pressed ${shut.pressed}, dock ${shut.dock.h}px`);
-    // The row the dock subtraction in `resize()` is for. Rendered full height under a
-    // bar drawn over it, the bottom of every frame is behind the buttons - and the
-    // bottom of the frame is where a subject's feet are, which is the occlusion the
-    // timeline's own comment refuses for the same reason.
-    check(shut.canvasBottom === shut.dock.top,
-      'the picture ends exactly where the dock begins, rather than continuing behind it',
-      `canvas bottom ${shut.canvasBottom}, dock top ${shut.dock.top}`);
-    // And the editor's own strip, which the collapsed panel has to stop above rather
-    // than land on top of. Both are `position: fixed` at the foot of the window at the
-    // same `z-index`, so the one that wins is the one written later - this asserts the
-    // box instead of the rule, which is the only version that survives either moving.
-    check(shut.dock.bottom <= shut.timeline.top,
-      'and it clears the timeline strip rather than sitting over it',
-      `dock bottom ${shut.dock.bottom}, timeline top ${shut.timeline.top}`);
-    check(shut.panel.h - shut.dock.h <= 1,
-      'with nothing but the dock left in the collapsed panel',
-      `panel ${shut.panel.h}px against the dock's ${shut.dock.h}px, `
-      + `slack ${shut.panel.h - shut.dock.h}px`);
+    check(shut.collapsed === true && shut.shown === 'false',
+      'the menu\'s entry shuts it, and the control says which way it is',
+      `aria-checked ${shut.shown}, body reads ${shut.collapsed ? 'collapsed' : 'expanded'}`);
 
-    // The round trip, and the reason the collapse is a class rather than an inline
-    // `display`. The version that shipped set `#panel.style.display` from the key
-    // handler alone: nothing else could read which way it was, and on a touchscreen -
-    // where there is no key to press a second time - it was a panel that did not come
-    // back at all.
-    await focusStage();
-    await page.keyboard.press('h');
-    await settle();
-    const back = await geometry();
-    check(back.collapsed === false && back.pressed === 'false',
-      'the H key drives the same state, and the toggle it never touched agrees about it',
-      `aria-pressed ${back.pressed}`);
-    check(back.panel.w === open.panel.w && back.panel.h === open.panel.h
-      && back.buffer === open.buffer,
-      'and the panel and the buffer come back to exactly what they were',
-      `panel ${back.panel.w}x${back.panel.h} buffer ${back.buffer}, `
-      + `against ${open.panel.w}x${open.panel.h} and ${open.buffer}`);
-
-    await page.keyboard.press('h');
-    await settle();
-    const shutAgain = await geometry();
-    check(shutAgain.collapsed === true && shutAgain.pressed === 'true',
-      'and the key shuts it as well as opens it, so the two controls are one state',
-      `aria-pressed ${shutAgain.pressed}`);
-
-    // Pressable, and asked at the point a finger actually lands rather than inferred
-    // from the boxes above. The collapsed panel and the timeline strip are both
-    // `position: fixed` at the foot of the window at the same `z-index`, so which of
-    // them takes a press is settled by which is written later in the markup - and a dock
-    // underneath the ruler measures as exactly the right size in exactly the right place
-    // while answering no thumb at all. `elementFromPoint` is the only reading that can
-    // tell those apart.
+    // ---- what the editor collapses to, which is nothing ----
     //
-    // It also keeps the rows below from discovering the same thing as a timeout. They
-    // press with a real click, on purpose: `el.click()` fires the handler on a button no
-    // operator could have reached, which is a row passing for a reason that has nothing
-    // to do with the feature. So an occluded dock has to be a red row here and a skip
-    // below, rather than a click that retries for thirty seconds and takes the rest of
-    // the file down with it as a crash.
-    const onTop = await page.evaluate(`(() => {
-      const el = document.getElementById('dockCentre');
-      const r = el.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-      return { what: hit ? (hit.id || hit.className || hit.tagName) : null,
-               own: hit === el || el.contains(hit) };
-    })()`);
-    check(onTop.own,
-      'and a press at the middle of a dock button reaches that button',
-      `the point belongs to ${onTop.what}`);
+    // `body.editing.panelcollapsed #panelDock { display: none }`, and the sentence
+    // 2727dfb wrote above it: the dock is the panel's collapsed form, so an editor with
+    // no panel has no dock either. This row is the whole of that rule, and it is an
+    // absence - what stops it being satisfied by a build with no dock at all is the
+    // recorder arm at the foot of the section, which asks these same ids and gets five
+    // controls back.
+    check(shut.display.panelDock === 'none',
+      'the collapsed editor draws no dock at all, because the dock is the panel collapsed and this surface has no panel',
+      `#panelDock computes to ${shut.display.panelDock}, box ${shut.dock.h}px`);
 
-    // ---- the dock presses the panel's own controls, read as the pose each lands ----
-    const pose = `(() => { const c = __kinect.freeCamera;
-      return [+c.position.x.toFixed(4), +c.position.y.toFixed(4), +c.position.z.toFixed(4)]; })()`;
-    const flick = async () => {
-      const stage = await page.evaluate(`(() => {
-        const r = document.getElementById('stage').getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-      })()`);
-      await page.mouse.move(stage.x, stage.y);
-      await page.mouse.down();
-      await page.mouse.move(stage.x + 60, stage.y + 30);
-      await page.mouse.up();
-      await settle();
-    };
-
-    if (!onTop.own) {
-      // Skipped rather than attempted, and said out loud. A `click()` on a covered
-      // element retries for thirty seconds and then throws, which ends the file as a
-      // crash - `monitor-check` counting its own timeout as a catch is the case
-      // `docs/instruments.md` keeps for exactly this, and the row above has already
-      // said the true thing about this build.
-      note('the two pose rows did not run',
-        'nothing can press a dock that the strip above it is taking the presses for');
-    } else {
-      await page.evaluate("document.getElementById('menuCameraReset').click()");
-      await settle();
-      const centreByMenu = await page.evaluate(pose);
-      await flick();
-      await page.locator('#dockCentre').click();
-      await settle();
-      const centreByDock = await page.evaluate(pose);
-      check(JSON.stringify(centreByDock) === JSON.stringify(centreByMenu),
-        'the dock\'s centre lands the pose the View menu\'s own reset lands',
-        `dock ${centreByDock.join(', ')} against menu ${centreByMenu.join(', ')}`);
-
-      await page.evaluate("document.getElementById('camSensor').click()");
-      await settle();
-      const sensorByPanel = await page.evaluate(pose);
-      check(JSON.stringify(sensorByPanel) !== JSON.stringify(centreByMenu),
-        'and the sensor\'s pose is a different place from the centred one, so the row below can tell them apart',
-        `sensor ${sensorByPanel.join(', ')} against centre ${centreByMenu.join(', ')}`);
-      await page.evaluate("document.getElementById('menuCameraReset').click()");
-      await settle();
-      await page.locator('#dockSensor').click();
-      await settle();
-      const sensorByDock = await page.evaluate(pose);
-      check(JSON.stringify(sensorByDock) === JSON.stringify(sensorByPanel),
-        'and the dock\'s sensor lands the pose Framing\'s own sensor view lands',
-        `dock ${sensorByDock.join(', ')} against panel ${sensorByPanel.join(', ')}`);
-    }
-
-    // ---- the two that act on the take, which this surface must not be offering ----
+    // ---- the two that act on the take, withheld by a rule of their own ----
     //
     // **This row replaced three that passed by comparing nothing.** They read `#dockRec`
     // against `#recGo` - disabled, title, text, pressed - on the theory that a dock
@@ -9532,38 +9493,278 @@ try {
     // two defaults and finds them equal is a row that would survive the paint being
     // deleted, which is the whole of what it claimed to be watching.
     //
-    // What is true on this surface is that the take pair should not be here at all. The
-    // editor hides the entire Record tab, so its panel offers neither control, and the
-    // dock is that panel collapsed rather than a second set of controls - it shipped
-    // offering both, over a `recordState` that is never once updated here, with the
-    // click still reaching `/record/start`. Asserting the absence is the claim this
-    // surface can hold, and it holds it against the bug that was actually in the tree.
-    const offered = await page.evaluate(`(() => {
-      const vis = (id) => {
-        const el = document.getElementById(id);
-        return Boolean(el) && el.checkVisibility({ checkVisibilityCSS: true });
-      };
-      return { centre: vis('dockCentre'), sensor: vis('dockSensor'),
-               rec: vis('dockRec'), mark: vis('dockMark') };
-    })()`);
-    check(offered.centre && offered.sensor,
-      'the collapsed editor offers the two controls that only move the eye',
-      `centre ${offered.centre}, sensor ${offered.sensor}`);
-    check(!offered.rec && !offered.mark,
-      'and offers neither of the two that act on the take, which this surface has no recorder for',
-      `record ${offered.rec}, mark ${offered.mark}`);
+    // **What replaced it then died the day the whole bar came off, and in the quiet
+    // direction.** It asked whether the editor *draws* the pair. Everything inside a
+    // hidden container is undrawn, so from 2727dfb the row was measuring the container
+    // and reporting the pair, printing green over a question nothing was asking -
+    // and `--mutate dock-offers-the-take-on-the-editor`, which deletes the rule that
+    // withholds them, had nothing left it could move. A row that cannot fail, sitting
+    // under a comment about rows that cannot fail.
+    //
+    // The rule is still there and still doing work of its own, and computed style is
+    // where that work can be seen: `display` is not inherited, so an element inside a
+    // `display: none` subtree still computes the value its own cascade gives it. The
+    // take pair compute to `none` on this surface and the two view buttons do not, which
+    // is exactly the difference between a control the editor withholds and a control the
+    // bar took away with it. Both halves are asserted because both can move, measured
+    // across three builds at 1512x900: this one reads none/none against
+    // inline-block/inline-block, the mutation reads inline-block on all four, and a
+    // build with `body.editing.panelcollapsed #panelDock` deleted reads none/none
+    // against block/block - so neither half can answer for the other.
+    const withheld = ['dockRec', 'dockMark'].every((id) => shut.display[id] === 'none');
+    const kept = ['dockCentre', 'dockSensor'].every((id) => shut.display[id] !== 'none'
+      && shut.display[id] !== 'absent');
+    check(withheld && kept,
+      'and the two that act on the take are withheld by a rule of their own rather than by the bar being gone',
+      `record ${shut.display.dockRec} and mark ${shut.display.dockMark}, against `
+      + `centre ${shut.display.dockCentre} and sensor ${shut.display.dockSensor}`);
+
+    // ---- and the picture takes the height back ----
+    //
+    // The other half of 2727dfb, and the half a rule about `display` does not state.
+    // `resize()` subtracts `#panelDock`'s `offsetHeight` from the height available to
+    // the stage while the body is collapsed, which is what stops a frame being rendered
+    // full height under a bar drawn over its last 72px - the bottom of the frame is
+    // where a subject's feet are, and it is the occlusion the timeline's own comment
+    // refuses for the same reason. A bar that is not drawn measures 0, so on this
+    // surface the subtraction is a no-op and the picture runs the whole way down to the
+    // strip. Asserted as the box rather than as that zero: a build that put the bar back
+    // takes those pixels off the frame again, and this is the row that says so.
+    check(shut.canvasBottom === shut.timeline.top,
+      'and the picture runs down to the timeline strip, taking back the height a dock would have occupied',
+      `canvas bottom ${shut.canvasBottom}, strip top ${shut.timeline.top}`);
+    // The collapsed panel's own box, which is the cascade rather than the arithmetic.
+    // The panel and the strip are both `position: fixed` at the foot of the window at
+    // the same `z-index`, so the one that wins is the one written later, and
+    // `body.editing.panelcollapsed #panel` is what lifts the panel clear of the strip.
+    // Exact rather than "at most", because a panel that had gone entirely also sits
+    // above the strip - the "passes by disappearing" reading this file refuses
+    // everywhere else, and it would arrive here as a green row.
+    check(shut.panel.bottom === shut.timeline.top,
+      'the collapsed panel stops exactly where the timeline strip starts rather than over it',
+      `panel bottom ${shut.panel.bottom}, strip top ${shut.timeline.top}`);
+    // And there is nothing left inside it. Collapsed, `#panel` hides its head, its body,
+    // its inspector tab rail and its dock, so what remains is the line along its top
+    // edge - which is why this compares against the border rather than against a 1, and
+    // why it is an equality: 31px is the tab rail surviving the collapse and 0px is the
+    // panel itself having gone.
+    check(shut.panel.h === shut.panelBorder,
+      'with nothing left in the collapsed editor panel but the line along the top of it',
+      `panel ${shut.panel.h}px against a ${shut.panelBorder}px border`);
+
+    // The round trip, and the reason the collapse is a class rather than an inline
+    // `display`. The version that shipped set `#panel.style.display` from the key
+    // handler alone: nothing else could read which way it was, and on a touchscreen -
+    // where there is no key to press a second time - it was a panel that did not come
+    // back at all.
+    await focusStage();
+    await page.keyboard.press('h');
+    await settle();
+    const back = await geometry();
+    check(back.collapsed === false && back.shown === 'true',
+      'the H key drives the same state, and the entry it never touched agrees about it',
+      `aria-checked ${back.shown}`);
+    check(back.panel.w === open.panel.w && back.panel.h === open.panel.h
+      && back.buffer === open.buffer,
+      'and the panel and the buffer come back to exactly what they were',
+      `panel ${back.panel.w}x${back.panel.h} buffer ${back.buffer}, `
+      + `against ${open.panel.w}x${open.panel.h} and ${open.buffer}`);
+
+    await page.keyboard.press('h');
+    await settle();
+    const shutAgain = await geometry();
+    check(shutAgain.collapsed === true && shutAgain.shown === 'false',
+      'and the key shuts it as well as opens it, so the two controls are one state',
+      `aria-checked ${shutAgain.shown}`);
+
+    // ---- the same collapse on the surface the dock was built for ----
+    //
+    // A second page rather than a navigation, because the editor page has to survive
+    // into section 22 with its take open and its transport where the rows above left it.
+    // A second *context* rather than a second page in this one, so nothing the recorder
+    // writes to storage lands under the editor's origin halfway through a file that
+    // spends section 15 reading exactly that.
+    //
+    // **The page carries route interceptions of its own, and that is the part to get
+    // right rather than the part that is bookkeeping.** `page.route` is installed per
+    // page, so a recorder opened without them runs the tree's own build while the editor
+    // beside it runs the mutated one - two arms of one comparison measuring two
+    // programs, and a mutation of the markup silently reaching only half of the section
+    // it was written for. `web/index.html` serves both surfaces, so the predicate names
+    // this path rather than the editor's. Delivery is verified rather than assumed, for
+    // the reason `openEditor` verifies it: a route that was declared and never installed
+    // ran the tree's own source and came back NOT CAUGHT with every row green.
+    //
+    // `?panel=collapsed` rather than the menu, because it is a shipped path - the Pi's
+    // kiosk unit opens the recorder exactly this way - and because the gesture that
+    // collapses is already driven twice above, on the surface whose rows are about it.
+    // What this arm is for is the bar, not the switch.
+    const RECORDER_PATH = '/record';
+    const recErrors = [];
+    let recorder = null;
+    let recWhy = '';
+    try {
+      const recContext = await page.context().browser().newContext({
+        viewport: VIEWPORT, deviceScaleFactor: 1,
+      });
+      const recPage = await recContext.newPage();
+      recPage.on('pageerror', (err) => recErrors.push(String(err)));
+      recPage.on('console', (msg) => { if (msg.type() === 'error') recErrors.push(msg.text()); });
+      await recPage.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
+      let recServedJs = false;
+      if (mutatedJs) {
+        await recPage.route('**/main.js', (route) => {
+          recServedJs = true;
+          route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: mutatedJs });
+        });
+      }
+      let recServedHtml = false;
+      if (mutatedHtml) {
+        await recPage.route((url) => url.pathname === RECORDER_PATH, (route) => {
+          recServedHtml = true;
+          route.fulfill({ contentType: 'text/html; charset=utf-8', body: mutatedHtml });
+        });
+      }
+      await recPage.goto(`${URL_BASE}${RECORDER_PATH}?panel=collapsed`, { waitUntil: 'load' });
+      await recPage.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
+      await recPage.evaluate('__kinect.timeline.settled()');
+      if (mutatedJs && !recServedJs) throw new Error("the mutated module never reached the recorder page - it ran the tree's own build");
+      if (mutatedHtml && !recServedHtml) throw new Error("the mutated markup never reached the recorder page - it ran the tree's own panel");
+      recorder = { page: recPage, close: () => recContext.close() };
+    } catch (err) {
+      recWhy = err.message.split('\n')[0];
+    }
+
+    if (!recorder) {
+      // Skipped rather than attempted, and said out loud with its reason. Every row in
+      // the arm below is about the recorder, so a page that never opened leaves them
+      // untested rather than failed - counting a harness failure as a finding is the
+      // mistake `monitor-check` made and `docs/instruments.md` keeps. **When this line
+      // appears, read the rows this section printed rather than its total**: six are
+      // missing and the total is six short of what a clean run reports.
+      note('the recorder arm did not run', recWhy
+        + (recErrors.length ? ` - the page said: ${recErrors.slice(0, 3).join(' | ')}` : ''));
+    } else {
+      try {
+        const rec = await recorder.page.evaluate(GEOMETRY);
+        // The positive half of every absence above, and the reason those absences mean
+        // anything. Five ids, one build, one collapse, and the surface is the only thing
+        // that differs.
+        check(BAR_IDS.every((id) => rec.drawn[id]),
+          'the same collapse on the recorder draws the dock and all four of its buttons, so the editor\'s absences are a difference between the surfaces',
+          `${BAR_IDS.map((id) => `${id} ${rec.drawn[id]}`).join(', ')}, `
+          + `body reads ${rec.collapsed ? 'collapsed' : 'expanded'}`);
+        // The subtraction `resize()` makes, asked on the only surface that still has
+        // something to subtract. It reads as working without this row - the panel
+        // collapses, the dock appears and every button answers - and only the geometry
+        // says the frame is being drawn full height with its last 72px behind the
+        // buttons. The recorder hides its timeline strip, so the dock's own top is what
+        // the picture has to end at here.
+        check(rec.canvasBottom === rec.dock.top,
+          'and there the picture ends exactly where the dock begins, rather than continuing behind it',
+          `canvas bottom ${rec.canvasBottom}, dock top ${rec.dock.top}`);
+
+        // Pressable, and asked at the point a finger actually lands rather than inferred
+        // from the boxes above. A dock underneath something else measures as exactly the
+        // right size in exactly the right place while answering no thumb at all, and
+        // `elementFromPoint` is the only reading that can tell those apart.
+        //
+        // It also keeps the rows below from discovering the same thing as a timeout.
+        // They press with a real click, on purpose: `el.click()` fires the handler on a
+        // button no operator could have reached, which is a row passing for a reason
+        // that has nothing to do with the feature. So an occluded dock has to be a red
+        // row here and a skip below, rather than a click that retries for thirty seconds
+        // and takes the rest of the file down with it as a crash.
+        const onTop = await recorder.page.evaluate(`(() => {
+          const el = document.getElementById('dockCentre');
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return { what: hit ? (hit.id || hit.className || hit.tagName) : null,
+                   own: hit === el || el.contains(hit) };
+        })()`);
+        check(onTop.own,
+          'and a press at the middle of a dock button reaches that button',
+          `the point belongs to ${onTop.what}`);
+
+        // ---- the dock presses the panel's own controls, read as the pose each lands ----
+        const recSettle = () => recorder.page.evaluate('__kinect.timeline.settled()');
+        const pose = `(() => { const c = __kinect.freeCamera;
+          return [+c.position.x.toFixed(4), +c.position.y.toFixed(4), +c.position.z.toFixed(4)]; })()`;
+        const flick = async () => {
+          const stage = await recorder.page.evaluate(`(() => {
+            const r = document.getElementById('stage').getBoundingClientRect();
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+          })()`);
+          await recorder.page.mouse.move(stage.x, stage.y);
+          await recorder.page.mouse.down();
+          await recorder.page.mouse.move(stage.x + 60, stage.y + 30);
+          await recorder.page.mouse.up();
+          await recSettle();
+        };
+
+        if (!onTop.own) {
+          // Skipped rather than attempted, and said out loud. A `click()` on a covered
+          // element retries for thirty seconds and then throws, which ends the file as a
+          // crash - `monitor-check` counting its own timeout as a catch is the case
+          // `docs/instruments.md` keeps for exactly this, and the row above has already
+          // said the true thing about this build.
+          note('the two pose comparisons did not run, nor the row that separates them',
+            'nothing can press a dock that whatever is over it is taking the presses for - '
+            + 'three rows short, and the row above carries what this build is');
+        } else {
+          // The two reference controls are pressed synthetically and the two dock
+          // buttons are not, and the asymmetry is deliberate: `#menuCameraReset` is
+          // inside a closed menu and `#camSensor` is inside the panel this arm has
+          // collapsed, so neither is reachable by a hand right now. They are the
+          // *reading* the dock is compared against rather than the thing under test,
+          // and the thing under test is pressed the way an operator presses it.
+          await recorder.page.evaluate("document.getElementById('menuCameraReset').click()");
+          await recSettle();
+          const centreByMenu = await recorder.page.evaluate(pose);
+          await flick();
+          await recorder.page.locator('#dockCentre').click();
+          await recSettle();
+          const centreByDock = await recorder.page.evaluate(pose);
+          check(JSON.stringify(centreByDock) === JSON.stringify(centreByMenu),
+            'the dock\'s centre lands the pose the View menu\'s own reset lands',
+            `dock ${centreByDock.join(', ')} against menu ${centreByMenu.join(', ')}`);
+
+          await recorder.page.evaluate("document.getElementById('camSensor').click()");
+          await recSettle();
+          const sensorByPanel = await recorder.page.evaluate(pose);
+          check(JSON.stringify(sensorByPanel) !== JSON.stringify(centreByMenu),
+            'and the sensor\'s pose is a different place from the centred one, so the row below can tell them apart',
+            `sensor ${sensorByPanel.join(', ')} against centre ${centreByMenu.join(', ')}`);
+          await recorder.page.evaluate("document.getElementById('menuCameraReset').click()");
+          await recSettle();
+          await recorder.page.locator('#dockSensor').click();
+          await recSettle();
+          const sensorByDock = await recorder.page.evaluate(pose);
+          check(JSON.stringify(sensorByDock) === JSON.stringify(sensorByPanel),
+            'and the dock\'s sensor lands the pose Framing\'s own sensor view lands',
+            `dock ${sensorByDock.join(', ')} against panel ${sensorByPanel.join(', ')}`);
+        }
+      } finally {
+        // Closed before the editor is put back, so the last gesture of this section goes
+        // to the page section 22 inherits and nothing is left holding a socket on the
+        // shooting server.
+        await recorder.close().catch(() => {});
+      }
+    }
 
     note('what this section cannot catch',
-      'anything about the take pair on the surface that does have them. They are the '
-      + 'recorder\'s controls and this is the editor\'s tool, so what is enforced here is '
-      + 'that they stay off this surface - their behaviour on `/record` is uncovered, and '
-      + 'saying so is better than crediting a driver that does not drive');
+      'what the take pair do once pressed. `record` and `mark` forward to `#recGo` and '
+      + '`#recMark`, whose outcome is a take written into `captures/` or a refusal from '
+      + 'the server, and neither is reachable from here without editing the library this '
+      + 'file measures. What is enforced is where they are: the recorder draws them and '
+      + 'the editor withholds them by a rule this section reads');
 
     // Left the way the sections after this one expect to find it.
     await focusStage();
     await page.keyboard.press('h');
     await settle();
   }
+
 
   console.log('\n[22] pinning the drive drops what the loop was going to serve');
 
