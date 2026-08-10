@@ -541,10 +541,10 @@ if (!existsSync(DOC)) {
 // reason that has nothing to do with the tree.
 {
   const DECLARATION = /^const MUTATIONS = \{$/m;
-  // Where a shape that does not carry its own target points. Both are facts about the
-  // shape rather than about any tool: a bare `[from, to]` pair is only ever the C++
-  // registration mutation, and the three JavaScript shapes all edit the browser bundle.
-  const MAIN = 'web/main.js';
+  // The one shape left that does not carry its own target: a bare `[from, to]` pair,
+  // which is only ever the C++ registration mutation. It is a fact about the shape
+  // rather than about any tool, which is the property that makes it safe to infer -
+  // and it is the last one, because every JavaScript table now declares its file.
   const REGISTRATION = 'third_party/libfreenect2/src/registration.cpp';
   // One name reused for every extraction, so a crash can leak at most one file, and
   // dotted-and-suffixed so the documentation row above catches it on the next run rather
@@ -580,13 +580,12 @@ if (!existsSync(DOC)) {
 
   /** What a single entry anchors on, or why it anchors on nothing, or null for unknown. */
   const shapeOf = (spec) => {
+    // The C++ table, and now the only array shape. The JavaScript tables that used to
+    // arrive as a bare array of edit pairs - `timeline-check` and `keyframe-check` -
+    // declare `{ file, edits }` like everything else, so a nested-array first element
+    // is no longer a shape this row recognises and would fail below naming the tool.
     if (Array.isArray(spec)) {
-      // Both array shapes are pairs, so `Array.isArray` alone cannot tell them apart -
-      // it is the first element that says which. Read it wrong and every registration
-      // anchor reports hundreds of hits, which is loud and still wrong.
-      if (typeof spec[0] === 'string') return { file: REGISTRATION, from: [spec[0]] };
-      if (Array.isArray(spec[0])) return { file: MAIN, from: spec.map(([from]) => from) };
-      return null;
+      return typeof spec[0] === 'string' ? { file: REGISTRATION, from: [spec[0]] } : null;
     }
     if (typeof spec === 'function') return { anchorless: 'functions that redirect the oracle' };
     if (spec === null || typeof spec === 'string') return { anchorless: 'whole replacement file bodies' };
@@ -594,13 +593,13 @@ if (!existsSync(DOC)) {
       if (typeof spec.file === 'string' && Array.isArray(spec.edits)) {
         return { file: spec.file, from: spec.edits.map(([from]) => from) };
       }
-      // `registry-check`'s shape, and it is the last entry in the tree that names no file.
-      // It is left resolving to the bundle rather than made to declare one, because this
-      // row's job is to report the shapes that exist rather than to require a rewrite of a
-      // tool it is checking - but the inference is a guess about a tool, which is the thing
-      // the rest of this resolver refuses to do, and it has already been wrong once.
-      // Anything new belongs in `{ file, edits }`.
-      if (typeof spec.from === 'string') return { file: MAIN, from: [spec.from] };
+      // `registry-check`'s old `{ from, to }` shape used to be read here and resolved to
+      // the browser bundle by inference. It is gone: that table declares `{ file, edits }`
+      // now, and the branch went with it rather than being left as a path nothing takes.
+      // The inference was a guess about a tool, which is the thing the rest of this
+      // resolver refuses to do, and it had already been wrong once - the case is in
+      // `docs/instruments.md`. An entry in that shape now falls through and fails below
+      // naming its tool, which is the loud direction and the whole point.
     }
     return null;
   };
