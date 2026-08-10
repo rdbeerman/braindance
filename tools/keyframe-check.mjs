@@ -43,13 +43,19 @@
 // the first version of this feature scissored a top-down into the render buffer
 // and it broke step 4's frame-identity claim.
 //
-//   node server/index.js --port 8080 --replay captures/sample.knct &
-//   node tools/keyframe-check.mjs --url http://localhost:8080
+//   node server/index.js --port 8080 --replay captures/fixture-1g.knct &
+//   node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g
 //   node tools/keyframe-check.mjs --mutate pose-linear     # must FAIL
 //
-// The fixture is the sample capture and it is not a 30fps take: 284 frames over
-// 30.36s, median gap 64ms, mean 9.32fps. Every source figure below is against that
-// cadence rather than against an assumed even 33ms.
+// **The take has to be at least `NEEDS_TAKE_SEC` long and the run refuses one that is
+// not**; the reasoning is beside that declaration. The cadence is read off the take
+// rather than assumed, which is a correction rather than a detail: this header used to
+// state "284 frames over 30.36s, median gap 64ms, mean 9.32fps" and the comment in
+// section 6d said "the 49.79s sample this tree holds", while the tree's own
+// `captures/sample.knct` runs 284 frames over 9.42s at 30.03fps. Three figures, one of
+// them right by accident, all written down as facts about a file `captures/` does not
+// track - which is the shape a number nobody re-derived always ends up in. Every source
+// figure below is against the cadence the run prints.
 
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -847,6 +853,49 @@ if (!gpu.colorBufferFloat) throw new Error('no EXT_color_buffer_float: the surfa
 console.log(`[keyframe] ${gpu.renderer}`);
 console.log(`[keyframe] stage ${gpu.buffer.join('x')}, take ${TAKE}: ${TIMES.length} frames, `
   + `${SOURCE_DURATION.toFixed(2)}s source at ${((TIMES.length - 1) / SOURCE_DURATION).toFixed(2)} fps mean`);
+
+/**
+ * How much footage this file's rows need under them, and the refusal when the take does
+ * not hold it.
+ *
+ * **A take too short for these numbers does not fail them honestly, and one of the two
+ * ways it goes wrong is silent.** Section 4e seeks to 12s under a HOLD curve that reaches
+ * source 18s, so on a 9.4s take the whole program is 7.7s and the seek clamps there -
+ * that reddens, which at least gets looked at. Sections 4f and 6d are the quiet half:
+ * their retime keys carry source seconds of 12, 20 and 15, and a curve reaching the end
+ * of the footage early collapses the program, which takes the key being dragged off the
+ * ruler. `drawLane` hides a key outside the window, a hidden element measures as a
+ * zero rectangle, and the drag then presses at the viewport origin - so the gesture never
+ * happens. Two rows redden about the drag not moving anything, and **two more pass**,
+ * because a key that was never dragged also never slid and never fell under its
+ * neighbour. A fixture gap that reddens a row gets investigated; one that greens a row
+ * does not, which is why this refuses rather than runs.
+ *
+ * Measured: all four red rows go green on a 75.6s fixture with nothing in `web/` changed,
+ * at the same 132 assertions. The scan is the same one `editor-check` carries and for the
+ * same reason - it holds this number against the deepest second the file's own text seeks
+ * to, so the declaration cannot quietly fall behind the rows. It cannot see the retime
+ * values, which are named above instead, and that is why the declared figure sits above
+ * the deepest literal rather than on it. The control is `--take sample`: exit 2 naming the
+ * shortfall, where before it ran to the end and reported four failures and two false
+ * passes.
+ */
+const NEEDS_TAKE_SEC = 24;
+const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+const deepestSeek = Math.max(...[...ownSource.matchAll(/\.seek\(\s*(\d+(?:\.\d+)?)\s*\)/g)].map((m) => Number(m[1])));
+if (deepestSeek > NEEDS_TAKE_SEC) {
+  console.log(`\n[keyframe] DID NOT RUN - a row seeks to ${deepestSeek}s while NEEDS_TAKE_SEC is ${NEEDS_TAKE_SEC}`
+    + ' - raise it and point --take at a fixture that holds it, or the clamp will redden rows about the build');
+  process.exit(2);
+}
+if (!(SOURCE_DURATION >= NEEDS_TAKE_SEC)) {
+  console.log(`\n[keyframe] DID NOT RUN - the take "${TAKE}" holds ${SOURCE_DURATION.toFixed(2)}s of source and `
+    + `these rows need ${NEEDS_TAKE_SEC}s: they seek to ${deepestSeek}s and retime through source 20s. `
+    + 'Under a shorter take the program collapses, the dragged key leaves the ruler and the gesture never '
+    + 'happens - four rows redden and two pass against nothing. Point --take at a longer capture '
+    + '(tools/make-fixture.js loops a short one).');
+  process.exit(2);
+}
 
 // A build that never settles takes the page down with it rather than failing an
 // assertion, and a stack trace is a worse verdict than a sentence. An evaluator
@@ -2357,9 +2406,12 @@ console.log('\n== 6d. a retime key dragged down changes the speed, not when it i
   })()`);
   // **The walk is in seconds converted to pixels, not in pixels.** The retime lane draws
   // zero to the capture's own length across its forty pixels, so what a pixel is worth
-  // depends on the fixture: on the 49.79s sample this tree holds, the old fixed walk of
-  // 3, 6, 9 and 12 pixels was worth 15 seconds, which took a key sitting at 15 exactly
-  // to zero. That is the floor - a curve flat at zero never advances the source, so the
+  // depends on the fixture: on the roughly 50s take this was written against, the old
+  // fixed walk of 3, 6, 9 and 12 pixels was worth 15 seconds, which took a key sitting at
+  // 15 exactly to zero. (That length was written here as a fact about "the sample this
+  // tree holds" and `captures/` is gitignored, so it described a file no checkout has to
+  // have - the header carries the rest of that correction.) That is the floor - a curve
+  // flat at zero never advances the source, so the
   // program length stops being "longer" and falls back to the last key's own time - and
   // the row below read the collapse as the clip failing to slow down. So the drop is
   // three quarters of wherever the key is, in four equal steps, and the pixels for it

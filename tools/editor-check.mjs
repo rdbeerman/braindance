@@ -346,6 +346,27 @@ const MUTATIONS = {
     ]],
   },
 
+  // Applying a look from the picker goes back to saying nothing at all, which is how it
+  // shipped for the whole life of the picker: the note lived on the apply button the
+  // picker replaced, and it went with the button rather than moving onto the control that
+  // inherited the gesture. The one action on this surface that rewrites every look value
+  // on screen was also the only one that happened in silence, and no row here had looked,
+  // because the row that would have was written against the button.
+  //
+  // Must redden: **one row** - section 17's "and the note for it says what was applied
+  // rather than naming a revision this gesture did not apply". Nothing else, and that is
+  // the shape worth having: the values still land, so every row about what a partial
+  // apply *writes* stays green and this one is about the sentence alone.
+  'apply-says-nothing': {
+    file: 'web/main.js',
+    edits: [[
+      '          say(stamped\n'
+      + '            ? `applied ${doc.name} · ${doc.rev.slice(7, 15)}`\n'
+      + '            : `applied ${written} values from ${doc.name}, which names part of a look rather than the whole of one`);',
+      '          void stamped; void written;',
+    ]],
+  },
+
   // The resume offer joins the working document to a take by id rather than by hash.
   // A rename frees the old id and a later take can be renamed into it (#13), so an id
   // match is a claim about a name where a hash match is a claim about footage - and
@@ -2412,6 +2433,52 @@ try {
   ({ page, errors, close } = opened);
 } catch (err) {
   console.log(`[editor] DID NOT RUN - ${err.message}`);
+  process.exit(2);
+}
+
+/**
+ * How much footage this file's own rows need under them, and the refusal when the take
+ * handed to `--take` does not hold it.
+ *
+ * **This is a precondition on the fixture, not a claim about the build, and the direction
+ * is the whole point.** A take shorter than the moments these rows reach does not make
+ * them fail honestly - the transport clamps the seek into the clip, every row downstream
+ * reads a playhead somewhere it did not ask for, and the run comes back with red rows
+ * that name real features and mean nothing. Measured on exactly that: against the 9.42s
+ * `sample` this tree ships, ten rows redden, and pointing the same build at a 75.6s
+ * fixture takes seven of them green with no code changed. Four more sit in
+ * `keyframe-check` for the same reason, and two of *its* rows pass against a drag that
+ * never happened - which is the worse half, because a fixture gap that reddens a row gets
+ * investigated and one that greens it does not. So the run declines rather than asserts,
+ * the way it already declines a mutation that was staged and never served: a red row on a
+ * suite reads as a catch, and a fixture that cannot hold the gesture is not a catch.
+ *
+ * The number is **checked rather than trusted**, which is what stops it becoming a second
+ * spelling of the rows that drifts away from them. The scan below reads this file's own
+ * literal seek targets - the same text the run executes - and refuses if any of them is
+ * deeper than what is declared here, so a row added later that seeks to 45s cannot
+ * quietly reintroduce the clamp. It cannot see a seek computed from a variable, and that
+ * is why the declared number is a little above the deepest literal rather than equal to
+ * it. The control for the whole mechanism is to run with `--take sample`: it must exit 2
+ * naming the shortfall, where before it ran to the end and reported ten failures.
+ */
+const NEEDS_TAKE_SEC = 32;
+const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+const literalSeeks = [...ownSource.matchAll(/\.seek\(\s*(\d+(?:\.\d+)?)\s*\)/g)].map((m) => Number(m[1]));
+const deepestSeek = Math.max(...literalSeeks);
+if (deepestSeek > NEEDS_TAKE_SEC) {
+  console.log(`[editor] DID NOT RUN - a row seeks to ${deepestSeek}s while NEEDS_TAKE_SEC is ${NEEDS_TAKE_SEC}`
+    + ' - raise it and point --take at a fixture that holds it, or the clamp will redden rows about the build');
+  await close();
+  process.exit(2);
+}
+const takeSec = await page.evaluate('__kinect.timeline.transport().duration');
+if (!(takeSec >= NEEDS_TAKE_SEC)) {
+  console.log(`[editor] DID NOT RUN - the take "${TAKE}" holds ${takeSec.toFixed(2)}s and these rows reach `
+    + `${deepestSeek}s, so ${NEEDS_TAKE_SEC}s is the shortest take they can be asked about. `
+    + 'Every seek past the end clamps, and the rows downstream would redden about the fixture rather than '
+    + 'about the build. Point --take at a longer capture (tools/make-fixture.js loops a short one).');
+  await close();
   process.exit(2);
 }
 
@@ -5835,10 +5902,25 @@ try {
   // The keys. `SHORTCUTS` is what `?` prints and it now names four of them, so each is
   // pressed rather than trusted - a string telling the user about a feature is the
   // cheap version of the bug this whole file exists for.
+  // **The playhead is put inside the window rather than at a second written down here.**
+  // This was `seek(15)` against a window set at 0.2..0.8 of the clip, and the two numbers
+  // are only compatible for a take between about 19s and 75s long: on the 9.4s sample the
+  // seek clamps to the end and on the 75.6s fixture 0.2 of the clip is 15.12s, so the
+  // playhead sat 0.12s to the *left* of the window before the zoom ever ran. `zoomAbout`
+  // holds its anchor where it is in the window, so an anchor outside stays outside, and
+  // the row below reddened reporting a build that had done exactly what it should. A
+  // constant second and a fractional window are two spellings of one position and only
+  // agree on the take somebody happened to have open; taking the position off the window
+  // that was just set asks the question this row means on any take long enough to hold it.
   await page.evaluate('__kinect.editor.view.set(0.2, 0.8)');
-  await page.evaluate('__kinect.timeline.transport().seek(15)');
+  const zoomWindow = await page.evaluate('__kinect.editor.view.window()');
+  await page.evaluate(`__kinect.timeline.transport().seek(${(zoomWindow.startSec + zoomWindow.endSec) / 2})`);
   await settle();
   const beforeKeyZoom = await page.evaluate('__kinect.editor.view.window()');
+  const parkedFor = await page.evaluate('__kinect.timeline.transport().programSec');
+  check(parkedFor > beforeKeyZoom.startSec && parkedFor < beforeKeyZoom.endSec,
+    'the playhead is inside the window before the zoom, which is what the row below is about',
+    `playhead ${parkedFor.toFixed(2)}s in ${beforeKeyZoom.startSec.toFixed(2)}s..${beforeKeyZoom.endSec.toFixed(2)}s`);
   await focusStage();
   await page.keyboard.press('=');
   await settle();
@@ -7505,12 +7587,28 @@ try {
     // liveness row below failed against a correct build. The boundaries are computed
     // from the curve the page is actually holding.
     const trim = await page.evaluate(`(() => {
-      const total = __kinect.editor.view.window().duration;
+      const window0 = __kinect.editor.view.window();
+      const total = window0.duration;
       const at = (s) => Math.max(0, Math.min(total, __kinect.timeline.retime.programSecAt(s)));
       const outside = at(2);
       const inside = at(8);
       const inAt = (outside + inside) / 2;
-      return { total, outside, inside, inAt, park: (inAt + inside) / 2, outAt: Math.min(total, inside + 1) };
+      // **The out point goes a distance on screen past the kept mark rather than a fixed
+      // second past it.** The out cut's grab zone reaches 12px to the left of its line and
+      // sits two stacking levels above the marks, so a second is far enough only while a
+      // second is wide. On a 75s take at rate 0.5 the program is 151s across the bed and
+      // one second is about six pixels, which put the out handle on top of the very tick
+      // the rows below have to press: the click retried for thirty seconds and took the
+      // run down as DID NOT RUN at 347 assertions, against a build with nothing wrong
+      // with it. Thirty-two pixels is twice the handle's reach, computed from the window
+      // actually on screen rather than assumed from the take.
+      const perPx = window0.spanSec / Math.max(1, document.getElementById('tBed').getBoundingClientRect().width);
+      const clearOfTheHandle = Math.max(1, 32 * perPx);
+      return {
+        total, outside, inside, inAt, clearOfTheHandle,
+        park: (inAt + inside) / 2,
+        outAt: Math.min(total, inside + clearOfTheHandle),
+      };
     })()`);
     // Set through the buttons the operator uses rather than through a hook, because a
     // hook that set the trim directly would be a second road to a value the keys have to
@@ -7529,6 +7627,30 @@ try {
       'the clip is trimmed with one mark outside it and one inside, and the playhead parks between the in point and the mark it keeps - which is the arrangement the clamp can be seen through',
       `outside ${trim.outside.toFixed(2)}s | in ${trimmed.in?.toFixed(2)}s | park ${trim.park.toFixed(2)}s`
       + ` | inside ${trim.inside.toFixed(2)}s | out ${trimmed.out?.toFixed(2)}s, ${marksNow} ticks`);
+    // **Both ticks are reachable by a pointer, hit-tested rather than assumed, before
+    // anything below aims at one.** The rows below press ticks, and a tick with another
+    // control drawn over it does not fail those rows - `locator.click` waits for the
+    // element to become clickable, retries for thirty seconds and then takes the whole
+    // run down as `DID NOT RUN`, which reports nothing about the build and loses every
+    // section after it. That is the failure this row converts into a sentence naming what
+    // is on top, and it is the one the trim's own geometry above was arranged to avoid.
+    const tickCover = await page.evaluate(`(() => {
+      return [...document.querySelectorAll('#tMarks .tmk')].map((tick) => {
+        const r = tick.getBoundingClientRect();
+        const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return {
+          title: tick.title,
+          clear: at === tick || tick.contains(at),
+          over: at ? (at.id ? '#' + at.id : at.tagName.toLowerCase() + '.' + at.className) : 'nothing',
+        };
+      });
+    })()`);
+    const covered = tickCover.filter((t) => !t.clear);
+    check(tickCover.length === 2 && covered.length === 0,
+      'and a pointer reaches both of them, so a tick with the out handle drawn over it is a red row rather than a timeout that ends the run',
+      covered.length
+        ? covered.map((t) => `"${t.title}" is under ${t.over}`).join('; ')
+        : `${tickCover.length} ticks, ${trim.clearOfTheHandle.toFixed(2)}s of program between the kept mark and the out point`);
     await page.evaluate(`__kinect.timeline.transport().seek(${trim.park})`);
     await settle();
     await focusStage();

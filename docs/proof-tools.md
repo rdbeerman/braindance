@@ -869,6 +869,33 @@ than 30.** So size fixtures by *frame count*, not duration: five minutes of its 
 rewritten monotonic stamps — real depth and real JPEGs, only the u64 at payload offset 8 moves.
 Say so whenever a number rests on one.
 
+**And no page can tell you which sample a checkout has, which is why two tools now refuse a
+take instead of assuming one.** `captures/` is gitignored, so every sentence written here about
+"the sample" describes a file the next machine may not hold — and they have already disagreed.
+The paragraph above says 9.3fps; `keyframe-check`'s header said 284 frames over 30.36s and its
+section 6d said 49.79s; the file in this tree is 284 frames over **9.42s at 30.03fps**. One
+frame count, four durations, all of them written down as facts.
+
+The damage is not the prose. `editor-check` seeks to 30s and `keyframe-check` retimes through
+source 20s, and on a 9.42s take every one of those clamps: **ten rows redden in `editor-check`
+and four in `keyframe-check` against a build with nothing wrong with it**, and — the half worth
+fearing — two more `keyframe-check` rows *pass*, because the key they drag has left the ruler
+and a gesture that never happened also never slid a key under its neighbour. Seven of the ten
+and all four of the four go green on a 75.6s fixture with nothing in `web/` changed.
+
+So both declare a `NEEDS_TAKE_SEC` and exit 2 naming the shortfall, in the same direction and
+for the same reason as `requireMutationDelivered`: a red row reads as a catch, so a fixture
+that cannot hold the gesture has to be the harness declining. The declaration is held against
+the file's own literal seek targets by a scan of its own source, so a row added later that
+seeks deeper cannot quietly fall outside it. **The control for both is `--take sample`**: exit
+2 with nothing asserted, where the same command used to run to the end and report failures.
+
+```
+node tools/make-fixture.js captures/sample.knct captures/fixture-1g.knct --loops 8
+node tools/editor-check.mjs   --url http://localhost:8080 --take fixture-1g --no-render
+node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g
+```
+
 **`fake-grabber` honours `--no-color` and `--no-low-light`, and reports any argument it does
 not know.** It ignored both for its whole life, which mattered because they are not the
 operator's flags — the server appends them to the grabber's argv out of `camera`, so eight of

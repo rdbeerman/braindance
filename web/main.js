@@ -11114,7 +11114,30 @@ function choosePicker(picker, name, { close = false } = {}) {
     if (name) {
       withPresetGesture(picker.note ?? ui.note, () => whileWriting(async () => {
         try {
-          applyStoredPreset(await (await fetch(`/presets/${encodeURIComponent(name)}`)).json());
+          const doc = await (await fetch(`/presets/${encodeURIComponent(name)}`)).json();
+          const { stamped, written } = applyStoredPreset(doc);
+          // **Applying a look says so, and this is the surface `applyStoredPreset`'s
+          // comment means when it says two of them report an apply.** The other is the
+          // import. This one had a note until the picker replaced the apply button, and
+          // the note went with the button rather than moving onto the control that took
+          // over the gesture - so the one action on this surface that rewrites every look
+          // value on screen was also the only one that happened in silence.
+          //
+          // Read off what the apply returned rather than off `appliedPreset`, for the
+          // reason that function's comment gives: a partial document leaves the stamp
+          // where it was, so a note printing the stamp's revision would name a document
+          // this press did not apply - and on a clip that never had a stamp it would
+          // throw inside the handler, which the catch below would report as an apply
+          // that failed over one that worked.
+          //
+          // The partial sentence carries a count and no denominator on purpose. It read
+          // "70 of 69 look values" the first time it shipped: the count of what the
+          // document names and the size of a *complete* look are two different questions,
+          // and the second one is not the one a partial apply raises. What is true and
+          // useful is how many values landed and that the stamp was left alone.
+          say(stamped
+            ? `applied ${doc.name} · ${doc.rev.slice(7, 15)}`
+            : `applied ${written} values from ${doc.name}, which names part of a look rather than the whole of one`);
         } catch (err) {
           showTimelineError(err);
         }

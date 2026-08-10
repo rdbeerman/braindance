@@ -135,7 +135,7 @@ node tools/timeline-check.mjs --url http://localhost:8080 # step 4: seek equals 
 node tools/timeline-check.mjs --mutate preroll-constant   # ... and must FAIL mutated
 node tools/timeline-check.mjs --mutate draft-always-resets # ... and must FAIL mutated
 node tools/timeline-check.mjs --mutate reading-write-skips-repaint # ... and must FAIL mutated
-node tools/keyframe-check.mjs --url http://localhost:8080 # step 5: tracks, retime curve, undo
+node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, retime curve, undo
 node tools/keyframe-check.mjs --mutate pose-linear        # ... and must FAIL mutated
 node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, export, the file
 node tools/export-check.mjs --mutate pointsize-absolute   # ... and must FAIL mutated
@@ -202,13 +202,14 @@ node tools/library-check.mjs --mutate one-refusal-for-older-versions # ... and m
 node tools/library-check.mjs --mutate open-ignores-format          # ... the capture's generation, at all four doors at once
 node tools/library-check.mjs --mutate shipped-look-drops-a-value   # ... a shipped look with a hole in it, which is the last look staying under the next one
 node tools/library-check.mjs --mutate complete-look-drops-a-group  # ... and the definition those documents are written against, which is code where they are data
-node tools/editor-check.mjs --url http://localhost:8080   # the editor's controls: that they exist, that pressing them changes something
+node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g # the editor's controls: that they exist, that pressing them changes something
 node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
 node tools/editor-check.mjs --mutate plant-unswept-control --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate import-skips-normalise --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate import-saves-before-validating --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate picker-ignores-the-boxes --no-render # ... the subset a preset is written with
 node tools/editor-check.mjs --mutate readings-tick-alone --no-render   # ... and the five weights that move as one
+node tools/editor-check.mjs --mutate apply-says-nothing --no-render    # ... and that applying one says so, on the control that inherited the gesture
 node tools/editor-check.mjs --mutate group-never-reveals --no-render      # ... a panel group is open because the clip says so
 node tools/editor-check.mjs --mutate reveal-ignores-tracks --no-render    # ... and a keyframe counts where the value does not
 node tools/editor-check.mjs --mutate override-prunes-only-on-toggle --no-render # ... and the override the document, not the toggle, has caught up with
@@ -390,7 +391,17 @@ tools/pi-registration-ab.sh        # the threading A/B runbook for a capture nod
 
 `captures/` is gitignored; `make-fixture` regenerates what the suite needs, and **the sample it
 loops was shot on a degraded link at about 9.3fps**, so size fixtures by frame count rather
-than by duration. See `docs/proof-tools.md`.
+than by duration. **`editor-check` and `keyframe-check` need a take of at least 32s and 24s and
+exit 2 naming the shortfall**, because on the short sample they redden ten rows and four about
+a build with nothing wrong with it, and green two more against a gesture that never happened.
+Their control is `--take sample`. The `--take fixture-1g` those two command lines name is not in
+a checkout either — make it first, and the two of them are the only reason it is 8 loops:
+
+```
+node tools/make-fixture.js captures/sample.knct captures/fixture-1g.knct --loops 8
+```
+
+See `docs/proof-tools.md`.
 
 ## Three things that are easy to get backwards
 
