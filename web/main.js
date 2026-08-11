@@ -11,13 +11,21 @@ import {
   renderer, scene, freeCamera, programCamera, viewCamera, controls, worldTilt, WORLD_UP,
   DEFAULT_POSE, onNav, setNavigationUp, useViewCamera,
 } from './scene.js';
-// The four pure ones: the scalar curve maths the tracks are evaluated through, the
-// levelling pair's composition, the table of output sizes, and the geometry of the
-// top-down inset. Arithmetic and data, with no DOM, no GL and nothing constructed at
-// import time - which is what makes these the parts of the editor a test can import and
-// call under bare node, and it is why this block can sit anywhere in this list. A module
-// with no top-level side effect cannot be reordered into a different program, and the
-// blocks above and below it do not have that property.
+// The pure ones: the scalar curve maths the tracks are evaluated through, the levelling
+// pair's composition, the table of output sizes, the geometry of the top-down inset, the
+// window of program time the strip is drawn against, and the trim a deliverable covers.
+// Arithmetic and data, with no DOM, no GL and nothing constructed at import time - which
+// is what makes these the parts of the editor a test can import and call under bare node,
+// and it is why this block can sit anywhere in this list. A module with no top-level side
+// effect cannot be reordered into a different program, and the blocks above and below it
+// do not have that property.
+//
+// The last two are the two that hold state, and they hold it in opposite ways for the same
+// reason - a boundary that cannot be written across. `view-window.js` exports a factory,
+// because a window has to be bound to a transport and a DOM node before it means anything;
+// `clip-range.js` exports the pair itself as two live bindings, because everything in this
+// file reads them and nothing outside `writeClipRange` may write them, and an import is
+// read-only where a comment is a promise.
 import {
   EASE_OUT_LINEAR, EASE_IN_LINEAR, easeParam, easeAt, easeSlopeAt, keyBefore,
   HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
@@ -27,6 +35,8 @@ import { EXPORT_SIZES, DEFAULT_EXPORT_SIZE } from './export-sizes.js';
 import {
   INSET, TOP_CENTRE, PLAN_STRIDE, FRUSTUM_LEN, planScale, planPoint, planWorld, projectThrough,
 } from './plan-geometry.js';
+import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
+import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
@@ -4330,12 +4340,6 @@ function applyPreset(preset) {
   params.apply(preset);
 }
 
-// Clip in/out points are program seconds, not frames, so they survive an output-fps
-// change. `out` is null when the clip runs to the end of the program. The transport
-// and the export read these directly; the UI drags them on the ruler.
-let clipIn = 0;
-let clipOut = null;
-
 // The active deliverable holds the export settings (in/out, output fps, output size,
 // codec). It is separate from the project, so one edit can spawn several deliverables
 // without the deliverable state being undoable project state.
@@ -4355,23 +4359,6 @@ function ensureActiveDeliverable() {
 
 function setActiveDeliverable(deliverable) {
   activeDeliverable = deliverable;
-}
-
-// What a clip bound is allowed to be, asked in one place because two callers need the
-// same answer and a second copy of it is the drift this design keeps refusing.
-//
-// `null` is a statement rather than a time, and it is only ever legal at the out point:
-// there it means "to the end", which has to survive a retime that lengthens the program
-// and so cannot be written down as a number. At the in point, and for anything else that
-// is not a finite number, there is no reading to recover - so it is refused.
-function clipBoundOrThrow(value, which) {
-  if (value === null && which === 'out') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  throw new Error(
-    `the clip's ${which} point is ${JSON.stringify(value) ?? String(value)}, which is not a program `
-    + 'time: a trim carries finite seconds, and holding a value that is not one inside the program '
-    + 'spreads it through both bounds and leaves the transport no range at all',
-  );
 }
 
 function applyDeliverable(deliverable) {
@@ -4411,59 +4398,21 @@ function applyDeliverable(deliverable) {
   paintExportFormats();
 }
 
+/**
+ * A trim, written and then told to the rest of the editor: the deliverable it belongs to,
+ * the readout beside it, and the transport if the playhead is now outside it.
+ *
+ * The writing itself is `writeClipRange` in `clip-range.js`, which refuses a bound that is
+ * not a time and holds the pair inside the program that is open. What is here is
+ * everything that write *means*, and that is the split the two callers need: the marker
+ * drags call the module directly while a pointer is down, because a preview must not move
+ * the deliverable or seek the transport once per pointer event, and they come here on the
+ * release. Both reach the same arithmetic, which is the whole point of it being reachable.
+ */
 function setClipInOut(values) {
-  const { in: inn, out } = values;
-  // **Refused before either binding is written, because the clamp below is arithmetic and
-  // arithmetic on something that is not a number does not fail - it spreads.** An `in` of
-  // `"start"` makes `Math.min(clipIn, dur)` NaN, and the `Math.max(clipIn, ...)` that holds
-  // the out point up then carries that NaN into a bound which was perfectly good: both ends
-  // are gone, `clipOutSec` answers NaN, and `frameAt` resolves every position to NaN. The
-  // getter this clamp was put in front of coerced instead - `Number(clipIn) || 0` read a
-  // malformed `in` as zero and left a valid `out` alone - so clamping without refusing first
-  // is strictly worse than what it replaced, on exactly the documents it exists to survive.
-  //
-  // `undefined` is not that case and must not be refused: it is how the two marker drags say
-  // which end they mean, and a drag writes one bound while the other keeps whatever it held.
-  // A document has no such reading, which is why `applyDeliverable` asks the same question
-  // about both of its fields and gets a refusal where this gets a pass.
-  const nextIn = inn === undefined ? undefined : clipBoundOrThrow(inn, 'in');
-  const nextOut = out === undefined ? undefined : clipBoundOrThrow(out, 'out');
-  if (nextIn !== undefined) clipIn = nextIn;
-  if (nextOut !== undefined) clipOut = nextOut;
-  // **Held inside the program that is open, because the two getters the transport reads
-  // this through are not symmetric.** `clipOutSec` is bounded above by the take's
-  // duration and `clipInSec` is bounded below by zero and above by nothing, so an `in`
-  // past the program's end makes `clipInSec` the larger of the two and `frameAt`
-  // composes to a constant: its inner `Math.min` can never exceed the out point, so its
-  // outer `Math.max` always answers the in point. Every position the editor can ask for
-  // then comes back as the same frame - seek, draft, redraw, `goTo`, Home, End, the
-  // arrow steps and the scrubber's release alike - while the readout goes on naming a
-  // range that has nothing in it.
-  //
-  // A deliverable is how that arrives. `applyDeliverable` writes a saved document's
-  // program times as they stand rather than into the rate the clip happens to be in, so
-  // a trim authored at 1x lands past the end of the same take played at 2x, and nothing
-  // upstream of here compares it against the take that is open.
-  //
-  // **Here rather than in the getters, and here rather than at `applyDeliverable`.**
-  // This is the one door every writer already passes - the two marker drags, the rate
-  // rescale in `reparameteriseProgramTime` and the deliverable - so there is no second
-  // clamp to keep in step with this one, and the writer added next year is held by
-  // existing. The markers already clamp themselves this way at their own ends; this is
-  // that same rule said once, where it covers the door a document comes through.
-  //
-  // What it deliberately does not do is make an empty range usable. A trim that lands
-  // wholly past the end has nothing in it, so it collapses to a point at the end - which
-  // is the state the two markers dragged together already reach, and it is explained by
-  // the same picture rather than by a frozen transport nothing on screen accounts for.
-  if (timeline) {
-    const dur = timeline.duration;
-    clipIn = Math.max(0, Math.min(clipIn, dur));
-    // `null` still means "to the end", which is a different statement from a number that
-    // happens to equal the duration: "whole clip" has to survive a retime that lengthens
-    // the program, and a duration written in here would freeze it at today's length.
-    if (clipOut !== null) clipOut = Math.max(clipIn, Math.min(clipOut, dur));
-  }
+  // `null` rather than a duration when nothing is open, because the trim is held inside
+  // the program and there is no program yet - a zero would collapse both bounds to it.
+  writeClipRange(values, timeline ? timeline.duration : null);
   ensureActiveDeliverable();
   activeDeliverable.in = clipIn;
   activeDeliverable.out = clipOut;
@@ -8161,177 +8110,26 @@ function showTimelineError(err) {
   console.error('[timeline]', err);
 }
 
-// How little program time the strip will show. A window is bounded below so a wheel
-// cannot zoom into a point, where every position on screen is the same instant and the
-// gesture that got there has no inverse.
-const MIN_VIEW_SEC = 0.25;
-
-/**
- * The window of program time the strip is drawn against, and the only thing that turns
- * a program second into a position on it.
- *
- * **It replaced `rulerDuration()` rather than joining it.** Eleven places used to work
- * out a position by dividing by the clip's length, and a twelfth that kept doing so
- * under a zoomed window would not look broken - it would draw its marker *unzoomed*,
- * at a plausible place, silently disagreeing with the eleven around it. Deleting the
- * old name is what makes a missed caller a throw on the first paint instead of a wrong
- * picture nobody can see is wrong.
- *
- * **The window is held as fractions of the program duration, and that is load-bearing
- * rather than a unit preference.** A speed change rescales the duration and every
- * program time in the document by the same factor - see `reparameteriseProgramTime` -
- * so a window in *seconds* would be a twelfth quantity somebody had to remember to
- * scale, and forgetting it would move the visible footage on a gesture whose whole
- * point is that nothing moves. In fractions there is nothing to remember: the ruler
- * and the window rescale together and the same footage stays on screen because the
- * arithmetic cannot express anything else.
- *
- * The one place that reads oddly is the consequence of the same choice, and it is
- * worth stating so it is not filed as this bug returning: a *retime key* changes the
- * program duration non-uniformly, so dragging one shifts the visible window on
- * release. That is a different situation from the speed slider - there the map is
- * uniform and nothing moves at all - and it is accepted rather than overlooked.
- */
-const view = {
-  // The visible window, as fractions of `duration`. `0..1` is the whole clip.
-  a: 0,
-  b: 1,
-  // And the window that was *asked* for, which is what the limits are re-derived from -
-  // see `set`. These two are equal except while a clamp is binding.
-  wantA: 0,
-  wantB: 1,
-
-  /**
-   * The program length the ruler is drawn against.
-   *
-   * Frozen for the length of a lane drag, and that is not a nicety. The retime curve
-   * *is* the program length: dragging one of its keys down slows the clip, which
-   * lengthens the program, which rescales the ruler, which moves the key under a
-   * pointer that has not moved horizontally - and the new position is read back as a
-   * new program time, which slows it further. Measured before it was fixed: a
-   * twelve-pixel vertical drag walked one key from 15.0s to 48.3s in four moves, and
-   * the drag got faster the longer it went on.
-   */
-  get duration() {
-    if (laneDrag) return Math.max(1e-6, laneDrag.duration);
-    return Math.max(1e-6, timeline ? timeline.duration : 1);
-  },
-
-  get startSec() { return this.a * this.duration; },
-  get endSec() { return this.b * this.duration; },
-  get spanSec() { return (this.b - this.a) * this.duration; },
-  /** True when the whole clip is on screen, which is what the fit control returns to. */
-  get whole() { return this.a === 0 && this.b === 1; },
-
-  /** Where a program second sits across the bed, in percent. Off-window is out of 0..100. */
-  pct(t) {
-    return ((t / this.duration) - this.a) / Math.max(1e-9, this.b - this.a) * 100;
-  },
-
-  /** Program seconds at a percentage across the bed. The inverse of `pct`. */
-  secAtPct(p) {
-    return (this.a + (p / 100) * (this.b - this.a)) * this.duration;
-  },
-
-  /** Where the pointer is, in program seconds, clamped to the window it is over. */
-  timeAt(clientX) {
-    const r = ui.bed.getBoundingClientRect();
-    const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;
-    return Math.max(0, Math.min(this.duration, (this.a + f * (this.b - this.a)) * this.duration));
-  },
-
-  /**
-   * Whether a marker at `t` is worth drawing. The margin is a whole window because a
-   * curve is sampled across the visible span and a key's node is 11px wide - a marker
-   * just outside still has a corner inside, and hiding it would pop at the edge.
-   */
-  holds(t) {
-    const f = t / this.duration;
-    const margin = (this.b - this.a) * 0.02;
-    return f >= this.a - margin && f <= this.b + margin;
-  },
-
-  /**
-   * The narrowest window allowed here, as a fraction of the clip.
-   *
-   * Named rather than recomputed by each caller, because the edge drag needs the same
-   * number `set` clamps with and a second copy of it would be a second answer.
-   */
-  minSpan() { return Math.min(1, MIN_VIEW_SEC / this.duration); },
-
-  /**
-   * The window, clamped: inside the clip, no narrower than `MIN_VIEW_SEC`, at most all.
-   *
-   * **What was asked for is kept beside what the clamp allowed, and the clamp is
-   * re-derived rather than accumulated.** `minSpan` is a number of seconds expressed as
-   * a fraction, so it moves whenever the clip's length does - and a clamp applied to its
-   * own previous output only ever ratchets outward. Measured: at 0.1x the whole clip is
-   * 480s and the minimum window is a fraction of 0.00052; going to 4x makes that 0.00625s
-   * of a 12s clip, the clamp widens it to 0.0208, and coming back to 0.1x that fraction
-   * is 10s. The document returns exactly, no undo step is committed, and the ruler is
-   * forty times wider than it started - which is the one thing the speed control claims
-   * not to do.
-   *
-   * `userLaneHeight` already had the answer, and its comment says why in the same words:
-   * store the request, apply the limits on the way out, so a window narrowed by a clip
-   * that got shorter opens back up when the clip gets longer again.
-   */
-  set(a, b) {
-    this.wantA = a;
-    this.wantB = b;
-    return this.reclamp();
-  },
-
-  /**
-   * Re-applies the limits to the window that was last asked for.
-   *
-   * Called whenever the duration moves under the window rather than only after a rate
-   * gesture, because a rate gesture is not the only thing that moves it - undo across a
-   * speed change, a project load and an output-rate change all do, and a fix that lived
-   * on the slider would have left three doors open.
-   */
-  reclamp() {
-    const span = Math.min(1, Math.max(this.minSpan(), this.wantB - this.wantA));
-    const start = Math.min(1 - span, Math.max(0, this.wantA));
-    const moved = start !== this.a || start + span !== this.b;
-    this.a = start;
-    this.b = start + span;
-    return moved;
-  },
-
-  /**
-   * Zooms by `factor` (>1 closer) holding the fraction `at` where it is on screen.
-   *
-   * **The clamp is applied here rather than left to `set`, because `set` can only widen
-   * the span and would keep the start that went with the narrower one.** At the minimum
-   * window, another notch inward asked for a span `set` refused and a start computed for
-   * it, so the window kept its width and slid to the right: a gesture that could not zoom
-   * panned instead, and the time under the pointer walked away a notch at a time. Deriving
-   * the start from the span that actually survives makes a further zoom-in a no-op, which
-   * is what a control at the end of its travel should do.
-   */
-  zoomAbout(at, factor) {
-    const span = Math.min(1, Math.max(this.minSpan(), (this.b - this.a) / factor));
-    // Where the anchor sits in the window now, kept where it is in the window after.
-    const held = (at - this.a) / Math.max(1e-9, this.b - this.a);
-    const start = at - held * span;
-    return this.set(start, start + span);
-  },
-
-  /** Pans by a share of the visible window, positive to the right. */
-  panBy(shareOfWindow) {
-    const d = (this.b - this.a) * shareOfWindow;
-    return this.set(this.a + d, this.b + d);
-  },
-
-  fit() { return this.set(0, 1); },
-
-  /** Frames a range with a margin, so the two markers are not on the very edges. */
-  frame(fromSec, toSec) {
-    const pad = Math.max(MIN_VIEW_SEC, (toSec - fromSec) * 0.05);
-    return this.set((fromSec - pad) / this.duration, (toSec + pad) / this.duration);
-  },
-};
+// The window of program time the strip is drawn against, built here because both of its
+// readings belong to this file: the length of the program, and where the ruler's bed is on
+// screen. Suppliers rather than values, because both move under a window that does not.
+//
+// **The length is frozen for the length of a lane drag, and that is not a nicety.** The
+// retime curve *is* the program length: dragging one of its keys down slows the clip, which
+// lengthens the program, which rescales the ruler, which moves the key under a pointer that
+// has not moved horizontally - and the new position is read back as a new program time,
+// which slows it further. Measured before it was fixed: a twelve-pixel vertical drag walked
+// one key from 15.0s to 48.3s in four moves, and the drag got faster the longer it went on.
+// `laneDrag` is null except while that drag is live, and it is declared three thousand
+// lines below this because it belongs to the drag - which is safe only because nothing
+// reads the window before a take is open, and the guard on that is `viewChanged`.
+//
+// The 1 with no clip open is a placeholder the floor inside the window would give it
+// anyway; what it buys is that `pct` divides by something before the first paint.
+const view = makeViewWindow({
+  durationSec: () => (laneDrag ? laneDrag.duration : (timeline ? timeline.duration : 1)),
+  bedRect: () => ui.bed.getBoundingClientRect(),
+});
 
 function paintDeliverable() {
   if (!ui.deliverableReadout) return;
@@ -8411,23 +8209,6 @@ function paintTimeline(t) {
   // as the render that produced the buffer, which is the only place it can land
   // at all, since the drawing buffer is not preserved across a paint.
   drawChrome();
-}
-
-// The ladder a ruler picks its spacing from, in seconds. Every rung divides the one
-// above it or is half of it, so zooming walks the labels through the ladder instead of
-// re-labelling everything on each notch, and the sub-second rungs are the frame-ish
-// intervals somebody placing a key actually wants.
-const TICK_STEPS = [
-  1 / 30, 1 / 10, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600,
-];
-
-/** A tick's label. Bare seconds under a minute, `m:ss` over it, so it reads as a clock. */
-function tickLabel(sec, step) {
-  const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
-  if (sec < 60) return `${sec.toFixed(decimals)}s`;
-  const m = Math.floor(sec / 60);
-  const s = sec - m * 60;
-  return `${m}:${s.toFixed(decimals).padStart(decimals ? decimals + 3 : 2, '0')}`;
 }
 
 /**
@@ -8837,10 +8618,6 @@ for (const type of ['pointerup', 'pointercancel']) {
 
 // ------------------------------------------------------------------ zoom and pan
 
-// How much one wheel notch zooms. Chosen so a notch is a visible step and a flick is
-// not a jump to the bottom of the range: about eight notches per factor of ten.
-const ZOOM_PER_NOTCH = 1.33;
-
 /**
  * The wheel over the strip. Vertical zooms about the pointer, horizontal pans.
  *
@@ -9017,13 +8794,26 @@ for (const handle of [ui.in, ui.out]) {
     pauseTransport();
     e.stopPropagation();
   });
+  // The drag itself, previewed rather than committed: the pair is written and the strip
+  // repaints, and the deliverable, the undo step and the transport are the release's
+  // business. That distinction is why this calls `writeClipRange` where the release calls
+  // `setClipInOut` - going through `setClipInOut` here would write the deliverable and seek
+  // the transport once per pointer event, which is the seek storm the comment on its own
+  // frame comparison records having been rewritten to avoid.
+  //
+  // **This used to assign the two bindings directly, and the door's comment said no such
+  // writer existed.** Both halves are fixed rather than one: the write is the module's now,
+  // and what the door claims is what the language enforces. The pair's own clamp still runs
+  // here, so a drag can no longer draw a trim its own release would refuse - measured on
+  // the build before this, dragging the out marker left of the in point with no out point
+  // set followed the pointer and then snapped back on release.
   handle.addEventListener('pointermove', (e) => {
     if (handleDrag !== (handle === ui.in ? 'in' : 'out')) return;
     const t = programAtPointer(e);
     if (handle === ui.in) {
-      clipIn = Math.max(0, Math.min(t, clipOut ?? timeline.duration));
+      writeClipRange({ in: Math.max(0, Math.min(t, clipOut ?? timeline.duration)) }, timeline.duration);
     } else {
-      clipOut = clipOut === null ? t : Math.max(clipIn, Math.min(t, timeline.duration));
+      writeClipRange({ out: clipOut === null ? t : Math.max(clipIn, Math.min(t, timeline.duration)) }, timeline.duration);
     }
     timeline.paint();
   });

@@ -1424,17 +1424,23 @@ const MUTATIONS = {
   // conversion missed would have: everything draws through the window and one place
   // still divides by the duration, so the strip looks right and the pointer is wrong by
   // a whole window.
+  // Re-anchored when the window moved into `web/view-window.js`. Two things about its text
+  // changed and neither is this control: the object literal is inside a factory now, so
+  // every line in it carries two more spaces, and the bed's box arrives as the `bedRect`
+  // supplier the factory was given rather than being read off `ui` from inside. The
+  // mutation itself is the same one - the pointer's fraction is taken against the clip and
+  // not against the window.
   'pointer-ignores-view': {
-    file: 'web/main.js',
+    file: 'web/view-window.js',
     edits: [[
-      '  timeAt(clientX) {\n'
-      + '    const r = ui.bed.getBoundingClientRect();\n'
-      + '    const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;\n'
-      + '    return Math.max(0, Math.min(this.duration, (this.a + f * (this.b - this.a)) * this.duration));',
-      '  timeAt(clientX) {\n'
-      + '    const r = ui.bed.getBoundingClientRect();\n'
-      + '    const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;\n'
-      + '    return f * this.duration;',
+      '    timeAt(clientX) {\n'
+      + '      const r = bedRect();\n'
+      + '      const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;\n'
+      + '      return Math.max(0, Math.min(this.duration, (this.a + f * (this.b - this.a)) * this.duration));',
+      '    timeAt(clientX) {\n'
+      + '      const r = bedRect();\n'
+      + '      const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;\n'
+      + '      return f * this.duration;',
     ]],
   },
 
@@ -1609,11 +1615,15 @@ const MUTATIONS = {
   // them too would be naming a different defect. Rows further down the file can go red
   // behind it - a frozen `frameAt` is frozen for whatever seeks next - which is why the
   // rows are read rather than counted.
+  // Re-anchored when the pair moved into `web/clip-range.js`. The clamp is handed the
+  // program's length rather than reading a transport it can no longer see, so the block's
+  // opening line is a test on that argument and the `const dur` that read it is gone. The
+  // three lines the mutation is actually about are unchanged, and so is what removing them
+  // does.
   'clip-range-unclamped': {
-    file: 'web/main.js',
+    file: 'web/clip-range.js',
     edits: [[
-      '  if (timeline) {\n'
-      + '    const dur = timeline.duration;\n'
+      '  if (dur !== null) {\n'
       + '    clipIn = Math.max(0, Math.min(clipIn, dur));\n'
       + '    // `null` still means "to the end", which is a different statement from a number that\n'
       + '    // happens to equal the duration: "whole clip" has to survive a retime that lengthens\n'
@@ -1632,24 +1642,25 @@ const MUTATIONS = {
   // page-error sweep because a build that does not refuse says nothing to the console.
   // The three `editor-check-past` rows above them stay green on purpose,
   // and that is the separation this control exists to make: the clamp itself still works,
-  // and what is missing is the refusal in front of it. Both edits are needed for the defect
-  // to come back at all - either question on its own still catches the document - which is
-  // why this is one mutation rather than two.
+  // and what is missing is the refusal in front of it.
+  //
+  // **Re-anchored onto the predicate itself when `clip-range.js` was extracted, and that is
+  // a change of shape rather than of position.** It used to be two edits - the pair of
+  // questions `applyDeliverable` asks, and the pair `setClipInOut` asks - and one of those
+  // two call sites is in `web/main.js` while the other is now in `web/clip-range.js`. A
+  // spec names one file, so two edits across two files cannot be written down here at all;
+  // and mutating the answer instead of the two questions is the stronger mutation anyway,
+  // because it takes the refusal away from every caller at once rather than from the two
+  // that existed when this was written. The mutated build is the same one: both askers get
+  // whatever they were handed back, unchecked, and the clamp then spreads it.
   'clip-bound-coerces-nonnumeric': {
-    file: 'web/main.js',
+    file: 'web/clip-range.js',
     edits: [
       [
-        "  clipBoundOrThrow(deliverable.in, 'in');\n"
-        + "  clipBoundOrThrow(deliverable.out, 'out');\n",
-        '',
-      ],
-      [
-        "  const nextIn = inn === undefined ? undefined : clipBoundOrThrow(inn, 'in');\n"
-        + "  const nextOut = out === undefined ? undefined : clipBoundOrThrow(out, 'out');\n"
-        + '  if (nextIn !== undefined) clipIn = nextIn;\n'
-        + '  if (nextOut !== undefined) clipOut = nextOut;\n',
-        '  if (inn !== undefined) clipIn = inn;\n'
-        + '  if (out !== undefined) clipOut = out;\n',
+        "  if (value === null && which === 'out') return null;\n"
+        + '  if (typeof value === \'number\' && Number.isFinite(value)) return value;\n',
+        "  if (value === null && which === 'out') return null;\n"
+        + '  return value;\n',
       ],
     ],
   },
@@ -1751,15 +1762,19 @@ const MUTATIONS = {
   // The zoom goes back to deriving its start from a span the clamp then refuses, so a
   // notch at the minimum window pans instead of doing nothing. Reddens the two clamp rows
   // and leaves every other zoom row green - they all start from a window with room.
+  // Re-anchored when the window moved into `web/view-window.js`. The only thing that
+  // changed in the text is the indent - the object literal is inside a factory now, so
+  // every line in it carries two more spaces - and the mutation is the pre-fix zoom exactly
+  // as it was.
   'zoom-pans-at-the-clamp': {
-    file: 'web/main.js',
+    file: 'web/view-window.js',
     edits: [[
-      '    const span = Math.min(1, Math.max(this.minSpan(), (this.b - this.a) / factor));\n'
-      + '    // Where the anchor sits in the window now, kept where it is in the window after.\n'
-      + '    const held = (at - this.a) / Math.max(1e-9, this.b - this.a);\n'
-      + '    const start = at - held * span;',
-      '    const span = (this.b - this.a) / factor;\n'
-      + '    const start = at - (at - this.a) / factor;',
+      '      const span = Math.min(1, Math.max(this.minSpan(), (this.b - this.a) / factor));\n'
+      + '      // Where the anchor sits in the window now, kept where it is in the window after.\n'
+      + '      const held = (at - this.a) / Math.max(1e-9, this.b - this.a);\n'
+      + '      const start = at - held * span;',
+      '      const span = (this.b - this.a) / factor;\n'
+      + '      const start = at - (at - this.a) / factor;',
     ]],
   },
 

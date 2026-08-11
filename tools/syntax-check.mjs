@@ -127,10 +127,11 @@ if (mutateAt !== -1 && !MUTATIONS[mutation]) {
 // step with every phase that splits `main.js`, and raised in the same commit rather than
 // left slack: the floor is a claim that the walk still reaches the modules, and one left
 // behind the tree it counts goes on passing with half of them deleted. `web` was 2 before
-// the split began and 4 after `scene.js`, `curve.js` and `record-poll.js`; it is 9 with
-// `world-tilt.js`, `export-sizes.js` and `plan-geometry.js` beside them, and `test` is 5
-// because those three arrived with a test each.
-const FLOORS = { server: 5, test: 5, tools: 12, web: 9 };
+// the split began and 4 after `scene.js`, `curve.js` and `record-poll.js`; it was 9 with
+// `world-tilt.js`, `export-sizes.js` and `plan-geometry.js` beside them, and it is 11 with
+// `view-window.js` and `clip-range.js`. `test` moves with it for the same reason - every
+// one of those modules arrived with a test file, which is most of why they are modules.
+const FLOORS = { server: 5, test: 7, tools: 12, web: 11 };
 
 // **Two different questions, so two different sets, and the difference is the point.**
 // `PARSES` is what `node --check` can be handed and have its answer mean anything - a

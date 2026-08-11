@@ -1055,6 +1055,11 @@ const EXEMPTIONS = [
     why: 'Every output resolution the product offers, grouped by ratio. The whole point of the file is that this is one list rather than two - the menu, the ratio buttons and the export all read it and none of them writes it, and a build that wanted a different size would be adding an entry here rather than assigning one at run time.',
   },
   {
+    module: 'web/view-window.js',
+    binding: 'TICK_STEPS',
+    why: 'The ladder a ruler picks its spacing from, in seconds. Searched with `find` by the one function that builds ticks and written by nothing - the property the array carries is that every rung divides the one above it, which a build wanting different gradations would change here rather than assign at run time.',
+  },
+  {
     module: 'web/plan-geometry.js',
     binding: 'INSET',
     why: 'Where the top-down inset sits and how big it is, in stage pixels. Read by the rect it is built into and by the stats overlay stacked under it; a literal that has never been written since the plan view was drawn.',
