@@ -196,7 +196,6 @@ export {
   EASE_IN_LINEAR,
   easeParam,
   easeAt,
-  easeSlopeAt,
   keyBefore,
   HOLD_ENDS,
   EXTEND_ENDS,
