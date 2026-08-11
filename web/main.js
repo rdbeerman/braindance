@@ -27,7 +27,7 @@ import {
 // file reads them and nothing outside `writeClipRange` may write them, and an import is
 // read-only where a comment is a promise.
 import {
-  EASE_OUT_LINEAR, EASE_IN_LINEAR, easeParam, easeAt, easeSlopeAt, keyBefore,
+  EASE_OUT_LINEAR, EASE_IN_LINEAR, keyBefore,
   HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
@@ -37,14 +37,19 @@ import {
 } from './plan-geometry.js';
 import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
-// The point cloud's two GLSL programs and the bloom pass: the two largest things this
-// file used to hold, and the two that are inert until something asks. The shaders are
-// source text with no interpolation in them, and `BloomPass` allocates its five render
-// targets in its constructor rather than while it evaluates - so neither of these can
-// move the boot order the block above is ordered for, and both import cleanly under bare
-// node, which is how `bloomChainSize` is held to the reference it is frozen at.
-import { vertexShader, fragmentShader } from './cloud-shader.js';
-import { BloomPass, bloomChainSize } from './bloom-pass.js';
+// One number out of the halo, and nothing else. `bloom-pass.js` holds the pass and
+// `post-chain.js` is what constructs it; what this file still needs is the reference the
+// chain is frozen at, because `resize` sizes that chain and `resize` lives here. The two
+// GLSL programs went the same way - `point-cloud.js` imports them from `cloud-shader.js`
+// directly, and both modules stay reachable through the ones that use them rather than
+// through a name carried here.
+//
+// **A name imported and not used is worse than no import**, which is why this line is one
+// binding rather than the three it was. It reads as a dependency to anyone tracing the
+// boot order, and it survives the deletion of the last thing that used it without a word
+// from any tool - which is exactly how the three that were here got here, when the
+// constructions moved out in the two commits after the modules were made.
+import { bloomChainSize } from './bloom-pass.js';
 // The two sensor frames the GPU holds, and the memory of where a ray used to be that is
 // built from them. Imported after `scene.js` because the second of them asks the live
 // context a question - whether it can render to float - and imported in this order
@@ -1020,8 +1025,9 @@ const PARAMS = {
   // `CLAUDE.md` rule 5 describes, an object every observation skips behind a justification
   // that stops anybody looking twice. So `blackwall.json`, which names `glitch: 0.18` and
   // no tint, does *not* draw the picture it drew: its tear flares dimmer. The flare's move
-  // out of the Blackwall branch two hundred lines up is a deliberate change on top of
-  // that; this one was not deliberate.
+  // out of the Blackwall branch - which is in `web/cloud-shader.js` now, and was a
+  // thousand-odd lines above this even before it left the file - is a deliberate change on
+  // top of that; this one was not deliberate.
   glitch: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glitch', label: 'amount',
     apply: (v) => { uniforms.glitch.value = v; } },
@@ -1549,8 +1555,9 @@ function missingReadings(values) {
   return READINGS.filter((n) => !Object.hasOwn(values, n));
 }
 
-// Each reading needs a uniform of its own name, and the shader string was built
-// hundreds of lines above this, so a reading declared in the registry with no
+// Each reading needs a uniform of its own name, and the two are now written in different
+// files - the registry here, the shader source in `web/cloud-shader.js` - so nothing about
+// reading one puts the other in front of you. A reading declared in the registry with no
 // uniform behind it would fail as a slider that moves nothing rather than as an
 // error. That is the shape this file keeps rejecting - a control that appears to
 // work - so it is an assertion, on the same reasoning as the age ceiling below.
