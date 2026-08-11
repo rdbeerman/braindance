@@ -153,7 +153,7 @@ const MUTATIONS = {
   // assertion is removed with it, because that is what the assertion is for -
   // without removing it the page would refuse to start and the check would be
   // proving that a throw happens rather than that the image is wrong.
-  'age-clamp-low': { file: 'web/main.js', edits: [
+  'age-clamp-low': { file: 'web/surface-memory.js', edits: [
     ['const MAX_AGE = 6.0;', 'const MAX_AGE = 4.0;'],
     ['  if (MAX_AGE < longestLife) {', '  if (false) {'],
   ] },

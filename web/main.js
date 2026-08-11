@@ -45,12 +45,26 @@ import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.
 // node, which is how `bloomChainSize` is held to the reference it is frozen at.
 import { vertexShader, fragmentShader } from './cloud-shader.js';
 import { BloomPass, bloomChainSize } from './bloom-pass.js';
+// The two sensor frames the GPU holds, and the memory of where a ray used to be that is
+// built from them. Imported after `scene.js` because the second of them asks the live
+// context a question - whether it can render to float - and imported in this order
+// because the memory's pass samples the depth texture the first of them owns.
+//
+// Neither builds anything while it evaluates. Each exports a build function that is
+// called at its own banner below, so the order these two come up in is written out in
+// this file rather than inferred from the order these lines happen to be in - which is
+// what stops a sorted import list from quietly becoming a different program.
+import {
+  depthCurr, colorPrev, colorCurr, buildTextures, bindDepth, bindColor, plantColor,
+} from './gpu-textures.js';
+import {
+  statePrev, stateNext, buildSurfaceMemory, stepSurfaceMemory, refuseAgeCeiling,
+} from './surface-memory.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 const POINTS = DEPTH_W * DEPTH_H;
 
@@ -129,144 +143,20 @@ const timelineEl = document.getElementById('timeline');
 // the orbit controls are built there and imported here.
 
 // ---------------------------------------------------------------- gpu textures
-
-// Depth arrives as raw millimetres. An integer texture keeps it exact, and two
-// of them let the vertex shader interpolate between the last two sensor frames -
-// which is what makes an 8-15fps stream look fluid on a 120Hz display.
-const makeDepthTexture = () => {
-  const tex = new THREE.DataTexture(
-    new Uint16Array(POINTS), DEPTH_W, DEPTH_H, THREE.RedIntegerFormat, THREE.UnsignedShortType,
-  );
-  tex.internalFormat = 'R16UI';
-  tex.minFilter = THREE.NearestFilter;
-  tex.magFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  tex.needsUpdate = true;
-  return tex;
-};
-
-let depthPrev = makeDepthTexture();
-let depthCurr = makeDepthTexture();
-
-const makeColorTexture = () => {
-  const tex = new THREE.Texture();
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
-  return tex;
-};
-
-let colorPrev = makeColorTexture();
-let colorCurr = makeColorTexture();
+//
+// Moved to `gpu-textures.js`. The two depth textures, the two colour textures and the
+// one door a new sensor frame replaces them through are built there. What is here is
+// the moment they are built, which is a decision about this program's boot rather than
+// about the textures - and the five uniform cells handed back, which the point cloud's
+// material composes by reference a hundred lines below.
+const sourceCells = buildTextures();
 
 // ------------------------------------------------------------- surface memory
-
-// A ray that lands on a different surface between two frames is a death and a
-// birth. Today the point simply teleports, which is the loudest artifact in the
-// viewer: 3.14% of pixels flip valid/zero every frame pair with no fade at all,
-// 44x more pixels than the snap threshold ever touches.
 //
-// Remembering where the ray used to be turns that into a cross-fade, and the
-// same memory is what a wake needs - so both come from one pass, one per
-// arriving frame rather than one per display frame.
-//
-//   .r  depth the ray had before the swap, mm - where the ghost stays
-//   .g  seconds since that swap
-//   .b  how hard the swap was, 0..1
-//   .a  depth at the previous arrival, mm - the swap detector itself
-const stateType = renderer.getContext().getExtension('EXT_color_buffer_float')
-  ? THREE.FloatType
-  : THREE.HalfFloatType;
-
-const makeStateTarget = () => new THREE.WebGLRenderTarget(DEPTH_W, DEPTH_H, {
-  type: stateType,
-  minFilter: THREE.NearestFilter,
-  magFilter: THREE.NearestFilter,
-  depthBuffer: false,
-  stencilBuffer: false,
-  generateMipmaps: false,
-});
-
-let statePrev = makeStateTarget();
-let stateNext = makeStateTarget();
-
-// How long a ray's age is allowed to keep counting, in seconds of source time.
-// This is not a free number: a ghost is drawn while `age < fadeTime + wakeTime *
-// strength`, so once the clamp sits below the longest life the registry can ask
-// for, a ray that stops swapping pins its age at the ceiling and sheds forever at
-// fixed alpha. At 4.0 that was reachable - fade and wake top out at 1500 and 4000
-// milliseconds - and it showed up as a wake that never expired in the live viewer
-// and as a seek that could not reproduce a playback, because a reset zeroes the
-// ghost and no length of pre-roll puts an immortal one back. The assertion below
-// `PARAMS` is what keeps the two in step; raising a slider's maximum past this
-// fails at boot rather than in the footage.
-const MAX_AGE = 6.0;
-
-const stateUniforms = {
-  depthCurr: { value: depthCurr },
-  statePrev: { value: statePrev.texture },
-  resolution: { value: new THREE.Vector2(DEPTH_W, DEPTH_H) },
-  dt: { value: 1 / 30 },
-  snapDelta: { value: 250 },
-};
-
-const stateQuad = new FullScreenQuad(new THREE.RawShaderMaterial({
-  glslVersion: THREE.GLSL3,
-  uniforms: stateUniforms,
-  vertexShader: /* glsl */ `
-    in vec3 position;
-    void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
-  `,
-  fragmentShader: /* glsl */ `
-    precision highp float;
-    precision highp usampler2D;
-
-    uniform usampler2D depthCurr;
-    uniform sampler2D statePrev;
-    uniform vec2 resolution;
-    uniform float dt, snapDelta;
-
-    out vec4 outState;
-
-    void main() {
-      ivec2 px = ivec2(gl_FragCoord.xy);
-      float cur = float(texelFetch(depthCurr, px, 0).r);
-      vec4 s = texelFetch(statePrev, px, 0);
-      float last = s.a;
-
-      bool wasValid = last > 0.0;
-      bool isValid = cur > 0.0;
-      float jump = (wasValid && isValid) ? abs(cur - last) : 0.0;
-      bool swapped = (wasValid != isValid) || jump > snapDelta;
-
-      if (!swapped) {
-        // Clamped so age cannot grow without bound across a long session, and so
-        // it never reaches the magnitude where a float stops absorbing a 33ms step.
-        outState = vec4(s.r, min(s.g + dt, ${MAX_AGE.toFixed(1)}), s.b, cur);
-        return;
-      }
-
-      // A pixel blinking in the middle of a flat wall is the depth solve's
-      // confidence gate chattering, not motion. Keying strength off the local
-      // depth spread separates the two: noise sits on a smooth surface and gets
-      // only the brief cross-fade, while a silhouette crossing sheds a full wake.
-      float ref = isValid ? cur : last;
-      float edge = 0.0;
-      for (int i = 0; i < 4; i++) {
-        ivec2 o = i == 0 ? ivec2(1, 0) : i == 1 ? ivec2(-1, 0) : i == 2 ? ivec2(0, 1) : ivec2(0, -1);
-        float n = float(texelFetch(depthCurr, clamp(px + o, ivec2(0), ivec2(resolution) - 1), 0).r);
-        if (n > 0.0) edge = max(edge, abs(n - ref));
-      }
-
-      float strength = (wasValid && isValid)
-        ? clamp(jump / (snapDelta * 3.0), 0.0, 1.0)
-        : clamp(edge / snapDelta, 0.0, 1.0);
-
-      outState = vec4(wasValid ? last : 0.0, 0.0, strength, cur);
-    }
-  `,
-}));
+// Moved to `surface-memory.js`. The ping-pong pair the ghost accumulates in, the pass
+// that ages it and the ceiling its age is clamped at are there. Built here, after the
+// textures above, because the pass samples the depth frame they own.
+buildSurfaceMemory();
 
 // ---------------------------------------------------------------- point cloud
 
@@ -306,10 +196,14 @@ const CLIP_NEAR_DEFAULT = 0.05;
 const CLIP_FAR_DEFAULT = 6;
 
 const uniforms = {
-  depthPrev: { value: depthPrev },
-  depthCurr: { value: depthCurr },
-  colorPrev: { value: colorPrev },
-  colorCurr: { value: colorCurr },
+  // The four source textures, referenced rather than restated: these are the same cells
+  // `gpu-textures.js` writes when its door swaps a frame in, so what the shader samples
+  // and what the door last bound cannot come apart. A fresh `{ value: depthPrev }` here
+  // would read correctly at boot and then hold the first frame forever.
+  depthPrev: sourceCells.depthPrev,
+  depthCurr: sourceCells.depthCurr,
+  colorPrev: sourceCells.colorPrev,
+  colorCurr: sourceCells.colorCurr,
   mixT: { value: 1 },
   // How far apart the two bound frames are, in seconds, which is what turns a depth
   // difference into a speed. `mixT` says where inside the pair the playhead sits and
@@ -451,7 +345,10 @@ const uniforms = {
   blackwallSweep: { value: 0.28 },
   denoise: { value: 1 },
   edgeTol: { value: 120 },
-  hasColor: { value: 0 },
+  // Whether there is a colour camera at all, and the same cell the colour door raises
+  // when a JPEG binds - so the stream switching colour off below and a frame arriving
+  // are writing one answer rather than two.
+  hasColor: sourceCells.hasColor,
   softEdge: { value: 1 },
   scanAmount: { value: 0 },
   rimAmount: { value: 0.55 },
@@ -525,6 +422,8 @@ const uniforms = {
 // other, which is the whole of why they moved. What did not move is the obligation
 // between them: every uniform declared there needs a key here, nothing checks it in
 // either direction, and a uniform with no key is a silent zero rather than an error.
+// Five of those keys hold cells `gpu-textures.js` owns rather than cells this table
+// made, which leaves the obligation exactly where it was and moves who may write them.
 const material = new THREE.ShaderMaterial({
   glslVersion: THREE.GLSL3,
   uniforms,
@@ -583,95 +482,13 @@ function setAdditive(on) {
 }
 
 // --------------------------------------------------------- binding a source frame
-
-// Every grid a depth block can arrive on, keyed by its own sample count. The
-// divisor is negotiated out of band on the socket, but a frame already in flight
-// when the setting changes arrives under the previous one - so the length is what a
-// frame actually is, where the last grant is only what the next frame will be. Every
-// divisor the socket and the frame API accept lands on a distinct count, so nothing
-// here has to be told which one it is looking at.
-const DEPTH_GRIDS = new Map();
-for (let k = 1; k <= 16; k++) {
-  const w = Math.ceil(DEPTH_W / k);
-  const h = Math.ceil(DEPTH_H / k);
-  DEPTH_GRIDS.set(w * h, { k, w, h });
-}
-
-/**
- * A decimated grid back onto the sensor's own, nearest-neighbour, which is exactly
- * the sampling `decimatePayload` did on the node run backwards.
- *
- * A texel only means anything at the pixel it was measured at: the shader unprojects
- * `-(col + 0.5 - cx) / fx * z` against intrinsics the sensor reported for a 512x424
- * grid, so where a sample sits in the texture *is* the ray it is claimed to lie on.
- * Writing a smaller grid straight into the larger one is therefore not a coarser
- * picture, it is a different scene. At ÷4 the 13,568 samples land in the first 27 of
- * 424 rows and the live cloud collapses into a band about a metre above the optical
- * axis, while the 203,520 texels the frame cannot reach - 93.8% of the grid - keep
- * the last full-rate frame and stand there frozen where the room used to be. That
- * reads as the depth returns having lost their scale, which is what it was reported
- * as, and it is a monitor silently changing its own geometry: the one thing the
- * design says an instrument must never do.
- *
- * Paying it back in compute rather than on the wire is the right side to pay on. The
- * divisor exists because a radio link cannot carry 14.6 MB/s and never because a
- * machine could not keep up, so expanding here costs the client the GPU it already
- * had spare and leaves the saving where it was asked for.
- */
-function expandDepth(src, dst) {
-  const grid = DEPTH_GRIDS.get(src.length);
-  if (!grid) {
-    throw new Error(
-      `a depth block of ${src.length} samples is not the ${DEPTH_W}x${DEPTH_H} grid at any divisor this `
-      + 'build serves: refusing rather than filling the head of the texture with it and '
-      + 'unprojecting whatever was already in the rest as though it were the scene',
-    );
-  }
-  if (grid.k === 1) {
-    dst.set(src);
-    return;
-  }
-  for (let row = 0; row < DEPTH_H; row++) {
-    const from = ((row / grid.k) | 0) * grid.w;
-    const to = row * DEPTH_W;
-    for (let col = 0; col < DEPTH_W; col++) dst[to + col] = src[from + ((col / grid.k) | 0)];
-  }
-}
-
-// The two doors every acquisition path goes through to put a capture frame in
-// front of the shader. There is one of each rather than one per source, because
-// the swap is the part that has to be identical: a socket arrival, a pinned run
-// and an indexed pull all have to leave the textures in the same relationship or
-// the renderer would produce a different image depending on where the bytes came
-// from - which is the drift this whole design is arranged to prevent.
 //
-// The expansion is inside the door for the same reason. A monitor was the only
-// caller handing over a decimated grid, so fixing it where the socket unpacks its
-// bytes would have left the next caller that decimates - the editor over a slow
-// link, which the design already asks for - to find the same hole again.
-function bindDepth(data) {
-  const swap = depthPrev;
-  depthPrev = depthCurr;
-  depthCurr = swap;
-  expandDepth(data, depthCurr.image.data);
-  depthCurr.needsUpdate = true;
-  uniforms.depthPrev.value = depthPrev;
-  uniforms.depthCurr.value = depthCurr;
-}
-
-// Ownership of the bitmap stays with the caller. Live closes its own two swaps
-// later, once it is certainly unbound; the indexed cache holds its own until the
-// frame is evicted. Closing one here would free a bitmap the other still needs.
-function bindColor(bitmap) {
-  const swap = colorPrev;
-  colorPrev = colorCurr;
-  colorCurr = swap;
-  colorCurr.image = bitmap;
-  colorCurr.needsUpdate = true;
-  uniforms.colorPrev.value = colorPrev;
-  uniforms.colorCurr.value = colorCurr;
-  uniforms.hasColor.value = 1;
-}
+// Moved to `gpu-textures.js`, beside the textures it swaps. The two doors, the grid a
+// decimated block is expanded back onto and the refusal for a block on no grid at all
+// are there, because the door and the pair it maintains are one thing: a caller able to
+// reach a texture without going through the door is the second acquisition path this
+// arrangement exists to prevent, and a boundary is a stronger statement of that than a
+// comment was.
 
 // ---------------------------------------------------------------- bloom
 //
@@ -2334,19 +2151,11 @@ for (const name of READINGS) {
 
 // The surface memory's age ceiling has to cover the longest persistence the two
 // sliders can ask for, or a ray that stops swapping pins its age below its own
-// life and sheds forever. The check lives here rather than beside `MAX_AGE`
-// because the shader string is built long before `PARAMS` exists, and it is an
-// assertion rather than a clamp because the honest failure is "this look cannot
-// be rendered correctly", which a silently shortened wake would hide.
-{
-  const longestLife = (PARAMS.fade.max + PARAMS.wake.max) / 1000;
-  if (MAX_AGE < longestLife) {
-    throw new Error(
-      `the surface memory clamps age at ${MAX_AGE}s but fade and wake can ask for `
-      + `${longestLife}s: a ghost past the clamp would never expire`,
-    );
-  }
-}
+// life and sheds forever. The ceiling and the refusal about it are the memory's, so
+// what happens here is the registry handing over the one number only it can compute -
+// and it happens here rather than at the memory's own banner because `PARAMS` is
+// declared above this line and not above that one.
+refuseAgeCeiling((PARAMS.fade.max + PARAMS.wake.max) / 1000);
 
 // Range inputs snap to their step grid and clamp to their bounds, and the registry
 // has to do the same arithmetic rather than lean on the DOM for it - otherwise a
@@ -5173,23 +4982,22 @@ let pairSource = livePairs;
 // forward at will, which is impossible while "a frame arrived" is what drives it.
 function advanceSurfaceState(dtSec) {
   counters.stateAdvances++;
-  stateUniforms.depthCurr.value = depthCurr;
-  stateUniforms.statePrev.value = statePrev.texture;
   // The upper bound is the discontinuity gate and nothing tighter. A lower one
   // would undo the gate a layer down: the sample capture's real 1448ms stall
   // would arrive here and be truncated, so wakes born before the stall would
   // survive it with life left over - which is the failure the gate exists to
   // prevent. Anything past the gate never reaches this call.
-  stateUniforms.dt.value = Math.min(DISCONTINUITY_MS / 1000, Math.max(0.001, dtSec));
-  stateUniforms.snapDelta.value = uniforms.snapDelta.value;
-
-  renderer.setRenderTarget(stateNext);
-  stateQuad.render(renderer);
-  renderer.setRenderTarget(null);
-
-  const swap = statePrev;
-  statePrev = stateNext;
-  stateNext = swap;
+  //
+  // Clamped on this side of the boundary because the gate is the transport's number
+  // and the snap threshold is the look's; what the memory is handed is a gap it can
+  // trust, and both of the decisions behind it stay where their reasons are.
+  stepSurfaceMemory(
+    Math.min(DISCONTINUITY_MS / 1000, Math.max(0.001, dtSec)),
+    uniforms.snapDelta.value,
+  );
+  // Read after the step, which has swapped: `statePrev` names the target just rendered
+  // into, and it is a live import rather than a copy, so this is the state this call
+  // produced rather than the one before it.
   uniforms.stateTex.value = statePrev.texture;
 }
 
@@ -13912,25 +13720,14 @@ globalThis.__kinect = {
      * failure this repo keeps finding, and the answer is to move the probe rather than
      * to write down an exception for it.
      *
-     * Bytes rather than a picture generated here, and both samplers pointed at the same
-     * texture, so nothing about what the arm renders depends on decode timing or on
-     * which side of the pair `mixT` happens to favour.
+     * The colour pair is `gpu-textures.js`'s, so this is that module's own third writer
+     * exposed rather than a second one written here: an assignment to an imported
+     * binding is a TypeError, and it would be thrown while this object literal is being
+     * built - publishing no `__kinect` at all and leaving every tool in the suite with
+     * no assertion behind its exit code. `injectDepth` below has always had the right
+     * shape for the same reason.
      */
-    plantColor(rgba, width, height) {
-      const tex = new THREE.DataTexture(
-        new Uint8Array(rgba), width, height, THREE.RGBAFormat, THREE.UnsignedByteType,
-      );
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.minFilter = THREE.LinearFilter;
-      tex.magFilter = THREE.LinearFilter;
-      tex.generateMipmaps = false;
-      tex.needsUpdate = true;
-      colorPrev = tex;
-      colorCurr = tex;
-      uniforms.colorPrev.value = tex;
-      uniforms.colorCurr.value = tex;
-      uniforms.hasColor.value = 1;
-    },
+    plantColor,
     times() { return pinnedPairs.times.slice(); },
     /**
      * One frame's depth straight into the current texture, bypassing every pair

@@ -185,7 +185,7 @@ const MUTATIONS = {
   // writes the block it was handed into the head of the full grid and leaves the rest
   // holding the last frame that filled it, which is what the viewer did until this
   // merge. Both of section 5's exact rows go red and so does the live pair.
-  'bind-ignores-grid': { file: 'web/main.js', edits: [[
+  'bind-ignores-grid': { file: 'web/gpu-textures.js', edits: [[
     '  expandDepth(data, depthCurr.image.data);',
     '  depthCurr.image.data.set(data);',
   ]] },
@@ -194,7 +194,7 @@ const MUTATIONS = {
   // on. Kept separate from the mutation above precisely because that one fails
   // everything: a control that reddens every row cannot say which row is carrying the
   // claim, and the claim here is that a sample lands where it was measured.
-  'expand-shifts-by-a-block': { file: 'web/main.js', edits: [[
+  'expand-shifts-by-a-block': { file: 'web/gpu-textures.js', edits: [[
     'for (let col = 0; col < DEPTH_W; col++) dst[to + col] = src[from + ((col / grid.k) | 0)];',
     'for (let col = 0; col < DEPTH_W; col++) dst[to + col] = src[from + Math.min(grid.w - 1, (((col / grid.k) | 0) + 1))];',
   ]] },
