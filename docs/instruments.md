@@ -1161,6 +1161,91 @@ to `{ file, edits }` and declaring its own target, not the resolver learning a s
 name: a resolver that knows which tool is asking is the hardcoded list this row exists to
 replace.
 
+### A filter on the file identity is the same hole as a route that was never installed
+
+The rule above guards the *anchor*: the text a mutation edits still exists, exactly once. This
+is the next question along, asked of the same spec — the file that text lives in is one the
+tool can still deliver. `editor-check` chose the bytes it would serve by comparing the
+mutation's file against the two names it had always carried:
+
+```
+const mutatedJs   = mutation?.file === 'web/main.js'    ? mutation.body : null;
+const mutatedHtml = mutation?.file === 'web/index.html' ? mutation.body : null;
+```
+
+All ninety-nine of its specs satisfied that, eighty-nine naming `web/main.js` and ten naming
+`web/index.html`, so it was true by coincidence rather than by construction — and the
+coincidence had a date on it, because `web/main.js` is being split into modules and the first
+spec to land on one of them leaves both bodies null. Neither route is then installed, and the
+two delivery guards were written against those same two names — `if (mutatedJs &&
+!servedModule) throw` — so neither of them can fire either. The run prints `MUTATED BUILD` at
+the top, drives the tree's own source through twenty-two sections, and ends `NOT CAUGHT`, which
+is the verdict this suite reserves for a check that is blind to a real bug rather than for a
+harness that never tried.
+
+**Measured rather than reasoned about.** A temporary spec pointed at `web/scene.js` — a module
+`main.js` imports, so every surface loads it — came back at 461 assertions with 0 failed and
+`NOT CAUGHT`, against an unmutated baseline of 461 assertions with 0 failed on the same server
+and the same fixture. Identical to the assertion, which is what the tree's own source running
+looks like from outside. Delivered by file identity, the same spec fires one row: `and the
+release still owed it movement when the key went in`, at `0.000 m still to travel`, which is
+the drift the damping it removes is what produces.
+
+**It is the hole the tool's own comment already recorded, entered from the other end.** That
+comment — "a route that was declared and never installed ran the tree's own source and came
+back NOT CAUGHT with every row green" — closed the case where the route is missing. This is the
+case where the route is written and correct and unreachable, because the selection in front of
+it does not recognise the file. The general shape is worth more than either instance: **a
+delivery and the check that it was delivered must not be conditioned on the same term.** A
+guard reading `mutatedJs` cannot see the failure of a selection that computed `mutatedJs`, and
+a count of the requests the page actually made is independent of both.
+
+The fix is one `servedAt(file, documentPath)` resolving any file under `web/` to the path a
+browser asks for it at, one `serveMutation` installing that route on every page the tool opens,
+and a guard of `MUTATE && served() === 0` — a third branch would have left the fourth file
+outside the list. Two refusals fall out of it, and both are exit 2 rather than a red row,
+because a red row on a mutation run reads as a catch. A file no page here is served from is
+refused before a browser launches: `web/menu.html` exits 2 with "neither a module or stylesheet
+under `web/` nor the document `/edit` is served from", zero assertions run. A file that is
+served but never requested is refused after the page has loaded: `web/library.js`, staged at
+`/library.js` and never asked for, exits 2 naming both. Before the fix that second spec was the
+silent one — 461 assertions, 0 failed, `NOT CAUGHT`.
+
+**Stylesheets are in the mapping because the page asks for one, and the arm was measured
+rather than assumed.** `web/index.html` links `/nav.css`, so a spec naming it is delivered:
+a temporary one moving `.appstatus`'s `margin-left: auto` to `0` came back 461 assertions, 0
+failed, `NOT CAUGHT` — and the `served() === 0` guard stayed silent, which is the reading that
+separates the two ways of arriving at that verdict. The bytes were handed over and no row in
+this tool measures anything the change moves, which is "a mutation that does nothing reads as a
+check that found nothing" three sections up rather than the delivery hole this case is about.
+The content type is the one the server itself sends for that extension, checked against
+`curl -I` rather than chosen: a stylesheet answered with the wrong MIME is refused by the
+browser outright, so the page would lose `nav.css` entirely and the run would be measuring an
+unstyled build.
+
+**Keying the document on its suffix is where the class would have stayed open.** A rule reading
+"ends in `.html`, so serve it as this page" takes `web/menu.html` — a real file this server
+really serves, at `/` — and hands its bytes over as the editor's document, whereupon the route
+fires, the counter counts it, the guard is satisfied, and every row below asserts against a page
+nobody wrote. That is `registry-check`'s recorded failure one level out. So the mapping is an
+identity test against the two entries of `server/index.js`'s `PAGES` map that name the surfaces
+this tool opens, and anything else falls through to being refused.
+
+**What this does not close.** The four specs above were temporary and were removed, so nothing
+in the tree exercises the routing for a third file today: every remaining spec names
+`web/main.js` or `web/index.html`, which is the coincidence this case is about. The first spec
+that lands on an extracted module is what will exercise it, and until one does the control is
+the half minute it takes to point a spec at `web/scene.js` and read the fired row. `web/`
+holds a fifth kind of file this mapping has no branch for — nothing here serves an image or a
+font — and that is deliberate rather than forgotten: the refusal is loud, and a branch no page
+exercises is a path nothing has measured.
+
+**And the same filter is still standing in `sensor-view-check`**, at its lines 779-780, in the
+same two comparisons. It is the safe half of this shape rather than the silent one — that tool
+refuses a third file at exit 2 before opening a page, and its own comment says why — so what it
+loses to a split is a control rather than a verdict. It is written down here because the two
+were one defect with two outcomes, and the loud one is the one nobody goes back for.
+
 ### A mutation can erase its own evidence
 
 `plant-open-take` originally appended its foreign bytes through a second file descriptor.

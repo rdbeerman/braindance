@@ -649,6 +649,19 @@ the last mutation, report the hashes with the numbers, and check
 `pgrep -f "tools/.*-check.mjs"` before starting — on this machine another agent's run is the
 normal state.
 
+**Its mutations are delivered by the file they name, and two of its exit-2 refusals are about
+that delivery rather than about the build.** Whatever file a spec declares is served to the
+page at the path a browser asks for it at — `web/index.html` is the document `/edit` and
+`/record` are, and a module or stylesheet under `web/` is its own path — and the run refuses if
+the page never asked. `DID NOT RUN - <name> was staged for <file> at <path> and the page never requested
+it` means the module is one this surface does not import, and the same sentence naming the
+recorder page means it reached the editor and not the recorder, which takes the run to
+`UNTESTED` even when the editor arm caught the mutation. `DID NOT RUN - <file> is neither a
+module or stylesheet under web/ nor the document /edit is served from` is refused before a
+browser launches at all. Neither is a finding, and neither used to exist: a spec naming a third file was served
+nothing and reported `NOT CAUGHT` against the tree's own source. `docs/instruments.md` carries
+the case.
+
 **Section 15 grades a feature whose whole design is that it stores almost nothing**, and its
 five controls exist because most of the ways it can be wrong are invisible from the panel.
 Whether a parameter group is open is derived — a group is open when any parameter in it carries

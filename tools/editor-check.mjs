@@ -84,7 +84,8 @@
 // runs are seconds instead of a minute.
 //
 // Exit 1 means a claim failed. Exit **2** means the harness did not run - no server,
-// a mutation whose anchor no longer matches, a crash. That split is not decoration:
+// a mutation whose anchor no longer matches, a mutation the page never asked for, a
+// crash. That split is not decoration:
 // a stale anchor exiting 1 reads identically to a mutation caught, and this repo has
 // already recorded a tool exiting non-zero with zero failed assertions being written
 // down as a bug found. **Count the failed assertions and read which ones fired.**
@@ -2316,16 +2317,95 @@ const DRIVER_IDS = {
 
 const { chromium } = await loadPlaywright();
 
+/**
+ * Which file each surface this tool opens is served from.
+ *
+ * The two entries `server/index.js`'s `PAGES` map holds for the two surfaces below, and
+ * an identity test rather than a rule about a suffix. The question a mutation's file has
+ * to answer is "are you the document this page is", not "do you look like markup": a
+ * suffix rule would take a spec naming `web/menu.html` - a real file this server really
+ * serves, at `/` - and hand its bytes over as the editor's document, at which point the
+ * interception fires, the delivery counter counts it and the guard below is satisfied by
+ * a page nobody wrote. `registry-check` records that shape at its own boundary. Here a
+ * file no page requests stays unserved and is refused, which is the honest failure.
+ */
+const SURFACE_DOCUMENTS = {
+  '/edit': 'web/index.html',
+  '/record': 'web/index.html',
+};
+
+/**
+ * Where the file a mutation names is asked for by a page opened at `documentPath`, and
+ * what it is handed back as.
+ *
+ * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob on
+ * the basename is a claim about a filename where the server's rule is about a path - two
+ * modules could end in the same name and the wrong one would be served without anything
+ * failing. `export-check`, `keyframe-check`, `timeline-check` and `sensor-view-check`
+ * carry the same function for the same reason. This copy also has a document to place,
+ * because `web/index.html` is not served at `/index.html` - it is what `/edit` and
+ * `/record` are.
+ */
+function servedAt(file, documentPath) {
+  if (file === SURFACE_DOCUMENTS[documentPath]) {
+    return { path: documentPath, contentType: 'text/html; charset=utf-8' };
+  }
+  const TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+  const ext = file.slice(file.lastIndexOf('.'));
+  if (file.startsWith('web/') && TYPES[ext]) {
+    return { path: `/${file.slice('web/'.length)}`, contentType: TYPES[ext] };
+  }
+  throw new Error(`${file} is neither a module or stylesheet under web/ nor the document `
+    + `${documentPath} is served from, so no page this tool opens would ever request it`);
+}
+
 let mutation = null;
 try {
   mutation = MUTATE ? mutatedSource(MUTATE) : null;
+  // Resolved before a browser is launched rather than at the first route, so a file no
+  // page could request is refused the way an anchor that stopped matching is refused two
+  // lines above - and by the same branch, which is why it is inside this `try`.
+  if (mutation) servedAt(mutation.file, EDITOR_PATH);
 } catch (err) {
   console.log(`[editor] DID NOT RUN - ${err.message}`);
   process.exit(2);
 }
-if (MUTATE) console.log(`[editor] MUTATED BUILD: ${MUTATE} in ${mutation.file} - this run is expected to FAIL`);
-const mutatedJs = mutation?.file === 'web/main.js' ? mutation.body : null;
-const mutatedHtml = mutation?.file === 'web/index.html' ? mutation.body : null;
+if (MUTATE) {
+  console.log(`[editor] MUTATED BUILD: ${MUTATE} in ${mutation.file} at `
+    + `${servedAt(mutation.file, EDITOR_PATH).path} - this run is expected to FAIL`);
+}
+
+/**
+ * Install the active mutation on one page, and hand back the count of times that page
+ * actually asked for it.
+ *
+ * **Keyed on the file the spec names, rather than filtered against the list of files this
+ * tool used to know.** What this replaces was a pair of bodies selected by
+ * `mutation.file === 'web/main.js'` and `=== 'web/index.html'` - true of every spec here
+ * by coincidence, and true right up until the module began splitting. A spec naming a
+ * third file matched neither, so neither route was installed, and the two delivery guards
+ * were written against those same two names, so they could not fire either. The run then
+ * completed against the tree's own source with every row green and printed NOT CAUGHT,
+ * which is the verdict this suite reserves for a check that is blind to a real bug rather
+ * than for a harness that never tried. Measured on a spec pointed at `web/scene.js`, a
+ * module `main.js` imports: 461 assertions, 0 failed, which is the unmutated baseline to
+ * the assertion.
+ *
+ * One helper for both surfaces rather than the routes written out at each of them,
+ * because `page.route` is installed per page: a page that missed one runs the tree's own
+ * build beside a page running the mutated one, and the two arms of one comparison are
+ * then measuring two programs.
+ */
+async function serveMutation(page, documentPath) {
+  if (!mutation) return { path: null, served: () => 0 };
+  const { path, contentType } = servedAt(mutation.file, documentPath);
+  let served = 0;
+  await page.route((url) => url.pathname === path, (route) => {
+    served++;
+    route.fulfill({ contentType, body: mutation.body });
+  });
+  return { path, served: () => served };
+}
 
 // The picker stub, installed before the module evaluates rather than after.
 //
@@ -2380,24 +2460,10 @@ async function openEditor() {
   page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
   await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
-  // Both interceptions are proved below rather than assumed. A route that was
-  // declared and never installed ran the tree's own source and came back NOT CAUGHT
-  // with every row green - a mutation that did nothing, reported as a check that
-  // found nothing.
-  let servedModule = false;
-  if (mutatedJs) {
-    await page.route('**/main.js', (route) => {
-      servedModule = true;
-      route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: mutatedJs });
-    });
-  }
-  let servedHtml = false;
-  if (mutatedHtml) {
-    await page.route((url) => url.pathname === EDITOR_PATH, (route) => {
-      servedHtml = true;
-      route.fulfill({ contentType: 'text/html; charset=utf-8', body: mutatedHtml });
-    });
-  }
+  // The interception is proved below rather than assumed. A route that was declared
+  // and never installed ran the tree's own source and came back NOT CAUGHT with every
+  // row green - a mutation that did nothing, reported as a check that found nothing.
+  const mutant = await serveMutation(page, EDITOR_PATH);
 
   await page.goto(`${URL_BASE}${EDITOR_PATH}?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
   const waitFor = async (expr, what, timeout = 30000) => {
@@ -2417,8 +2483,13 @@ async function openEditor() {
   // not been fitted yet and reporting the planes at their bounds, a finding about the
   // check rather than about the build.
   await waitFor('globalThis.__kinect.takeOpened()', 'the take opened but never finished opening');
-  if (mutatedJs && !servedModule) throw new Error("the mutated module was never served - this page ran the tree's own build");
-  if (mutatedHtml && !servedHtml) throw new Error("the mutated markup was never served - this page ran the tree's own panel");
+  // Gated on a mutation having been asked for rather than on a body this file recognised,
+  // which is the other half of the same hole: a guard whose condition is the same file
+  // name the route was selected by cannot fire for the file that selected no route.
+  if (MUTATE && mutant.served() === 0) {
+    throw new Error(`${MUTATE} was staged for ${mutation.file} at ${mutant.path} and the page never `
+      + "requested it, so every row below would have measured the tree's own build");
+  }
   return { page, errors, close: () => browser.close() };
 }
 
@@ -9766,15 +9837,19 @@ try {
     // writes to storage lands under the editor's origin halfway through a file that
     // spends section 15 reading exactly that.
     //
-    // **The page carries route interceptions of its own, and that is the part to get
+    // **The page carries the mutation's route of its own, and that is the part to get
     // right rather than the part that is bookkeeping.** `page.route` is installed per
-    // page, so a recorder opened without them runs the tree's own build while the editor
+    // page, so a recorder opened without it runs the tree's own build while the editor
     // beside it runs the mutated one - two arms of one comparison measuring two
     // programs, and a mutation of the markup silently reaching only half of the section
-    // it was written for. `web/index.html` serves both surfaces, so the predicate names
-    // this path rather than the editor's. Delivery is verified rather than assumed, for
-    // the reason `openEditor` verifies it: a route that was declared and never installed
-    // ran the tree's own source and came back NOT CAUGHT with every row green.
+    // it was written for. `web/index.html` serves both surfaces, which is why the path
+    // the document is placed at is what `serveMutation` takes its second argument for.
+    // Delivery is verified rather than assumed, for the reason `openEditor` verifies it:
+    // a route that was declared and never installed ran the tree's own source and came
+    // back NOT CAUGHT with every row green. So a file this surface never asks for takes
+    // the whole run to UNTESTED and exit 2 even when the editor arm caught the mutation -
+    // honest while the two surfaces are one page in two modes, and the line to revisit on
+    // the day a module reaches only one of them.
     //
     // `?panel=collapsed` rather than the menu, because it is a shipped path - the Pi's
     // kiosk unit opens the recorder exactly this way - and because the gesture that
@@ -9792,25 +9867,14 @@ try {
       recPage.on('pageerror', (err) => recErrors.push(String(err)));
       recPage.on('console', (msg) => { if (msg.type() === 'error') recErrors.push(msg.text()); });
       await recPage.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
-      let recServedJs = false;
-      if (mutatedJs) {
-        await recPage.route('**/main.js', (route) => {
-          recServedJs = true;
-          route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: mutatedJs });
-        });
-      }
-      let recServedHtml = false;
-      if (mutatedHtml) {
-        await recPage.route((url) => url.pathname === RECORDER_PATH, (route) => {
-          recServedHtml = true;
-          route.fulfill({ contentType: 'text/html; charset=utf-8', body: mutatedHtml });
-        });
-      }
+      const recMutant = await serveMutation(recPage, RECORDER_PATH);
       await recPage.goto(`${URL_BASE}${RECORDER_PATH}?panel=collapsed`, { waitUntil: 'load' });
       await recPage.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
       await recPage.evaluate('__kinect.timeline.settled()');
-      if (mutatedJs && !recServedJs) throw new Error("the mutated module never reached the recorder page - it ran the tree's own build");
-      if (mutatedHtml && !recServedHtml) throw new Error("the mutated markup never reached the recorder page - it ran the tree's own panel");
+      if (MUTATE && recMutant.served() === 0) {
+        throw new Error(`${MUTATE} was staged for ${mutation.file} at ${recMutant.path} and the `
+          + "recorder page never requested it, so this arm ran the tree's own build");
+      }
       recorder = { page: recPage, close: () => recContext.close() };
     } catch (err) {
       recWhy = err.message.split('\n')[0];
