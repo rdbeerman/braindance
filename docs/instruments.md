@@ -578,6 +578,107 @@ than membership, and each planted file sits on one dimension's list and off the 
 which makes both a missed form and an over-read form fail, with no row of its own for
 either.
 
+### A tenth round, in a second instrument: a mask consulted after the match is consulted too late
+
+`module-check` carries a lexer of its own for the same reason `numbersIn` does, and it took the
+same shape of correction on its first run — with one difference worth reading, because it is not
+about a token being asked of a character. Everything about the mask was right. It was *used* at
+the wrong moment.
+
+The scan matched `import ... from '<specifier>'` over the raw source and then asked the mask
+whether the match had begun in code. A regular expression matches **leftmost-first**, and
+`web/main.js` carries a paragraph containing the word `import` a few lines above a real import
+declaration — so the engine started at the word in the prose, stretched the clause across the
+comment to the `from` on the declaration below, and returned one match whose index is inside a
+comment. The mask answered honestly, the match was discarded, and the declaration underneath it
+was never matched at all: its edge left the graph in silence. Measured before it was fixed:
+`web/scene.js` and `web/curve.js` lost their edges and the run reported them as modules nothing
+loads, which reads as a finding about the tree rather than about the instrument.
+
+**A filter on where a match *landed* cannot undo a match that started somewhere else.** The
+repair is to remove the comment from the text before matching rather than to test the match
+afterwards, which needs a third state: a comment is blanked to spaces, and a string **body** is
+kept, because the specifier lives in one. Newlines survive the blanking so every line number
+still means what it says.
+
+### A control aimed at something the exemption table already covers is answered by the table
+
+The falsification control for "no module writes into a binding it imported" was first written as
+`EASE_OUT_LINEAR[0] = 1 / 3;` planted in `web/main.js` — a real cross-boundary write, into a real
+imported array, and the run came back **30 assertions, 0 failed, NOT CAUGHT** with the tool
+working perfectly. `web/curve.js::EASE_OUT_LINEAR` is in the exemption table, so the write was
+found, matched, and excused.
+
+The tell is that every object this tree exports is exempted, by construction: the table was
+written from what the tree holds, so *any* plant aimed at an object is aimed at an entry. The
+control has to be aimed somewhere the table is not, which here is a memo hung on an imported
+**function** — and that turns out to be the stronger claim as well, since it says the sweep
+ranges over every name an import brings in rather than over the ones the table already knows
+about. **When an instrument has an exemption list, ask whether your control lands inside it**;
+a mutation of the subject cannot reach a case the subject's own exemptions cover.
+
+### The population a floor counts has to be the population that was walked
+
+`module-check`'s write sweep printed its own floor as `inTree.filter(e => e.names.length).length`
+— every in-tree edge carrying a named import — while the sweep itself began
+`const src = sources.get(edge.from); if (src === undefined) continue;`. An edge out of a page's
+inline module is keyed `page.html#module0`, which is never in the map of *files*, so every
+inline module was skipped and the floor counted it as swept. Measured: a write planted in
+`web/menu.html`'s inline module came back green with the row reading `7 import declarations
+swept` where the clean tree reads 6 — the number went **up** as the sweep went blind, which in
+a log reads as the sweep having widened.
+
+A filter that resembles the walked set is not the walked set. The repair is to increment a
+counter at the point of the work, and to make an edge with no body a **failed assertion of its
+own** rather than a `continue` — folding it into the sweep's message would make one row mean
+two faults, which is exactly the blast radius a control set is arranged to avoid. Every other
+floor in that tool was recomputed the same way at the same time, because fixing the sweep's
+would have left the other five outside the list.
+
+### A rule whose exemption list is written from the subject cannot be falsified by the subject
+
+Rule 3 of `module-check` has two classifiers — `shapeOfInit`, which decides whether an export
+is an object somebody can write into, and `writesInto`, which finds the writes. Neither had a
+control. Every object `web/` exports is in the exemption table by construction, since the table
+was written from what the tree holds, so a mutation aimed at any of them is answered by the
+table and comes back NOT CAUGHT with the tool working perfectly. What was left standing over
+both classifiers was a single conjunct in the exemption audit: an entry that covers nothing
+fails, so a classifier that flagged nothing would eventually redden *those* rows.
+
+Measured, and this is the shape to recognise: forcing `const covers = true;` left the clean run
+green **and left all eight declared mutations still catching**, because each of them falsifies
+something else as well. Compose the forcing with either classifier stubbed and the tool goes
+blind while staying green — `covers=true` plus `writesInto` returning `[]`, or plus
+`shapeOfInit` answering `'primitive'`, both PASS. The declared control that looks like it
+covers this, `exemption-outlives-its-export`, cannot: un-exporting the binding falsifies
+`known` and `covers` at once and the row reports the `known` branch.
+
+Two repairs, and both were needed. A mutation that falsifies `covers` **alone** —
+`exemption-covers-nothing` promotes an exempted control-point pair to the number it is made of,
+so the entry still names a real export and covers nothing, one row. And a probe tree carrying
+one of every export and import spelling, asserted as exact sets, so both classifiers are
+falsified on every run rather than backstopped by a filter. With both in place, forcing
+`covers` true now reddens the clean run by itself.
+
+### A sweep ranges over the names an import binds, not the names it asks for
+
+The same tool's sweep took `p.split(/\s+as\s+/)[0]` off every import clause — the **exported**
+spelling, which is correct for asking whether the target exports the name and wrong for
+searching the importing file, which contains the *local* one. Three spellings of one defect
+therefore sat outside the swept population: a renamed import (`{ scalarAt as scalarAtLocal }`,
+where the sweep searched for `scalarAt`), a namespace import (`import * as curve`, where the
+clause parse returned no names at all), and a default import (likewise). Measured, each against
+the unaliased spelling of the identical write which the sweep does redden: all three came back
+`30 assertions, 0 failed, NOT CAUGHT`.
+
+This is one population gap rather than three bugs, and the tell is in the row's own text — it
+claimed to range over "every name an import brings in", which is a claim about bindings while
+the code held far-side names. **When a row's sentence and its variable disagree about which
+side of a boundary a name is on, the sentence is usually the design and the variable is the
+defect.** Renaming on import is the ordinary way a fifteen-thousand-line split resolves a name
+collision, so this was the spelling most likely to appear in exactly the work the tool was
+written for.
+
 ### A comment that was true when written, and false one commit later
 
 The scan's own paragraph said legacy octal could be ignored: `01000` is 512, it is a

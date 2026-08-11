@@ -319,6 +319,23 @@ node tools/guard-check.mjs --mutate upgrade-skips-origin  # ... and must FAIL mu
 node tools/guard-check.mjs --mutate host-accepts-a-name   # ... and must FAIL mutated
 node tools/jobs-check.mjs                                 # step 8: the queue, the pin, and a real render
 node tools/jobs-check.mjs --mutate claim-ignores-renderer # ... and must FAIL mutated
+node tools/module-check.mjs                               # the boundaries in web/: the import graph, what an import names, what crosses it
+node tools/module-check.mjs --mutate cycle-planted        # ... the import web/scene.js's own header says does not exist
+node tools/module-check.mjs --mutate cycle-through-a-second-spelling # ... and the same ring written the way the other page writes its imports
+node tools/module-check.mjs --mutate import-of-a-missing-file # ... a specifier this server answers 404 for, which is a module that never evaluates
+node tools/module-check.mjs --mutate import-names-a-missing-export # ... and a name the other side does not export, which fails before anything evaluates
+node tools/module-check.mjs --mutate one-spelling-for-every-module # ... the fold onto one node, which only two spellings of one file exercise
+node tools/module-check.mjs --mutate exported-mutable-object # ... a state object handed across a boundary with nothing saying why
+node tools/module-check.mjs --mutate state-crosses-as-a-live-let # ... the same object under the one keyword that used to excuse it
+node tools/module-check.mjs --mutate state-crosses-as-a-default # ... and in the export form that used to contribute nothing at all
+node tools/module-check.mjs --mutate export-form-nothing-claims # ... an export spelling nobody thought of, named rather than dropped
+node tools/module-check.mjs --mutate a-barrel-re-export        # ... and the barrel the one-implementation rule already refuses
+node tools/module-check.mjs --mutate imported-object-written-across-the-boundary # ... and the write itself, into a binding this module does not own
+node tools/module-check.mjs --mutate write-through-a-namespace # ... the same write where the far-side name is a property rather than a binding
+node tools/module-check.mjs --mutate write-through-a-rename    # ... and under the rename a name collision is ordinarily resolved with
+node tools/module-check.mjs --mutate write-from-a-page         # ... and from a page's inline module, which is a module like any other
+node tools/module-check.mjs --mutate exemption-outlives-its-export # ... and the exemption table's own rot, which is what a list has instead of a bug
+node tools/module-check.mjs --mutate exemption-covers-nothing  # ... its other half, which is the only thing standing over both rule 3 classifiers
 ```
 
 `jobs-check` needs a GPU browser and ffprobe and renders one real job through
@@ -335,6 +352,15 @@ first and refuses, so everywhere else the `pgrep` below is the check. `export-ch
 ffmpeg and ffprobe.
 `level-check` needs neither a sensor nor a capture — it plants analytic planes straight into
 the depth texture, which is what lets it grade the plane fit against a normal it chose.
+**`module-check` needs nothing at all** — no port, no browser, no install — because every
+failure it is about is a failure to *boot*, and an instrument that needs the page running
+cannot see one. It reads `web/` off disk and refuses a tree with an import cycle in it, an
+import naming a file or an exported name that is not there, or state crossing a boundary as
+an object anybody can write into. **What it does not test is the intra-module dead zone**,
+which is the fault `web/main.js` has actually shipped twice: that reach runs through property
+dispatch and is not statically decidable, so it belongs to a post-boot state diff rather than
+to a source scan, and the tool says so in its own output rather than leaving it to be
+assumed.
 
 **`library-check` binds a span of fixed ports** — `--node-port`, and `--mac-port` through
 `--mac-port + 16`, which default to 8210 and 8211..8227. It checks the whole span before it
@@ -374,7 +400,7 @@ And the ones that are not proof tools, listed because a tool nobody documented i
 nobody runs. **`syntax-check` enforces that list**: anything in `tools/` this file does not
 mention fails it, so a tool added next year is asked by existing. The arithmetic, written
 down because a count nobody adds up is how this list rotted the first time: `tools/` holds
-**28** files, of which **18** are `*-check` proof tools and **10** are the block below.
+**29** files, of which **19** are `*-check` proof tools and **10** are the block below.
 
 ```
 node tools/convert-presets.mjs presets projects jobs # version 3 documents -> version 4, in place

@@ -848,6 +848,159 @@ Mutation-tested three ways beyond its own control: a numeric export added to `pr
 left out of the table reddens it, the specification block deleted reddens it, and a number edited
 in the table while the code stays put reddens it.
 
+**`module-check`** needs nothing at all — no port, no server, no browser, no sensor and no
+install — and that is the point rather than a convenience. Every failure it is about is a
+failure to *boot*: an import cycle, a specifier naming a file that is not there, or a named
+import of a binding the other side does not export all stop the module graph before a line of
+anybody's body runs, and a module that throws while it evaluates publishes no
+`globalThis.__kinect`, so every tool in the suite reports DID NOT RUN with no assertion behind
+its exit code. An instrument that needs the page running cannot see any of them.
+
+It walks `web/` for `.js` modules and reads every `.html` page for its `<script type="module">`
+elements, so a module added later and a page that starts loading one are both asked by existing.
+`type="module"` is one exact spelling in the HTML specification, which is why there is no list to
+keep up with here — unlike the sixteen MIME essences that mean "classic script", which
+`library-check`'s grid scan had to copy out.
+
+**Exit codes.** 0 is a pass and 1 is a failed assertion, as everywhere. **2 is DID NOT RUN**, in
+three places: a `--root` that is not a checkout, a `--mutate` name it does not know, and a
+mutation whose anchor text no longer matches its file — the last being the important one, because
+a mutation that changed nothing comes back green and gets written down as the control passing.
+There is a fourth, and it is the one this tool needed that `syntax-check` does not: a mutation
+naming a file that nothing in the run read is also exit 2, since the substitution would otherwise
+be delivered nowhere and the clean run would be recorded as a catch.
+
+**Three rules, and the second one is narrower than it sounds.**
+
+*Rule 1, the graph is acyclic.* `web/scene.js` opens with the claim that "Nothing here imports
+back into this file, which is what keeps that order a fact rather than a convention", and until
+this tool that was a convention with a paragraph in front of it. `--mutate cycle-planted` puts
+exactly the forbidden import into the file the comment is at the top of.
+`--mutate cycle-through-a-second-spelling` writes the same ring the way `web/library.js` writes
+its imports, `/main.js` rather than `./main.js`, because `server/index.js` maps a root-relative
+URL onto `web/` with `join(WEB_DIR, urlPath)` and a resolver that folds the two spellings onto
+different nodes reports a ring as a tree. The pair discriminates and was measured doing it: with
+the root-relative branch taken out of the resolver, `cycle-planted` still reddens the cycle row
+and `cycle-through-a-second-spelling` leaves it green.
+
+*Rule 2, an import names something that will be there.* The rule as originally posed — no
+top-level statement reaches an imported binding before it is initialized — is **entailed by rule
+1** rather than a second question, because ES modules evaluate their dependencies to completion
+before the importer's body runs, so an acyclic graph cannot put an imported binding in its dead
+zone. Top-level `await` does not change that in an acyclic graph and a dynamic `import()`
+resolves against a module that has already finished. What is left, and what is asserted, is the
+part rule 1 does not imply: the specifier resolves, it does not escape `web/` (which this server
+answers 403 for), the named import is a name the target exports, and two spellings of one file
+are one node. `--mutate import-of-a-missing-file` and `--mutate import-names-a-missing-export`
+are its two controls and they fail differently.
+
+**What rule 2 does not cover, said in the tool's own output rather than left to be found.** The
+reach `web/main.js` has actually been bitten by twice — the comments above `groupRevealChanged`
+and `transportWriting` — is a top-level statement reaching a `const` declared further down *the
+same module*, through `params.reset()` to `params.set` to `spec.apply`. That is property
+dispatch, which is not statically decidable, so a check that followed only calls made through a
+name would redden on planted toys and stay green on the shape that has shipped. It is left to the
+post-boot state diff, which also sees the silent version of the same fault: `params.reset()`
+landing before the panel generator has filled its Maps writes every value into the registry,
+reaches no control, throws nothing, and leaves a page whose sliders show their markup defaults.
+
+*Rule 3, what crosses a boundary.* Two halves that fail independently. The shape of the export —
+a binding holding an object is state anybody importing it can write into, and needs an entry in
+the exemption table saying why that is the channel. And the use at the far end — no module writes
+a property or an element of a binding it imported. Measured on the tree as it stands, off a clean
+run: 35 exports, 6 primitive, 16 behaviour, 1 live `let`, 12 exempted, over 36 bindings across 6
+declarations swept. The write count is not a number the tool prints, so it was taken by running
+the widened sweep with the exemption table emptied — 17 sites across four bindings, `renderer` 5,
+`controls` 9, `freeCamera` 2 and `programCamera` 1, every one of them a three.js object being
+configured from `web/main.js`. `--mutate exported-mutable-object`
+and `--mutate imported-object-written-across-the-boundary` are its first two controls, and there
+are six more below, one per way the rule was found to be escapable.
+
+**The shape decides before the keyword does, and the order is the claim.** The first version
+asked what a binding was *declared* as before it asked what it *held*, so `export let x = {}`
+went into the live-let bucket without the shape ever being consulted — the sanctioned channel was
+one keyword wide. A live `let` is sanctioned because an importer cannot **assign** to what it
+imports; that says nothing about the object the binding currently holds, and writing a property
+on that object is the same fault under a different keyword. Measured: `export let SENSOR_STATE =
+{ frames: 0 }` in `web/format.js` plus `import * as m from './format.js'; m.SENSOR_STATE.frames =
+1` in another module passed both rows. `--mutate state-crosses-as-a-live-let` is the control, and
+reordering the ladder newly flagged exactly one binding in the tree — `web/scene.js::viewCamera`,
+a live `let` holding one of the two cameras beside it, which is why it now carries an entry
+saying so rather than a bucket that never looked.
+
+**The sweep ranges over the bindings an import makes, not the names it asks for.** `{ a as b }`
+names `a` over there and binds `b` here, `* as ns` binds one object whose properties are the
+other module's exports, and `import d from` binds the far side's default. Taking the exported
+spelling hands the sweep a name the importing file does not contain: measured, a renamed import,
+a namespace import and a default import each hid a write that the unaliased spelling of the same
+write reddens, and a page's inline module was skipped entirely because its body is not a file.
+`--mutate write-through-a-rename`, `--mutate write-through-a-namespace` and `--mutate
+write-from-a-page` are the three controls, and the row that used to print a floor over the edges
+it had silently dropped now prints one incremented where the sweeping happens.
+
+**Every `export` and every `import` keyword is claimed by a form, or it is a failed assertion.**
+Reading the two keywords with a list of regular expressions means a spelling the list does not
+carry contributes nothing and says nothing about it — `export default { … }` and an export list
+written without its semicolon both did exactly that, and nothing has to import a binding *by
+name* for it to be a channel, so no downstream row noticed. The keywords are enumerated first and
+classified second. A property may legally be called `export` (`web/main.js` has two), and brace
+depth is the exact discriminator, since a declaration is legal only at the top level of a module.
+`--mutate state-crosses-as-a-default` and `--mutate export-form-nothing-claims` are its controls,
+the second planting a destructuring export the scan refuses to take apart. A barrel — `export …
+from` in any spelling — is refused rather than followed, by `--mutate a-barrel-re-export`.
+
+**And the depth filter has a cross-check of its own, because it is a silent failure path.** If
+the brace counter ever drifts, every later top-level keyword in that file reads as nested and is
+skipped with no row — a quieter version of the fault the audit closes. Column zero is the
+discriminator on top of it: every top-level declaration in this tree is written there and no
+property key is, so a keyword at column zero that depth calls nested reddens a row naming the
+file. The arm is planted rather than argued about, and it uses the one case the lexer leaves
+ambiguous on purpose — a `/` after `}`, read as division, which scans the pattern's body as code
+and counts the `{` inside it. Probed by deleting the `depth--` from the closing brace: the row
+names `web/curve.js:194` and `web/scene.js:152`, which are the two `export { … }` lists that
+would otherwise have vanished.
+
+**The exemption table cannot rot, and both halves of that needed an arm.** Every entry has to
+still name something this tree exports *and* still cover something a rule flagged — an entry
+naming nothing is a list going stale, and an entry covering nothing is the standing filter
+`docs/instruments.md` warns about. `--mutate exemption-outlives-its-export` takes the `export`
+keyword off `POLLED_NODE_FIELDS`. It was first written as a *rename* and reddened two rows,
+because the renamed binding is then an exported object with no exemption of its own — a second red
+row about a second fact, which is the blast radius that stops a control saying which question it
+asked. The module-gone branch of the same row cannot be planted by a text edit and was probed by
+hand: pointing an entry at `web/tween.js` reports "web/tween.js is gone, so this entry is about a
+module that no longer exists". The `covers` half went without an arm for longer, and it was
+carrying more than its own weight — see `docs/instruments.md`, which measures what that cost.
+`--mutate exemption-covers-nothing` promotes an exempted control-point pair to the number it is
+made of, which leaves the entry naming a real export and covering nothing, in one row.
+
+**Three mechanisms cannot be falsified by the subject, and each gets a tree of its own.** The
+cycle detector is the first, since `web/` is acyclic and is meant to stay that way: a
+three-module ring, a self-loop, a ring spelled through the server root, a diamond that is *not* a
+ring, and a file whose only `import` lines are inside a comment and a template. The diamond earns
+its place — a depth-first search using a single `visited` set instead of separating "on the
+stack" from "finished" calls it a cycle. Probed by planting exactly that, which reddens the
+diamond row reporting `d3.js -> d4.js` as a ring and reddens the real tree's cycle row as well.
+The second is rule 2's two prohibitions: this tree holds no dynamic `import()` and no specifier
+that climbs out of `web/`, so both rows range over an empty population, and the probe carries one
+of each so the branch that decides them fires every run. The third is rule 3, where the subject
+is worst of all — every object `web/` exports is in the exemption table, so a plant aimed at one
+is answered by the table, and the tree imports nothing under a rename, a namespace or a default.
+Both classifiers now run over a tree carrying one of every spelling with their findings asserted
+as **exact sets**, so stubbing either reddens the clean run: `writesInto` returning nothing and
+`shapeOfInit` answering `primitive` were each measured green before this, with the exemption
+audit's `covers` forced true.
+
+**Comments have to be removed before the match, not tested after it.** The scan carries a small
+lexer for the same reason `numbersIn` in `library-check` does, and it needs a third state that
+one does not: a comment is blanked to spaces, a string *body* is kept. `web/main.js` carries a
+paragraph containing the word `import` a few lines above a real import declaration, and a regular
+expression reaching from the word in the prose to the `from` below it matches leftmost-first — so
+the match begins inside the comment, a mask consulted afterwards says "not code", and the
+declaration is skipped with its edge silently gone from the graph. Measured before it was fixed:
+`web/scene.js` and `web/curve.js` lost their edges and the run reported them as modules nothing
+loads, which reads as a finding about the tree.
+
 **`prof-summary.mjs <profile> [warmup]`** reads `grabber --profile` output and flags any run
 under 29.5fps as contended, because the segment timings from a run that dropped frames are
 noise. That floor belongs to a profiling run that writes nothing — see the gate paragraph in
