@@ -191,9 +191,17 @@ const MUTATIONS = {
   // assertions, because `web/curve.js::EASE_OUT_LINEAR` is exempt. Aiming at a function
   // says the sweep ranges over every name an import brings in rather than over the ones the
   // table already knows about, which is the wider claim.
+  //
+  // The plant hangs off `WORKING_PROJECT` rather than off anything the write is about,
+  // and that is deliberate: what these three need is a top-level statement position in
+  // `web/main.js` after its imports, so the anchor should be the most inert line that
+  // offers one. It used to be `const POINTS = DEPTH_W * DEPTH_H;`, which moved to
+  // `web/format.js` when the point cloud came out of this file - a scaffolding line
+  // following the code it happened to sit next to, which is exactly why an anchor that
+  // is part of what a mutation asserts is a better anchor than a convenient one.
   'imported-object-written-across-the-boundary': {
     file: 'web/main.js',
-    edits: [['const POINTS = DEPTH_W * DEPTH_H;', 'const POINTS = DEPTH_W * DEPTH_H;\nscalarAt.cache = new Map();']],
+    edits: [["const WORKING_PROJECT = '__working__';", "const WORKING_PROJECT = '__working__';\nscalarAt.cache = new Map();"]],
   },
 
   // The same fault as the entry above under the one keyword that used to excuse it. The
@@ -245,7 +253,7 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [
       ["import { pollRecordState } from './record-poll.js';", "import { pollRecordState } from './record-poll.js';\nimport * as recordPoll from './record-poll.js';"],
-      ['const POINTS = DEPTH_W * DEPTH_H;', 'const POINTS = DEPTH_W * DEPTH_H;\nrecordPoll.pollRecordState.cache = new Map();'],
+      ["const WORKING_PROJECT = '__working__';", "const WORKING_PROJECT = '__working__';\nrecordPoll.pollRecordState.cache = new Map();"],
     ],
   },
 
@@ -257,7 +265,7 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [
       ["import { pollRecordState } from './record-poll.js';", "import { pollRecordState as poll } from './record-poll.js';"],
-      ['const POINTS = DEPTH_W * DEPTH_H;', 'const POINTS = DEPTH_W * DEPTH_H;\npoll.cache = new Map();'],
+      ["const WORKING_PROJECT = '__working__';", "const WORKING_PROJECT = '__working__';\npoll.cache = new Map();"],
     ],
   },
 
@@ -1031,6 +1039,19 @@ const EXEMPTIONS = [
   },
   {
     module: 'web/format.js',
+    binding: 'POINTS',
+    // Not an object at all, and it is the first export in `web/` whose initializer is
+    // neither a literal nor a constructor - so it is the first to land on `shapeOfInit`'s
+    // last line, which answers `object` for anything it cannot place. That default is the
+    // deliberate one this file's header describes: guessing toward reporting fails a clean
+    // tree, where guessing the other way drops the binding out of the sweep in silence.
+    // Closing the class properly means teaching the classifier that arithmetic over
+    // identifiers is a number, which is a new branch in an instrument and wants its own
+    // control and its own commit rather than a line inside a module extraction.
+    why: 'The product of `DEPTH_W` and `DEPTH_H`, which is a number. Nothing writes it and nothing could - it is here because an initializer that opens on an identifier falls to this scan\'s report-rather-than-drop default, the same reason `web/scene.js::DEFAULT_POSE` is listed.',
+  },
+  {
+    module: 'web/format.js',
     binding: 'VALID_ID',
     why: 'A regular expression with no `g` or `y` flag, so it carries no `lastIndex` between calls and there is no state in it to share.',
   },
@@ -1098,6 +1119,25 @@ const EXEMPTIONS = [
     module: 'web/post-chain.js',
     binding: 'grade',
     why: 'The one combined grade pass. Eight look parameters write their term into `uniforms` and four of them gate `enabled` on whether any term is up, which is the reason the pass is one rather than four.',
+  },
+  // The one entry in this table that is not a three.js object with a published interface,
+  // and the only one that needed arguing rather than citing. A uniform is a cell the GPU
+  // reads: `uniforms.pointSize.value = v` is not state leaking out of the module that owns
+  // it, it is the sole mechanism three.js offers for telling a shader anything, and a
+  // parameter written any other way reaches no pixel. Roughly seventy of the registry's
+  // `apply` closures are one such write, so a setter per term would be the registry spelled
+  // twice - and the second spelling is the thing that drifts, which is the fault this rule
+  // exists to prevent rather than a shape it should force.
+  //
+  // The other three exports of that module deliberately have no entry. `geometry`, `material`
+  // and `cloud` are reached only through their own methods - `setDrawRange`, `copy`,
+  // `toArray` - so the sweep flags none of them, and an entry naming one would name a real
+  // export while covering nothing, which is the standing filter `--mutate
+  // exemption-covers-nothing` is the arm for.
+  {
+    module: 'web/point-cloud.js',
+    binding: 'uniforms',
+    why: "The cloud's uniform table. A uniform is a cell the GPU reads and writing `.value` on one is the whole of the interface three.js publishes for driving a shader, so the registry's look parameters land here directly; the alternative is a setter per parameter, which is the registry declared a second time in the module it drives.",
   },
 ];
 

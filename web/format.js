@@ -243,3 +243,23 @@ export const VALID_ID = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
  */
 export const DEPTH_W = 512;
 export const DEPTH_H = 424;
+
+/**
+ * How many cells that grid has, which is here because its two readers have nothing else
+ * in common.
+ *
+ * `web/main.js` measures an arriving frame's depth block against it and refuses one that
+ * is not that many samples, and divides by it to turn a count of returns into a share of
+ * the sensor; `web/point-cloud.js` allocates two vertices per cell and addresses every
+ * point by it. The first is a statement about the wire and the second is a statement about
+ * the renderer, so filing it under either one would have the other importing a module it
+ * has no other business with - which is the same delivery argument the grid above it is
+ * filed here on, one derivation further along.
+ *
+ * It is a declaration rather than `DEPTH_W * DEPTH_H` written at each site for the reason
+ * that pair is one: a second spelling of a derived constant is the same drift as a second
+ * spelling of what it derives from, and it takes a multiplication rather than a glance to
+ * see. `server/capture.js` still writes the product out where it refuses a depth block,
+ * and that is a third spelling this could absorb rather than a claim that it has.
+ */
+export const POINTS = DEPTH_W * DEPTH_H;

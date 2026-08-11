@@ -77,10 +77,10 @@ const makeStateTarget = (type) => new THREE.WebGLRenderTarget(DEPTH_W, DEPTH_H, 
   generateMipmaps: false,
 });
 
-// Read by the point cloud, which samples the current one, and by the reset that clears
-// both. They are live bindings rather than a pair anybody may assign, because the only
-// legitimate way for them to change places is the step below having rendered into the
-// far one first.
+// Read by `web/point-cloud.js`, whose `stateTex` is seeded with the current one, and by
+// the reset that clears both. They are live bindings rather than a pair anybody may
+// assign, because the only legitimate way for them to change places is the step below
+// having rendered into the far one first.
 export let statePrev = null;
 export let stateNext = null;
 

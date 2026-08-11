@@ -22,10 +22,12 @@ import { DEPTH_H, DEPTH_W } from './format.js';
  * of it.
  *
  * `buildTextures` hands back the five uniform cells the cloud's shader reads its source
- * frames through, and the point cloud composes those same cells into its material by
+ * frames through, and `web/point-cloud.js` composes those same cells into its material by
  * reference rather than copying their values. That is what lets the door below reach the
  * shader without importing the material it feeds: a uniform is a cell the GPU reads, and
- * a second copy of one is a second answer to which texture is current.
+ * a second copy of one is a second answer to which texture is current. The cells go by way
+ * of `web/main.js`, which holds what this returns and hands it to `buildPointCloud` - so
+ * the wiring is one line of the boot rather than an import each way.
  */
 
 // Depth arrives as raw millimetres. An integer texture keeps it exact, and two

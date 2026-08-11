@@ -120,7 +120,7 @@ const MUTATIONS = {
   // class" failure written as one line: two readers, one of them told. There were three
   // readers while a floor could be selected in the picture, and that reader is gone, so
   // the plan is now the only thing standing between this mutation and a green run.
-  'crop-switch-reaches-only-the-shader': { file: 'web/main.js', edits: [[
+  'crop-switch-reaches-only-the-shader': { file: 'web/point-cloud.js', edits: [[
     '  if (uniforms.cropOn.value !== 1) return false;\n',
     '',
   ]] },

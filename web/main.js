@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DEPTH_H, DEPTH_W, PROJECT_VERSION, versionRefusal, captureFormatRefusal } from './format.js';
+import { DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, versionRefusal, captureFormatRefusal } from './format.js';
 import { pollRecordState } from './record-poll.js';
 // The renderer and everything built directly on it. Imported before any other module of
 // this page because its body appends the canvas and constructs the cameras, and the
@@ -69,8 +69,22 @@ import {
 import {
   composer, renderPass, afterimage, bloom, grade, buildPostChain,
 } from './post-chain.js';
-
-const POINTS = DEPTH_W * DEPTH_H;
+// What a point is made of and how it is addressed: the geometry, the uniform table both
+// shaders are driven through, the material and the cloud itself. Last of the render core
+// and imported last, because it is built on every block above it - the scene it joins, the
+// shaders it compiles, the source cells it composes and the ghost target it samples. It
+// allocates nothing while it evaluates either; `buildPointCloud` is called at its banner
+// below, which is what keeps the moment the cloud joins the scene a line in this file.
+//
+// The uniform table crosses this boundary as an object anybody may write into, which is the
+// one channel `tools/module-check.mjs` refuses in general and exempts here by name. A
+// uniform is a cell the GPU reads, so a look parameter's `apply` writing `uniforms.X.value`
+// is not state leaking across a boundary - it is the only way three.js can be told
+// anything, and a setter per term would be the registry below spelled a second time.
+import {
+  geometry, uniforms, material, cloud, buildPointCloud, setAdditive,
+  CLIP_NEAR_DEFAULT, CLIP_FAR_DEFAULT, CROP_LIMIT, cropReach, croppedOut,
+} from './point-cloud.js';
 
 // Which of the two surfaces this page is, decided by the path. One document still
 // serves both, because there is one renderer and one image pipeline and splitting
@@ -152,7 +166,7 @@ const timelineEl = document.getElementById('timeline');
 // one door a new sensor frame replaces them through are built there. What is here is
 // the moment they are built, which is a decision about this program's boot rather than
 // about the textures - and the five uniform cells handed back, which the point cloud's
-// material composes by reference a hundred lines below.
+// material composes by reference when it is built at the banner below.
 const sourceCells = buildTextures();
 
 // ------------------------------------------------------------- surface memory
@@ -163,282 +177,14 @@ const sourceCells = buildTextures();
 buildSurfaceMemory();
 
 // ---------------------------------------------------------------- point cloud
-
-// Two vertices per depth pixel: one for the live point, one for the ghost it
-// leaves behind. Shedding needs both on screen at once. The ghost half is left
-// out of the draw range entirely when nothing can be shed, so it costs nothing.
-const geometry = new THREE.BufferGeometry();
-const pixelCoords = new Float32Array(POINTS * 2 * 3);
-const slotAttr = new Float32Array(POINTS * 2);
-for (let slot = 0; slot < 2; slot++) {
-  for (let row = 0, i = 0; row < DEPTH_H; row++) {
-    for (let col = 0; col < DEPTH_W; col++, i++) {
-      const k = slot * POINTS + i;
-      pixelCoords[k * 3] = col;
-      pixelCoords[k * 3 + 1] = row;
-      pixelCoords[k * 3 + 2] = 0;
-      slotAttr[k] = slot;
-    }
-  }
-}
-geometry.setAttribute('position', new THREE.BufferAttribute(pixelCoords, 3));
-geometry.setAttribute('aSlot', new THREE.BufferAttribute(slotAttr, 1));
-geometry.setDrawRange(0, POINTS);
-geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -3), 12);
-
-// The depth pair's defaults, named once because three separate things now have to
-// agree about them: the uniform below, the registry entry that overwrites it at boot,
-// and `DUOTONE_SPAN_DEFAULT` beneath, which is the span the duotone's ramp covers when
-// nothing has asked for another one.
 //
-// **Naming them is a repair rather than tidiness.** The uniforms carried 0.5 and 4.5
-// while the registry carried 0.05 and 6, and the registry won at boot - so the two
-// numbers in this file that looked like the clip range were a range no build has opened
-// at since the registry existed, sitting where anybody reading the shader's neighbours
-// would take them for the answer.
-const CLIP_NEAR_DEFAULT = 0.05;
-const CLIP_FAR_DEFAULT = 6;
-
-const uniforms = {
-  // The four source textures, referenced rather than restated: these are the same cells
-  // `gpu-textures.js` writes when its door swaps a frame in, so what the shader samples
-  // and what the door last bound cannot come apart. A fresh `{ value: depthPrev }` here
-  // would read correctly at boot and then hold the first frame forever.
-  depthPrev: sourceCells.depthPrev,
-  depthCurr: sourceCells.depthCurr,
-  colorPrev: sourceCells.colorPrev,
-  colorCurr: sourceCells.colorCurr,
-  mixT: { value: 1 },
-  // How far apart the two bound frames are, in seconds, which is what turns a depth
-  // difference into a speed. `mixT` says where inside the pair the playhead sits and
-  // `sinceFrameSec` says how far past the older one it has come; neither is the gap,
-  // and reconstructing it as the second over the first is degenerate at the head of
-  // every pair. So the transport hands it over as its own number.
-  //
-  // One second at boot, and it is a placeholder rather than a gap anybody should read
-  // a frame rate into. Nothing divides by it before the transport writes it: both depth
-  // textures are zero-filled until the first bind, so every point leaves at the empty
-  // sample test above the division, and the transport writes this beside `mixT` before
-  // the render that would reach it. Copying the transport's own nominal gap here would
-  // be a second declaration of the frame rate five thousand lines from the first, for a
-  // value that cannot reach a pixel.
-  spanSec: { value: 1 },
-  snapDelta: { value: 250 },
-  interpolate: { value: 1 },
-  focal: { value: new THREE.Vector2(366, 366) },
-  center: { value: new THREE.Vector2(256, 212) },
-  resolution: { value: new THREE.Vector2(DEPTH_W, DEPTH_H) },
-  // The drawing buffer's height, which is what makes every screen-space term
-  // below a fraction of the frame rather than a count of pixels. Written by
-  // `resize` and by nothing else, so the one place the buffer can change is also
-  // the one place this can.
-  bufferHeight: { value: 1080 },
-  pointSize: { value: 9 },
-  opacity: { value: 1 },
-  exposure: { value: 1.15 },
-  nearClip: { value: CLIP_NEAR_DEFAULT },
-  farClip: { value: CLIP_FAR_DEFAULT },
-  // The four lateral faces of the box `nearClip`/`farClip` already close in depth.
-  // Metres in the sensor frame, and absolute plane positions rather than insets from
-  // an edge, because the sensor's frame widens with depth and an inset would have to
-  // name a depth to mean anything. A cuboid names none.
-  //
-  // Wide open by default: `farClip` reaches 9.5m and the sensor sees 256/fx and 212/fy
-  // of that laterally, so +/-6.65m across and +/-5.50m up at the far end of what any
-  // slider can ask for. Seven clears both, which is what keeps a project saved before
-  // these existed from loading with its subject clipped.
-  cropL: { value: -7 },
-  cropR: { value: 7 },
-  cropB: { value: -7 },
-  cropT: { value: 7 },
-  // Whether those six faces actually cut, and what a point on the wrong side of them
-  // looks like while somebody is editing them. The two are deliberately different
-  // kinds of thing and the split is the whole design.
-  //
-  // `cropOn` is the `crop` parameter's landing site: document state, keyed and
-  // exported like every other look value, and it **gates the discard rather than
-  // moving the planes**. That is what lets one switch cover all six faces including
-  // the depth pair, which the fragment stage also normalises its depth ramp against -
-  // a switch that opened `nearClip`/`farClip` instead would re-grade every point still
-  // inside the box, and the A/B would stop being an A/B.
-  //
-  // `cropOutside` is the alpha a cut point draws at instead of vanishing, and it is
-  // viewer-only: derived from the crop box being on screen, never assigned, and zero
-  // in every path that produces a deliverable because those paths already take the
-  // chrome off. Zero also means the discard comes back, which is not a shortcut - a
-  // surviving point at alpha zero still writes depth and would punch invisible holes
-  // in the cloud behind it.
-  cropOn: { value: 1 },
-  cropOutside: { value: 0 },
-  // The turbulence field. Amplitude is metres, scale is cycles per metre and speed is
-  // how fast the field drifts through the scene in program seconds - all three world
-  // units, so none of them owes the 1080p reference every screen-space term here does.
-  noise: { value: 0 },
-  noiseScale: { value: 3 },
-  noiseSpeed: { value: 0.7 },
-  lattice: { value: 0 },
-  latticeCell: { value: 0.05 },
-  // One region, three uses. Centre, half-extents, corner radius and falloff width are
-  // metres in the sensor frame; the three effects below are what read it.
-  regionCentre: { value: new THREE.Vector3(0, 0, -2) },
-  regionHalf: { value: new THREE.Vector3(0, 0, 0) },
-  regionRound: { value: 0.5 },
-  regionSoft: { value: 0.2 },
-  regionPush: { value: 0 },
-  regionNoise: { value: 0 },
-  regionMask: { value: 0 },
-  ripple: { value: 0 },
-  rippleFreq: { value: 4 },
-  rippleSpeed: { value: 1 },
-  // Datastream corruption, and the five numbers one slider used to hide. `glitch` is
-  // the master and the only one of the six that is meant to be keyframed in anger: a
-  // clip brings the corruption in and out on one track, where five absolute values
-  // would have to be animated in step and reach zero together to stop. The rest are
-  // ceilings - what a fully open master means - and every default below is exactly the
-  // literal it replaced, so a document that names none of them draws what it drew.
-  //
-  // The pair that earns its keep is `glitchDensity` against `glitchShove`. Fused into
-  // the master they could only ever travel the diagonal, which made sparse-and-violent
-  // and dense-and-subtle both unaskable - the complaint that started this. Because the
-  // master still multiplies both, perceived intensity ramps as roughly the square of
-  // the fader, which is an ease-in you would otherwise keyframe by hand.
-  glitch: { value: 0 },
-  glitchDensity: { value: 0.45 },
-  glitchShove: { value: 0.45 },
-  glitchTint: { value: 1.8 },
-  glitchBands: { value: 12 },
-  glitchAxis: { value: 0 },
-  // Hertz, and zero is a state rather than an off switch: `floor(time * 0.0)` is a
-  // constant, so the tear pattern freezes where it stands instead of stopping. A held
-  // corruption is a different picture from no corruption, and because the rate
-  // keyframes it can be stopped and started.
-  glitchRate: { value: 7 },
-  time: { value: 0 },
-  // The five readings of the take, as weights rather than as a mode. Each one is a
-  // complete answer to "what colour is this point", and the fragment stage mixes
-  // whichever are non-zero - so colour and range compose instead of excluding one
-  // another, and a reading can move under the playhead like every other look value.
-  // RGB alone is the boot state, which is what the old `mode: 0` meant.
-  readRgb: { value: 1 },
-  readDepth: { value: 0 },
-  readGhost: { value: 0 },
-  readContour: { value: 0 },
-  readBlackwall: { value: 0 },
-  // What each reading is made of, which used to be literals inside its branch. The
-  // values here are the literals they replaced, so a build that somehow reached a
-  // frame before `params.reset()` would draw what the old one drew - and every one of
-  // them is what makes the equality `registry-check` hashes against the pre-reading
-  // revision hold. A default that drifted off its literal is that comparison's red
-  // row rather than something anybody has to eyeball.
-  rgbSaturation: { value: 1 },
-  depthGamma: { value: 1 },
-  ghostRim: { value: 0.7 },
-  ghostFill: { value: 0.35 },
-  contourBands: { value: 12 },
-  // One parameter, two uniforms, and it is a rounding measurement rather than a
-  // preference. The band edges are the width either side of the middle of the band,
-  // and computing `0.5 - contourWidth` in the shader does that arithmetic in float32:
-  // `f32(0.5) - f32(0.08)` is 0.42000001668930054, where the literal `0.42` this
-  // replaces is 0.41999998688697815. Those are different floats, so the shader form
-  // would move every contour frame by a hair and redden the readContour row of the
-  // comparison against the old build for a reason that has nothing to do with the
-  // feature. Done here in double and rounded once on the way to the GPU, both edges
-  // land on exactly the floats the literals did.
-  contourLo: { value: 0.42 },
-  contourHi: { value: 0.58 },
-  blackwallSweep: { value: 0.28 },
-  denoise: { value: 1 },
-  edgeTol: { value: 120 },
-  // Whether there is a colour camera at all, and the same cell the colour door raises
-  // when a JPEG binds - so the stream switching colour off below and a frame arriving
-  // are writing one answer rather than two.
-  hasColor: sourceCells.hasColor,
-  softEdge: { value: 1 },
-  scanAmount: { value: 0 },
-  rimAmount: { value: 0.55 },
-  // Both apply on top of whichever mode is selected rather than inside one of its
-  // branches, so they compose with every reading of the take instead of being a
-  // sixth and seventh one. Unitless mixes.
-  thermal: { value: 0 },
-  edges: { value: 0 },
-  // The duotone, which sits beside those two for their reason and carries a second one
-  // of its own. It is a tonal transform rather than a palette: the two poles it lands
-  // between hold **luminance as well as hue**, the near one running toward black and the
-  // far one toward hot, so the near-black figure against a burning core comes out of the
-  // same term that decides what colour the room is.
-  //
-  // That pairing is the design rather than an economy, and it was reached by asking what
-  // the obvious shape could not draw. A global toe darkens near and far by the same
-  // amount, so a parameter named for the silhouette would have shipped unable to produce
-  // one - a control that appears to work, arriving at the level of the look instead of at
-  // the level of the wiring, which is the harder place to notice it. Keying the poles on
-  // depth is the whole of what makes a subject go black while the space behind it burns,
-  // and once the poles carry luminance there is nothing left for a second parameter to do.
-  //
-  // The pair itself is baked, following the precedent `heatRamp` and `depthRamp` set:
-  // both are hardcoded ramps and what is parameterised is how you use them. A `colour`
-  // registry kind would be the first new kind since `pose` and would drag a keyframe
-  // interpolation in with it - two saturated hues lerped through sRGB pass through grey
-  // on the way, so the honest version interpolates perceptually and the document format
-  // then carries that choice forever. `duotoneHue` turns both poles together instead,
-  // which is the one degree of freedom a look actually reaches for, and it keyframes.
-  //
-  // Radians here and degrees on the slider, the way the levelling angles are.
-  duotoneDepth: { value: 0 },
-  duotoneHue: { value: 0 },
-  duotoneSplit: { value: 0.5 },
-  // How many metres the ramp between the two poles takes, and it is in metres for the
-  // one reason worth having: without it the ramp's width *was* the clip range, so the
-  // grade was a function of how tightly the crop box happened to be shut.
-  //
-  // That coupling is easy to defend and was wrong in use. `t` is the point's position
-  // inside `nearClip`..`farClip`, and the ramp used to run the whole unit interval, so
-  // opening the box flattened the duotone and closing it steepened one. Measured on
-  // 2026-08-07-take1, whose cloud sits between 0.58m and 3.73m at p5 and p95: against
-  // the default range the visible cloud only reaches `t` 0.62, so the hot pole is
-  // unreachable and the grade sits in the cold third of its own travel. Getting the
-  // toning back meant shutting the far plane onto the subject and throwing the back of
-  // the room away - a framing decision the grade had no business forcing.
-  //
-  // **The split stays a fraction and only the width becomes a distance**, which is a
-  // split down the middle of one parameter rather than an inconsistency. Where the poles
-  // meet is a place in the room, and a place is what the crop box already describes, so
-  // it should move when the box does. How fast the picture crosses between them is a
-  // property of the look, and a look that had to be re-tuned every time a face moved is
-  // the thing being removed.
-  //
-  // The default is the clip range's own width, so a document that names nothing renders
-  // what it rendered before this existed. That identity is a property of these two
-  // literals rather than of the subtraction - `6.0f - 0.05f` and `5.95f` happen to round
-  // to the same float32 - so it is measured rather than argued: see the commit that
-  // introduced this, which carries the five readings' hashes either side of the change.
-  duotoneSpan: { value: CLIP_FAR_DEFAULT - CLIP_NEAR_DEFAULT },
-  duotoneMotion: { value: 0 },
-  stateTex: { value: statePrev.texture },
-  fadeTime: { value: 0.12 },
-  wakeTime: { value: 0 },
-  sinceFrameSec: { value: 0 },
-};
-
-// The two programs those uniforms feed are in `cloud-shader.js`, imported at the top of
-// this file. Nine hundred lines of GLSL sitting between the table above and the hundred
-// places below that write it put the two ends of one parameter out of sight of each
-// other, which is the whole of why they moved. What did not move is the obligation
-// between them: every uniform declared there needs a key here, nothing checks it in
-// either direction, and a uniform with no key is a silent zero rather than an error.
-// Five of those keys hold cells `gpu-textures.js` owns rather than cells this table
-// made, which leaves the obligation exactly where it was and moves who may write them.
-const material = new THREE.ShaderMaterial({
-  glslVersion: THREE.GLSL3,
-  uniforms,
-  vertexShader,
-  fragmentShader,
-  transparent: true,
-  depthWrite: true,
-});
-
-const cloud = new THREE.Points(geometry, material);
-scene.add(cloud);
+// Moved to `point-cloud.js`. Two vertices per depth pixel, the uniform table both shaders
+// are driven through, the material and the cloud are there. What is here is the moment
+// they are built and the moment the cloud joins the scene, which are decisions about this
+// program's boot rather than about the cloud - and the cells from the textures above,
+// handed over rather than reached for, so the one place the two are wired together is this
+// line.
+buildPointCloud(sourceCells);
 
 // ------------------------------------------------------------ levelling the world
 
@@ -476,13 +222,6 @@ function applyWorldTilt() {
   // includes every frame of a clip that keys these - because the compare short
   // circuits whenever the pole is already where it belongs.
   setNavigationUp(WORLD_UP);
-}
-
-function setAdditive(on) {
-  material.blending = on ? THREE.AdditiveBlending : THREE.NormalBlending;
-  material.depthWrite = !on;
-  uniforms.softEdge.value = on ? 1 : 0;
-  material.needsUpdate = true;
 }
 
 // --------------------------------------------------------- binding a source frame
@@ -927,61 +666,6 @@ function gradeNeeded() {
     || grade.uniforms.grain.value > 0
     || grade.uniforms.vignette.value > 0
     || grade.uniforms.streak.value > 0;
-}
-
-/**
- * How far out the four lateral crop planes reach, in metres.
- *
- * It has to clear everything the sensor can see at the furthest depth the near/far
- * sliders allow, or the defaults would crop a project that never asked to be cropped.
- * The widest sample is the frame corner furthest from the principal point, so the
- * half-extent at depth z is `max(c, N - c) / f * z` per axis rather than `c / f * z`
- * - an off-centre principal point makes one side reach further than the other, and
- * this rig's is off centre by 1.8px horizontally and 5.2px vertically.
- *
- * At 9.5m with this Kinect that is 6.69m across and 5.64m up. Seven clears both, and
- * `cropReach()` is exposed so a check can hold the number against the intrinsics of
- * the take actually open rather than against the ones in this comment.
- */
-const CROP_LIMIT = 7;
-const cropReach = (maxDepth = 9.5) => {
-  const { x: fx, y: fy } = uniforms.focal.value;
-  const { x: cx, y: cy } = uniforms.center.value;
-  return {
-    x: (Math.max(cx, DEPTH_W - cx) / fx) * maxDepth,
-    y: (Math.max(cy, DEPTH_H - cy) / fy) * maxDepth,
-    limit: CROP_LIMIT,
-  };
-};
-
-/**
- * Whether a sensor-space sample is on the wrong side of the crop box.
- *
- * **The crop is asked about in two places and this is one of them.** The vertex shader
- * has to keep its own copy because it is in another language, but the plan inset's
- * density map used to spell the six comparisons out for itself - so a switch wired to
- * the shader alone left the top-down drawing a cropped cloud underneath a picture
- * drawing everything, and the top-down is exactly where the depth faces get dragged.
- * A second spelling of one rule is a second place for the next face, or the next
- * switch, to be forgotten, which is why the plan asks here rather than deciding.
- *
- * It had a third caller while the room could be levelled by selecting a floor in the
- * picture, and that gesture is gone; the sharing is what survived it, because the one
- * reader left is the one the switch was originally wired past.
- *
- * Sensor metres and before the levelling rotation, matching the shader: the box is a
- * place in the room, so testing a rotated position would move all six faces every time
- * the room was levelled underneath them.
- *
- * `depth` is positive metres from the sensor, which is what every caller already has in
- * hand from the depth texture - the room's own z is its negation, and asking for the
- * value nobody has to flip is what keeps a sign error out of the callers.
- */
-function croppedOut(x, y, depth) {
-  if (uniforms.cropOn.value !== 1) return false;
-  if (depth < uniforms.nearClip.value || depth > uniforms.farClip.value) return true;
-  return x < uniforms.cropL.value || x > uniforms.cropR.value
-    || y < uniforms.cropB.value || y > uniforms.cropT.value;
 }
 
 // ------------------------------------------------- fitting the box to the footage

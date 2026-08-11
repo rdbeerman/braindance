@@ -130,13 +130,15 @@ if (mutateAt !== -1 && !MUTATIONS[mutation]) {
 // the split began and 4 after `scene.js`, `curve.js` and `record-poll.js`; it was 9 with
 // `world-tilt.js`, `export-sizes.js` and `plan-geometry.js` beside them, 11 with
 // `view-window.js` and `clip-range.js`, 13 with `cloud-shader.js` and `bloom-pass.js`,
-// and it is 15 with `gpu-textures.js` and `surface-memory.js`. `test` moves with it for
-// the same reason - most of those modules arrived with a test file, which is most of why
-// they are modules. It moves by one rather than by two here: `surface-memory.js` asks the
-// live context whether it can render to float, so it cannot be imported under bare node
-// at all, and a floor that counted a test nobody can write would be a floor that has to
-// be lowered later.
-const FLOORS = { server: 5, test: 10, tools: 12, web: 16 };
+// 15 with `gpu-textures.js` and `surface-memory.js`, 16 with `post-chain.js`, and it is
+// 17 with `point-cloud.js`. `test` moves with it for the same reason - most of those
+// modules arrived with a test file, which is most of why they are modules - but it has
+// stopped moving, and the last three phases are why. `surface-memory.js` asks the live
+// context whether it can render to float, `post-chain.js` hands a composer a renderer and
+// `point-cloud.js` imports both of them, so none of the three can be imported under bare
+// node at all, and a floor that counted a test nobody can write would be a floor that has
+// to be lowered later.
+const FLOORS = { server: 5, test: 10, tools: 12, web: 17 };
 
 // **Two different questions, so two different sets, and the difference is the point.**
 // `PARSES` is what `node --check` can be handed and have its answer mean anything - a
