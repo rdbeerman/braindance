@@ -11,12 +11,22 @@ import {
   renderer, scene, freeCamera, programCamera, viewCamera, controls, worldTilt, WORLD_UP,
   DEFAULT_POSE, onNav, setNavigationUp, useViewCamera,
 } from './scene.js';
-// The scalar curve maths the tracks are evaluated through. Pure arithmetic, which is
-// why it is the one part of the editor a test can import and call without a browser.
+// The four pure ones: the scalar curve maths the tracks are evaluated through, the
+// levelling pair's composition, the table of output sizes, and the geometry of the
+// top-down inset. Arithmetic and data, with no DOM, no GL and nothing constructed at
+// import time - which is what makes these the parts of the editor a test can import and
+// call under bare node, and it is why this block can sit anywhere in this list. A module
+// with no top-level side effect cannot be reordered into a different program, and the
+// blocks above and below it do not have that property.
 import {
   EASE_OUT_LINEAR, EASE_IN_LINEAR, easeParam, easeAt, easeSlopeAt, keyBefore,
   HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
 } from './curve.js';
+import { tiltQuaternion } from './world-tilt.js';
+import { EXPORT_SIZES, DEFAULT_EXPORT_SIZE } from './export-sizes.js';
+import {
+  INSET, TOP_CENTRE, PLAN_STRIDE, FRUSTUM_LEN, planScale, planPoint, planWorld, projectThrough,
+} from './plan-geometry.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
@@ -1408,9 +1418,10 @@ scene.add(cloud);
 // ------------------------------------------------------------ levelling the world
 
 // A sensor is a thing somebody bolted to something, and nothing measures the angle it
-// ended up at: libfreenect2's device API offers the two sets of camera intrinsics and
-// no accelerometer, so a cloud shot from a dashboard mount arrives canted and there is
-// no gravity vector anywhere to straighten it by. A human has to say which way is up.
+// ended up at, so a human has to say which way is up. What the two angles they give
+// *mean* is in `world-tilt.js` - the pair, the order it composes in because the pair
+// does not commute, and why there are two of them and not three. What is here is where
+// that rotation lands, which is the half that needs a scene.
 //
 // That angle is a fact about the take rather than about whoever is looking at it, so
 // it lives in the document beside the crop and not on the camera - which is also what
@@ -1419,32 +1430,21 @@ scene.add(cloud);
 // merely rolled itself would leave the other three canted and give keyed poses a roll
 // to interpolate against defaults that have none.
 //
-// Two angles and not three. `roll` turns the picture in its frame, which is what a
-// sensor rotated in its bracket does, and `tilt` pitches the room, which is what a
-// sensor aimed downward does. The third would be yaw about the room's vertical, and
-// that is not levelling at all - it is what dragging on the picture already does, so a
-// slider for it would be a second way to say one thing.
-//
-// **The order is stated because the pair does not commute.** `Rx(tilt) * Rz(roll)`,
-// which is three's own `XYZ` Euler with the middle angle left at zero. Read the other
-// way round, neither slider does one visible thing any more: each starts moving the
-// room along two axes at once and the panel stops being usable by eye.
-//
 // What deliberately does *not* move with it: the crop faces and the region are tested
 // on the undisplaced sensor-space position in the vertex shader, before the model
 // matrix, so a box shrunk onto a subject stays shrunk onto that subject when the room
 // is levelled underneath it. `level-check` holds that invariant by rotating the world
 // and the camera together and demanding the picture not change at all.
+//
+// The two angles stay on this side of that boundary, and the reason is the write below
+// them: the registry's `tilt` and `roll` apply closures assign into this object. An
+// object an importer writes into is the channel `module-check` rule 3 refuses, and it is
+// refused for the reason that applies exactly here - the module that declares it cannot
+// see the write, so nothing at that end knows what its own state is.
 const worldTiltAngles = { tilt: 0, roll: 0 };
-const tiltEuler = new THREE.Euler(0, 0, 0, 'XYZ');
 
 function applyWorldTilt() {
-  tiltEuler.set(
-    THREE.MathUtils.degToRad(worldTiltAngles.tilt),
-    0,
-    THREE.MathUtils.degToRad(worldTiltAngles.roll),
-  );
-  worldTilt.setFromEuler(tiltEuler);
+  tiltQuaternion(worldTiltAngles.tilt, worldTiltAngles.roll, worldTilt);
   cloud.quaternion.copy(worldTilt);
   // Levelling is the gesture that says "this frame is the room's", so it takes the
   // turntable's pole back off the sensor view. Cheap to call on every write - which
@@ -2105,37 +2105,7 @@ composer.addPass(new OutputPass());
 let renderScale = 1;
 
 // The drawing buffer an export has taken over, or null while the window owns it.
-/**
- * Every size the export menu offers, grouped by the ratio it is.
- *
- * **This is the list, and the menu is built from it.** Step 6 recorded the failure
- * that makes that worth insisting on: `export-check` swept four sizes that were all
- * 1.6 while the menu offered four that were all 16:9, so a build referencing the
- * width instead of the height was bit-identical on every arm the tool had and drew
- * 11.1% too large on every size the product shipped. Two lists, neither aware of the
- * other. There is now one, and the check reads it off the page.
- *
- * **Ratios are exact, and dimensions are even.** `yuv420p` subsamples chroma by two
- * each way, so an odd dimension is not encodable and `server/export.js` refuses it
- * rather than letting ffmpeg fail after the first frame is already written. 65:24
- * only lands on both at once when the height is a multiple of 48, which is why its
- * widths are 2730 and 3900 rather than anything rounder - a menu entry labelled
- * 65:24 that is really 2.7062 would be a number this repo would find later and have
- * to correct.
- *
- * Both 4K flavours are here because they are different shapes: UHD is 3840x2160 and
- * 16:9, DCI is 4096x2160 and 1.896:1, and picking one would silently decide an
- * aspect for anybody who asked for "4K".
- */
-const EXPORT_SIZES = [
-  { ratio: '16:9', sizes: [[960, 540], [1280, 720], [1920, 1080], [3840, 2160]] },
-  { ratio: '1.90:1 DCI', sizes: [[2048, 1080], [4096, 2160]] },
-  { ratio: '4:3', sizes: [[1440, 1080], [2880, 2160]] },
-  { ratio: '1:1', sizes: [[1080, 1080], [2160, 2160]] },
-  { ratio: '65:24', sizes: [[2730, 1008], [3900, 1440]] },
-];
-const DEFAULT_EXPORT_SIZE = '1920x1080';
-
+//
 // An export's output resolution is a setting rather than a property of whatever
 // window it was started from, and the look is resolution-relative precisely so
 // that can be true - but the buffer still has to actually become that size, and
@@ -11965,19 +11935,6 @@ chromeCanvas.hidden = true;
 document.body.appendChild(chromeCanvas);
 const chromeCtx = chromeCanvas.getContext('2d');
 
-const INSET = { w: 176, h: 118, margin: 8 };
-// Metres across the plan view's shorter axis.
-const TOP_SPAN = 7;
-// Centred a little deeper than the orbit target, so the sensor at the origin sits
-// inside the frame rather than on its edge - the plan is unreadable without it,
-// because everything in it is a distance from there.
-const TOP_CENTRE = { x: 0, z: -2.6 };
-// Every fourth pixel each way, so the plan is thirteen thousand points rather than
-// two hundred and seventeen thousand. At a hundred and eighteen pixels tall the
-// rest would land on top of each other anyway, and this runs on the main thread on
-// every paint.
-const PLAN_STRIDE = 4;
-const FRUSTUM_LEN = 0.55;
 // Reused across the plan's inner loop, which runs on the main thread on every paint.
 const planVec = new THREE.Vector3();
 
@@ -12123,6 +12080,11 @@ function syncCropOutside() {
   uniforms.cropOutside.value = chromeOn && showCropBox ? CROP_FAINT : 0;
 }
 
+// The drawing side's own scratch. `plan-geometry.js` keeps a second one for the
+// projection it took with it, which is two vectors rather than one shared object for the
+// reason that module states: a `Vector3` exported for both to write into is state
+// crossing a boundary, and there is no state in either - each is fully written before it
+// is read on every call.
 const scratchVec = new THREE.Vector3();
 
 function stageSize() {
@@ -12138,39 +12100,6 @@ function insetRect() {
 function cameraKeys() {
   const track = tracks.get('camera');
   return track ? track.keys : [];
-}
-
-/** World x/z to a point in the plan view, and back. Screen up is deeper into the room. */
-function planScale(rect) { return rect.h / TOP_SPAN; }
-
-function planPoint(rect, x, z) {
-  const s = planScale(rect);
-  return {
-    x: rect.x + rect.w / 2 + (x - TOP_CENTRE.x) * s,
-    y: rect.y + rect.h / 2 + (z - TOP_CENTRE.z) * s,
-  };
-}
-
-function planWorld(rect, px, py) {
-  const s = planScale(rect);
-  return {
-    x: TOP_CENTRE.x + (px - rect.x - rect.w / 2) / s,
-    z: TOP_CENTRE.z + (py - rect.y - rect.h / 2) / s,
-  };
-}
-
-/** A point projected through a perspective camera into stage pixels, or null behind it. */
-function projectThrough(position, camera, rect) {
-  scratchVec.fromArray(position).project(camera);
-  // `project` divides by w, and w is negative behind the camera - which flips the
-  // sign and puts a point that is behind you on screen in front of you. z outside
-  // the unit cube is the readable form of that test.
-  if (scratchVec.z < -1 || scratchVec.z > 1) return null;
-  return {
-    x: rect.x + ((scratchVec.x + 1) / 2) * rect.w,
-    y: rect.y + ((1 - scratchVec.y) / 2) * rect.h,
-    z: scratchVec.z,
-  };
 }
 
 /** The sampled camera path, in world space. Empty below two keys - a point is not a path. */

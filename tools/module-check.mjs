@@ -1049,6 +1049,21 @@ const EXEMPTIONS = [
     binding: 'POLLED_NODE_FIELDS',
     why: 'The list of node fields a poll compares, read by `server/library.js` to decide which ones a manifest must carry. A list, iterated and never written.',
   },
+  {
+    module: 'web/export-sizes.js',
+    binding: 'EXPORT_SIZES',
+    why: 'Every output resolution the product offers, grouped by ratio. The whole point of the file is that this is one list rather than two - the menu, the ratio buttons and the export all read it and none of them writes it, and a build that wanted a different size would be adding an entry here rather than assigning one at run time.',
+  },
+  {
+    module: 'web/plan-geometry.js',
+    binding: 'INSET',
+    why: 'Where the top-down inset sits and how big it is, in stage pixels. Read by the rect it is built into and by the stats overlay stacked under it; a literal that has never been written since the plan view was drawn.',
+  },
+  {
+    module: 'web/plan-geometry.js',
+    binding: 'TOP_CENTRE',
+    why: 'The world x/z the plan view is centred on. Read by the two directions of the same coordinate change and by nothing else, and a pair of numbers rather than a point because it is not a place in three dimensions.',
+  },
 ];
 
 // ---------- the walk

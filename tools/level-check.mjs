@@ -192,7 +192,7 @@ const MUTATIONS = {
   // It shares that row with `plan-ignores-tilt`, which reddens it at 116px flat and 116px
   // on edge. Distinguishable by value and not by name, so the row is load-bearing twice
   // over: weaken it and two controls go quiet together.
-  'level-order-swapped': { file: 'web/main.js', edits: [[
+  'level-order-swapped': { file: 'web/world-tilt.js', edits: [[
     "const tiltEuler = new THREE.Euler(0, 0, 0, 'XYZ');",
     "const tiltEuler = new THREE.Euler(0, 0, 0, 'ZYX');",
   ]] },
