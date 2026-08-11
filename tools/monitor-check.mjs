@@ -849,7 +849,7 @@ try {
             if (mm <= 0 || mm === 65535) continue;
             const z = mm * 0.001;
             const col = i % DW, row = (i / DW) | 0;
-            // x negated: the mirror correction unproject in web/main.js carries the
+            // x negated: the mirror correction unproject in web/cloud-shader.js carries the
           // reasoning for. Width and height are invariant under it and the centroid is
           // not, so an oracle left un-negated would agree with the page on the rows that
           // happen to measure extents and disagree on the one that measures a position.
@@ -962,7 +962,7 @@ try {
           const z = mm * 0.001;
           if (z < k.uniforms.nearClip.value || z > k.uniforms.farClip.value) continue;
           const col = i % DW, row = (i / DW) | 0;
-          // x negated: the mirror correction unproject in web/main.js carries the
+          // x negated: the mirror correction unproject in web/cloud-shader.js carries the
           // reasoning for. Width and height are invariant under it and the centroid is
           // not, so an oracle left un-negated would agree with the page on the rows that
           // happen to measure extents and disagree on the one that measures a position.

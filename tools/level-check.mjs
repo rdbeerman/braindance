@@ -35,7 +35,7 @@
 //     has to be posed in the sensor's frame rather than the levelled one: its picture
 //     at any cant is the same picture it gives at none. That is what forces the free
 //     camera's up onto the sensor's, which is why navigation's controls are rebuilt
-//     rather than written to - see `setNavigationUp` in `web/main.js`.
+//     rather than written to - see `setNavigationUp` in `web/scene.js`.
 //  5. **There is a neutral way back, and it goes through the control.** The pair is
 //     document state and easy to leave somewhere unusable, so `reset rotation` puts
 //     both axes and both sliders back in one press - and it has to be pressed rather
@@ -402,7 +402,7 @@ try {
       for (let col = 0; col < DW; col++) {
         // The ray this sample lies on, and it is the *page's* unprojection inverted
         // rather than upstream's - x carries the mirror correction `unproject` in
-        // `web/main.js` explains. Planting through an un-negated ray would put every
+        // `web/cloud-shader.js` explains. Planting through an un-negated ray would put every
         // surface in the texture at the mirror image of the normal asked for, and the
         // plane fit would then be graded against a normal nobody planted.
         const ux = -(col + 0.5 - cx) / fx;

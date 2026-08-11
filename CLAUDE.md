@@ -34,10 +34,15 @@ belongs beside its neighbours in the relevant document, with this file gaining a
 if an agent would get the *next* task wrong without it. The version of this file that
 absorbed everything reached 704 lines and stopped being read.
 
-That chain is enforced rather than trusted: `syntax-check` walks every `docs/*.md` path
-cited here or under `tools/` and fails on one that does not exist, because a pointer that
+That chain is enforced rather than trusted: `syntax-check` walks every `docs/*.md` path this
+repo's prose and source cite and fails on one that does not exist, because a pointer that
 outlives its target teaches a document nobody can read. Its control is moving one of the
-three away and running it.
+three away and running it. **The same walk resolves every `web/….js` a comment or a page
+cites**, and a `file:line` form fails when the file has fewer lines than the citation names —
+which is what the browser bundle's split into modules needed, because fourteen citations were
+left naming that bundle for code that had moved out of it. Cite a function by name rather
+than by a line: a path is checked for resolving and never for being *right*, so a line that
+has drifted into the middle of something else passes here.
 
 ## Measurement culture
 
@@ -405,6 +410,8 @@ node tools/syntax-check.mjs                          # every JS file this repo s
 node tools/syntax-check.mjs --mutate spec-drifts     # ... and the .knct decoder specification must FAIL when a constant moves under it
 node tools/syntax-check.mjs --mutate shell-id-renamed # ... and a surface whose shell drives an id the markup stopped declaring
 node tools/syntax-check.mjs --mutate shell-key-undeclared # ... and the other direction, which is the one a merge produces
+node tools/syntax-check.mjs --mutate web-citation-outlives-its-module # ... and a module this repo's own prose names, renamed to something the tree does not hold
+node tools/syntax-check.mjs --mutate line-citation-past-the-end # ... and the line half of that, which rots without the path rotting
 node tools/release-gate-check.mjs                    # the .npmrc supply-chain gate is actually armed
 node tools/release-gate-check.mjs --mutate wrong-unit # ... and must FAIL (also: no-gate, absent)
 ```

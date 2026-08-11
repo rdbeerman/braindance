@@ -346,7 +346,7 @@ function drawFrame(canvas, take, payload, divisor) {
       // The negation on x is the mirror correction, and the poster needs it for the same
       // reason the cloud does: the sensor's frames arrive horizontally flipped, so a
       // gallery tile drawn without it is a reflection of the take the editor then opens
-      // the right way round. `unproject` in `web/main.js` carries the reasoning.
+      // the right way round. `unproject` in `web/cloud-shader.js` carries the reasoning.
       const wx = (-(x - cx) * z) / fx;
       const wy = -((y - cy) * z) / fy;
       const sx = Math.round(ox + (wx * scale) / z);

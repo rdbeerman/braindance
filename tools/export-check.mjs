@@ -242,8 +242,9 @@ const CONTROL_MARGIN = 5;
 
 // ------------------------------------------------------------------- mutations
 //
-// Each breaks exactly one claim. Most live in `web/main.js` because that is what
-// the page can be served a different copy of, and two of those - the rate and the
+// Each breaks exactly one claim. Most live under `web/` - nine in `web/main.js` and
+// ten across the modules split out of it - because that is what the page can be
+// served a different copy of, and two of those - the rate and the
 // flip - are about what the *file* ends up being, written as the browser lying to
 // the encoder rather than as the encoder misbehaving, which exercises the same
 // assertion from the only side a served page can reach.
@@ -604,8 +605,8 @@ const index = await (await fetch(`${URL_BASE}/capture/${TAKE}/index`)).json();
 const stamps = index.frames.stampMs;
 const DURATION = (stamps[stamps.length - 1] - stamps[0]) / 1000;
 
-// What a page that fetched nothing would be rendering on - `web/main.js`'s uniform
-// block. The intrinsics claim needs these, because "the page has the right numbers"
+// What a page that fetched nothing would be rendering on - the uniform block in
+// `web/point-cloud.js`. The intrinsics claim needs these, because "the page has the right numbers"
 // is only evidence if the wrong numbers are different numbers.
 const BOOT_DEFAULTS = { fx: 366, fy: 366, cx: 256, cy: 212 };
 
@@ -679,7 +680,7 @@ const INSTALL = `(() => {
           if (mm === 0) continue;
           const z = mm * 0.001;
           if (z < near || z > far) continue;
-          // x negated: the mirror correction unproject in web/main.js carries the
+          // x negated: the mirror correction unproject in web/cloud-shader.js carries the
           // reasoning for. It reaches viewZ through m[2], so it only vanishes from this
           // row while the program camera happens to face straight down the axis.
           const X = (-(px + 0.5 - cx) / fx) * z;
@@ -1766,7 +1767,7 @@ async function resolutionSweep(page, pipelines) {
 
 // `CROP_OPEN` says what "no crop" is, and the registry is what decides it. Held
 // against each other rather than trusted, because the two only agree today: raise
-// `CROP_LIMIT` in `web/main.js` and this table would go on resetting the planes to
+// `CROP_LIMIT` in `web/point-cloud.js` and this table would go on resetting the planes to
 // seven while the sliders opened to more, which would leave every row here rendering
 // a quietly cropped cloud and calling it the baseline.
 {
@@ -1899,7 +1900,7 @@ let rebaseNon169Old = null;
   }
   // The pinned build is the old *point size*, not the old geometry. The unprojection's x
   // sign changed after this rev - the sensor's frames arrive horizontally mirrored and this
-  // build undoes them, `unproject` in `web/main.js` carries the reasoning - so left alone
+  // build undoes them, `unproject` in `web/cloud-shader.js` carries the reasoning - so left alone
   // the old arm draws the room reflected and the cross-build rows below disagree for two
   // reasons at once. They were already failing at this rev for the first reason, which is a
   // separate finding recorded in `docs/instruments.md`; the point of normalising here is

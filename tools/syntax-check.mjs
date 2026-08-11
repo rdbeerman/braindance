@@ -84,6 +84,29 @@ const MUTATIONS = {
       "shell.exportCloseDialog.addEventListener('click', () => ui.exportDialog.close());",
     ]],
   },
+
+  // The citation row's control, and it plants the failure that row exists for rather than
+  // an invented one: a module named in this repo's own prose, renamed to something the
+  // tree does not hold. Splitting the browser bundle into twelve modules produced that
+  // fourteen times over - the prose went on naming the file a thing used to be in while the
+  // thing moved to a module beside it - and the name planted here is deliberately one no
+  // page, tool or document mentions, so the anchor row above still finds it exactly once.
+  'web-citation-outlives-its-module': {
+    file: 'CLAUDE.md',
+    edits: [[
+      'which is the fault `web/main.js` has actually shipped twice',
+      'which is the fault `web/render-loop.js` has actually shipped twice',
+    ]],
+  },
+
+  // The other half of the same row, and it needs a mutation of its own because a citation
+  // naming a file that exists cannot be falsified by deleting a file. A `file:line` form
+  // rots without the path rotting - which is the more common way of the two, since the
+  // path survives every edit to the file it names and the line survives none of them.
+  'line-citation-past-the-end': {
+    file: 'docs/proof-tools.md',
+    edits: [['`web/main.js:9860` is and what made', '`web/main.js:98600` is and what made']],
+  },
 };
 
 // Reads a file, and applies the mutation to it when the mutation is one that names it.
@@ -263,6 +286,61 @@ if (!existsSync(DOC)) {
   }
 }
 
+// Blanks the body of every string and template literal, leaving comments, code and every
+// newline where they were so a line number still means what it says. It is the inverse of
+// the comment stripping the shell row below does, and it is here for the inverse reason:
+// that row wants the code and this one wants the prose, and in a JavaScript file the prose
+// is the comments.
+//
+// **A path in a string is data; a path in a comment is a citation**, which is the same
+// distinction `library-check`'s own scanner draws when it refuses to read a number out of
+// a debug message. What it drops here is the `file:` target of a mutation table and the
+// `module:` of `module-check`'s exemption table - both of which name modules, and both of
+// which are already answered somewhere better: a mutation anchoring into a file that is
+// not there fails the anchor row further down this file, and an exemption entry naming a
+// module that is gone fails `module-check`'s own audit of that table. What it would keep
+// is the fixture paths `library-check` builds its probe tree out of, which are relative to
+// a temporary root and name nothing in this checkout at all - and, sharper than that, the
+// two module names this file's own mutation table plants, which are chosen for being absent
+// and are absent on a clean tree by definition. Measured by taking the exclusion out and
+// running: seven paths red, six of them the probe tree's and the seventh this table's, plus
+// the line citation this table moves past the end of the file. A row falsified by its own
+// controls on every clean run is the shape this file's header refuses, so the exclusion is
+// load-bearing rather than tidy.
+//
+// Deliberately not a lexer, and the bound is worth stating because this repo has paid for
+// the other kind: a regex literal spelling a module path would be read as code and its
+// text reported, which fails loudly and has never happened, where the alternative reading
+// swallows to the next slash and loses a citation in silence. `docs/instruments.md`
+// carries nine rounds of that argument under a scanner that had to be exact; this one does
+// not, because over-reporting a citation costs a red row somebody reads.
+const withoutStringBodies = (src) => {
+  let out = '';
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '/' && (src[i + 1] === '/' || src[i + 1] === '*')) {
+      const end = src[i + 1] === '/' ? src.indexOf('\n', i) : src.indexOf('*/', i + 2) + 1;
+      const stop = end <= 0 ? src.length : end + (src[i + 1] === '/' ? 0 : 1);
+      out += src.slice(i, stop);
+      i = stop - 1;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < src.length) {
+        if (src[j] === '\\') { j += 2; continue; }
+        if (src[j] === c || (c !== '`' && src[j] === '\n')) break;
+        j++;
+      }
+      out += src.slice(i, j + 1).replace(/[^\n]/g, ' ');
+      i = j;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+};
+
 // **And every `docs/*.md` anything points at has to exist**, for the same reason and by
 // the same shape as the block above. `CLAUDE.md` was 704 lines and was split into three
 // documents it now sends you to by name, with fourteen comments in `tools/` citing those
@@ -284,20 +362,111 @@ if (!existsSync(DOC)) {
 // comment deliberately does not spell: the scan reads its own prose, so a filename
 // written here as an example is a citation like any other and fails the run that quotes
 // it. Append the line to the runbook, run, revert.
+//
+// **And the same question asked of the modules, because a `web/` citation rots faster than
+// a `docs/` one and nothing was asking it.** `web/main.js` was fifteen thousand lines and
+// is now a seventh smaller with twelve modules beside it, and the prose did not move with the
+// code: fourteen citations were left naming the browser bundle for code that had been carried
+// out of it. That is the ordinary consequence of a split rather than anything unusual, and
+// it is why the walk had to widen twice over. The **citing** set is every prose page this
+// repo ships and every source file it ships, not `CLAUDE.md` and `tools/` alone - the
+// documents cite each other and the modules cite each other, and a scan that reads only the
+// two files that point at `docs/` would have seen four of the thirty. The **question** is
+// two questions asked of one walk, because they are the same claim about two kinds of
+// target and a second walk beside this one would be the second path this repo keeps
+// refusing.
+//
+// **Read through `sourceWithMutation` rather than off disk**, which is the whole reason
+// this block builds repo-relative paths where it used to build absolute ones. A row that
+// reads the tree directly cannot be falsified by a mutation, so the control would have been
+// green against every build there is - the delivery hole `docs/instruments.md` records
+// `library-check` shipping, arriving here in the one block whose subject is prose.
+//
+// **What this cannot see, said out loud.** A citation is checked for resolving and not for
+// being *right*: `web/point-cloud.js` cited for something that moved to a neighbouring
+// module passes here, because the file is there. The line form is the same bound one step
+// in - a line past the end of the file fails, and a line that has drifted into the middle
+// of something else does not. `server/capture.js` records what that costs and answers it
+// the only way that works, by citing `handleFrame` by name after the line it used to name
+// had drifted nine hundred lines into the middle of a shader with nothing failing. Cite a
+// function, not a line; the line form is checked here because it exists, not because it is
+// a good idea.
+//
+// The controls are `--mutate web-citation-outlives-its-module`, which renames a module in
+// CLAUDE.md's own prose to something the tree does not hold, and
+// `--mutate line-citation-past-the-end`, which moves a line citation past the end of the
+// file it names. Two, because the halves fail differently: a path that still resolves
+// answers for a line that does not.
 {
-  const citing = [join(ROOT, 'CLAUDE.md'), ...walk(join(ROOT, 'tools'), SHIPPED)];
+  const md = /\.md$/;
+  const prose = readdirSync(ROOT, { withFileTypes: true })
+    .filter((e) => !e.isSymbolicLink() && e.isFile() && md.test(e.name))
+    .map((e) => e.name)
+    .sort();
+  const citing = [
+    ...prose,
+    ...(existsSync(join(ROOT, 'docs')) ? walk(join(ROOT, 'docs'), md) : []),
+    ...Object.keys(FLOORS).flatMap((dir) => walk(join(ROOT, dir), SHIPPED)),
+  ].map((p) => relative(ROOT, p));
+
   const cited = new Set();
-  for (const file of citing) {
-    if (!existsSync(file)) continue;
-    for (const m of readFileSync(file, 'utf8').matchAll(/\bdocs\/[A-Za-z0-9._-]+\.md\b/g)) cited.add(m[0]);
+  // Keyed by the citation as written, so `web/main.js` and `web/main.js:9860` are two
+  // entries and the line form is not answered by the bare one appearing elsewhere.
+  const modules = new Map();
+  for (const rel of citing) {
+    const raw = sourceWithMutation(rel);
+    if (raw === null) continue;
+    // Markdown is prose throughout, and a shell script is scanned whole because it has no
+    // second kind of text worth separating - both read in the over-reporting direction,
+    // which is the one that fails where somebody sees it.
+    const text = /\.(js|mjs)$/.test(rel) ? withoutStringBodies(raw) : raw;
+    for (const m of text.matchAll(/\bdocs\/[A-Za-z0-9._-]+\.md\b/g)) cited.add(m[0]);
+    // A range takes its last line, because that is the bound the file has to reach: a
+    // `:844-847` whose 844 still exists and whose 847 does not is a citation half of which
+    // is off the end, and reading the start would call that resolved.
+    for (const m of text.matchAll(/\bweb\/[A-Za-z0-9._/-]+\.js\b(?::(\d+)(?:-(\d+))?)?/g)) {
+      const at = `${rel}:${text.slice(0, m.index).split('\n').length}`;
+      if (!modules.has(m[0])) modules.set(m[0], { path: m[0].split(':')[0], line: m[2] ?? m[1], at });
+    }
   }
+
   const missing = [...cited].filter((p) => !existsSync(join(ROOT, p))).sort();
   if (cited.size === 0) {
     fail('nothing cites a docs/ page, so this assertion passed on nothing - the disclosure chain is gone or this scan is looking in the wrong place');
   } else if (missing.length) {
     fail(`${missing.join(', ')} is cited but does not exist - a pointer that outlives its target teaches a document nobody can read`);
   } else {
-    console.log(`  docs/   all ${cited.size} cited pages exist`);
+    console.log(`  docs/   all ${cited.size} cited pages exist, over ${citing.length} pages and source files`);
+  }
+
+  // The floor, in the shape the row above has and for the same reason: a scan that matched
+  // nothing would print a clean line about zero citations, which is the green light wired
+  // to nothing this file's own header is about.
+  const byLine = [...modules.values()].filter((c) => c.line);
+  const gone = [];
+  const past = [];
+  for (const [cite, { path, line, at }] of modules) {
+    const full = join(ROOT, path);
+    if (!existsSync(full)) { gone.push(`${cite} at ${at}`); continue; }
+    if (!line) continue;
+    const lines = readFileSync(full, 'utf8').split('\n').length;
+    if (Number(line) > lines) past.push(`${cite} at ${at}, where ${path} has ${lines} lines`);
+  }
+  if (modules.size === 0) {
+    fail('nothing cites a web/ module, so this assertion passed on nothing - either the prose stopped naming the modules or this scan is looking in the wrong place');
+  } else {
+    // Two failures rather than one, because which of the two it is decides what to do:
+    // a path that is gone is a module that moved and took its prose with it, and a line
+    // past the end is a file that grew or shrank under a citation nobody re-read.
+    if (gone.length) {
+      fail(`${gone.join('; ')} - the module is not there, so the citation sends a reader to a file this checkout does not have`);
+    }
+    if (past.length) {
+      fail(`${past.join('; ')} - the line is past the end of the file, so whatever it named has moved`);
+    }
+    if (!gone.length && !past.length) {
+      console.log(`  web/    all ${modules.size} cited modules exist, ${byLine.length} of them named by line`);
+    }
   }
 }
 

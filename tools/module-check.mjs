@@ -9,8 +9,9 @@
 //
 //   node tools/module-check.mjs [--root <dir>] [--mutate <name>]
 //
-// **Why this exists at all.** `web/main.js` is one ES module of fifteen thousand lines and
-// it is being taken apart. A module that throws while it evaluates publishes no
+// **Why this exists at all.** `web/main.js` was one ES module of fifteen thousand lines and
+// is being taken apart - 13,206 with twelve modules beside it as this line is written, and
+// the number is here so a reader can tell how far in they are. A module that throws while it evaluates publishes no
 // `globalThis.__kinect`, and then every tool in the suite reports DID NOT RUN with no
 // assertion behind its exit code - which this repo has written down three times as a bug
 // found rather than as a bug caught. An import cycle, a specifier naming a file that is
@@ -628,8 +629,9 @@ const lineAt = (src, index) => src.slice(0, index).split('\n').length;
 // nested, and a keyword that reads as nested is skipped without a row, because it never
 // reaches the audit that would have named it. The drift is not hypothetical: this lexer
 // leaves one case ambiguous on purpose, a `/` after `}`, which it reads as division, and
-// `web/main.js` carries twelve hundred lines of GLSL in template literals and a great many
-// patterns for that to land in. Every top-level declaration in this tree is written at
+// this tree carries twelve hundred lines of GLSL in template literals - 900 of them in
+// `web/cloud-shader.js` and 183 in `web/post-chain.js` - and a great many patterns for that
+// to land in. Every top-level declaration in this tree is written at
 // column zero and no property key is, so a keyword at column zero that depth calls nested is
 // the counter having shifted, and it is reported rather than dropped.
 const atColumnZero = (src, index) => index === 0 || src[index - 1] === '\n';

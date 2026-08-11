@@ -57,7 +57,7 @@
 // 170,134.
 //
 // **Unprojection**, libfreenect2's pinhole model, the same one the vertex shader in
-// `web/main.js` uses. For the sample at column `col` and row `row` holding `mm`
+// `web/cloud-shader.js` uses. For the sample at column `col` and row `row` holding `mm`
 // millimetres, in metres, in a right-handed frame with the camera looking down -z:
 //
 //     z = mm / 1000

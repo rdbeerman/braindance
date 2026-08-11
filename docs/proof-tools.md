@@ -144,8 +144,16 @@ mutation that never arrived has to be the harness declining to run.
 Measured when the mechanisms were collapsed: 19 of the 20 page mutations delivered, each
 named with the URL and the byte count, `gallery-has-no-way-back` among them at `/gallery`,
 which is the case the interception existed for. The twentieth is `marks-ignore-retime`, which
-cannot be constructed at all — its anchor matches twice in `web/main.js` and the
-match-exactly-once refusal stops it, a stale anchor that predates this and is tracked in #28.
+could not be constructed at all — its anchor matched twice in `web/main.js` and the
+match-exactly-once refusal stopped it, a stale anchor that predated this and was tracked in #28.
+That is closed and the fix is worth knowing, because it is not the one a reader would guess: the
+duplicate is still there in `web/main.js`, once at four spaces of indentation and once at six,
+and `c757210` re-anchored the entry onto a leading newline and four spaces, which by that alone
+cannot match the six-space copy inside the
+`miniMarks` map. So the anchor matches exactly once now, which is what `syntax-check`'s anchor
+row reports across all 406 anchors in the suite. Whether the mutation *delivers* has not been
+re-measured — the anchor being constructible is the weaker claim, and only the weaker one is
+stated here.
 The control for the delivery refusal is to stop staging `web/` files and run a page mutation:
 it names the file, the URL and both byte counts, and exits 2 without printing an assertion.
 
@@ -251,8 +259,8 @@ that `readGhost` at 1.0 is bit-identical to the old `mode 2` at `f49c8339…^`. 
 branch point `6e1be6f` it fails on one frame of six; at HEAD it fails on two, frames 2 and 3.
 So it is not something this branch introduced, and it did get worse here — both halves of that
 sentence matter, and neither was written down anywhere until now, which is how a known-red row
-becomes a row nobody re-derives. A comment in `web/main.js` calls it "the pre-existing readGhost
-failure" and that comment arrived in `40ab241`, which is testimony rather than a measurement;
+becomes a row nobody re-derives. A comment in `web/cloud-shader.js` calls it "the pre-existing
+readGhost failure" and that comment arrived in `40ab241`, which is testimony rather than a measurement;
 the two runs above are the measurement. Nothing has dated the one-frame-to-two change, and the
 same bisect harness that dated the `export-check` rows would do it.
 
@@ -840,6 +848,41 @@ is named in `CLAUDE.md`, which is why the invocation list lives there rather tha
 added later is asked by existing, and the falsification control is adding a tool without
 documenting it.
 
+**Its second row resolves the citations**, and it is one walk asking two questions because they
+are the same claim about two kinds of target. Every `docs/*.md` path has to exist, which is what
+holds the disclosure chain `CLAUDE.md` opens on together — delete one of the three documents and
+every pointer at it resolves to nothing while the tool stays green, and the control for that half
+is `mv docs/instruments.md /tmp` and a run. Every `web/….js` path has to exist too, and a
+`file:line` form fails when the file has fewer lines than the citation names. That half arrived
+with the browser bundle's split: `web/main.js` went from 15,449 lines to 13,206 with twelve
+modules beside it, and fourteen citations were left naming the bundle for code that had been
+carried out of it — eight of them one sentence about the unprojection copied around the suite.
+
+The **citing** set is every prose page this repo ships and every source file it ships, not
+`CLAUDE.md` and `tools/` alone, because the documents cite each other and the modules cite each
+other — a scan reading only the two files that point at `docs/` would have seen four of the
+thirty `web/` citations. The **question** is asked of the prose rather than of the whole file: a
+path in a string is data and a path in a comment is a citation, which is the same distinction
+`library-check`'s number scan draws when it refuses to read a declaration out of a debug message.
+That exclusion is load-bearing rather than tidy, and it was measured by taking it out — seven
+paths red on a clean tree, six of them the fixture paths `library-check` builds its probe tree
+out of and the seventh the module name this tool's own mutation table plants for being absent.
+
+Two controls, because the halves fail differently and a path that still resolves would answer for
+a line that does not. `--mutate web-citation-outlives-its-module` renames a module in `CLAUDE.md`'s
+own prose to something the tree does not hold; `--mutate line-citation-past-the-end` moves a line
+citation past the end of the file it names. Each reddens one row and nothing else. The floor was
+falsified by hand in the same round, by narrowing the pattern to match nothing: `nothing cites a
+web/ module, so this assertion passed on nothing`, one failed assertion.
+
+**What it cannot see is worth knowing before trusting it.** A citation is checked for resolving
+and never for being *right*, so a module cited for something that moved to a neighbouring file
+passes, and a line that has drifted into the middle of something else passes. `server/capture.js`
+records what that costs and answers it the only way that works — it cites `handleFrame` by name
+after the line it used to name had drifted nine hundred lines into the middle of a shader with
+nothing failing. Cite a function; the line form is checked here because it exists in the tree,
+not because it is a good idea.
+
 **Its third row is the `.knct` decoder specification**, the page at the top of
 `server/protocol.js` that issue #45 decided is a take's exit from this program instead of a
 point-cloud export. That makes it load-bearing in a way prose here usually is not: it is what
@@ -981,8 +1024,11 @@ keyword off `POLLED_NODE_FIELDS`. It was first written as a *rename* and reddene
 because the renamed binding is then an exported object with no exemption of its own — a second red
 row about a second fact, which is the blast radius that stops a control saying which question it
 asked. The module-gone branch of the same row cannot be planted by a text edit and was probed by
-hand: pointing an entry at `web/tween.js` reports "web/tween.js is gone, so this entry is about a
-module that no longer exists". The `covers` half went without an arm for longer, and it was
+hand: pointing an entry at a module name that is not in the tree reports that module "is gone, so
+this entry is about a module that no longer exists". The name it was probed with is deliberately
+not written down here, because `syntax-check` resolves every `web/….js` this repo's prose spells
+and a name chosen for being absent would fail it. The `covers` half went without an arm for
+longer, and it was
 carrying more than its own weight — see `docs/instruments.md`, which measures what that cost.
 `--mutate exemption-covers-nothing` promotes an exempted control-point pair to the number it is
 made of, which leaves the entry naming a real export and covering nothing, in one row.

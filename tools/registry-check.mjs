@@ -650,8 +650,8 @@ function servedAt(file) {
 }
 
 // The route below used to be a bare `'**/main.js'` glob, true of every mutation this
-// file has ever carried and true by coincidence: every entry in `MUTATIONS` names
-// `web/main.js`, so a glob on that basename happened to be a path. It stayed a
+// file carried at the time and true by coincidence: every entry in `MUTATIONS` named
+// `web/main.js` then, so a glob on that basename happened to be a path. It stayed a
 // coincidence right up until the tree it patches was about to stop being one file -
 // at which point a mutation whose anchor moved into a neighbouring module would have
 // gone on matching the glob's basename while matching no request any browser makes,
@@ -1961,7 +1961,7 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
 
   // **The old arm is the old readings, not the old geometry.** The unprojection's x sign
   // changed after this rev: the sensor's frames arrive horizontally mirrored and this build
-  // undoes them, which `unproject` in `web/main.js` carries the reasoning for. Left alone,
+  // undoes them, which `unproject` in `web/cloud-shader.js` carries the reasoning for. Left alone,
   // the pinned build draws the room reflected and every row below reports 6 of 6 frames
   // differing over a change that has nothing to do with a reading - measured, before this
   // was here: all five rows plus the raster, uniformly, where at HEAD five of the six pass.

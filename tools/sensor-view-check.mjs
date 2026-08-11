@@ -227,8 +227,8 @@ const CAPTURES_DIR = resolve(flag('--captures', join(REPO, 'captures')));
 const DW = 512;
 const DH = 424;
 
-// The boot defaults in `web/main.js`'s uniform block - what a page that fetched
-// nothing would be unprojecting on. The recorder arm needs them, because "the
+// The boot defaults in the uniform block in `web/point-cloud.js` - what a page that
+// fetched nothing would be unprojecting on. The recorder arm needs them, because "the
 // intrinsics arrived" is only evidence if the numbers that did not arrive are
 // different numbers.
 const BOOT_DEFAULTS = { fx: 366, fy: 366, cx: 256, cy: 212 };

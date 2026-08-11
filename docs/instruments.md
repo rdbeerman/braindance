@@ -748,8 +748,11 @@ The mistake is not the missing recursion. It is that the enumeration was **the f
 exist** while the comment above it claimed the enumeration was **the tree**, and the two are
 the same list right up until they are not. A traversal cannot be falsified by the tree it
 walks when that tree has nothing in it to recurse into, so the control is a tree the row
-builds: `web/flat.js` with no grid and `web/nested/buried.js` with one, run through the same
-walker, asserting it answers `['web/nested/buried.js']`. A walker that stops at the top
+builds under a probe root of its own: a `flat.js` with no grid and a `nested/buried.js` with
+one, run through the same walker, asserting it answers the buried one alone. Those two paths
+are relative to the probe root and never to a checkout, which is why they are written without
+the directory the walker is handed — a path spelled the way this repo cites its own modules
+is a citation, and `syntax-check` resolves those. A walker that stops at the top
 answers `[]` and the row goes red, where against the real `web/` it would answer exactly
 what the row wants. **When a row's claim is about a shape the subject does not currently
 have, build the shape and run the same code over it** — a mutation of the subject cannot
@@ -2507,6 +2510,75 @@ nobody re-runs at the width the claim actually needs.
 - **Ask what a surface is for, and check that, not only what its documents are.** Every
   existing preset arm asked about one document in isolation. The property a user has is a
   sequence of presses.
+
+## A pointer check that walked one kind of pointer and never noticed the other
+
+`syntax-check` had a block whose comment said the disclosure chain is load-bearing and nothing
+was checking it, and it closed exactly the pointers it was written for: every `docs/*.md` path
+cited from `CLAUDE.md` or from `tools/`, resolved against the tree. It was right about the
+class it named and blind to the neighbour in the same sentence. The documents and the tools
+cite **modules** far more often than they cite each other — thirty `web/….js` paths against six
+`docs/` ones — and none of those was being asked anything at all.
+
+Nothing was wrong until the browser bundle split. Then `web/main.js` went from 15,449 lines to
+13,206 with twelve modules beside it, and **fourteen** citations were left naming the bundle for
+code that had been carried out of it. Eight of them are one sentence copied around the suite —
+the unprojection's mirror correction, which is in `web/cloud-shader.js` and which
+`web/library.js`, `export-check` twice, `registry-check`, `monitor-check` twice, `level-check`
+and `server/protocol.js` all sent a reader to the bundle for. The rest are `CROP_LIMIT`, which is
+declared in `web/point-cloud.js` while the prose told a reader to raise it in the bundle,
+`setNavigationUp` in `web/scene.js`, the boot uniform block in `web/point-cloud.js` with two
+tools still naming the bundle for it, the GLSL one lexer's ambiguity is argued from, and the
+`readGhost` comment this suite quotes. Every one of those paths still resolves, which is the
+second lesson below.
+
+Four more claims went with them without naming a wrong file at all — a mutation table described
+as "most live in `web/main.js`" when nine of its twenty-two do, a paragraph saying every entry in
+another table names the bundle, a header calling it fifteen thousand lines, and a mutation
+recorded as unbuildable because its anchor matched twice, which a re-anchoring in `c757210` fixed
+without the note above it hearing about it. **A count is a citation of a file's contents**, and it
+rots on the same edit as a path does with nothing to resolve it against.
+
+**The audit that found the first five could not have found the other eight, and the reason is
+worth copying.** It was a script: for every citation, take the backticked identifiers within two
+lines and ask whether each is declared in a *different* `web/` module. That reaches a citation
+whose subject is a **name** and is blind to one whose subject is a **phrase** — "the uniform
+block", "twelve hundred lines of GLSL", "most of these live here" — and blind again to a name
+written without backticks, which is how three copies of one sentence about `unproject` survived
+the first pass. What closed it was enumerating every mention of the bundle in prose and comments,
+about thirty-five sites, and reading the sentence at each. **A heuristic over a citation's
+neighbours is a way to rank the reading, not a way to skip it.**
+
+**The enumeration and the question are set separately, and widening one is not widening the
+other.** This document already carries that rule from `library-check`'s grid scan, where the
+walk stayed wide and the question narrowed to the JavaScript; here it arrives as two decisions
+made in the same block. The **citing** set had to widen from two files to every prose page and
+every source file this repo ships, because the documents cite each other and the modules cite
+each other and a scan reading only the two files that point at `docs/` saw four of the thirty.
+The **question** had to narrow at the same time: a path in a string is data and a path in a
+comment is a citation, which is the mirror of the rule `numbersIn` already applies when it
+refuses to read a declaration out of a debug message. Dropping the strings loses the `file:`
+target of a mutation table and the `module:` of `module-check`'s exemption table, and both of
+those are answered better elsewhere — the anchor row fails a mutation anchoring into a file that
+is not there, and `module-check` audits its own table for an entry naming a module that is gone.
+
+**The exclusion is load-bearing and was measured rather than argued.** Taken out, the row goes
+red on a clean tree with seven paths: six are the fixture paths `library-check` builds its probe
+tree out of, which are relative to a temporary root and name nothing in any checkout, and the
+seventh is the module name this check's own mutation table plants for being absent. A row
+falsified by its own controls on every clean run is the failure this whole document is about,
+arriving from the direction where the instrument is the subject.
+
+**And the bound has to be said out loud, because the check is weaker than it reads.** A citation
+is checked for resolving and never for being *right*. All fourteen of the stale ones above name a
+file that exists, so the tool that now guards this class would not have caught a single one of
+them — they were found by reading, and the arm that exists after them is for the next split
+rather than for this one. The line form is the same bound one step in: a citation past the end
+of the file fails, and a line that has drifted into the middle of something else does not.
+`server/capture.js` had already reached the only answer that works and wrote it down —
+`handleFrame` is cited by name because the line it used to name had drifted nine hundred lines
+into the middle of a shader with nothing failing. **Cite a function, not a line**, and read the
+sentence around a citation rather than trusting that the path resolved.
 
 ## A mirroring assertion on a surface where the painter never runs
 
