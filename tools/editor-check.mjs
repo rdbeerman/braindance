@@ -1945,7 +1945,7 @@ const MUTATIONS = {
   // points still disappear, and the four sliders are wired to the wrong sides - which
   // is invisible to any row that only counts what was removed.
   'crop-axes-swapped': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {',
       '  if (cropOn == 1.0 && (pos.y < cropL || pos.y > cropR || pos.x < cropB || pos.x > cropT)) {',
@@ -1958,7 +1958,7 @@ const MUTATIONS = {
   // caught by rows that are not about this, and the claim under test is specifically
   // that a plane stays where it was put as the subject walks away from the sensor.
   'crop-in-image-space': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {',
       '  float wedge = 2.0 / max(0.001, z);\n'

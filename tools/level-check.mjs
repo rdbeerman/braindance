@@ -102,7 +102,7 @@ const MUTATIONS = {
   // in the room and become a place relative to however the room is currently turned.
   // Section 2's identity is what sees it - the surviving set changes, and no camera
   // move can put a discarded point back.
-  'crop-follows-tilt': { file: 'web/main.js', edits: [[
+  'crop-follows-tilt': { file: 'web/cloud-shader.js', edits: [[
     '  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {',
     '  vec3 cropAt = (modelMatrix * vec4(pos, 1.0)).xyz;\n'
     + '  if (cropOn == 1.0 && (cropAt.x < cropL || cropAt.x > cropR || cropAt.y < cropB || cropAt.y > cropT)) {',
@@ -168,7 +168,7 @@ const MUTATIONS = {
   // only because that section now switches a region effect on: with `regionPush`,
   // `regionNoise` and `regionMask` all at zero the shader never evaluates the region
   // coordinate at all, and this mutation and the fix draw the same picture.
-  'region-follows-tilt': { file: 'web/main.js', edits: [[
+  'region-follows-tilt': { file: 'web/cloud-shader.js', edits: [[
     '  vec3 p0 = pos;',
     '  vec3 p0 = (modelMatrix * vec4(pos, 1.0)).xyz;',
   ]] },
@@ -203,7 +203,7 @@ const MUTATIONS = {
   // because that section plants something asymmetric. Every other fixture in this file,
   // and the fov and intrinsics arms of `sensor-view-check`, draw the same picture either
   // way round.
-  'x-not-mirrored': { file: 'web/main.js', edits: [[
+  'x-not-mirrored': { file: 'web/cloud-shader.js', edits: [[
     '    -(pixel.x + 0.5 - center.x) / focal.x * z,',
     '     (pixel.x + 0.5 - center.x) / focal.x * z,',
   ]] },

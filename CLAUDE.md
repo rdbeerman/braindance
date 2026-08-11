@@ -141,6 +141,11 @@ node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, 
 node tools/export-check.mjs --mutate pointsize-absolute   # ... and must FAIL mutated
 node tools/export-check.mjs --mutate cropoutside-reaches-the-export # ... the crop box's faint pass, one edit from being in a deliverable
 node tools/export-check.mjs --mutate faint-survives-at-zero # ... and a cut point kept at alpha zero, invisible and still occluding
+node tools/export-check.mjs --mutate bloom-buffer-sized   # ... the glow's chain following the buffer, which is the only live catcher
+                                                          #     in this suite for the reference the chain is frozen at. Its sibling
+                                                          #     `bloom-reference-1080` is NOT caught by anything here and is not a
+                                                          #     regression - `test/bloom-chain.test.mjs` is what holds that half,
+                                                          #     and docs/instruments.md has the measurement
 node tools/library-check.mjs                              # step 7: library, recorder, routes
 node tools/library-check.mjs --mutate plant-open-take     # ... and must FAIL
 node tools/library-check.mjs --mutate open-decides-its-own-reason  # ... one take, one refusal, whichever surface asks
@@ -465,18 +470,19 @@ thing that should be touching capture bytes.
   `registry-check` asserts the 1080/600 rebase factor rather than skipping the value, so a
   preset re-tuned by hand to something near it fails.
 - **1080p is the unit; 600 is bloom's frozen chain; both are correct and do not reconcile
-  them.** Every screen-space term is *expressed* against 1080p, which is why `main.js` reads
-  `bufferHeight / 1080.0` in the shaders. Bloom has no parameter to express, because
-  `UnrealBloomPass` bakes its tap count in at construction, so its mip chain is instead frozen
-  at the 600-tall buffer the look was graded on: `resize` computes
-  `refWidth = (buf.x / buf.y) * 600` and then sets the chain at half of it,
+  them.** Every screen-space term is *expressed* against 1080p, which is why the cloud's
+  shaders in `web/cloud-shader.js` read `bufferHeight / 1080.0`. Bloom has no parameter to
+  express, because `UnrealBloomPass` bakes its tap count in at construction, so its mip chain
+  is instead frozen at the 600-tall buffer the look was graded on: `bloomChainSize` computes
+  `refWidth = (bufferWidth / bufferHeight) * 600` and then sets the chain at half of it,
   `setSize(aspect * 300, 300)`. Neither reference is a typo for the other, and the mechanism
   is the reason - the halo's width is a tap count over a texel count, so a chain with 1.8x
   the texels has a halo 1.8x tighter, constant at last and constant at a glow nobody tuned.
   Measured: a 1080-frozen chain lands 7.16/255 off the graded look on the worst of forty
-  tile means where the 600-frozen one lands 1.10. The comment above `bloom.setSize` in
-  `web/main.js` carries the rest, including the undersampling gap above 1200 that nothing
-  has measured.
+  tile means where the 600-frozen one lands 1.10. The comment above `bloomChainSize` in
+  `web/bloom-pass.js` carries the rest, including the undersampling gap above 1200 that
+  nothing has measured, and `test/bloom-chain.test.mjs` holds the arithmetic to it under
+  bare node.
 
 ## Process hygiene
 

@@ -274,7 +274,7 @@ const MUTATIONS = {
     "    ext: 'pngseq',\n    frameExt: null,",
   ]] },
   // The dominant screen-space term goes back to framebuffer pixels.
-  'pointsize-absolute': { file: 'web/main.js', edits: [[
+  'pointsize-absolute': { file: 'web/cloud-shader.js', edits: [[
     'gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);',
     'gl_PointSize = clamp(pointSize * (1.0 / max(0.15, -mv.z)), 1.0, 64.0);',
   ]] },
@@ -282,7 +282,7 @@ const MUTATIONS = {
   // so the same look sums four times too bright at twice the resolution. Only the
   // varying moves: the point size itself stays resolution-relative, which is what
   // makes this a test of the normalisation rather than of the term above.
-  'vsize-framebuffer': { file: 'web/main.js', edits: [[
+  'vsize-framebuffer': { file: 'web/cloud-shader.js', edits: [[
     'vSize = gl_PointSize / k;',
     'vSize = gl_PointSize;',
   ]] },
@@ -296,20 +296,29 @@ const MUTATIONS = {
   // The bloom chain goes back to being sized against the drawing buffer, which is
   // where the design had it and where its halo's width in frame-fractions halves
   // every time the buffer doubles.
-  'bloom-buffer-sized': { file: 'web/main.js', edits: [[
-    `  const refWidth = (buf.x / buf.y) * 600;
-  bloom.setSize(Math.max(1, refWidth / 2), 300);`,
-    '  bloom.setSize(Math.max(1, buf.x / 2), Math.max(1, buf.y / 2));',
+  //
+  // **These two anchor in `web/bloom-pass.js` rather than in `resize`, and the text they
+  // patch is the arithmetic rather than the call.** The chain's size moved into
+  // `bloomChainSize` beside the pass whose baked tap count is the reason it is frozen at
+  // all; what each of these plants is what it always planted - a chain that follows the
+  // buffer, and a chain frozen at the wrong reference - written in that function's
+  // parameters instead of in `resize`'s local. The pair is the falsification control for
+  // the one number CLAUDE.md states twice, so it is named here rather than left to be
+  // inferred from a path.
+  'bloom-buffer-sized': { file: 'web/bloom-pass.js', edits: [[
+    `  const refWidth = (bufferWidth / bufferHeight) * 600;
+  return { width: Math.max(1, refWidth / 2), height: 300 };`,
+    '  return { width: Math.max(1, bufferWidth / 2), height: Math.max(1, bufferHeight / 2) };',
   ]] },
   // The chain is frozen, but against 1080 rather than against the height the look
   // was graded at. Resolution-independent and wrong: every output size gets the
   // same halo, 1.8x tighter than Blackwall was ever tuned for. This is the one a
   // per-size comparison cannot see, because both sizes agree about it.
-  'bloom-reference-1080': { file: 'web/main.js', edits: [[
-    `  const refWidth = (buf.x / buf.y) * 600;
-  bloom.setSize(Math.max(1, refWidth / 2), 300);`,
-    `  const refWidth = (buf.x / buf.y) * 1080;
-  bloom.setSize(Math.max(1, refWidth / 2), 540);`,
+  'bloom-reference-1080': { file: 'web/bloom-pass.js', edits: [[
+    `  const refWidth = (bufferWidth / bufferHeight) * 600;
+  return { width: Math.max(1, refWidth / 2), height: 300 };`,
+    `  const refWidth = (bufferWidth / bufferHeight) * 1080;
+  return { width: Math.max(1, refWidth / 2), height: 540 };`,
   ]] },
   // Only the split reverts, so the claim cannot be carried by the other two.
   'rgbsplit-absolute': { file: 'web/main.js', edits: [[
@@ -324,7 +333,7 @@ const MUTATIONS = {
   // shape of `grade-absolute` and `pointsize-absolute` pointed at the new terms: the
   // same slider then describes a different shape at every output size, and the two
   // region rows must say so while `noise` and the eight terms above stay clean.
-  'region-in-metres': { file: 'web/main.js', edits: [[
+  'region-in-metres': { file: 'web/cloud-shader.js', edits: [[
     '  return 1.0 - smoothstep(0.0, max(1e-4, regionSoft), sd);',
     '  return 1.0 - smoothstep(0.0, max(1e-4, regionSoft * bufferHeight / 1080.0), sd);',
   ]] },
@@ -332,7 +341,7 @@ const MUTATIONS = {
   // the frame - the same mistake `region-in-metres` plants one term over. Four numbers
   // that named a box a subject stood in now name a different box at every output size,
   // so the `crop` row must say so while `noise` and the two region rows stay clean.
-  'crop-in-pixels': { file: 'web/main.js', edits: [[
+  'crop-in-pixels': { file: 'web/cloud-shader.js', edits: [[
     '  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {',
     '  float cropScale = bufferHeight / 1080.0;\n'
     + '  if (cropOn == 1.0 && (pos.x < cropL * cropScale || pos.x > cropR * cropScale\n'
@@ -351,7 +360,7 @@ const MUTATIONS = {
   // occluding: `depthWrite` is on, so the cut half of a room goes on hiding the half
   // that was kept, and the picture with the box off quietly loses geometry that is not
   // cropped at all.
-  'faint-survives-at-zero': { file: 'web/main.js', edits: [
+  'faint-survives-at-zero': { file: 'web/cloud-shader.js', edits: [
     [
       '  if (outsideCrop && cropOutside <= 0.0) {\n'
       + '    gl_Position = vec4(0.0, 0.0, 2.0, 1.0);\n'
@@ -1473,12 +1482,27 @@ const PIPELINES = [
 // `bloom-buffer-sized` puts those rows at departures of 0.0648 and 0.0807, which is
 // 6.5x and 8.1x the wider band, and it fails their coarse means as well at 10.629
 // and 13.955 against 1.6 and 2.6. `bloom-reference-1080` departs by 0.0018 and
-// 0.0024 and is not caught on these rows at either band, which is not a gap: a
-// per-size comparison cannot see a chain that is wrong by a constant factor because
-// both sizes agree about it, and the two cross-build rows further down are what
-// catch it. Wider bands on the other seven were tried first and are what let three
+// 0.0024 and is not caught on these rows at either band: a per-size comparison
+// cannot see a chain that is wrong by a constant factor, because both sizes agree
+// about it. Wider bands on the other seven were tried first and are what let three
 // of the mutations through, so those stay as tight as the sampling residual allows
 // rather than as wide as the result permits.
+//
+// **This paragraph used to end by saying the two cross-build rows further down catch
+// `bloom-reference-1080`, and they do not.** Measured on 2026-08-11, both arms against a
+// server replaying `fixture-1g`, once on the module split and once on `84084b0` before it
+// with the mutation still in `web/main.js`: 50 of 50 passed and 0 failed on both, and the
+// mutation is delivered rather than absent - the page's numbers move, the bloom row's
+// luminance ratio going 1.0006 to 1.0038 and the two `whole look rebases` rows going 0.410
+// to 0.382 and 0.371 to 0.345 on the worst of forty tile means, against a band those never
+// come close to. So the reference the chain is frozen at has no catcher in this file, on
+// either side of the split, and it is written down here rather than left as a claim
+// somebody trusts. What does catch it is `test/bloom-chain.test.mjs`, which asserts the
+// arithmetic directly and reddens four of its six rows on exactly this mutation - a cheaper
+// instrument reaching what a picture comparison structurally cannot, which is the same
+// division of labour the point-size rows and the cross-build arm already have. Closing it
+// here instead would want a coarse band re-baselined against a measured residual rather
+// than a threshold tightened until this one row goes red.
 //
 // What the widening cost, since a threshold change that only reports what it bought
 // is half a measurement. Two mutations lose an assertion to it, and both lose the

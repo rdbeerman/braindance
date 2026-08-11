@@ -107,7 +107,7 @@ const MUTATIONS = {
   // spelling of `mix-ignores-normalisation`, indistinguishable from it by the rows that
   // went red, so it could not tell anybody which claim was load-bearing.
   'rgb-contributes-no-alpha': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    alphaFactor += readRgb;',
       '    alphaFactor += 0.0;',
@@ -119,7 +119,7 @@ const MUTATIONS = {
   // there is transcription rather than arithmetic - and a check that compared only
   // colour would pass a build that dropped a term from one of them.
   'ghost-alpha-term-dropped': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * readGhost;',
       '    alphaFactor += (0.25 + 0.75 * rim) * readGhost;',
@@ -131,7 +131,7 @@ const MUTATIONS = {
   // weight is 1 and the rest are 0. This is the mutation section 1b cannot see and the
   // whole reason 8b exists.
   'mix-ignores-normalisation': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       'float norm = readSum > 0.0 ? 1.0 / readSum : 0.0;',
       'float norm = readSum > 0.0 ? 1.0 : 0.0;',
@@ -148,7 +148,7 @@ const MUTATIONS = {
   // in that bucket rather than one is the right answer here, and a fourth would mean a
   // parameter had quietly become reachable only from ghost.
   'weight-ignored': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '  if (readGhost > 0.0) {',
       '  if (false) {',
@@ -162,7 +162,7 @@ const MUTATIONS = {
   // right answer and a fifth would mean some other parameter had quietly become reachable
   // only through the duotone.
   'duotone-ignored': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '  if (duotoneDepth > 0.0) {',
       '  if (false) {',
@@ -177,7 +177,7 @@ const MUTATIONS = {
   // cannot draw the silhouette this parameter exists for, which is exactly the shape of
   // failure that ships looking like a control that works.
   'duotone-ignores-depth': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    float k = smoothstep(duotoneSplit - w * 0.5, duotoneSplit + w * 0.5, t);',
       '    float k = 0.5;',
@@ -191,7 +191,7 @@ const MUTATIONS = {
   // lands in a uniform nothing reads. The plain shape, and the drop-one sweep is what sees
   // it: a parameter whose picture never changes when you take it away.
   'duotone-span-ignored': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
       '    float w = 1.0;',
@@ -210,7 +210,7 @@ const MUTATIONS = {
   // parameter was added to remove, reinstated in a form nothing that renders one range can
   // detect.
   'duotone-span-against-a-frozen-range': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
       '    float w = duotoneSpan / 5.95;',
@@ -225,7 +225,7 @@ const MUTATIONS = {
   // section's motion rows too, and those are the rows that say the sweep is measuring the
   // speed rather than something else that moved with it.
   'vspeed-ignored': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
       '    vSpeed = 0.0;',
@@ -241,7 +241,7 @@ const MUTATIONS = {
   // in. Nothing here could see it before the planted section existed, because both arms
   // of every comparison in this file run at the same frame rate by construction.
   'vspeed-unnormalised': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
       '    vSpeed = paired ? abs(mmC - mmP) : 0.0;',
@@ -255,7 +255,7 @@ const MUTATIONS = {
   // few for any hashed run over it to notice, so the only thing that can see this is a
   // pair planted across the threshold on purpose.
   'vspeed-ignores-the-gate': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
       '    vSpeed = mmP > 0.0 ? abs(mmC - mmP) / spanSec : 0.0;',
@@ -270,7 +270,7 @@ const MUTATIONS = {
   // question at all. The blend keeps the point's own sample, so nothing about the geometry
   // moves and section 1b is untouched.
   'vspeed-reads-one-texel': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
       '    vSpeed = paired ? abs(mmC - depthAt(depthPrev, ivec2(0))) / spanSec : 0.0;',
@@ -285,7 +285,7 @@ const MUTATIONS = {
   // in this file can fail on a default that leaks, because every other comparison here either
   // has the term raised on both sides or has the block switched off entirely.
   'motion-leaks-at-zero': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '    k = mix(k, 1.0, duotoneMotion * smoothstep(0.0, 1200.0, vSpeed));',
       '    k = mix(k, 1.0, (duotoneMotion + 0.02) * smoothstep(0.0, 1200.0, vSpeed));',
@@ -353,7 +353,7 @@ const MUTATIONS = {
   },
   // The lattice switched off at its own guard: a cell that quantises nothing.
   'lattice-ignored': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '  if (lattice > 0.0) {',
       '  if (false) {',
@@ -362,7 +362,7 @@ const MUTATIONS = {
   },
   // The ripple switched off the same way.
   'ripple-ignored': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '  if (ripple > 0.0 && rw > 0.0) {',
       '  if (false) {',
@@ -374,7 +374,7 @@ const MUTATIONS = {
   // cannot see this**: the scrambled set raises all four at once, so the weight is there
   // anyway and the ripple goes on working. Only the arm that raises it alone reddens.
   'ripple-outside-the-gate': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0 || ripple > 0.0)',
       '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0)',
@@ -386,7 +386,7 @@ const MUTATIONS = {
   // off the eighths it steps in, so the smooth phase lands somewhere the stepped one never
   // does rather than agreeing with it by luck at one instant.
   'ripple-clock-continuous': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '      float cycles = dist * rippleFreq - floor(time * rippleSpeed * 8.0) * 0.125;',
       '      float cycles = dist * rippleFreq - time * rippleSpeed;',
@@ -400,7 +400,7 @@ const MUTATIONS = {
   // reverted. A build that quietly lost it tears horizontally under a green run, which is
   // the whole of what this control was added to stop being the only option.
   'glitch-axis-ignored': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '      ? floor(mix(position.y, position.x, glitchAxis) / glitchBands)',
       '      ? floor(position.y / glitchBands)',
@@ -613,28 +613,24 @@ const mutatedSource = (() => {
     }
     staged.set(spec.file, body.replace(from, to));
   }
-  return { js: read('web/main.js'), html: read('web/index.html') };
+  // The panel and the module, which this tool has always served as a pair because a
+  // build's `PARAMS` throws at boot on a parameter with no control in the markup - and
+  // beside them whatever file the spec actually edited. For a spec naming `main.js` that
+  // third member is the same string as `js`; for one naming a module `main.js` imports it
+  // is that module's own bytes, requested by the browser under its own path.
+  //
+  // **This used to be the pair alone, and a spec naming a third file was refused outright**
+  // with a note saying the pairing would be fixed when something needed it. Eighteen of the
+  // entries below need it: the cloud's two GLSL programs are `web/cloud-shader.js` now, and
+  // a refusal there is eighteen falsification controls that cannot run. What the refusal
+  // was protecting against is real and is closed differently here - the staged edit used to
+  // be discarded at this line while `mutantPath` still resolved to the module's own path,
+  // so the interception fired on a request for that module and answered it with `main.js`'s
+  // unmutated bytes, which reads as a delivered mutation and asserts about code nobody
+  // wrote. Serving each file at its own path is what makes that impossible rather than
+  // refused.
+  return { js: read('web/main.js'), html: read('web/index.html'), mutated: read(spec.file) };
 })();
-
-// The staging above edits whichever file the spec names, but what it *returns* is
-// fixed at the two files this tool has always paired: the panel and the module a
-// registry write has to reach. A spec landing on a third file - a module `main.js`
-// has since split a claim into - would stage its edit into the map and then have it
-// discarded at that last line, while `mutantPath` below still comes out as that
-// module's own path and the route below still gets a real request for it: the
-// browser asks for the mutation's file, the interception fires, `mutantServed`
-// counts it, and the guard is satisfied - by main.js's unmutated bytes, handed over
-// as if they were the module that was actually asked for. That is worse than the
-// silence this file exists to close, because it does not even print MUTATED and
-// stop: it runs, and whatever it asserts is about code nobody wrote. So this is
-// refused before any page opens, the same way an anchor that stopped matching is -
-// fixing the pairing above to serve a third file is out of scope here and stays
-// that way until something needs it; until then this is the honest failure.
-if (MUTATE && MUTATIONS[MUTATE].file !== 'web/main.js' && MUTATIONS[MUTATE].file !== 'web/index.html') {
-  console.log(`\n[registry] DID NOT RUN - ${MUTATE} edits ${MUTATIONS[MUTATE].file}, which this tool only `
-    + 'stages for web/main.js and web/index.html - serving it would hand a page the wrong file\'s bytes');
-  process.exit(2);
-}
 
 /**
  * Where a file under `web/` is reached from a browser.
@@ -664,7 +660,8 @@ function servedAt(file) {
 // reads it, and it is computed here rather than at every call site because every
 // call site wants the same answer under `--mutate`: which file, if any, is the
 // mutated one.
-const mutantPath = MUTATE ? servedAt(MUTATIONS[MUTATE].file) : servedAt('web/main.js');
+const MAIN_PATH = servedAt('web/main.js');
+const mutantPath = MUTATE ? servedAt(MUTATIONS[MUTATE].file) : MAIN_PATH;
 // Counted rather than assumed. A route that matches nothing fulfils nothing and
 // throws no error - the page simply loads the tree's own source - so the only way to
 // tell a mutation that was delivered from one that was never asked for is to watch
@@ -1442,15 +1439,33 @@ async function openPage({
     // under a heading that says they came from different code.
     await page.route((url) => url.pathname === RECORDER_PATH,
       (route) => { servedHtml = true; return route.fulfill({ contentType: 'text/html; charset=utf-8', body: source.html }); });
+    await page.route((url) => url.pathname === MAIN_PATH, (route) => route.fulfill({
+      contentType: 'text/javascript; charset=utf-8', body: source.js,
+    }));
+  }
+  // The file the mutation actually edits, at its own path.
+  //
+  // **Only ever installed for this tree's own pages, and that is the whole of why it is
+  // outside the block above.** `beforeArm` and the mode-comparison arms pass an explicit
+  // historical `source`, and mutating the thing a comparison is measured *against* moves
+  // both sides and proves nothing - a historical `main.js` predates the split and asks for
+  // no siblings at all, so the only way it could take this route is a rev that does, which
+  // is a comparison across two builds rather than one.
+  //
+  // Registered after the `main.js` route so it wins when the two paths are the same, which
+  // is every spec that edits `main.js`: the body it serves is that same staged text, so the
+  // one thing the ordering decides is that `mutantServed` counts. Counting on the route
+  // rather than on the file makes the guard below evidence that the mutated bytes were
+  // asked for, instead of evidence that some page asked for something.
+  //
+  // `mutatedSource` is null on a run with no mutation, and the default `source` is that
+  // same null - so the pair test alone would install this route on every clean page and
+  // answer `/main.js` with a property of null. The mutation has to exist for there to be
+  // one to serve.
+  if (mutatedSource && source === mutatedSource) {
     await page.route((url) => url.pathname === mutantPath, (route) => {
-      // Only the current tree's own default source is the mutation - `beforeArm` and
-      // the mode-comparison arms pass an explicit historical `source` of their own,
-      // and a request for their module is not evidence that the mutation reached
-      // anything. Counting it anyway would make the guard below pass on the strength
-      // of a page that never asked for the mutated tree at all, as long as it opened
-      // *some* page with a source after the after-arm did.
-      if (source === mutatedSource) mutantServed++;
-      return route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source.js });
+      mutantServed++;
+      return route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source.mutated });
     });
   }
   if (pin) {

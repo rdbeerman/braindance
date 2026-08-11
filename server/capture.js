@@ -49,7 +49,10 @@ const SCAN_CHUNK = 4 * 1024 * 1024;
 const RUN_CHUNK = 1024 * 1024;
 
 // The framing header plus the u32 depth length, u32 colour length and u64
-// timestamp that open every frame payload (`web/main.js:844-847`). Assembling
+// timestamp that open every frame payload - `handleFrame` in `web/main.js` reads
+// exactly these three off the other end. Cited by the function's name rather than by
+// a line, because the line it used to name had already drifted nine hundred lines
+// into the middle of a shader and nothing failed when it did. Assembling
 // exactly this much per message is what lets the scan record a timestamp without
 // ever holding the payload it came from.
 const STAMP_BYTES = 16;

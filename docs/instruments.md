@@ -1033,6 +1033,34 @@ leaves the listing identical, and moves only the monotonic write count. It now f
 row and leaves the contents row passing, which is what makes the count load-bearing rather
 than a second way of saying the same thing.
 
+### A comment naming which rows catch a mutation is a claim, and this one was wrong
+
+`export-check`'s threshold note ends by pricing what its two bloom mutations cost the bands it
+widened, and it used to say that `bloom-reference-1080` — the chain frozen at the wrong
+reference — "is not caught on these rows at either band, which is not a gap, and the two
+cross-build rows further down are what catch it". Read that way for as long as it stood: the
+one number CLAUDE.md states twice had a named catcher, so nobody looked.
+
+Measured on 2026-08-11, both arms against a server replaying `fixture-1g`, once on the module
+split and once on `84084b0` before it with the mutation still in `web/main.js`: **50 of 50
+passed and 0 failed on both.** Nothing catches it. And the mutation is delivered rather than
+absent, which is the distinction that makes this a coverage hole rather than a harness one —
+the numbers move, the bloom row's luminance ratio going 1.0006 to 1.0038 and the two
+`whole look rebases` rows going 0.410 to 0.382 and 0.371 to 0.345 on the worst of forty tile
+means. They move *toward* agreement, which is why no threshold notices.
+
+Two things worth keeping. The first is that this was found by running the mutation on both
+sides of a refactor for an unrelated reason: the specs were re-pointed at
+`web/bloom-pass.js`, and the run at HEAD was taken only to prove the re-pointing had not
+broken a control that turned out never to have worked. **Re-running the baseline in the
+conditions the failure happened in is what separated "I broke it" from "it was never there",
+and it is the whole of why that rule is in `CLAUDE.md`.** The second is where the coverage went
+instead: `test/bloom-chain.test.mjs` asserts the arithmetic directly and reddens four of its
+six rows on exactly this mutation, in milliseconds and with no GPU. A picture comparison
+between two output sizes cannot see a chain that is wrong by a constant factor, because both
+sizes agree about it — so the instrument that can see it is a different kind of instrument, not
+a tighter band on this one.
+
 ### A mutation run that exits non-zero with zero failed assertions did not run
 
 Every tool that carries mutations refuses one whose anchor text it cannot find, and
@@ -1231,20 +1259,44 @@ nobody wrote. That is `registry-check`'s recorded failure one level out. So the 
 identity test against the two entries of `server/index.js`'s `PAGES` map that name the surfaces
 this tool opens, and anything else falls through to being refused.
 
-**What this does not close.** The four specs above were temporary and were removed, so nothing
-in the tree exercises the routing for a third file today: every remaining spec names
-`web/main.js` or `web/index.html`, which is the coincidence this case is about. The first spec
-that lands on an extracted module is what will exercise it, and until one does the control is
-the half minute it takes to point a spec at `web/scene.js` and read the fired row. `web/`
-holds a fifth kind of file this mapping has no branch for — nothing here serves an image or a
-font — and that is deliberate rather than forgotten: the refusal is loud, and a branch no page
-exercises is a path nothing has measured.
+**What this does not close.** `web/` holds a fifth kind of file this mapping has no branch
+for — nothing here serves an image or a font — and that is deliberate rather than forgotten:
+the refusal is loud, and a branch no page exercises is a path nothing has measured.
+
+**And the routing for a third file is exercised now, which it was not when this case was
+written.** The paragraph here used to say every remaining spec named `web/main.js` or
+`web/index.html` and that the first spec landing on an extracted module would be what tried
+it. That happened when the cloud's two GLSL programs became `web/cloud-shader.js`:
+`crop-axes-swapped` and `crop-in-image-space` name that file, and `crop-in-image-space` runs
+461 assertions with 1 failed and prints `MUTATED BUILD: crop-in-image-space in
+web/cloud-shader.js at /cloud-shader.js`, the fired row being the one its spec names — the cut
+walking with depth in the direction the plane sits. So the fix above is measured on the case
+it was built for rather than on the case that prompted it.
 
 **And the same filter is still standing in `sensor-view-check`**, at its lines 779-780, in the
 same two comparisons. It is the safe half of this shape rather than the silent one — that tool
 refuses a third file at exit 2 before opening a page, and its own comment says why — so what it
 loses to a split is a control rather than a verdict. It is written down here because the two
 were one defect with two outcomes, and the loud one is the one nobody goes back for.
+
+**`registry-check` was the other loud one, and a split is what came for it.** It staged the
+edit into whichever file its spec named and then returned a fixed pair — `web/main.js` and
+`web/index.html`, the module and the panel it has to be paired with — so a spec naming a third
+file had its staged bytes discarded at that last line while the route still resolved to that
+module's own path. Its comment said as much and refused the whole run at exit 2, with the note
+that fixing the pairing was out of scope until something needed it. Eighteen specs needed it at
+once: every mutation of the cloud's shaders moved to `web/cloud-shader.js`, and a refusal there
+is eighteen falsification controls that cannot run, which is worse than the failure the refusal
+was protecting against. The fix is the same shape as the one above — the staged file is carried
+beside the pair and served at its own path, registered after the module's route so it wins when
+the two paths are the same, and `mutantServed` counts on that route rather than on the file — and
+it is falsified rather than argued: serving `main.js`'s bytes at `/cloud-shader.js`, which is
+exactly what the discarded staging would have done, takes the run to `DID NOT RUN` at exit 2
+with zero assertions and a 30-second `waitForFunction` timeout, because a module answering with
+another module's text exports none of the names its importer asks for. With the fix,
+`mix-ignores-normalisation` fires 2 assertions and the row it names is the one that reddens,
+and `crush-ignored`, which still names `web/main.js`, fires 3 and reddens the drop-one sweep on
+`crush` — so neither path was traded for the other.
 
 ### A mutation can erase its own evidence
 
