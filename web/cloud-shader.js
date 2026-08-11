@@ -410,7 +410,7 @@ void main() {
     // The axis the bands are cut along, and the default path is the old expression itself
     // rather than one that computes what the old expression computed. That distinction has
     // already cost this file a measurement twice - the comment above says why, and the
-    // raster's guard two hundred lines into the grade shader says it again - so the zero
+    // raster's guard in the grade shader in web/post-chain.js says it again - so the zero
     // case reaches the old division textually, with no local in the way to license a
     // contraction the inline form does not get.
     float band = glitchAxis > 0.0

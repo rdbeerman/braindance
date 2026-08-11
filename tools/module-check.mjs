@@ -1069,6 +1069,36 @@ const EXEMPTIONS = [
     binding: 'TOP_CENTRE',
     why: 'The world x/z the plan view is centred on. Read by the two directions of the same coordinate change and by nothing else, and a pair of numbers rather than a point because it is not a place in three dimensions.',
   },
+  // The four passes below are one entry repeated, and the reason they are four entries is
+  // that an exemption follows a binding rather than a kind. Each is a three.js `Pass`, and
+  // `enabled` plus whatever uniforms the pass declares is the whole of the interface that
+  // library publishes - the same argument as `web/scene.js`'s renderer and cameras above.
+  // Wrapping them would put the registry inside `post-chain.js`: every one of these writes
+  // is a look parameter's `apply`, which reads a slider, decides whether its pass is worth
+  // running and writes both in one line, and a setter per term would be that registry
+  // spelled twice. `composer` deliberately has no entry - nothing writes a property on it,
+  // only calls its methods, and an exemption covering nothing is the standing filter the
+  // audit below refuses.
+  {
+    module: 'web/post-chain.js',
+    binding: 'renderPass',
+    why: "three.js's own RenderPass. `camera` is repointed by the one function that decides which of the two cameras the viewport draws, which is what that field is for.",
+  },
+  {
+    module: 'web/post-chain.js',
+    binding: 'afterimage',
+    why: 'The trails pass. `enabled` and `uniforms.damp` are written by the trails parameter\'s apply, together and in one line, because a damp of zero is a pass not worth running.',
+  },
+  {
+    module: 'web/post-chain.js',
+    binding: 'bloom',
+    why: 'The glow. `strength` and `enabled` are written by the bloom parameter the same way, and `setSize` is called by `resize` with what `bloomChainSize` answers.',
+  },
+  {
+    module: 'web/post-chain.js',
+    binding: 'grade',
+    why: 'The one combined grade pass. Eight look parameters write their term into `uniforms` and four of them gate `enabled` on whether any term is up, which is the reason the pass is one rather than four.',
+  },
 ];
 
 // ---------- the walk

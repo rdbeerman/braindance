@@ -326,7 +326,7 @@ const MUTATIONS = {
   // the only row that can see it is the drop-one sweep, where reverting a parameter that
   // reaches nothing changes no pixel.
   'crush-ignored': {
-    file: 'web/main.js',
+    file: 'web/post-chain.js',
     edits: [[
       '      col = max(col - crush, 0.0) * 1.12;',
       '      col = max(col - 0.018, 0.0) * 1.12;',
@@ -344,7 +344,7 @@ const MUTATIONS = {
   // bearing, green means it does not and the branch should come out, because a fast path
   // that is bit-identical to the slow one is the second implementation this repo refuses.
   'raster-recomputes-the-default': {
-    file: 'web/main.js',
+    file: 'web/post-chain.js',
     edits: [[
       '        if (scanAxis.x == 0.0 && scanAxis.y == 1.0 && scanPitch == 1.3 && scanHard == 0.0) {',
       '        if (false) {',
@@ -412,7 +412,7 @@ const MUTATIONS = {
   // change. The drop-one sweep is where that shows, because reverting a parameter nothing
   // reads leaves the image where it was.
   'streak-ignored': {
-    file: 'web/main.js',
+    file: 'web/post-chain.js',
     edits: [[
       '      if (streak > 0.0) {',
       '      if (false) {',
@@ -445,7 +445,7 @@ const MUTATIONS = {
   // is the sharper half of `duotone-ignored`: that one asks whether the term is wired up at
   // all, this one asks whether it does the thing it is named for.
   'streak-ignores-angle': {
-    file: 'web/main.js',
+    file: 'web/post-chain.js',
     edits: [[
       '          vec3 tap = texture2D(tDiffuse, vUv + d * texel * streakAxis).rgb;',
       '          vec3 tap = texture2D(tDiffuse, vUv + vec2(0.0, d * texel.y)).rgb;',
@@ -496,7 +496,7 @@ const MUTATIONS = {
   // is reverted. This is the vertical column grille the whole of D1 is for, so a build
   // that quietly lost it would be drawing television scanlines under a green run.
   'raster-ignores-angle': {
-    file: 'web/main.js',
+    file: 'web/post-chain.js',
     edits: [[
       '          float coord = dot(vUv * ref, scanAxis);',
       '          float coord = vUv.y * ref.y;',
@@ -507,7 +507,7 @@ const MUTATIONS = {
   // nothing about the shipped picture moves - which is the point, and which leaves the
   // drop-one sweep as the only thing that can tell the two builds apart.
   'raster-pitch-fixed': {
-    file: 'web/main.js',
+    file: 'web/post-chain.js',
     edits: [[
       '          float wave = sin(coord * scanPitch + time * 2.0) * 0.5 + 0.5;',
       '          float wave = sin(coord * 1.3 + time * 2.0) * 0.5 + 0.5;',
@@ -519,7 +519,7 @@ const MUTATIONS = {
   // and a build without it draws rotated softness at every setting - which looks like a
   // raster right up until you compare it against a reference frame.
   'raster-hard-ignored': {
-    file: 'web/main.js',
+    file: 'web/post-chain.js',
     edits: [[
       '          line = mix(wave, smoothstep(0.5 - w, 0.5 + w, wave), scanHard);',
       '          line = wave;',

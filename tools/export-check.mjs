@@ -287,7 +287,7 @@ const MUTATIONS = {
     'vSize = gl_PointSize;',
   ]] },
   // Grain and scanlines go back to being sized in framebuffer pixels.
-  'grade-absolute': { file: 'web/main.js', edits: [[
+  'grade-absolute': { file: 'web/post-chain.js', edits: [[
     `      float k = resolution.y / 1080.0;
       vec2 ref = resolution / k;`,
     `      float k = 1.0;
@@ -321,7 +321,7 @@ const MUTATIONS = {
   return { width: Math.max(1, refWidth / 2), height: 540 };`,
   ]] },
   // Only the split reverts, so the claim cannot be carried by the other two.
-  'rgbsplit-absolute': { file: 'web/main.js', edits: [[
+  'rgbsplit-absolute': { file: 'web/post-chain.js', edits: [[
     'vec2 off = dir * rgbSplit * texel * 8.0;',
     'vec2 off = dir * rgbSplit * (1.0 / resolution) * 8.0;',
   ]] },
@@ -386,7 +386,7 @@ const MUTATIONS = {
       + '    }',
     ],
   ] },
-  'grain-continuous': { file: 'web/main.js', edits: [[
+  'grain-continuous': { file: 'web/post-chain.js', edits: [[
     'float n = hash(floor(vUv * ref) + fract(time) * 137.0);',
     'float n = hash(vUv * ref + fract(time) * 137.0);',
   ]] },
@@ -455,6 +455,14 @@ const MUTATIONS = {
   // 640x400 stage), so this mutation is bit-identical on all of them and leaves
   // every one of their assertions passing - while every size the export menu
   // offers is 16:9, where it draws 11.1% too large.
+  //
+  // **The two halves of it live in two files now, and that is what the third element on
+  // the second edit is for.** The point size's reference is written in `resize`, which is
+  // `web/main.js`; the grade's is the first line of the grade shader, which went to
+  // `web/post-chain.js` with the pass it belongs to. Splitting this into two mutations was
+  // rejected: the claim is that *every* screen-space term follows the same reference, and
+  // a pair of mutations each moving one term would leave every arm able to pass on the
+  // other term still being right, which is the claim asserted rather than enforced.
   'scale-by-width': { file: 'web/main.js', edits: [
     [
       '  uniforms.bufferHeight.value = buf.y;',
@@ -463,6 +471,7 @@ const MUTATIONS = {
     [
       '      float k = resolution.y / 1080.0;',
       '      float k = resolution.x / 1728.0;',
+      'web/post-chain.js',
     ],
   ] },
   // The failure path reaches back to the output it did not write. This is the
@@ -489,28 +498,45 @@ const MUTATIONS = {
 };
 
 /**
- * The mutated source of whichever file the named mutation edits.
+ * The mutated source of every file the named mutation edits.
  *
  * The exactly-once refusal is the point of the function. A replacement that
  * silently matched nothing would run the unmutated build and be recorded as this
  * tool having missed a bug it was never shown - and because a mutation is a piece
  * of source text, it stops matching the moment the code it names is edited, which
  * is the only warning anyone gets that an anchor has gone stale.
+ *
+ * **An edit may name its own file as a third element, and `spec.file` is the default
+ * for the ones that do not.** One mutation needs it: `scale-by-width` moves the
+ * reference every screen-space term is expressed against, and those terms are no longer
+ * in one file - the point size's is written in `resize` and the grade's is the first line
+ * of a shader that now lives beside its pass. The alternative was a mutation per file,
+ * which is a different and weaker claim, and the alternative to *that* was leaving an
+ * anchor pointing at text that had moved, which `syntax-check` would redden and which
+ * would take a falsification control off the run either way.
+ *
+ * Keyed by file so the exactly-once rule is asked per file rather than of a concatenation:
+ * a `from` that matched once in each of two files would otherwise read as matching twice
+ * and be refused, and one that matched twice in the file it names would read as matching
+ * once against the other file's zero.
  */
 function mutatedSource(name) {
   const spec = MUTATIONS[name];
   if (!spec) {
     throw new Error(`unknown mutation ${name} - have ${Object.keys(MUTATIONS).join(', ')}`);
   }
-  let source = readFileSync(join(REPO, spec.file), 'utf8');
-  for (const [from, to] of spec.edits) {
+  const staged = new Map();
+  for (const [from, to, where] of spec.edits) {
+    const file = where ?? spec.file;
+    if (!staged.has(file)) staged.set(file, readFileSync(join(REPO, file), 'utf8'));
+    const source = staged.get(file);
     const hits = source.split(from).length - 1;
     if (hits !== 1) {
-      throw new Error(`mutation ${name} matched ${hits} times in ${spec.file}, expected exactly 1: ${from}`);
+      throw new Error(`mutation ${name} matched ${hits} times in ${file}, expected exactly 1: ${from}`);
     }
-    source = source.replace(from, to);
+    staged.set(file, source.replace(from, to));
   }
-  return { file: spec.file, body: source };
+  return [...staged].map(([file, body]) => ({ file, body }));
 }
 
 /**
@@ -952,7 +978,14 @@ const mutation = MUTATE ? mutatedSource(MUTATE) : null;
 // `prores-writes-h264`, `pngseq-writes-one-file` and `export-fail-unlinks-output` all
 // patch `server/export.js`, which the render worker imports directly and no browser
 // ever requests.
-const mutatedBody = mutation && mutation.file.startsWith('web/') ? mutation.body : null;
+//
+// `main.js` is separated from the rest because it is the one file `openPage` already had a
+// parameter for: a cross-build arm passes its own older `main.js` and must not be handed
+// this run's mutated one, while every other staged module is a file that arm's build never
+// imports, so it can be routed on every page unconditionally.
+const pageMutants = (mutation ?? []).filter((m) => m.file.startsWith('web/'));
+const mutatedBody = pageMutants.find((m) => m.file === 'web/main.js')?.body ?? null;
+const otherMutants = pageMutants.filter((m) => m.file !== 'web/main.js');
 // The path this mutation would arrive at if a browser asked for it, read off the
 // spec rather than assumed to be `main.js` - the assumption every mutation here has
 // satisfied so far, but coincidentally, the way `registry-check` and `keyframe-check`
@@ -960,13 +993,24 @@ const mutatedBody = mutation && mutation.file.startsWith('web/') ? mutation.body
 // every page it opens on the current tree; the cross-build arms pass their own
 // explicit `source` and are routed at `web/main.js` regardless, because a cross-build
 // arm is always this tree's older `main.js` whatever mutation happens to be active.
-const mutantPath = mutatedBody !== null ? servedAt(mutation.file) : null;
+const mutantPath = mutatedBody !== null ? servedAt('web/main.js') : null;
 // Counted rather than assumed, across every page this file opens on the current
 // tree: `main`, the determinism arms and the resolution sweep all default to
 // `mutatedBody`, and any one of them failing to request the mutated module would
 // leave the others carrying a run that never happened.
+//
+// **Counted per staged file, because a mutation that edits two of them is delivered only
+// if both arrive.** A build patched in `main.js` alone, with the shader half sitting
+// unserved in this process, is a build nobody wrote being measured under the name of one
+// somebody did - `docs/instruments.md` carries the delivery hole this shape belongs to,
+// where a mutation staged and never requested reads as the tool missing a bug it was
+// never shown.
+const mutantServedBy = new Map(pageMutants.map((m) => [m.file, 0]));
 let mutantServed = 0;
-if (MUTATE) console.log(`[export] MUTATED BUILD: ${MUTATE} in ${mutation.file} - this run is expected to FAIL`);
+if (MUTATE) {
+  const where = mutation.map((m) => m.file).join(', ');
+  console.log(`[export] MUTATED BUILD: ${MUTATE} in ${where} - this run is expected to FAIL`);
+}
 
 const pageErrors = [];
 
@@ -1020,6 +1064,21 @@ async function openPage(viewport, source = mutatedBody, html = null) {
     await page.route((url) => url.pathname === EDITOR_PATH,
       (route) => { servedHtml = true; return route.fulfill({ contentType: 'text/html; charset=utf-8', body: html }); });
   }
+  // Every staged module other than `main.js`, each at its own path. Installed before the
+  // `main.js` route and on every page including the cross-build arms, which is safe for
+  // the reason that separates them in the first place: an arm serving an older `main.js`
+  // is serving a build from before this tree had these modules, so it never asks for one
+  // and the route never fires. What it must not do is go uninstalled on a page that *does*
+  // ask, because that page would then run the tree's own module beside a mutated
+  // neighbour - half a mutation, measured under the whole one's name.
+  for (const mutant of otherMutants) {
+    const path = servedAt(mutant.file);
+    await page.route((url) => url.pathname === path, (route) => {
+      mutantServed++;
+      mutantServedBy.set(mutant.file, mutantServedBy.get(mutant.file) + 1);
+      route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: mutant.body });
+    });
+  }
   if (source) {
     // `source === mutatedBody` for every call that did not pass its own explicit
     // source, which is every page opened on the current tree under `--mutate` - so
@@ -1032,7 +1091,10 @@ async function openPage(viewport, source = mutatedBody, html = null) {
     // happens to be active this run.
     const path = source === mutatedBody ? mutantPath : servedAt('web/main.js');
     await page.route((url) => url.pathname === path, (route) => {
-      if (source === mutatedBody) mutantServed++;
+      if (source === mutatedBody) {
+        mutantServed++;
+        mutantServedBy.set('web/main.js', mutantServedBy.get('web/main.js') + 1);
+      }
       route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source });
     });
   }
@@ -1190,8 +1252,13 @@ const main = await openPage(STAGE);
 // same reason. `main` is the first page this file opens on the current tree, and every
 // later page installs the same route the same way, so if this one never asked for the
 // mutated module, none of them will either.
-if (MUTATE && mutatedBody !== null && mutantServed === 0) {
-  console.log(`\n[export] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
+//
+// **Asked of every staged file rather than of a total**, because a mutation spanning two
+// modules is delivered only if both of them arrive: a run where `main.js` was served and
+// the shader was not has a non-zero count and is measuring a build nobody wrote.
+const unserved = [...mutantServedBy].filter(([, n]) => n === 0).map(([file]) => servedAt(file));
+if (MUTATE && pageMutants.length > 0 && unserved.length > 0) {
+  console.log(`\n[export] DID NOT RUN - ${MUTATE} was staged for ${unserved.join(', ')} and the page never `
     + 'requested it, so this run would have measured the unmutated build');
   process.exit(2);
 }
@@ -2487,9 +2554,8 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
   const frameOf = (n) => Buffer.alloc(FRAME_BYTES, 24 + n * 96);
 
   const scratch = mkdtempSync(join(tmpdir(), 'export-check-'));
-  const serverSource = mutation?.file === 'server/export.js'
-    ? mutation.body
-    : readFileSync(join(REPO, 'server/export.js'), 'utf8');
+  const serverSource = mutation?.find((m) => m.file === 'server/export.js')?.body
+    ?? readFileSync(join(REPO, 'server/export.js'), 'utf8');
   let copies = 0;
 
   // One server on the module under test. A fresh copy per call rather than one

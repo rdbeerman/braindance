@@ -4,10 +4,10 @@
 // mechanism in front of it is a number somebody will later take for a resolution bug.
 //
 // Nothing here runs at import time beyond declaring a class and three strings - the five
-// render targets are allocated in the constructor, which the post chain in `main.js` runs
-// where it builds its passes - so importing this module cannot reorder anything a GPU
-// sees, and both halves of it can be constructed and measured under bare node with no
-// renderer at all.
+// render targets are allocated in the constructor, which `buildPostChain` in
+// `post-chain.js` runs where it builds its passes - so importing this module cannot
+// reorder anything a GPU sees, and both halves of it can be constructed and measured
+// under bare node with no renderer at all.
 
 import * as THREE from 'three';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';

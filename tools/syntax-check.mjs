@@ -136,7 +136,7 @@ if (mutateAt !== -1 && !MUTATIONS[mutation]) {
 // live context whether it can render to float, so it cannot be imported under bare node
 // at all, and a floor that counted a test nobody can write would be a floor that has to
 // be lowered later.
-const FLOORS = { server: 5, test: 10, tools: 12, web: 15 };
+const FLOORS = { server: 5, test: 10, tools: 12, web: 16 };
 
 // **Two different questions, so two different sets, and the difference is the point.**
 // `PARSES` is what `node --check` can be handed and have its answer mean anything - a
@@ -592,20 +592,34 @@ if (!existsSync(DOC)) {
     (line, spec) => (/^[./]|^node:/.test(spec) ? line : ''),
   );
 
-  /** What a single entry anchors on, or why it anchors on nothing, or null for unknown. */
+  /**
+   * What a single entry anchors on, or why it anchors on nothing, or null for unknown.
+   *
+   * **An anchor carries its own file rather than borrowing the spec's**, and the two are
+   * usually the same string. They stopped being the same when the page split into modules:
+   * `export-check`'s `scale-by-width` moves the reference every screen-space term is
+   * expressed against, one of those terms is written in `resize` and another is the first
+   * line of a shader that now lives beside its pass, so one mutation's two edits land in
+   * two files. An edit may therefore name its file as a third element, with the spec's
+   * `file` as the default for the ones that do not - and each anchor is checked against
+   * the file it names, because a `from` looked for in the wrong file matches zero times
+   * and reddens as a stale anchor, which is a true statement about the wrong thing.
+   */
   const shapeOf = (spec) => {
     // The C++ table, and now the only array shape. The JavaScript tables that used to
     // arrive as a bare array of edit pairs - `timeline-check` and `keyframe-check` -
     // declare `{ file, edits }` like everything else, so a nested-array first element
     // is no longer a shape this row recognises and would fail below naming the tool.
     if (Array.isArray(spec)) {
-      return typeof spec[0] === 'string' ? { file: REGISTRATION, from: [spec[0]] } : null;
+      return typeof spec[0] === 'string' ? { anchors: [{ file: REGISTRATION, from: spec[0] }] } : null;
     }
     if (typeof spec === 'function') return { anchorless: 'functions that redirect the oracle' };
     if (spec === null || typeof spec === 'string') return { anchorless: 'whole replacement file bodies' };
     if (typeof spec === 'object') {
       if (typeof spec.file === 'string' && Array.isArray(spec.edits)) {
-        return { file: spec.file, from: spec.edits.map(([from]) => from) };
+        return {
+          anchors: spec.edits.map(([from, , where]) => ({ file: where ?? spec.file, from })),
+        };
       }
       // `registry-check`'s old `{ from, to }` shape used to be read here and resolved to
       // the browser bundle by inference. It is gone: that table declares `{ file, edits }`
@@ -680,18 +694,18 @@ if (!existsSync(DOC)) {
         if (!anchorless.some((a) => a.name === name)) anchorless.push({ name, why: shape.anchorless });
         continue;
       }
-      const body = targetSource(shape.file);
-      if (body === null) {
-        fail(`${name}/${mutation} anchors into ${shape.file}, which does not exist`);
-        continue;
-      }
-      for (const from of shape.from) {
+      for (const { file, from } of shape.anchors) {
+        const body = targetSource(file);
+        if (body === null) {
+          fail(`${name}/${mutation} anchors into ${file}, which does not exist`);
+          continue;
+        }
         carriesAnchors = true;
         anchorsChecked++;
         const hits = body.split(from).length - 1;
         if (hits !== 1) {
           stale++;
-          fail(`${name}/${mutation} matches ${hits} times in ${shape.file}, expected exactly 1`
+          fail(`${name}/${mutation} matches ${hits} times in ${file}, expected exactly 1`
             + ` - ${hits === 0 ? 'the text it anchors on has moved, so this control cannot run' : 'the text it anchors on appears more than once, so the tool refuses it'}`);
         }
       }
