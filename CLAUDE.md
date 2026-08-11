@@ -341,6 +341,10 @@ node tools/module-check.mjs --mutate write-through-a-rename    # ... and under t
 node tools/module-check.mjs --mutate write-from-a-page         # ... and from a page's inline module, which is a module like any other
 node tools/module-check.mjs --mutate exemption-outlives-its-export # ... and the exemption table's own rot, which is what a list has instead of a bug
 node tools/module-check.mjs --mutate exemption-covers-nothing  # ... its other half, which is the only thing standing over both rule 3 classifiers
+node tools/module-check.mjs --mutate import-nothing-uses       # ... a name brought across a boundary that no line on this side reads, which is the defect this tool shipped
+node tools/module-check.mjs --mutate import-used-under-its-far-side-name # ... asked of the binding an import makes rather than the name it asks for, which a rename separates
+node tools/module-check.mjs --mutate export-nothing-imports    # ... and the other direction, a name let out that nothing anywhere asks for
+node tools/module-check.mjs --mutate consumer-outside-web-drops-the-name # ... where the only reader is outside web/, and the join is per name rather than per module
 ```
 
 `jobs-check` needs a GPU browser and ffprobe and renders one real job through
@@ -360,8 +364,12 @@ the depth texture, which is what lets it grade the plane fit against a normal it
 **`module-check` needs nothing at all** — no port, no browser, no install — because every
 failure it is about is a failure to *boot*, and an instrument that needs the page running
 cannot see one. It reads `web/` off disk and refuses a tree with an import cycle in it, an
-import naming a file or an exported name that is not there, or state crossing a boundary as
-an object anybody can write into. **What it does not test is the intra-module dead zone**,
+import naming a file or an exported name that is not there, state crossing a boundary as an
+object anybody can write into, or a name crossing one that only one end wanted - a dead
+import, or an export nothing imports. That last pair reads **every JavaScript file in the
+checkout** rather than only `web/`, because seven of this tree's exports have their only
+reader in `server/`, `tools/` or `test/` and a row scoped to `web/` reddens all seven on a
+healthy tree. **What it does not test is the intra-module dead zone**,
 which is the fault `web/main.js` has actually shipped twice: that reach runs through property
 dispatch and is not statically decidable, so it belongs to a post-boot state diff rather than
 to a source scan, and the tool says so in its own output rather than leaving it to be

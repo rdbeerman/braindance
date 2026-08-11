@@ -883,7 +883,7 @@ There is a fourth, and it is the one this tool needed that `syntax-check` does n
 naming a file that nothing in the run read is also exit 2, since the substitution would otherwise
 be delivered nowhere and the clean run would be recorded as a catch.
 
-**Three rules, and the second one is narrower than it sounds.**
+**Four rules, and the second one is narrower than it sounds.**
 
 *Rule 1, the graph is acyclic.* `web/scene.js` opens with the claim that "Nothing here imports
 back into this file, which is what keeps that order a fact rather than a convention", and until
@@ -1013,6 +1013,75 @@ the match begins inside the comment, a mask consulted afterwards says "not code"
 declaration is skipped with its edge silently gone from the graph. Measured before it was fixed:
 `web/scene.js` and `web/curve.js` lost their edges and the run reported them as modules nothing
 loads, which reads as a finding about the tree.
+
+*Rule 4, a name crosses a boundary because both ends wanted it.* This is the rule the tool
+shipped without, and it shipped a green run on a tree that was wrong: **57 assertions, 0 failed,
+PASS** on a `web/main.js` carrying six imports nothing in the file used — `vertexShader` and
+`fragmentShader` from `./cloud-shader.js`, `BloomPass` from `./bloom-pass.js`, and `easeParam`,
+`easeAt` and `easeSlopeAt` from `./curve.js`, three of them dead since the branch point and three
+since the commit that moved their callers out. Every neighbouring question answers *yes* for a
+dead import — the file is reached, the specifier resolves, the name is exported, the module is not
+an orphan — so nothing in rules 1 to 3 could see one. Both halves are built out of what rule 2
+already had in hand, the edge list and `exportsByModule`, which is what made the hole cheap to
+close and embarrassing to have had.
+
+**No module imports a name it does not use.** The search runs over the same scan the rest of the
+tool runs over, with every import declaration in the body blanked on top of it — all of them
+rather than the one under the question, because two declarations importing one name from two
+modules would otherwise each read as a use of the other, and a name moving between modules is
+exactly what this refactor does all day. The population is the in-tree edges **and the
+bare-specifier declarations**: `three` is not a file under `web/`, but `OutputPass` going dead
+when a pass moves out is the same fault as `BloomPass` going dead when a constructor does. A
+binding whose far-side name the target does not export is skipped here and left to rule 2's row,
+so `--mutate import-names-a-missing-export` still reddens one row and not two. `--mutate
+import-nothing-uses` adds a real export of `record-poll.js` to `main.js`'s import of it, and
+`--mutate import-used-under-its-far-side-name` renames the binding so the file is full of the
+name the import *asks for* and holds no reference to the one it *makes* — the fault
+`docs/instruments.md` records against rule 3's sweep, planted here before it can be made again.
+
+**No module exports a name nothing imports, and the consumer set is the checkout rather than
+`web/`.** Seven of this tree's exports have no importer inside `web/` at all: `server/library.js`
+imports `POLLED_NODE_FIELDS`, `tools/fake-grabber.mjs` and `tools/library-check.mjs` import
+`CAPTURE_FORMAT`, and `BLOOM_LEVELS`, `easeParam`, `easeAt`, `TOP_SPAN` and `MIN_VIEW_SEC` are
+held only by unit tests under `test/`. Measured by commenting the outside walk out: the row
+reddens naming all seven, which is a check that cries wolf on its first run and then gets deleted
+rather than fixed. So the walk is the whole checkout minus `node_modules`, `vendor`, `third_party`
+and `web/` itself, and the direction it is allowed to be wrong in is set deliberately — a
+directory it fails to walk costs a consumer and reddens a live export, which somebody sees, while
+a directory it walks that it should not manufactures a consumer and keeps a dead export green.
+A namespace import consumes every export of its target, which is how `test/clip-range.test.mjs`
+reaches `web/clip-range.js`. `--mutate export-nothing-imports` plants a number nothing asks for,
+and `--mutate consumer-outside-web-drops-the-name` takes the name off `server/library.js`'s import
+while leaving the module imported, which separates a join done per name from one done per module:
+a check that marked every export consumed the moment anything imported the module reads that tree
+as unchanged. A row beside them asserts the outside walk is load-bearing rather than decorative —
+if no export ever depended on a reader outside `web/`, it says so, in the shape of
+`--mutate one-spelling-for-every-module`.
+
+**What the use question gets wrong, both found rather than reasoned about.** It asks about a name
+and not about a scope, so two things read as uses that are not references. A name appearing only
+inside a **string body** is the first, because the blanking that removes comments deliberately
+keeps string bodies — the specifier of every import lives in one. Measured on both trees, the
+strict reading, where a use has to sit at a position the mask calls code, names the same six and
+nothing more, and none of the 118 names swept on the current tree has zero code-position hits, so
+nothing is standing on the loose one either way — four names pick up extra hits inside strings
+(`grade`, `afterimage`, `bloom`, `material`, words the GLSL says too) and every one is read in
+code as well. The second was found by a control coming back NOT CAUGHT: a **property key or a
+method name in code position** has no dot in front of it, so the lookbehind that refuses
+`obj.name` cannot refuse `{ name(gl) { … } }`, which is what `web/main.js:9860` is and what made
+an alias of `poll` look read. That one will not close with a lookahead, and the measurement says
+so rather than the argument — excluding a hit followed by `:` or by `(` at the head of a line
+calls twelve live imports unused, `writeClipRange`, `tiltQuaternion` and `pollRecordState` among
+them, because a call written as its own statement is at the head of a line too. Both are false
+negatives, each costing a dead import this row does not find rather than a clean tree it fails,
+and telling a definition from a reference needs a scope analysis rather than a search.
+
+**Its first catch was real.** On the tree as it stood after the six imports came off, the export
+half reddened `web/curve.js:66`: `easeSlopeAt` was let out through the trailing export list, its
+last importer was the dead import in `main.js`, and removing that one left an export with no
+consumer anywhere in the checkout. Fixed by taking the name off the list — `scalarSlopeAt` calls
+the function four lines down, so it is a name coming off a boundary rather than code being
+deleted.
 
 **`prof-summary.mjs <profile> [warmup]`** reads `grabber --profile` output and flags any run
 under 29.5fps as contended, because the segment timings from a run that dropped frames are

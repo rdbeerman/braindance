@@ -1834,6 +1834,46 @@ the row look grounded: the arm is reading live state through a real seam, and th
 reads simply is not the one the behaviour depends on. Ask what the *subject* reads, not what is
 convenient to read about it.
 
+**A sixth, and the skipped object was a name that answers *yes* to every question its
+neighbours ask.** `module-check` ran **57 assertions, 0 failed, PASS** on a `web/main.js`
+carrying six imports nothing in the file used — `vertexShader` and `fragmentShader` from
+`./cloud-shader.js`, `BloomPass` from `./bloom-pass.js`, and `easeParam`, `easeAt` and
+`easeSlopeAt` from `./curve.js`. Three went dead when their callers moved out one commit after
+their module was made and three were dead at the branch point, and they were found by a person
+grepping rather than by the tool built to hold that boundary.
+
+What makes this worth writing down is *why* three rules missed it, because the answer is not
+that anybody scoped them badly. A dead import is a green answer to every question the tool
+asks: the graph is still acyclic through it, the specifier still resolves, the file is still
+reached from a page so it is not an orphan, the name is still a name the other side exports, and
+nothing writes into it because nothing touches it at all. The tool had a row for an orphan
+*file* and a row for an import naming a *missing* name — the two questions on either side of
+this one — and the shape between them is the one where every observation comes back healthy.
+**When two rows sit either side of a gap, the gap is where the fault will be**, because a fault
+that reddened either of them would have been fixed already.
+
+Two things came out of closing it. The first: the consumer set for "does anything import this
+export" **cannot be the directory under test**. Seven of `web/`'s exports have no importer inside
+`web/` — `server/library.js` reads `POLLED_NODE_FIELDS`, `tools/fake-grabber.mjs` and
+`tools/library-check.mjs` read `CAPTURE_FORMAT`, and five more are held only by `test/` — and
+measured by commenting the outside walk out, a row scoped to `web/` reddens all seven on a
+healthy tree. A check that cries wolf on its first run is deleted rather than fixed, so the
+scoping decision is the row surviving or not. The direction the walk is allowed to be wrong in
+follows from the same argument: a directory it misses costs a consumer and reddens a live
+export, which somebody sees, while a directory it should not have walked manufactures a consumer
+and keeps a dead export green.
+
+The second: the use question is asked of a **name** and not of a scope, and it took a control
+coming back NOT CAUGHT to find where that bites. `--mutate import-used-under-its-far-side-name`
+renamed `pollRecordState` to `poll` on import, leaving the file full of the far-side name and
+holding no reference to the binding it makes — and the row stayed green, because
+`web/main.js:9860` defines a method called `poll` in an object literal, which is a name written
+in code position with no dot in front of it and so indistinguishable from a reference. The
+control now uses an alias nothing else spells; the limitation is in the tool's header beside the
+other one, that a name appearing only inside a string body reads as used. Both are false
+negatives, which is the direction an instrument may be wrong in — but the rule is that a
+limitation lives in a comment, never inside a control, where it reads as the rule not working.
+
 ### The third form: a fixture symmetric under the very transform you are testing
 
 The two forms above are about arms agreeing and about an object nobody looks at. There is a
