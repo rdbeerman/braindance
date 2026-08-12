@@ -2940,3 +2940,73 @@ kind-dependent row at once", which is true of most of the table's fields and exa
 the one that gates the sweep: editing `eases` reddens **zero** rows. A plausible-sounding
 reason for a scoping decision is worth re-deriving against the specific field, because the
 comment was what stopped anybody looking.
+
+## A driver credit is prose, and nothing joins it to a press
+
+`editor-check` covers its control sweep two ways: a rule that claims a class by container,
+and `DRIVER_IDS`, a table naming one control at a time and crediting the driver that presses
+it. The table's own comments already record two entries that credited a driver which did not
+drive, and say in as many words that this is the shape the table exists to refuse.
+
+Three more were found at once, and finding them was an accident of the shape and the rate
+moving surfaces. `tFps` was credited to "timeline-check and export-check change the output
+rate and count frames": both of those write `transport().outputFps` directly and neither has
+ever referenced the element. `tDeliverable` and `tDeliverableNew` were credited to
+`library-check`, which writes deliverable directories on the server, reads `#tNote`, and
+touches neither control. So of five entries read closely, three were false and two of those
+were false in both halves.
+
+**The mechanism is that a credit is a string.** Nothing joins `DRIVER_IDS['tFps']` to a
+press of `#tFps` anywhere — the sweep asks whether the key exists, not whether the sentence
+is true — so an entry is exactly as good as the last person to read it. That is not an
+argument for deleting the table, because the alternative is the container rule, which is
+worse in the same direction: it claims everything the container grows. It is an argument for
+treating an entry as a claim with an owner. When a control moves, the entry moves with it and
+is re-derived rather than carried across, and the honest repair for a credit with no true
+answer is to make one true — section 1 presses those three now.
+
+**And a container rule widened to a new container is the same failure with a bigger blast
+radius.** `shelldialogs` was widened from two dialogs to three when the shape and the rate
+moved into a new modal, which is a rule claiming every enabled control in a container the
+tool had never opened. The `appbar` rule's comment records that exact mistake twice. The
+repair is to make the claim true — the new dialog is opened, both of its controls are driven,
+and both of its ways out are pressed — and then to run `plant-unswept-control` and read
+*which* assertion fires, rather than trusting the exit code. It fired naming
+`tPlantedControl`, which is the row doing its job; a widening that swallowed the planted
+control would have read green at 488 assertions.
+
+## A hook renamed under a tool that deliberately boots two builds
+
+`registry-check` renders this tree against a `web/main.js` pulled out of history with `git
+show`, so it is the one tool in the suite holding two builds at once. Renaming a page hook —
+`setTargetSize` to `setOutputSize`, because the name referred to a variable that no longer
+existed — left the old arm answering to a name nothing asked it. Reached as
+`globalThis.__kinect.setOutputSize?.("640x400")`, which is how five of that hook's six
+callers spell it, the miss is silent by construction: the arm kept its default 16:9 letterbox
+at 640x360 while this tree framed 1.6 at 640x400, and **all six cross-build rows went red
+naming pixels that differ.** Six findings about readings, produced by a rename.
+
+Two things are worth keeping out of this.
+
+**An optional call on a probe hook is a resize that can quietly not happen.** `?.` is right
+where the absence is meaningful and wrong where it stands in for "this build might spell it
+differently" — the first is a fact about the build, the second is a rename nobody has
+noticed yet. A cross-build tool has to address each build in the language it speaks, which is
+what `git show` already commits it to, so asking by both names is the accommodation rather
+than the smell. It is not a compatibility path inside the program, which is the thing this
+repo refuses.
+
+**But do not then throw when neither name answers**, which is the obvious next step and is
+wrong here. One of this tool's two arms predates letterboxing entirely, publishes neither
+name, and arrives at the right buffer by having nothing to fit — so a throw turns a correct
+no-op into `DID NOT RUN` for the whole file. It did, on the first attempt at the repair. The
+absence is meaningful on one arm and a rename on the other, and only reading what each arm
+actually publishes tells them apart.
+
+**And the control that settles it is the baseline in the failing conditions, not reasoning
+about the diff.** Five of the six rows went green with the accommodation in place and one did
+not — `readGhost`, two of six frames rather than six of six, which is a different shape and
+so a different cause. A worktree at the commit before the branch's work, served on its own
+port and checked from its own tree, produced the identical row with identical hashes. That
+row is older than the change sitting on top of it, and ten minutes of `git worktree` is what
+separates "pre-existing" from "mine" when both readings fit.

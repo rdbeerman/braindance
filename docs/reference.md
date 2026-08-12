@@ -171,6 +171,43 @@ does not keep its trail at another. It is the only term this applies to, because
 `AfterimagePass` in `web/post-chain.js` is the only pass in the chain that carries anything
 from one render to the next.
 
+## The edit, and what comes out of it
+
+Two menus, because there are two questions and one of them used to answer both. **File >
+Project settings** holds the shape the stage is letterboxed to and the rate the frames come
+out at, and both are undoable document state. **Output > Export** holds the resolution, the
+format, the output name and a readout of the trim the press will take, and all of those
+belong to a deliverable — one of several files you might make from the edit.
+
+**The shape is the edit's because the camera was keyed against a frame.** A 65:24 shot
+reopened at 16:9 is a different shot with the same keys, which is the class of silent
+reinterpretation the point-size rebase already taught this repo to refuse. The resolution is
+*not* the edit's, and that is the same argument read the other way: every screen-space term
+is expressed against 1080p and bloom's chain is frozen at 600 whatever the buffer is, so
+1920x1080 and 1280x720 of one edit are the same picture and neither needs re-keying. So the
+resolution menu offers only sizes of the project's shape — a size of another shape would be
+a reframe, and reframing is what Project settings is for.
+
+A project stores the shape as the reduced integer pair rather than as a ratio, and the two
+are not interchangeable: the "1.90:1 DCI" the menu prints is really 1.8963, so a document
+carrying that decimal would record a shape 0.2% away from the one the clip was composed
+for and the editor would reframe it on the next open. `2048x1080` reduces to `[256, 135]`
+exactly, and every other group in the table reduces exactly too.
+
+**The rate is the edit's because `trails` is counted in output frames**, for the reason the
+paragraph above gives — the same document at two rates is two different looks, so a rate
+chosen per deliverable would mean two files of one edit carrying two grades with nothing on
+screen saying so. Moving it also made a rate change undoable, which it had never been: the
+handler committed to the stack, and the snapshot it compared held nothing for it to notice.
+
+A deliverable saved by an older build names an output rate this build would ignore, so it is
+refused at the picker rather than read — set the rate in Project settings and save it again.
+A *project* saved by an older build carries an `outputSize` instead of a shape, and that one
+is read rather than refused: its ratio is the shape it was framed at, and its pixels are
+handed to the deliverable, so it renders exactly what it rendered before. A hand-typed size
+of a shape the table has nothing for keeps its own size and lights no shape button, which is
+honest rather than tidy — the stage really is that shape.
+
 ## Levelling a canted mount
 
 A sensor bolted to a dashboard shoots a room that arrives on its side, and nothing measures
