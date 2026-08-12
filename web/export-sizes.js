@@ -69,6 +69,22 @@ const DEFAULT_EXPORT_SIZE = '1920x1080';
  * `[16, 9]` with `[16, 9]` is that equality written down; comparing the sizes is not.
  */
 function reduceAspect(w, h) {
+  // **`[0, 0]` for anything that is not two finite numbers, which the guard has to say
+  // rather than the loop.** Without this line NaN walks straight through: `while (b)` is
+  // false for NaN because NaN is falsy, so the reduction never runs and the return is
+  // `[NaN, NaN]` - a pair that compares unequal to itself, lights no shape button and
+  // matches no group, with nothing anywhere saying why. Infinity is worse in the other
+  // direction, reducing to `[Infinity, 1]`, which is a *shape* as far as `sameAspect` is
+  // concerned. Both were reachable in the sense that mattered: this function's own
+  // docstring and the test beside it promise `[0, 0]` for a degenerate pair, and that
+  // promise was kept for `(0, 0)` and broken for every non-finite input.
+  //
+  // Every caller today guards with `w > 0 && h > 0` before trusting the result, so nothing
+  // shipped wrong. That is exactly the argument for fixing it here rather than leaving it:
+  // a contract kept only by the discipline of every caller is one the next caller breaks,
+  // and `[0, 0]` already means "a shape nothing matches" to `aspectOfSize` and to
+  // `sizesForAspect`, so the degenerate answer has a reader.
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return [0, 0];
   let a = Math.abs(Math.trunc(w));
   let b = Math.abs(Math.trunc(h));
   while (b) [a, b] = [b, a % b];
@@ -103,6 +119,17 @@ function exportAspects() {
  * into a deliverable, is exactly the second list the header is about.
  */
 function sizesForAspect(aspect) {
+  // **A pair, checked rather than assumed, and the check answers rather than throws.** The
+  // bare destructure below has two failure modes that both read as something else. A
+  // `null` or an object is not iterable, so it threw a `TypeError` out of a function whose
+  // documented answer for "no such shape" is an empty array - and this is called while the
+  // resolution menu is being built, so the throw lands in a repaint rather than at the
+  // document that caused it. A *three*-element array went the other way and was worse: the
+  // destructure reads the first two and ignores the rest, so `[16, 9, 1]` matched the 16:9
+  // group and was accepted as a shape. Nothing upstream can produce one today, because
+  // `restoreProject` checks the length before this is reached, but a contract kept by a
+  // caller's validator is one the next caller breaks.
+  if (!Array.isArray(aspect) || aspect.length !== 2) return [];
   const [w, h] = aspect;
   const group = EXPORT_SIZES.find((g) => {
     const [gw, gh] = reduceAspect(g.sizes[0][0], g.sizes[0][1]);

@@ -133,6 +133,40 @@ test('a degenerate pair answers [0, 0] rather than dividing by zero', () => {
   assert.deepEqual(reduceAspect(1920, 0), [1, 0]);
 });
 
+test('and anything that is not two finite numbers answers [0, 0] too', () => {
+  // **This row is here because the one above was named for a promise it did not test.** It
+  // said "a degenerate pair" and checked two pairs of real numbers, so `NaN` walked
+  // straight through the reduction - `while (b)` is false for NaN - and came back as
+  // `[NaN, NaN]`, while Infinity came back as `[Infinity, 1]`, which `sameAspect` would
+  // read as a shape. Two reviewers found the gap independently and neither could reach it
+  // from a document, because every caller guards first. A contract kept only by every
+  // caller's discipline is one the next caller breaks, so it is kept here instead.
+  for (const bad of [NaN, Infinity, -Infinity, undefined, null, {}, [], 'wide']) {
+    assert.deepEqual(reduceAspect(bad, 9), [0, 0], `reduceAspect(${String(bad)}, 9)`);
+    assert.deepEqual(reduceAspect(16, bad), [0, 0], `reduceAspect(16, ${String(bad)})`);
+  }
+  // `null` coerces to 0 through `Number.isFinite`? It does not - `Number.isFinite(null)`
+  // is false, which is the answer wanted here and is worth pinning, because the older
+  // `w > 0` style guard would have let `null` through as 0 and produced `[0, 1]`.
+  assert.deepEqual(reduceAspect(null, 9), [0, 0]);
+});
+
+test('a shape that is not a pair of two is not a shape, however it is spelled', () => {
+  // Both halves shipped wrong and they failed in opposite directions. A `null` or an
+  // object is not iterable, so the bare destructure threw a TypeError out of a function
+  // whose documented answer for "no such shape" is `[]` - and it is called while the
+  // resolution menu is being rebuilt, so the throw landed in a repaint rather than at the
+  // document that caused it. A three-element array did the more dangerous thing: the
+  // destructure read the first two and ignored the rest, so `[16, 9, 1]` matched the 16:9
+  // group and was accepted as a shape.
+  for (const bad of [null, undefined, {}, '16:9', 42, [], [16], [16, 9, 1], [16, 9, 1, 1]]) {
+    assert.deepEqual(sizesForAspect(bad), [], `sizesForAspect(${JSON.stringify(bad) ?? String(bad)})`);
+  }
+  // And the pair it is spelled as still works, or the row above passes by refusing
+  // everything.
+  assert.ok(sizesForAspect([16, 9]).length > 0);
+});
+
 test('every size in a group reduces to the same integer pair, not merely the same ratio', () => {
   // **Stronger than the float row above, and the difference is what the split needs.** That
   // row asks whether `w/h` agrees to within 1e-12, which is a question about a quotient;
