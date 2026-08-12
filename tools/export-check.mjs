@@ -321,6 +321,32 @@ const MUTATIONS = {
     `  const refWidth = (bufferWidth / bufferHeight) * 1080;
   return { width: Math.max(1, refWidth / 2), height: 540 };`,
   ]] },
+  // There is no mutation here for the chain rows, and the attempt that was supposed to be
+  // one is worth naming so it is not re-derived.
+  //
+  // A control for `sameChain` has to diverge the two builds' chains *without* moving the
+  // picture, or the row it reddens cannot say which of its terms did the work. The
+  // candidate was `trail-gate-admits-zero`: the trail's gate is `damp > 0`, so admitting
+  // zero puts `AfterimagePass:on` in this build's chain and nowhere in the pinned build's,
+  // and three's `AfterimageShader` is `max(texelNew, texelOld * damp * when_gt(...))`,
+  // which at a damp of zero is algebraically `max(new, 0)` - the pass returning its input.
+  // The chain half worked exactly as designed, `RenderPass+AfterimagePass+OutputPass`
+  // against `RenderPass+OutputPass` on the three arms whose trail is zero. The picture
+  // half did not: the worst of forty tile means went from 0.602, 0.070 and 0.071 of 255
+  // to 42.502, 22.141 and 27.607, at a luminance ratio of 1.64. An enabled pass is another
+  // ping-pong through the composer's targets whatever its shader computes, so a pass that
+  // is an identity is still not free, and every one of those rows then failed on the
+  // tolerances as well as on the chain - a mutation caught twice over, proving nothing
+  // about either catcher.
+  //
+  // That generalises rather than being about the trail: **no product edit can diverge the
+  // chain and leave the pixels**, because the divergence is a pass appearing or
+  // disappearing and the composer charges for the pass rather than for what it computes.
+  // So the chain term's falsification is a probe at the readback instead, and
+  // `docs/instruments.md` carries both probes with what each measured. The one that
+  // matters found the tolerances moving by nothing at all under a divergent chain, which
+  // is the reading that says these rows have one guard rather than two.
+  //
   // Only the split reverts, so the claim cannot be carried by the other two.
   'rgbsplit-absolute': { file: 'web/post-chain.js', edits: [[
     'vec2 off = dir * rgbSplit * texel * 8.0;',
@@ -1443,12 +1469,24 @@ const asOldBuild = (look) => {
  * and joins, so an arm off a page that stopped publishing its composer answers `''` - and
  * two arms that both answer `''` compare equal, which is an assertion that has stopped
  * being able to fail while reading exactly like one that passes. That is this repo's most
- * frequently recorded defect and it is closed here rather than at the five call sites,
- * because a sixth cross-build row added later would otherwise inherit the hole. Nothing
- * legitimately renders through no passes: `RenderPass` and `OutputPass` are added in
- * `web/post-chain.js` and neither is ever disabled - only the afterimage, the bloom and
+ * frequently recorded defect.
+ *
+ * It is closed in two places on purpose, and the division of labour is the point rather
+ * than belt and braces. **The class is closed at the readback**, by the row over `ARMS`
+ * near the foot of this file: that one names the arm that came back silent, fires whether
+ * the silence is ever compared or not, and covers a future row that reads `chainOf`
+ * directly instead of going through this predicate - which is the hole a guard living only
+ * here would still have, since a consumer that never calls `sameChain` never meets it. The
+ * term below is the narrower job of stopping a *comparison* being believed on the strength
+ * of two silences, so a run that somehow reaches a cross-build row with no chain to compare
+ * reddens the row it would otherwise have passed rather than only the population row.
+ *
+ * Nothing legitimately renders through no passes: `RenderPass` and `OutputPass` are added
+ * in `web/post-chain.js` and neither is ever disabled - only the afterimage, the bloom and
  * the grade are - so the floor for a healthy arm is two names, and requiring one is a
- * requirement no correct build can trip over.
+ * requirement no correct build can trip over. Measured on a clean run, the barest arms in
+ * this file read `RenderPass+OutputPass` and the fullest `RenderPass+AfterimagePass+
+ * BloomPass+ShaderPass+OutputPass`.
  */
 const chainOf = (arm) => (arm.passes ?? [])
   .filter((p) => p.endsWith(':on'))
@@ -1732,6 +1770,16 @@ const RES_TOLERANCE = {
   crop: { on: 'coarse', mean: 0.9, ratio: 0.005 },
 };
 
+// Every arm this run captured, in capture order and under the label it was asked for.
+//
+// The chain rows below are built on a readback, and a readback is a thing that can
+// stop working. Keeping the arms lets that be asked as a question about the whole
+// population once, rather than inferred at each comparison from the fact that two
+// sides matched - which is the inference that cannot tell a match from two silences.
+// It is recorded here rather than at the call sites because this is the one funnel
+// every arm in the file goes through, so an arm added later is asked by existing.
+const ARMS = [];
+
 // One arm at whatever size the page is currently at, with the intrinsics pinned so
 // the hello fetch - which landed in the same commit as the resolution work - is not
 // part of any difference measured here.
@@ -1739,7 +1787,9 @@ async function armAt(page, opts) {
   await page.evaluate(
     `globalThis.__ex.pinIntrinsics(${[hello.fx, hello.fy, hello.cx, hello.cy].join(', ')})`,
   );
-  return page.evaluate(`(${RES_ARM})(${JSON.stringify({ at: AT_SEC, resLook: RES_LOOK, ...opts })})`);
+  const arm = await page.evaluate(`(${RES_ARM})(${JSON.stringify({ at: AT_SEC, resLook: RES_LOOK, ...opts })})`);
+  ARMS.push([opts.label ?? '(unlabelled)', arm]);
+  return arm;
 }
 
 async function resolutionSweep(page, pipelines) {
@@ -2787,6 +2837,33 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
 }
 
 // --------------------------------------------------------------------- shutdown
+
+// The readback the chain rows stand on, asked of every arm this run took rather than
+// of the pairs that happened to be compared.
+//
+// Five rows above judge whether two builds ran the same post chain, and all five read it
+// through `chainOf`, which answers `''` for an arm off a page that has stopped publishing
+// its composer. Two of those and the comparison is an equality between silences: it passes,
+// it goes on passing, and nothing in the run says the instrument went blind. Asking the
+// population instead of the pair is what makes the failure loud - it names the arm, and it
+// names it whether that arm was ever put in a comparison or not, so a future row reading
+// `chainOf` straight is covered by a check that already exists rather than by whoever adds
+// it remembering.
+//
+// The count is asserted with it, because a row over a list is a row that passes on an empty
+// list, and this file's own history has one of those in it - "every parameter every row asks
+// for exists on this build" read `Object.entries` over a `Map`, got `[]`, and printed a pass
+// whatever the arms had dropped. A full clean run captures 39; the floor is stated as "some"
+// rather than as 39 so that adding an arm is not an edit here, and the mutations that cut the
+// run short are why it is not an equality.
+{
+  const blind = ARMS.filter(([, a]) => chainOf(a) === '').map(([label]) => label);
+  check(ARMS.length > 0 && blind.length === 0,
+    'every arm published the chain it rendered through, so the rows comparing chains had chains',
+    blind.length
+      ? `${blind.length} of ${ARMS.length} arms came back with no passes: ${blind.join(', ')}`
+      : `${ARMS.length} arms, each naming its passes; ${ARMS.map(([l, a]) => `${l} ${chainOf(a)}`).join(', ')}`);
+}
 
 check(pageErrors.length === 0, 'no page errors', pageErrors.slice(0, 3).join(' | '));
 

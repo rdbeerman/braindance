@@ -2054,12 +2054,49 @@ gap between a list of three call sites and the word "every" one paragraph away.
 Underneath all five sat a second hole with the shape this file records most often. `chainOf`
 reads `arm.passes ?? []` and joins, so an arm off a page that stopped publishing its composer
 answers `''` — and `'' === ''` is a match, so a failed readback passed as agreement and would
-have kept passing. It was closed in `sameChain` rather than at the call sites, which is the
-same argument as the section this sits under: a sixth cross-build row added next year inherits
-the requirement by calling the predicate. The floor is a chain of at least one name, and no
-correct build can trip over it, because `RenderPass` and `OutputPass` are added in
-`web/post-chain.js` and neither is ever disabled — only the afterimage, the bloom and the grade
-are.
+have kept passing. The first repair put a non-empty requirement inside `sameChain` and claimed
+in its comment that this closed the class; it does not, because a row that reads `chainOf`
+directly never calls the predicate and inherits the hole untouched. **The failure belongs to
+the readback, so the guard belongs there**: `armAt` is the one funnel every arm in the file goes
+through, it now records each arm under its label, and a row near the foot asks the whole
+population whether every arm published the chain it rendered through. That one names the arm
+that came back silent, fires whether the silence was ever compared or not, and asserts the
+population size beside it — because a row over a list is a row that passes on an empty list, and
+this same file already shipped one of those. The narrower term stayed in `sameChain` to stop a
+*comparison* being believed on two silences. The floor is a chain of at least one name, and no
+correct build can trip over it: `RenderPass` and `OutputPass` are added in `web/post-chain.js`
+and neither is ever disabled — only the afterimage, the bloom and the grade are.
+
+**The control is a probe, and the mutation that was supposed to replace it was built, run and
+thrown away.** A control for the chain term has to diverge the two builds' chains without moving
+the picture, or the row it reddens cannot say which of its terms did the work. The candidate was
+`trail-gate-admits-zero`: the trail's gate is `damp > 0`, so admitting zero puts
+`AfterimagePass:on` in this build's chain and nowhere in the pinned build's, and three's
+`AfterimageShader` is `max(texelNew, texelOld * damp * when_gt(texelOld, 0.1))`, which at a damp
+of zero is `max(new, 0)` — the pass returning its input. The shader source was read rather than
+recalled, and the algebra is right.
+
+It was still wrong. Measured, the chain half worked exactly as designed —
+`RenderPass+AfterimagePass+OutputPass` against `RenderPass+OutputPass` on the three arms whose
+trail is zero — and the worst of forty tile means went from 0.602, 0.070 and 0.071 of 255 to
+**42.502, 22.141 and 27.607**, at a luminance ratio of 1.64. An enabled pass is another
+ping-pong through the composer's render targets whatever its shader computes, so an identity
+shader is not a free pass, and each of those rows then failed on the tolerances as well as on the
+chain: a mutation caught twice over, which proves nothing about either catcher. **The
+generalisation is the useful part — no product edit can diverge the chain and leave the pixels,
+because the divergence is a pass appearing or disappearing and the composer charges for the pass
+rather than for what it computes.** So this is a claim whose falsification cannot be a source
+mutation, and saying that is better than shipping a mutation that reddens the right rows for the
+wrong reason.
+
+The probes are the control. Filtering `ShaderPass` out of the old build's full arm gives 48 of
+50, failing exactly the two whole-look rows and no others, **with the luminance ratio at 1.00883
+and the worst tile at 0.410/255, unchanged from the clean run to five figures.** That is the
+reading that justifies the whole repair — the pixel tolerances see a chain divergence as nothing
+at all, so on those rows `sameChain` is not a second opinion, it is the only one. A second probe
+emptying every arm's pass list gives 45 of 50, failing exactly the five cross-build rows, which
+is the vacuity the population row now catches at its source. Both are recorded here with their
+numbers because that is the whole of what stands behind those rows.
 
 ### The half measured by hand is the half the next round finds
 

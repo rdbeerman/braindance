@@ -252,9 +252,25 @@ the class, wearing the class's own paragraph, and it survived a round of review 
 green row is where an exemption is cheapest to write and hardest to see. Both rows carry
 `sameChain` now and print both chains. The same edit closed a second hole underneath all five:
 `chainOf` answers `''` for an arm off a page that stopped publishing its composer, and two
-empty chains compared equal, so a failed readback read exactly like a match. It now requires
-a non-empty chain, which no correct build can trip over — `RenderPass` and `OutputPass` are
-never disabled, so the floor for a healthy arm is two names.
+empty chains compared equal, so a failed readback read exactly like a match. That is guarded at
+the readback rather than at the comparison — `armAt` records every arm it takes, and a row at
+the foot asks the population whether each one published a chain, so a future row reading
+`chainOf` without going through `sameChain` is covered by a check that already exists. No
+correct build can trip it: `RenderPass` and `OutputPass` are never disabled, so the floor for a
+healthy arm is two names.
+
+**The chain rows have no mutation, and the one built for them was measured and discarded.** A
+control for the chain term has to diverge the two builds' chains without moving the picture, or
+the row cannot say which term did the work. `trail-gate-admits-zero` admitted a damp of zero to
+the trail's gate, which put `AfterimagePass:on` in this build's chain and nowhere in the pinned
+build's; three's `AfterimageShader` is `max(new, old * damp * when_gt(...))`, an identity at damp
+zero. The chain diverged exactly as designed and the picture moved anyway — the worst of forty
+tile means went from 0.602, 0.070 and 0.071 of 255 to 42.502, 22.141 and 27.607 — because an
+enabled pass is another ping-pong through the composer's targets whatever its shader computes.
+That generalises: no product edit can diverge the chain and leave the pixels, so this claim's
+falsification cannot be a source mutation. `docs/instruments.md` carries the two probes that
+stand in for one, with the reading that matters — a divergent chain moves the luminance ratio and
+the worst tile not at all.
 
 One row beside them **could not fail on any input**: "every parameter every row asks for
 exists on this build" read `Object.entries` over a `Map`, which is `[]`, so it printed a pass
