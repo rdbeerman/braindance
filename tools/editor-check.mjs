@@ -2217,10 +2217,10 @@ const DRIVER_RULES = [
   },
   {
     key: 'shelldialogs',
-    what: 'a control in the Export, OBS, or state dialog',
+    what: 'a control in the Project settings, Export, OBS, or state dialog',
     by: 'section 1 opens each application dialog, drives every enabled control, and '
       + 'asserts every format the export dialog offers is one the server encodes',
-    match: (row) => inGroup(row, '#exportDialog', '#obsDialog'),
+    match: (row) => inGroup(row, '#projectDialog', '#exportDialog', '#obsDialog'),
   },
   {
     key: 'paneltabs',
@@ -2364,7 +2364,12 @@ const DRIVER_IDS = {
   tRate: 'section 4 - the anchor rows and the seek-storm row',
   tCamView: 'section 1 - looks through the program camera and reads the orbit back',
   tRateKey: 'section 5 - plants and removes a retime key',
-  tFps: 'timeline-check and export-check change the output rate and count frames',
+  // `tFps` is deliberately not here. It moved into Project settings with the rate itself,
+  // so the `shelldialogs` rule covers it and section 1 drives it - which is a credit that
+  // names a press. The entry it replaces read "timeline-check and export-check change the
+  // output rate and count frames", and both of those write `transport().outputFps`
+  // directly: true of the model, false of the control, and this file exists because the
+  // suite once tested the first and never the second.
   tSetIn: 'section 3 - sets the range from the playhead',
   tSetOut: 'section 3 - sets the range from the playhead',
   tClearRange: 'section 3 - puts the range back to the whole clip',
@@ -2401,8 +2406,14 @@ const DRIVER_IDS = {
   // library link's rather than following it, which is the assertion that matters for a
   // control whose whole behaviour is where it points.
   toMenu: 'section 1 - reads the href it navigates to, beside the library link',
-  tDeliverable: 'library-check, and section 6 here plants a long name in it',
-  tDeliverableNew: 'library-check',
+  // **Both of these were credited to `library-check`, and it presses neither.** It writes
+  // deliverable *directories* on the server and reads `#tNote`; it has never referenced
+  // either control. The picker's other half was true - section 6 does plant a name in it
+  // and read the refusal back - so that half is what is left. The `new` button had nothing
+  // true said about it at all, which is the shape the two project entries above record,
+  // arriving a third time. Section 1 presses it now, so the credit names a press.
+  tDeliverable: 'section 6 - plants a long name in it and reads back which one the picker is left on',
+  tDeliverableNew: 'section 1 - presses it and reads the prompt it opens, the way Save as is driven',
   tExportName: 'section 7 - names the file and refuses a path',
   tExportSize: 'export-check sweeps every size the menu offers',
   tExport: 'section 6 asserts it is reachable, section 7 renders with it',
@@ -2775,10 +2786,15 @@ try {
       // wrapper per menu - so the container is the class, and a rule that could only
       // name ids had to fall back to "anywhere in the row", which is exactly how it came
       // to cover a control nothing drives.
+      // `#projectDialog` is here because the shape and the rate moved onto the document
+      // and out of the deliverable, taking their two controls into a third modal. A
+      // container this list does not name gives every control inside it an empty
+      // `groups`, so nothing in the rule table can match one and they arrive as unknown -
+      // which is the honest direction, and is how the two the split created were noticed.
       groups: ['#appBar', '#panel', '#panelTabs', '#lookPresetGroup', '#cameraGroup', '#navRow',
         '#recordGroup', '#recLookGroup', '#sensorGroup', '#monitorGroup',
-        '#programOutGroup', '#presetPick', '#exportDialog', '#obsDialog', '#panelDock',
-        '.appmenu']
+        '#programOutGroup', '#presetPick', '#projectDialog', '#exportDialog', '#obsDialog',
+        '#panelDock', '.appmenu']
         .filter((g) => el.closest(g)),
       kf: el.classList.contains('kf'),
       mark: el.classList.contains('tmk'),
@@ -3000,13 +3016,23 @@ try {
   await new Promise((r) => setTimeout(r, 100));
   check(savePrompt.startsWith('save this edit as'), 'Save as reaches the existing project writer', savePrompt || 'no prompt');
 
+  // `Output > Export`, which is the whole of that menu's editing half now. It was two
+  // commands - `Render` opened this dialog and `Export` jumped past it into the save when
+  // there was a file to hand over - and one menu item doing two unrelated things according
+  // to state the menu did not show is what the merge removed. There is no `#menuRender` to
+  // click any more, and clicking the one that is left has to reach the dialog directly.
   await page.locator('#outputMenuButton').click();
-  await page.locator('#menuRender').click();
+  await page.locator('#menuExport').click();
   const exportDialog = await page.evaluate(`(() => ({
     open: document.getElementById('exportDialog').open,
-    ratios: [...document.querySelectorAll('#exportRatios button')].map((button) => ({
-      label: button.textContent, selected: button.getAttribute('aria-pressed'),
-    })),
+    // The resolutions this dialog offers, where the ratio segments used to be read. The
+    // segments moved to Project settings with the shape itself, and what is left here is
+    // the pixel count - so this reads the menu that is now the deliverable's own choice,
+    // and the row below asserts every entry in it is the shape the stage is letterboxed
+    // to. That is the claim the split rests on: a resolution is not a reframe.
+    resolutions: [...(document.getElementById('tExportSize')?.options ?? [])].map((o) => o.value),
+    chosenSize: document.getElementById('tExportSize')?.value ?? '',
+    aspect: globalThis.__kinect.outputSize().aspect,
     // The format segments, read as a set rather than by id. This row used to name
     // exportFormatMov and exportFormatPng and assert both were disabled, which encoded
     // a claim that has since stopped being true - the server grew prores and an image
@@ -3053,10 +3079,28 @@ try {
       return `${codec || '(unnamed)'}: ${err.message}`;
     }
   }).filter(Boolean);
-  check(exportDialog.open && exportDialog.ratios.some((ratio) => ratio.selected === 'true'),
-    'Render opens the designed Export dialog from the authoritative size table',
-    `${exportDialog.ratios.length} ratios, selected `
-    + `${exportDialog.ratios.filter((r) => r.selected === 'true').map((r) => r.label).join(', ') || 'none'}`);
+  // **The resolution menu is every size of the project's shape, and only those.** Read as
+  // two claims rather than one, because they fail for different reasons and the fix is
+  // different: a menu that is empty is a shape the table has nothing for, and a menu
+  // holding a size of another shape is the reframe-through-a-deliverable this split
+  // exists to make impossible - `exportClip` refuses that pair at the press, so an option
+  // offering it is a control that leads to a refusal.
+  const offShape = exportDialog.resolutions.filter((value) => {
+    const [w, h] = value.split('x').map(Number);
+    if (!(w > 0 && h > 0)) return true;
+    const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+    const d = gcd(w, h);
+    return w / d !== exportDialog.aspect[0] || h / d !== exportDialog.aspect[1];
+  });
+  check(exportDialog.open && exportDialog.resolutions.length > 0,
+    'Export opens the designed dialog with a resolution menu built from the authoritative size table',
+    `${exportDialog.resolutions.length} sizes: ${exportDialog.resolutions.join(', ') || 'none'}`);
+  check(offShape.length === 0,
+    `  and every size it offers is the ${exportDialog.aspect.join(':')} the stage is framed at, so choosing one cannot reframe the clip`,
+    offShape.length ? `off-shape: ${offShape.join(', ')}` : `all of ${exportDialog.resolutions.join(', ')}`);
+  check(exportDialog.resolutions.includes(exportDialog.chosenSize),
+    '  and the size it shows as chosen is one of them, rather than a value the menu cannot display',
+    `chosen ${JSON.stringify(exportDialog.chosenSize)} of ${exportDialog.resolutions.join(', ')}`);
   check(offered.length >= 2 && exportDialog.formats.every((format) => !format.disabled),
     'and it offers a format per codec with every one of them enabled, rather than showing a refusal the encoder no longer makes',
     exportDialog.formats.map((f) => `${f.codec}${f.disabled ? ' DISABLED' : ''}`).join(', ') || 'no format segments');
@@ -3190,12 +3234,144 @@ try {
     check(codecCleanup, 'and the deliverable this block planted was removed again',
       codecCleanup ? `${codecDoor} deleted` : `DELETE refused for ${codecDoor}`);
   }
+  // **The deliverable's `new` button, driven the way Save as is driven.** It came into
+  // this dialog with the picker and was credited to `library-check`, which has never
+  // referenced it - so nothing pressed it, and the `shelldialogs` rule's claim to drive
+  // every enabled control in this dialog was false for one of them.
+  //
+  // Dismissed rather than accepted, and that is the whole assertion rather than a
+  // shortcut: what this control does first is ask for a name, so a build that had lost
+  // the handler opens no prompt and this row is red. Accepting would write a document to
+  // the server in the middle of section 1 and leave the picker on it, which is the class
+  // of side effect two comments in this file already record. Save as is driven exactly
+  // this way twenty lines above.
+  let newPrompt = null;
+  page.once('dialog', async (dialog) => { newPrompt = dialog.message(); await dialog.dismiss(); });
+  await page.locator('#tDeliverableNew').click();
+  await new Promise((r) => setTimeout(r, 150));
+  check(typeof newPrompt === 'string' && /deliverable/i.test(newPrompt),
+    'the deliverable\'s new button reaches the writer that names one, rather than being markup in the dialog',
+    newPrompt === null ? 'no prompt opened' : `prompt: ${JSON.stringify(newPrompt)}`);
+
   await page.locator('#exportClose').click();
-  await page.locator('#outputMenuButton').click();
-  await page.locator('#menuExport').click();
-  check(await page.evaluate('document.getElementById("exportDialog").open'),
-    'Export opens the same dialog before a render exists, rather than inventing a second path');
-  await page.locator('#exportClose').click();
+
+  // **File > Project settings, which is the third application dialog and the one the
+  // shape moved into.** The row this replaces asserted that `Output > Export` opened the
+  // same dialog `Render` did before a render existed - a claim about two commands that
+  // were two doors onto one thing, and there is one command now, so the row had become
+  // the click above repeated. What is worth asserting in its place is the dialog that did
+  // not exist: the shape and the rate are the edit's, and the controls that write them
+  // have to be reachable and have to work.
+  await page.locator('#fileMenuButton').click();
+  await page.locator('#menuProjectSettings').click();
+  const projectDialog = await page.evaluate(`(() => ({
+    open: document.getElementById('projectDialog').open,
+    aspects: [...document.querySelectorAll('#projectAspects button')].map((button) => ({
+      label: button.textContent, aspect: button.dataset.aspect,
+      selected: button.getAttribute('aria-pressed'),
+    })),
+    // Read off the control rather than off a list written here, for the reason the markup
+    // gives for leaving it empty: `restoreProject` refuses a rate this build does not
+    // offer, and a tool spelling the rates out again would be a third statement of a list
+    // that is supposed to have one.
+    rates: [...(document.getElementById('tFps')?.options ?? [])].map((o) => o.value),
+    rate: document.getElementById('tFps')?.value ?? '',
+  }))()`);
+  check(projectDialog.open && projectDialog.aspects.length >= 5,
+    'Project settings opens the designed dialog with a shape per group in the authoritative size table',
+    `${projectDialog.aspects.length} shapes: ${projectDialog.aspects.map((a) => a.label).join(', ') || 'none'}`);
+  check(projectDialog.aspects.filter((a) => a.selected === 'true').length === 1,
+    '  and exactly one of them is lit, because the clip is framed at one shape rather than at a set of them',
+    `lit: ${projectDialog.aspects.filter((a) => a.selected === 'true').map((a) => a.label).join(', ') || 'none'}`);
+  check(projectDialog.rates.length >= 2 && projectDialog.rates.includes(projectDialog.rate),
+    '  and the rate it shows is one the control offers, so the list the document is validated against is the list on screen',
+    `${projectDialog.rate} of ${projectDialog.rates.join(', ') || 'none'}`);
+
+  // **Pressed, and put back.** Reading five buttons says nothing about whether any of them
+  // is wired - the argument the format segments above are driven for - so one that is not
+  // already lit is pressed and the stage is asked whether it followed. It is pressed back
+  // immediately afterwards, because the shape is the letterbox: every section from 8
+  // onward reads the stage at pointer coordinates, and this file already carries two scars
+  // from a probe in section 1 leaving a later section measuring something else.
+  //
+  // The stage's own aspect is the discriminator rather than the button's `aria-pressed`,
+  // which is the press describing itself. A build that lit the button and reframed nothing
+  // would pass on the attribute and fail here.
+  const stageAspect = () => page.evaluate(`(() => {
+    const r = document.getElementById('stage').getBoundingClientRect();
+    return r.height > 0 ? r.width / r.height : 0;
+  })()`);
+  const wasLit = projectDialog.aspects.find((a) => a.selected === 'true');
+  const toPress = projectDialog.aspects.find((a) => a.selected !== 'true');
+  if (!wasLit || !toPress) {
+    check(false, 'pressing a shape reframes the stage and rebuilds the resolution menu under it',
+      `nothing to press: lit ${wasLit?.label ?? 'none'}, unlit ${toPress?.label ?? 'none'}`);
+  } else {
+    const before = await stageAspect();
+    await page.locator(`#projectAspects button[data-aspect="${toPress.aspect}"]`).click();
+    await settle();
+    const pressed = await page.evaluate(`(() => ({
+      aspect: globalThis.__kinect.outputSize().aspect.join('x'),
+      sizes: [...document.getElementById('tExportSize').options].map((o) => o.value),
+    }))()`);
+    const after = await stageAspect();
+    const wanted = toPress.aspect.split('x').map(Number);
+    check(pressed.aspect === toPress.aspect
+      && Math.abs(after - wanted[0] / wanted[1]) / (wanted[0] / wanted[1]) < 0.02,
+      'pressing a shape writes it into the document and the stage is letterboxed to it',
+      `pressed ${toPress.label}: the document reads ${pressed.aspect}, the stage is `
+      + `${after.toFixed(4)} where ${(wanted[0] / wanted[1]).toFixed(4)} was asked for `
+      + `(it was ${before.toFixed(4)})`);
+    check(pressed.sizes.length > 0 && pressed.sizes.join(',') !== exportDialog.resolutions.join(','),
+      '  and the resolution menu was rebuilt under it, rather than going on offering the old shape\'s sizes',
+      `${pressed.sizes.join(', ') || 'none'} where the old shape offered ${exportDialog.resolutions.join(', ')}`);
+    await page.locator(`#projectAspects button[data-aspect="${wasLit.aspect}"]`).click();
+    await settle();
+    const restored = await stageAspect();
+    check(Math.abs(restored - before) < 1e-6,
+      '  and pressing the shape it came in on puts the stage back, so no later section reads a frame this block moved',
+      `${before.toFixed(6)} -> ${after.toFixed(6)} -> ${restored.toFixed(6)}`);
+  }
+  // **The rate, driven through the control rather than through the transport.** It was
+  // credited in `DRIVER_IDS` to `timeline-check` and `export-check`, and neither of them
+  // has ever touched it: both write `transport().outputFps` directly, which is the model
+  // this file exists to stop standing in for the control. That credit was true of nothing
+  // and would have gone on reading as coverage, so the entry is gone and the dialog rule
+  // covers it - which obliges section 1 to drive it, and this is that.
+  //
+  // Restored to the rate it came in on for the reason the shape above is: `timeline.frame`
+  // counts output frames, so a rate left changed here moves the playhead under every
+  // section after it.
+  const rateBack = projectDialog.rate;
+  const rateOther = projectDialog.rates.find((r) => r !== rateBack);
+  if (!rateOther) {
+    check(false, 'setting the output rate writes it into the transport the playhead is counted in',
+      `only one rate offered: ${projectDialog.rates.join(', ') || 'none'}`);
+  } else {
+    const heldSec = await page.evaluate('__kinect.timeline.transport().programSec');
+    await page.selectOption('#tFps', rateOther);
+    await settle();
+    const moved = await page.evaluate(`(() => ({
+      fps: globalThis.__kinect.timeline.transport().outputFps,
+      sec: globalThis.__kinect.timeline.transport().programSec,
+    }))()`);
+    check(moved.fps === Number(rateOther),
+      'setting the output rate writes it into the transport the playhead is counted in',
+      `asked ${rateOther}, the transport reads ${moved.fps}`);
+    // The playhead is held across the change, which is the half a rate control gets wrong.
+    // A frame index reinterpreted at a new rate lands somewhere else in the clip - frame
+    // 300 is 10s at 30 and 5s at 60 - so the assertion is about the second, not the frame.
+    check(Math.abs(moved.sec - heldSec) < 1 / Math.min(...projectDialog.rates.map(Number)),
+      '  and the playhead is held in seconds across it, rather than being reinterpreted at the new rate',
+      `${heldSec.toFixed(4)}s -> ${moved.sec.toFixed(4)}s across ${rateBack} -> ${rateOther}fps`);
+    await page.selectOption('#tFps', rateBack);
+    await settle();
+    const restoredRate = await page.evaluate('__kinect.timeline.transport().outputFps');
+    check(restoredRate === Number(rateBack),
+      '  and the rate it came in on goes back, so no later section counts frames at another one',
+      `${rateBack} -> ${rateOther} -> ${restoredRate}`);
+  }
+  await page.locator('#projectClose').click();
 
   const cameraBefore = await page.evaluate('__kinect.freeCamera.position.toArray()');
   await page.evaluate('__kinect.freeCamera.position.x += 2; __kinect.controls.update()');
@@ -3415,7 +3591,7 @@ try {
   // in a filename, so a shortcut handler with no guard makes the one text field in
   // the export dialog unusable while quietly editing the clip.
   await page.locator('#outputMenuButton').click();
-  await page.locator('#menuRender').click();
+  await page.locator('#menuExport').click();
   await page.evaluate(`(() => { const el = document.getElementById('tExportName'); el.value = ''; el.focus(); })()`);
   const beforeTyping = await range();
   const keysBeforeTyping = await lanes();
@@ -4652,7 +4828,7 @@ try {
   note('a long option planted in every select the scroller holds',
     `${await page.evaluate('globalThis.__planted.length')} selects`);
   await page.locator('#outputMenuButton').click();
-  await page.locator('#menuRender').click();
+  await page.locator('#menuExport').click();
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: VIEWPORT.height });
     await new Promise((r) => setTimeout(r, 250));
@@ -4732,7 +4908,7 @@ try {
     // that asserted the button existed would pass on a build that saved nothing.
     const sizes = await page.evaluate('__kinect.exportSizes()');
     const smallest = sizes.slice().sort((a, b) => (a.w * a.h) - (b.w * b.h))[0];
-    await page.evaluate(`__kinect.setTargetSize(${JSON.stringify(`${smallest.w}x${smallest.h}`)})`);
+    await page.evaluate(`__kinect.setOutputSize(${JSON.stringify(`${smallest.w}x${smallest.h}`)})`);
     await settle();
     // **The trim is set with the dialog shut, because that is the only order the
     // surface allows.** The export is a modal now, so while it is open the browser
@@ -4754,7 +4930,7 @@ try {
     await page.locator('#tSetOut').click();
     await settle();
     await page.locator('#outputMenuButton').click();
-    await page.locator('#menuRender').click();
+    await page.locator('#menuExport').click();
     await page.waitForFunction('document.getElementById("exportDialog").open');
     await setName('editor-check-copy');
     await new Promise((r) => setTimeout(r, 150));
@@ -5142,7 +5318,7 @@ try {
   // it, which is the worst version of this - a row that passes in the fast mode and
   // fails in the full one.
   await page.locator('#tClearRange').click();
-  await page.evaluate('__kinect.setTargetSize("1920x1080")');
+  await page.evaluate('__kinect.setOutputSize("1920x1080")');
   await page.evaluate('__kinect.keyframes.setTracks({})');
   await page.evaluate('__kinect.keyframes.setRetime({ rate: 1, keys: [] })');
   await page.evaluate("__kinect.params.reset(__kinect.params.names('look'))");

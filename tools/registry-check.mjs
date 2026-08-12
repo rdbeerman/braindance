@@ -1508,7 +1508,7 @@ async function openPage({
   // drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
   // makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
   // every buffer-size expectation and every pointer coordinate in this file.
-  await page.evaluate('globalThis.__kinect.setTargetSize?.("640x400")');
+  await page.evaluate('globalThis.__kinect.setOutputSize?.("640x400")');
 
   // Proof the interception held, independent of the readings it protects. The
   // sensor's hello carries fx as 366.031494 and the uniform defaults to exactly

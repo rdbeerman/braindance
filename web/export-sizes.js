@@ -13,8 +13,12 @@
 //
 // Data and nothing else. There is no import here and nothing is constructed, so this
 // module has no top-level side effect at all and its position in anybody's import list
-// cannot change what the program does. `buildExportMenu` and `buildExportRatios` stay in
-// `main.js`, because they create elements in a document.
+// cannot change what the program does. The three functions below are arithmetic over the
+// table and evaluate only when they are called, so that stays true of them too -
+// `exportAspects()` deliberately walks the list per call rather than being a second array
+// computed beside it, because a derived array is a second representation with the same
+// name as the first and this file's whole argument is against those. `buildResolutionMenu`
+// and `buildAspectSegments` stay in `main.js`, because they create elements in a document.
 
 /**
  * Every size the export menu offers, grouped by the ratio it is.
@@ -47,4 +51,64 @@ const EXPORT_SIZES = [
 ];
 const DEFAULT_EXPORT_SIZE = '1920x1080';
 
-export { EXPORT_SIZES, DEFAULT_EXPORT_SIZE };
+/**
+ * A width and a height as the shape they are: the pair divided by its own divisor.
+ *
+ * **The pair rather than the label, because the label is not the number.** The project
+ * document stores what it is letterboxed to, and the obvious thing to store is the
+ * `ratio` string beside each group - except that "1.90:1 DCI" is really 1.8963, so a
+ * document carrying that label would record a shape 0.2% away from the one the clip was
+ * composed for, and the editor would reframe it on the next open. `2048x1080` reduces to
+ * `[256, 135]` exactly, and every other group here reduces exactly too, so the pair is
+ * lossless where a decimal label is a rounding this repo would find later and have to
+ * correct.
+ *
+ * Reduced rather than kept as the size it came from, because two sizes of one shape have
+ * to compare equal - 1920x1080 and 1280x720 are the same picture, which is the whole
+ * reason resolution is a per-deliverable choice and shape is project state. Comparing
+ * `[16, 9]` with `[16, 9]` is that equality written down; comparing the sizes is not.
+ */
+function reduceAspect(w, h) {
+  let a = Math.abs(Math.trunc(w));
+  let b = Math.abs(Math.trunc(h));
+  while (b) [a, b] = [b, a % b];
+  return a === 0 ? [0, 0] : [Math.trunc(w) / a, Math.trunc(h) / a];
+}
+
+/**
+ * The distinct shapes the table offers, each with the label its group is written under.
+ *
+ * A group *is* a shape - every size in one reduces to the same pair, which is the claim
+ * the group's label makes and the reason the pair is taken off the first size rather than
+ * asserted here. A node test walking the whole table is where that claim is enforced,
+ * because this file is data and a module that throws while it is being imported takes the
+ * page down at boot rather than saying which row is wrong.
+ */
+function exportAspects() {
+  return EXPORT_SIZES.map((group) => ({
+    ratio: group.ratio,
+    aspect: reduceAspect(group.sizes[0][0], group.sizes[0][1]),
+  }));
+}
+
+/**
+ * Every size in the table belonging to one shape, which is what the resolution menu is.
+ *
+ * **Empty is a real answer and the caller has to have one for it.** A project saved before
+ * the shape moved onto the document carried an `outputSize` rather than an aspect, and
+ * that size was free to be anything a hand had typed - so `1600x1000` reduces to `[8, 5]`,
+ * a shape no group here offers, and there is nothing in this table to show for it. The
+ * alternative was to manufacture a size at that ratio near 1080p, and this file refuses
+ * to: a resolution the product does not offer, invented at load time and then written
+ * into a deliverable, is exactly the second list the header is about.
+ */
+function sizesForAspect(aspect) {
+  const [w, h] = aspect;
+  const group = EXPORT_SIZES.find((g) => {
+    const [gw, gh] = reduceAspect(g.sizes[0][0], g.sizes[0][1]);
+    return gw === w && gh === h;
+  });
+  return group ? group.sizes.map(([sw, sh]) => [sw, sh]) : [];
+}
+
+export { EXPORT_SIZES, DEFAULT_EXPORT_SIZE, reduceAspect, exportAspects, sizesForAspect };

@@ -554,11 +554,11 @@ const PROBE = `(() => {
       return this.pose();
     },
 
-    // One stage shape at a time, applied and then read. \`setTargetSize\` resizes
+    // One stage shape at a time, applied and then read. \`setOutputSize\` resizes
     // synchronously, so the camera's aspect is already the new one when
     // \`sensorView\` reads it and there is nothing to wait for.
     at(size) {
-      k.setTargetSize(size);
+      k.setOutputSize(size);
       const returned = k.sensorView();
       return { returned, pose: this.pose() };
     },

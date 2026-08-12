@@ -863,7 +863,7 @@ if (MUTATE && mutantServed === 0) {
 // drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
 // makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
 // every buffer-size expectation and every pointer coordinate in this file.
-await page.evaluate('globalThis.__kinect.setTargetSize?.("640x400")');
+await page.evaluate('globalThis.__kinect.setOutputSize?.("640x400")');
 // The viewport is then sized to whatever the strip actually is, measured off the
 // page. `CHROME_H_GUESS` is a first guess and nothing more: it was 104 while the bar was
 // one row, the bar became two, and the stage quietly came out 570x356 while every

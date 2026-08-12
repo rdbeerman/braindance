@@ -107,6 +107,21 @@ const MUTATIONS = {
     file: 'docs/proof-tools.md',
     edits: [['`web/main.js:9860` is and what made', '`web/main.js:98600` is and what made']],
   },
+
+  // The third half of the same row, and the one that says the walk reaches outside the
+  // prose. Both mutations above plant their failure in a file the old citing set already
+  // read - a root markdown page and a `docs/` page - so both stayed caught while the walk
+  // covered four source directories and `docs/`, and neither could tell you that
+  // `native/grabber.cpp`, `presets-builtin/README.md` and this repo's own CI workflow were
+  // outside it. All three cite a module. This plants the same rot in the C++ file, which is
+  // the furthest one from the prose and the one whose citation is load-bearing: the comment
+  // it sits in exists to say that the constant beside it is a second spelling of a value
+  // `web/format.js` owns, so a reader sent to a file that is not there loses the only
+  // pointer to the owner.
+  'citation-outside-the-prose': {
+    file: 'native/grabber.cpp',
+    edits: [['Node reads `web/format.js` by path', 'Node reads `web/capture-format.js` by path']],
+  },
 };
 
 // Reads a file, and applies the mutation to it when the mutation is one that names it.
@@ -398,24 +413,81 @@ const withoutStringBodies = (src) => {
 // file it names. Two, because the halves fail differently: a path that still resolves
 // answers for a line that does not.
 {
-  const md = /\.md$/;
-  const prose = readdirSync(ROOT, { withFileTypes: true })
-    .filter((e) => !e.isSymbolicLink() && e.isFile() && md.test(e.name))
-    .map((e) => e.name)
-    .sort();
-  const citing = [
-    ...prose,
-    ...(existsSync(join(ROOT, 'docs')) ? walk(join(ROOT, 'docs'), md) : []),
-    ...Object.keys(FLOORS).flatMap((dir) => walk(join(ROOT, dir), SHIPPED)),
-  ].map((p) => relative(ROOT, p));
+  // **The set a citation can be written in is every file this repo ships, and it used to be
+  // a list.** The old set was root markdown, `docs/**.md`, and `.js`/`.mjs`/`.sh` under the
+  // four floors - which is the tree a citation is *usually* written in and not the tree one
+  // *can* be written in. Three files were outside it and all three cite a module:
+  // `native/grabber.cpp` names `web/format.js` as the owner of the constant it is a second
+  // spelling of, `presets-builtin/README.md` names `web/main.js`, and this repo's own CI
+  // workflow names it too. Point any of those at a module that has moved and the row above
+  // stayed green while printing that every cited module resolves, which is a claim about
+  // coverage the instrument did not have - the same shape as a row that measures 1200 and
+  // says 1080p.
+  //
+  // An allowlist of directories is the wrong instrument for "everywhere", because it rots
+  // in the direction that reads as success: a source tree added next year is simply not
+  // asked, and nothing says so. **A denylist read from `.gitignore` rots the other way** -
+  // whatever this repo declares it does not ship excludes itself by existing, and a new
+  // gitignored directory needs no edit here. That is also why this still needs nothing but
+  // the filesystem: `git ls-files` would be the more direct spelling of "what this repo
+  // ships" and would make the one tool that runs on a bare checkout depend on git.
+  //
+  // The cost of over-reaching is a red row somebody reads, which is the direction this file
+  // already chose twice. Measured on this tree at the time of writing: nothing under
+  // `third_party/` cites a `web/` module, so the widened walk adds three citations and no
+  // false ones.
+  const ignored = (() => {
+    const names = new Set(['.git']);
+    const paths = new Set();
+    const globs = [];
+    const raw = existsSync(join(ROOT, '.gitignore'))
+      ? readFileSync(join(ROOT, '.gitignore'), 'utf8') : '';
+    for (const line of raw.split('\n')) {
+      // A negation re-includes rather than excludes, and reading one as an exclusion would
+      // hide a tree this walk is supposed to reach. There are none today; skipping them
+      // keeps that true rather than silently inverting one that arrives.
+      const pattern = line.trim();
+      if (!pattern || pattern.startsWith('#') || pattern.startsWith('!')) continue;
+      const clean = pattern.replace(/^\/+/, '').replace(/\/+$/, '');
+      if (!clean) continue;
+      if (clean.includes('*')) {
+        globs.push(new RegExp(`^${clean.split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`));
+      } else if (clean.includes('/')) paths.add(clean);
+      else names.add(clean);
+    }
+    return (rel, name) => names.has(name) || paths.has(rel) || globs.some((g) => g.test(name));
+  })();
+  // Named `walkShipped` rather than `shipped`, which is already a module-level binding
+  // holding the tool list this file checks against CLAUDE.md. Shadowing it here would be
+  // legal and would read as the same thing twice.
+  const walkShipped = (dir, out = []) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue;
+      const p = join(dir, entry.name);
+      if (ignored(relative(ROOT, p), entry.name)) continue;
+      if (entry.isDirectory()) walkShipped(p, out);
+      else out.push(p);
+    }
+    return out;
+  };
+  const citing = walkShipped(ROOT).map((p) => relative(ROOT, p)).sort();
 
   const cited = new Set();
   // Keyed by the citation as written, so `web/main.js` and `web/main.js:9860` are two
   // entries and the line form is not answered by the bare one appearing elsewhere.
   const modules = new Map();
+  let scanned = 0;
   for (const rel of citing) {
     const raw = sourceWithMutation(rel);
     if (raw === null) continue;
+    // A screenshot cannot cite anything, and reading `media/` as text is the only cost the
+    // widened walk adds. Sniffed rather than listed by extension for the same reason the
+    // exclusions are: a list of binary suffixes is one more thing that rots quietly, and a
+    // NUL in the first bytes is what "not text" actually means. Decoded as UTF-8 already,
+    // so an invalid byte is a replacement character rather than a throw, and the check is
+    // for the NUL that no source file of ours contains.
+    if (raw.includes('\u0000')) continue;
+    scanned++;
     // Markdown is prose throughout, and a shell script is scanned whole because it has no
     // second kind of text worth separating - both read in the over-reporting direction,
     // which is the one that fails where somebody sees it.

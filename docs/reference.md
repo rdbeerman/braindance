@@ -159,6 +159,18 @@ than a buffer that accumulates across frames: a buffer would smear along whateve
 last, so an orbit would drag every streak sideways and a seek would arrive carrying the streak
 the scrub built rather than the one playback would have.
 
+**`trails`** is the buffer that paragraph rules out, and the one look term whose length is
+counted in frames rather than in seconds. It hands its value straight to the afterimage pass's
+damp, and that pass multiplies the picture it is holding once per rendered frame with nothing
+in the expression about how long a frame lasted, so what the control sets is a number of
+frames and not a duration: at 0.9 the trail is down to 12% after twenty of them, which is
+0.83s of a 24fps deliverable and 0.33s of a 60fps one. `fade` and `wake` are in milliseconds
+for the reason [surface memory](architecture.md#surface-memory) gives, and this term is the
+exception to that rather than a second expression of it — so a look graded at one output rate
+does not keep its trail at another. It is the only term this applies to, because
+`AfterimagePass` in `web/post-chain.js` is the only pass in the chain that carries anything
+from one render to the next.
+
 ## Levelling a canted mount
 
 A sensor bolted to a dashboard shoots a room that arrives on its side, and nothing measures

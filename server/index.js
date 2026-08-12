@@ -216,7 +216,16 @@ const PRESETS = new DocumentStore(
   PROJECT_VERSION,
   resolve(flag('--builtin-presets', join(ROOT, 'presets-builtin'))),
 );
-const DELIVERABLES = new DocumentStore(resolve(flag('--deliverables', join(CAPTURES_DIR, '..', 'deliverables'))), 'deliverable', 1);
+// Version 2 dropped `outputFps`. The output rate is a property of the edit rather than of
+// one output of it - `programTime = k / outputFps` makes it the edit's own coordinate, and
+// `trails` is measured in output frames rather than in seconds, so two deliverables at two
+// rates are two different-looking pictures rather than one picture sampled twice. It moved
+// onto the project, and a version 1 document is refused rather than read: it names a rate
+// this build would ignore, so it would render at the project's rate while saying otherwise,
+// which is a document parsing perfectly and meaning something else. There is no conversion
+// because there is nothing to convert - the shape changed while no deliverable had ever been
+// written to disk.
+const DELIVERABLES = new DocumentStore(resolve(flag('--deliverables', join(CAPTURES_DIR, '..', 'deliverables'))), 'deliverable', 2);
 // The render queue's records. A flag for the same reason the document stores take
 // one: a capture node and an editing machine are the same program, and running
 // both on one host is how the two-machine behaviour gets tested at all.

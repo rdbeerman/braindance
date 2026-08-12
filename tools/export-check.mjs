@@ -1255,7 +1255,7 @@ async function setStage(page, size) {
     // that build has no letterbox - its buffer is the viewport, which is exactly what
     // the wait below already expects. Guarding here rather than branching at the call
     // sites keeps one function that means "put the stage at this size" on both builds.
-    await page.evaluate(`globalThis.__kinect.setTargetSize?.(${JSON.stringify(`${size.width}x${size.height}`)})`);
+    await page.evaluate(`globalThis.__kinect.setOutputSize?.(${JSON.stringify(`${size.width}x${size.height}`)})`);
     try {
       await page.waitForFunction(
         `(() => {

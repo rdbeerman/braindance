@@ -31,7 +31,9 @@ import {
   HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
-import { EXPORT_SIZES, DEFAULT_EXPORT_SIZE } from './export-sizes.js';
+import {
+  EXPORT_SIZES, DEFAULT_EXPORT_SIZE, reduceAspect, exportAspects, sizesForAspect,
+} from './export-sizes.js';
 import {
   INSET, TOP_CENTRE, PLAN_STRIDE, FRUSTUM_LEN, planScale, planPoint, planWorld, projectThrough,
 } from './plan-geometry.js';
@@ -290,91 +292,201 @@ let outputSize = null;
  *
  * So a wider ratio shows more to the sides and a squarer one shows less, and neither
  * changes how big anything is.
+ *
+ * **A shape and not a size, and the split is what this refactor is about.** This used to
+ * be a `{w, h}` in pixels that drove the letterbox *and* named what the export would
+ * render, so choosing 1280x720 instead of 1920x1080 was a document edit - and it is not
+ * one. Two sizes of one shape are the same picture, because `pointSize` and every
+ * screen-space term are expressed against 1080p and bloom's chain is frozen at 600
+ * whatever the buffer is, so the smaller of the two needs no re-keying and reopens
+ * identically. A different *shape* is not free, because the camera was keyed against a
+ * frame - which is why the shape is here, on the document, and the pixel count is on the
+ * deliverable where a second one can disagree with the first without either being wrong.
+ *
+ * Stored as the reduced integer pair rather than as a ratio, for `reduceAspect`'s reason:
+ * DCI is 1.8963 and a document carrying that decimal would record a shape 0.2% away from
+ * the one the clip was composed for.
  */
-let targetSize = { w: 1920, h: 1080 };
-const targetAspect = () => targetSize.w / targetSize.h;
+let projectAspect = [16, 9];
+const targetAspect = () => projectAspect[0] / projectAspect[1];
+
+// The shape buttons in the Project settings dialog, null until the boot below builds
+// them. Declared here rather than beside that build because `setProjectAspect` repaints
+// them and runs first - `restoreProject` reaches it, and a `let` read before its own
+// declaration is a ReferenceError rather than an `undefined` the optional chain would
+// forgive.
+let aspectButtons = null;
 
 // Where the letterboxed stage sits in the window. Set by `resize`, read by the
 // overlay so both canvases cover the same pixels.
 const stageBox = { left: 0, top: 0 };
 
-/** The menu, filled from `EXPORT_SIZES` and grouped by ratio. One list. */
-function buildExportMenu(select) {
+/**
+ * The rates the output can be, and the only list of them.
+ *
+ * Here rather than as four `<option>`s in the markup because two things read it and only
+ * one of them is a control: `#tFps` is built from it, and `restoreProject` refuses a
+ * document naming a rate this build does not offer. A validator that read the rates off
+ * the select would be a document check standing on a DOM node, and one that spelled them
+ * out again would be the second list this file keeps deleting.
+ */
+const OUTPUT_RATES = [24, 30, 60, 120];
+
+/** The default shape, taken off the default size so there is still one list. */
+const defaultAspect = () => reduceAspect(...DEFAULT_EXPORT_SIZE.split('x').map(Number));
+
+/** A `WIDTHxHEIGHT` string as the shape it is, or `[0, 0]` when it is not a size. */
+function aspectOfSize(text) {
+  const [w, h] = String(text).split('x').map(Number);
+  return w > 0 && h > 0 ? reduceAspect(w, h) : [0, 0];
+}
+
+const sameAspect = (a, b) => a[0] === b[0] && a[1] === b[1];
+
+/**
+ * The size a shape opens on: the default one where the shape offers it, the smallest it
+ * offers otherwise, and null for a shape the table has nothing for.
+ *
+ * Null rather than a manufactured size, because the only way to be here is a project
+ * saved before the shape moved onto the document, whose `outputSize` was free to be
+ * anything a hand had typed. Scaling `[8, 5]` up to something near 1080p would put a
+ * resolution the product does not offer into a deliverable and then into a filename, and
+ * a number this repo would find later and have to correct is exactly what the reduced
+ * pair exists to avoid. The callers carry the null instead - the load hands the legacy
+ * size straight across, and `exportClip` refuses a pair that disagrees.
+ */
+function openingSizeForAspect(aspect) {
+  const sizes = sizesForAspect(aspect).map(([w, h]) => `${w}x${h}`);
+  if (sizes.includes(DEFAULT_EXPORT_SIZE)) return DEFAULT_EXPORT_SIZE;
+  return sizes[0] ?? null;
+}
+
+/**
+ * The resolution menu, which is every size in the table of the project's shape.
+ *
+ * **Rebuilt on every shape change rather than filtered on the way past**, because the
+ * alternative - one menu of everything with the wrong shapes disabled - is a control that
+ * offers a reframe it will not perform, and this dialog no longer has the authority to
+ * reframe anything.
+ *
+ * A size the table does not offer is appended rather than dropped, which is the same rule
+ * the old whole-table menu carried and it survives for the same reason: a project saved
+ * before the shape moved onto the document carried a hand-typed `outputSize`, so `[8, 5]`
+ * is a shape with real pixels behind it and no group here to hold them. The size the clip
+ * was actually framed at is a better answer than the nearest neighbour.
+ */
+function buildResolutionMenu(select, keep) {
   if (!select) return select;
-  for (const group of EXPORT_SIZES) {
-    const optgroup = document.createElement('optgroup');
-    optgroup.label = group.ratio;
-    for (const [w, h] of group.sizes) {
-      const option = document.createElement('option');
-      option.value = `${w}x${h}`;
-      option.textContent = `${w}x${h}`;
-      optgroup.appendChild(option);
-    }
-    select.appendChild(optgroup);
+  const sizes = sizesForAspect(projectAspect).map(([w, h]) => `${w}x${h}`);
+  select.replaceChildren();
+  for (const value of sizes) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
   }
-  select.value = DEFAULT_EXPORT_SIZE;
+  if (keep && !sizes.includes(keep)) {
+    const option = document.createElement('option');
+    option.value = keep;
+    option.textContent = `${keep} (from the project)`;
+    select.appendChild(option);
+  }
   return select;
 }
 
-/** The ratio controls are another view over `EXPORT_SIZES`, never another list. */
-function buildExportRatios(container, select) {
-  if (!container || !select) return [];
-  const buttons = EXPORT_SIZES.map((group) => {
+/** The shape controls are another view over `EXPORT_SIZES`, never another list. */
+function buildAspectSegments(container) {
+  if (!container) return [];
+  const buttons = exportAspects().map(({ ratio, aspect }) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.dataset.ratio = group.ratio;
-    button.textContent = group.ratio.replace(' DCI', '');
+    button.dataset.ratio = ratio;
+    button.dataset.aspect = aspect.join('x');
+    button.textContent = ratio.replace(' DCI', '');
     button.addEventListener('click', () => {
-      const values = new Set(group.sizes.map(([w, h]) => `${w}x${h}`));
-      if (!values.has(select.value)) {
-        const [w, h] = group.sizes[0];
-        select.value = `${w}x${h}`;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      paintExportRatioSelection(buttons, select);
+      // Through the setter and then straight to the stack, because this is one of the two
+      // controls in the program that edit the document from a dialog. `history.commit`
+      // compares snapshots, so pressing the shape the clip is already on costs nothing.
+      if (setProjectAspect(aspect)) history.commit();
+      paintAspectSelection(buttons);
     });
     container.appendChild(button);
     return button;
   });
-  paintExportRatioSelection(buttons, select);
+  paintAspectSelection(buttons);
   return buttons;
 }
 
-function paintExportRatioSelection(buttons, select) {
-  const selected = select.selectedOptions[0]?.parentElement?.label ?? '';
+/**
+ * Which shape button is lit, read off the document rather than off the last press.
+ *
+ * None of them, when the project's shape is one the table does not offer - which is
+ * honest and is the point. A legacy `outputSize` of 1600x1000 is a real shape this build
+ * will letterbox to and go on exporting, and lighting the nearest button would say the
+ * clip is 16:9 while the stage says otherwise.
+ */
+function paintAspectSelection(buttons) {
   for (const button of buttons) {
-    button.setAttribute('aria-pressed', String(button.dataset.ratio === selected));
+    const aspect = button.dataset.aspect.split('x').map(Number);
+    button.setAttribute('aria-pressed', String(sameAspect(aspect, projectAspect)));
   }
 }
 
 /**
- * Adopt an output size: the editor reframes to it and the project remembers it.
+ * Adopt a shape: the editor reframes to it and the project remembers it.
  *
- * The size is document state rather than a control's position, because a
- * composition and the shape it was composed for are one thing. A 65:24 shot reopened
- * at 1920x1080 would be a different shot with the same keys, which is the class of
- * silent reinterpretation the point-size rebase already taught this repo to refuse.
+ * The shape is document state rather than a control's position, because a composition and
+ * the frame it was composed for are one thing. A 65:24 shot reopened at 16:9 would be a
+ * different shot with the same keys, which is the class of silent reinterpretation the
+ * point-size rebase already taught this repo to refuse.
+ *
+ * **The deliverable comes with it, and it has to.** Every other route into this program
+ * assumes the thing being rendered is the shape the stage is showing - `exportClip`
+ * refuses the pair when they disagree - so a shape change that left a 16:9 resolution
+ * behind would produce an editor that cannot export until somebody notices the menu.
+ * Keeping a size that already matches is what makes the shape change a no-op for the
+ * deliverable when the document simply restated its own shape, which is the ordinary case
+ * on every project load and every undo.
  */
-function setTargetSize(text, { fromDocument = false } = {}) {
-  const [w, h] = String(text).split('x').map(Number);
+function setProjectAspect(aspect, { fromDocument = false } = {}) {
+  const [w, h] = reduceAspect(aspect[0], aspect[1]);
   if (!(w > 0 && h > 0)) return false;
-  targetSize = { w, h };
-  if (ui?.exportSize && ui.exportSize.value !== `${w}x${h}`) {
-    // A size a document names that the menu does not offer is still the size the
-    // clip was framed at, so it is added rather than snapped to a neighbour.
-    if (![...ui.exportSize.options].some((o) => o.value === `${w}x${h}`)) {
-      const option = document.createElement('option');
-      option.value = `${w}x${h}`;
-      option.textContent = `${w}x${h} (from the project)`;
-      ui.exportSize.appendChild(option);
-    }
-    ui.exportSize.value = `${w}x${h}`;
-  }
-  void fromDocument;
+  projectAspect = [w, h];
   ensureActiveDeliverable();
-  activeDeliverable.outputSize = `${w}x${h}`;
+  if (!sameAspect(aspectOfSize(activeDeliverable.outputSize), projectAspect)) {
+    // A shape the table has nothing for leaves the deliverable where it was, and
+    // `exportClip` is what says so - refusing at the press rather than rendering a file
+    // that is not the shape on screen.
+    activeDeliverable.outputSize = openingSizeForAspect(projectAspect) ?? activeDeliverable.outputSize;
+  }
+  buildResolutionMenu(ui?.exportSize, activeDeliverable.outputSize);
+  if (ui?.exportSize) ui.exportSize.value = activeDeliverable.outputSize;
+  if (aspectButtons) paintAspectSelection(aspectButtons);
+  void fromDocument;
   paintDeliverable();
   resize();
+  return true;
+}
+
+/**
+ * Adopt an output size, which reframes nothing and is the whole point of the split.
+ *
+ * Every size this can be given is of the shape the stage is already letterboxed to, so
+ * there is no `resize()` here and its absence is the behaviour rather than an omission:
+ * a resolution is how many pixels the same picture is delivered at, and the editor has
+ * nothing to redraw when that number moves. The one thing that has to happen is that the
+ * deliverable and the menu agree, because the menu is where the operator reads it back.
+ */
+function setDeliverableSize(text) {
+  const [w, h] = String(text).split('x').map(Number);
+  if (!(w > 0 && h > 0)) return false;
+  ensureActiveDeliverable();
+  activeDeliverable.outputSize = `${w}x${h}`;
+  if (ui?.exportSize && ui.exportSize.value !== `${w}x${h}`) {
+    buildResolutionMenu(ui.exportSize, `${w}x${h}`);
+    ui.exportSize.value = `${w}x${h}`;
+  }
+  paintDeliverable();
   return true;
 }
 
@@ -562,7 +674,7 @@ function resize() {
   // with the chrome overlay floating over it because that is a separate 2D canvas
   // `placeChrome` goes on repainting. Every path that resizes a parked stage had it: the
   // window listener below, the three splitter entries, the render-scale slider, the
-  // export-size menu through `setTargetSize`, and `rebuildLanes` reaching this
+  // shape controls through `setProjectAspect`, and `rebuildLanes` reaching this
   // indirectly - which is the argument for the repaint being here, at the door, rather
   // than at a caller list the seventh path would be added outside of.
   //
@@ -2389,20 +2501,34 @@ function applyPreset(preset) {
   params.apply(preset);
 }
 
-// The active deliverable holds the export settings (in/out, output fps, output size,
-// codec). It is separate from the project, so one edit can spawn several deliverables
+// The active deliverable holds the export settings (in/out, output size, codec, output
+// name). It is separate from the project, so one edit can spawn several deliverables
 // without the deliverable state being undoable project state.
+//
+// **Version 2, and the bump is what `outputFps` leaving costs.** The output rate is the
+// project's now, because `trails` is counted in output frames rather than in seconds and
+// the same document at two rates is two different looks. A version 1 document naming
+// 24fps read by this build would simply not be read - the field is nowhere in the reader
+// - and the render would come out at whatever the project says, which is a document that
+// parses perfectly and produces the wrong file. That is what a version gate is for, and
+// `applyDeliverable` is where it stands.
+const DELIVERABLE_VERSION = 2;
+
 let activeDeliverable = null;
 
 function ensureActiveDeliverable() {
   if (activeDeliverable) return;
   activeDeliverable = {
-    version: 1,
+    version: DELIVERABLE_VERSION,
     in: 0,
     out: null,
-    outputFps: timeline ? timeline.outputFps : 30,
-    outputSize: `${targetSize.w}x${targetSize.h}`,
+    outputSize: openingSizeForAspect(projectAspect) ?? DEFAULT_EXPORT_SIZE,
     codec: 'h264',
+    // Empty rather than the take's id, because the field it feeds treats empty as "use
+    // the take's id" and writing that id in would freeze it: a deliverable saved on one
+    // take and opened on another would name the first one's footage in the second one's
+    // file. `exportBaseName` is where the default is answered, once.
+    name: '',
   };
 }
 
@@ -2419,18 +2545,52 @@ function applyDeliverable(deliverable) {
   // and codec sitting on a clip whose cuts it never got to write. Asking the same
   // predicate here first is a second call site rather than a second rule, which is the
   // distinction that matters: there is still one answer to what a clip bound is.
+  // The version, asked before the bounds and for the harder reason. A version 1
+  // deliverable is the shape this program wrote until the output rate moved onto the
+  // project, and every field this reader looks at is still in it - so it would adopt
+  // cleanly, drop the 24fps it names on the floor, and render at whatever rate the
+  // project happens to hold. A document that parses and produces the wrong file is
+  // precisely what a version gate is for, and there is nothing here to convert: the rate
+  // it names belongs to a project this deliverable does not know the identity of.
+  if (deliverable.version !== DELIVERABLE_VERSION) {
+    throw new Error(
+      `this deliverable is version ${JSON.stringify(deliverable.version)} and this build writes `
+      + `${DELIVERABLE_VERSION}: the output rate lives on the project now, so a version 1 document `
+      + 'would render at a rate nothing on screen agrees with - set the rate in Project settings and '
+      + 'save the deliverable again',
+    );
+  }
   clipBoundOrThrow(deliverable.in, 'in');
   clipBoundOrThrow(deliverable.out, 'out');
+  // **And the shape, because a deliverable is not allowed to reframe the clip.** This
+  // used to reach a setter that wrote the document's own framing from a size the
+  // deliverable named - so adopting a stored 1:1 deliverable silently re-composed a
+  // 65:24 edit, keys and all. `setDeliverableSize` is what took its place. The split
+  // makes the size a choice about pixels only, and that is only true while every size
+  // reaching it is of the shape the stage is showing. Refused here rather than corrected,
+  // for the reason this function refuses everything else before touching anything: a
+  // document naming another shape is from another edit, and quietly snapping it to this
+  // one's opening size would lose which size it actually asked for.
+  if (!sameAspect(aspectOfSize(deliverable.outputSize), projectAspect)) {
+    throw new Error(
+      `this deliverable renders ${deliverable.outputSize}, which is not the ${projectAspect.join(':')} `
+      + 'this project is framed at: the shape belongs to the edit, so change it in Project settings '
+      + 'rather than through a deliverable',
+    );
+  }
   // Before anything is written, because what follows replaces the cuts and the output
-  // rate wholesale - see `dropRateGesture` for why this is not `takeTransport`.
+  // size wholesale - see `dropRateGesture` for why this is not `takeTransport`.
   dropRateGesture();
   setActiveDeliverable(deliverable);
   setClipInOut({ in: deliverable.in, out: deliverable.out });
-  setTargetSize(deliverable.outputSize);
-  if (timeline) {
-    timeline.outputFps = deliverable.outputFps;
-    if (ui.fps) ui.fps.value = String(deliverable.outputFps);
-  }
+  setDeliverableSize(deliverable.outputSize);
+  // The output name travels with the deliverable now, which is what stops two of them
+  // writing over each other's file. It has never been persisted anywhere: the field was
+  // bare, falling back to the take's id, so every deliverable of one take proposed the
+  // same filename and the second render replaced the first in everything but the
+  // `<pid>-<seq>` directory. Empty stays empty rather than becoming the take id, because
+  // empty is what `exportBaseName` reads as "use the take's id".
+  if (ui.exportName) ui.exportName.value = deliverable.name ?? '';
   timingChanged();
   paintDeliverable();
   // The format segments, beside the readout that was already repainted here. They read
@@ -2445,6 +2605,10 @@ function applyDeliverable(deliverable) {
   // autosave and this dialog all reach a deliverable, and only one of them is these three
   // buttons.
   paintExportFormats();
+  // And the name chip, for the same rule read once more: the name above came off a
+  // document rather than out of the field's own `input` event, so nothing else in this
+  // program would have asked whether it is a filename.
+  paintExportName();
 }
 
 /**
@@ -3081,10 +3245,28 @@ function serialiseProjectBody() {
       retime: retime.serialise(),
       camera: tracks.get('camera')?.serialise() ?? [],
     },
-    // The framing the clip was composed for. Deliverables reference this too, but the
-    // editor size itself is document state because the point-size rebase makes the
-    // look resolution-relative.
-    outputSize: `${targetSize.w}x${targetSize.h}`,
+    // The framing the clip was composed for, as the shape rather than as a size. The
+    // pixel count is the deliverable's, because the point-size rebase makes the look
+    // resolution-relative and two sizes of one shape reopen identically; the shape is
+    // here because the camera was keyed against a frame and a different one is a
+    // different shot with the same keys.
+    //
+    // **No version bump for either of the two fields on these lines**, and that is
+    // deliberate rather than an oversight. `PROJECT_VERSION` is shared with presets, so
+    // bumping it to describe a project field would invalidate every document in
+    // `presets-builtin/` for a change presets have nothing to do with. The convention for
+    // an added field here is "absent is allowed and means X", which is what the
+    // `outputSize` this replaces already said and what `vignette` did before it.
+    aspect: [...projectAspect],
+    // The output rate, moved off the deliverable because it is not free. `trails` is the
+    // one look term whose length is counted in output frames rather than in seconds - at
+    // damp 0.9 a trail is down to 12% after twenty frames, which is 0.83s at 24fps and
+    // 0.33s at 60fps - so a rate chosen per deliverable would mean two files of one edit
+    // carrying two different looks with nothing on screen saying so. `AfterimagePass` is
+    // the only pass in `web/post-chain.js` that carries state between renders, so it is
+    // the only such term; fixing that is a separate decision that would change the look
+    // of every project already saved, and it is not this one.
+    outputFps: timeline ? timeline.outputFps : 30,
     // Provenance, not a reference. The values above are already copied in, so this
     // changes nothing about what renders - it only records which revision of which
     // look this clip was built from, which is what lets a gallery see that three
@@ -3173,13 +3355,37 @@ function restoreProject(project) {
   // 0..1. One validator for every look value beats a hand-written clause per special
   // case, which is what the special case was.
   //
-  // Checked here rather than shrugged off, because a size that does not parse would
-  // otherwise leave the editor framing at whatever the last clip was and quietly
-  // export a different shape from the one on screen. Absent is allowed and means the
-  // 1920x1080 this field was introduced beside - the version gate above is what makes
-  // that reading safe, since nothing older than it can reach here.
+  // Checked here rather than shrugged off, because a shape that does not parse would
+  // otherwise leave the editor framing at whatever the last clip was and quietly export a
+  // different shape from the one on screen. Absent is allowed and means the shape derived
+  // below - the version gate above is what makes that reading safe, since nothing older
+  // than it can reach here.
+  //
+  // A pair of positive integers, which is the whole of what a shape is. Integers rather
+  // than any two numbers because the pair is a *reduced* ratio and the reduction is what
+  // makes two sizes of one shape compare equal; `[16.0, 9.0]` would compare unequal to
+  // `[16, 9]` under `sameAspect` and light no button while framing identically, which is
+  // the kind of near-miss that reads as a rendering bug.
+  const aspectShape = Array.isArray(project.aspect) && project.aspect.length === 2
+    && project.aspect.every((n) => Number.isInteger(n) && n > 0);
+  if (project.aspect !== undefined && !aspectShape) {
+    throw new Error(`aspect is ${JSON.stringify(project.aspect)}: it reads as [width, height] in whole positive numbers`);
+  }
+  // The legacy field, still checked because it is still read - it is the only thing a
+  // project written before the shape moved onto the document has to say what it was
+  // framed at, and a size that does not parse is a project this build cannot frame.
   if (project.outputSize !== undefined && !/^[1-9][0-9]*x[1-9][0-9]*$/.test(String(project.outputSize))) {
     throw new Error(`outputSize is ${JSON.stringify(project.outputSize)}: it reads as WIDTHxHEIGHT`);
+  }
+  // The rate against the list the control is built from, so a document naming 25 is
+  // refused rather than adopted into a `<select>` that cannot show it. Refused rather
+  // than snapped to the nearest offered rate for the reason every other refusal here
+  // exists: `trails` is counted in output frames, so a rate quietly moved from 25 to 24
+  // is a look quietly changed, and the operator would have no way to see which.
+  if (project.outputFps !== undefined && !OUTPUT_RATES.includes(project.outputFps)) {
+    throw new Error(
+      `outputFps is ${JSON.stringify(project.outputFps)}: this build offers ${OUTPUT_RATES.join(', ')}`,
+    );
   }
   if (!project.look.params || typeof project.look.params !== 'object') {
     throw new Error('a project look carries a params object');
@@ -3323,7 +3529,7 @@ function restoreProject(project) {
   // walks the document's own keys, so absent is invisible to it - which was harmless
   // only while every document carried every key. It stops being harmless the moment
   // a parameter is added, and the second project opened in one session is where it
-  // would have shown up. `outputSize` takes this position too, on the line above, for
+  // would have shown up. `aspect` takes this position too, on the lines above, for
   // the same reason read the other way round.
   //
   // **The look tag, not every parameter.** `params.reset()` defaults view state too,
@@ -3331,16 +3537,50 @@ function restoreProject(project) {
   // scale back to 100, which is the one thing the stack is supposed to leave alone.
   // The set reset here is exactly the set `serialiseProjectBody` writes.
   // **The first thing here that changes anything, and it used to be the first thing in
-  // the function.** `setTargetSize` resized the stage and the export target before the
+  // the function.** `setProjectAspect` resizes the stage, and the setter it replaced
+  // resized the export target with it, before the
   // shape of the document had been checked at all, so a project that named a new size
   // and was then refused - for a missing reading, a track the registry does not know,
   // a retime that descends - left the editor framing something the clip on screen was
   // never composed for. `loadProjectNamed` exits on the throw without reapplying the
   // active deliverable, so nothing put it back.
   //
-  // The format of the string is still checked up in the validation phase, where a
+  // The format of both fields is still checked up in the validation phase, where a
   // refusal costs nothing. Only the write waited.
-  setTargetSize(project.outputSize ?? DEFAULT_EXPORT_SIZE, { fromDocument: true });
+  //
+  // **One reader with one documented fallback, not a second code path.** A project this
+  // build wrote carries `aspect` and nothing else; one written before the split carries
+  // an `outputSize`, whose ratio *is* the shape it was framed at, so the shape is derived
+  // from it rather than the project being refused for lacking a field it could not have
+  // known about. A project carrying neither is the shape the default size is.
+  //
+  // The legacy size is handed to the deliverable in the same breath, and that is the half
+  // that would be easy to leave out. `outputSize` was both the shape and the pixel count,
+  // so a hand-typed 1600x1000 reduces to `[8, 5]` - a shape the table offers no size for -
+  // and dropping the pixels would leave the deliverable holding a 16:9 size that
+  // `exportClip` then refuses. Seeding it means such a project renders exactly what it
+  // rendered before, which is the whole promise of an additive field.
+  const legacySize = project.outputSize === undefined ? null : String(project.outputSize);
+  if (legacySize !== null && project.aspect === undefined) {
+    ensureActiveDeliverable();
+    activeDeliverable.outputSize = legacySize;
+  }
+  setProjectAspect(
+    project.aspect ?? (legacySize === null ? defaultAspect() : aspectOfSize(legacySize)),
+    { fromDocument: true },
+  );
+
+  // The output rate, and the playhead held across it. `timeline.frame` counts *output*
+  // frames, so writing a new rate underneath it silently moves the playhead - frame 300
+  // is 10s at 30fps and 5s at 60 - and undo promises in as many words that the playhead
+  // does not move. Held here rather than at each caller because there are three of them
+  // and one is the undo stack itself: a project load, a restored autosave and every undo
+  // that crosses a rate change all arrive through this line.
+  if (timeline) {
+    const held = timeline.programSec;
+    timeline.outputFps = project.outputFps ?? 30;
+    timeline.frame = timeline.frameAt(held);
+  }
 
   params.reset(params.names('look'));
   params.apply(project.look.params);
@@ -5884,10 +6124,30 @@ async function exportClip(options = {}) {
   if (exporting) throw new Error('an export is already running');
   ensureActiveDeliverable();
   const d = activeDeliverable;
-  const deliverableSize = parseSize(options.outputSize ?? d.outputSize ?? `${targetSize.w}x${targetSize.h}`);
+  // **The one place the two halves of the split are checked against each other.** The
+  // stage is letterboxed to the project's shape and the file is rendered at the
+  // deliverable's size, and every route that writes either of them keeps them agreeing -
+  // `setProjectAspect` brings the size along, `applyDeliverable` refuses a stored size of
+  // another shape. This is the backstop under all of them, and it has one case it is the
+  // *only* answer to: a project saved with a shape the size table offers nothing for,
+  // reopened with a deliverable that never held a size of that shape. Refusing at the
+  // press costs a message; rendering would cost a file that is not the picture on screen,
+  // which is the failure this whole letterbox exists to make impossible.
+  const requested = options.outputSize ?? d.outputSize;
+  if (options.width === undefined && options.height === undefined
+    && !sameAspect(aspectOfSize(requested), projectAspect)) {
+    throw new Error(
+      `this clip is framed at ${projectAspect.join(':')} and the deliverable renders ${requested}: `
+      + 'pick a resolution of the project\'s shape in Export, or change the shape in Project settings',
+    );
+  }
+  const deliverableSize = parseSize(requested);
   const width = Math.trunc(options.width ?? deliverableSize.w);
   const height = Math.trunc(options.height ?? deliverableSize.h);
-  const fps = options.fps ?? d.outputFps ?? timeline.outputFps;
+  // The project's rate, since it left the deliverable. `options.fps` is still ahead of it
+  // because a queued job names the rate it was queued at, and re-rendering that job has to
+  // reproduce the file rather than whatever the project has since been set to.
+  const fps = options.fps ?? timeline.outputFps;
   const codec = options.codec ?? d.codec ?? 'h264';
 
   const restore = {
@@ -5945,6 +6205,13 @@ async function exportClip(options = {}) {
       // render machine today so the field constrains nothing - but a job record
       // without it cannot be retrofitted once old jobs exist, and provenance is
       // exactly what is wanted on the day two workers disagree about an image.
+      //
+      // **Serialised inside the try, so `outputFps` is the rate this render is at**
+      // rather than the rate the project was on before `options.fps` overrode it. That is
+      // the direction that makes a job replayable: the body now carries the rate, and a
+      // worker restoring it renders the file that was asked for rather than the one the
+      // project would produce today. It also means `trails`, whose length is counted in
+      // output frames, decays over the same span on the replay as it did here.
       project: serialiseProjectBody(),
       capture: timeline.source.index.hash,
       renderer: rendererClass(),
@@ -6016,8 +6283,11 @@ const ui = {
   // for why the surface rather than the state decides.
   cropFit: document.getElementById('cropFit'),
   cropReset: document.getElementById('cropReset'),
-  exportSize: buildExportMenu(document.getElementById('tExportSize')),
-  exportRatios: document.getElementById('exportRatios'),
+  // Empty in the markup and filled by `setProjectAspect`, which is the only thing that
+  // knows which sizes this project's shape has. The boot call below runs after this
+  // object exists, so the select is briefly empty and nothing reads it in between.
+  exportSize: document.getElementById('tExportSize'),
+  projectAspects: document.getElementById('projectAspects'),
   exportFormats: document.getElementById('exportFormats'),
   exportDialog: document.getElementById('exportDialog'),
   exportGo: document.getElementById('tExport'),
@@ -6025,6 +6295,7 @@ const ui = {
   exportName: document.getElementById('tExportName'),
   exportNameChip: document.getElementById('tExportNameChip'),
   exportSave: document.getElementById('tExportSave'),
+  exportTrim: document.getElementById('tExportTrim'),
   inOut: document.getElementById('tInOut'),
   outOut: document.getElementById('tOutOut'),
   clipLen: document.getElementById('tClipLen'),
@@ -6065,7 +6336,11 @@ const ui = {
   recRange: document.getElementById('recRange'),
 };
 
-const exportRatioButtons = buildExportRatios(ui.exportRatios, ui.exportSize);
+// The rates, built from `OUTPUT_RATES` rather than written into the markup, so the list
+// the validator refuses against and the list the control offers are one object.
+for (const rate of OUTPUT_RATES) ui.fps?.appendChild(new Option(String(rate), String(rate)));
+
+aspectButtons = buildAspectSegments(ui.projectAspects);
 
 /**
  * The output format, as one segmented control over the deliverable's `codec`.
@@ -6201,15 +6476,30 @@ const view = makeViewWindow({
   bedRect: () => ui.bed.getBoundingClientRect(),
 });
 
+/**
+ * What the chosen deliverable is, and what the press will take out of the clip.
+ *
+ * The rate is not in it any more and its absence is the change rather than a shortening:
+ * it belongs to the project, so printing it beside the deliverable's own fields would say
+ * it is one of them. The trim is a second element rather than the tail of this string
+ * because the dialog gives it a row of its own - the operator's question there is "what
+ * range is this press going to render", and an answer buried at the end of a summary line
+ * is one they have to parse rather than read.
+ */
 function paintDeliverable() {
   if (!ui.deliverableReadout) return;
   if (!activeDeliverable) {
     ui.deliverableReadout.textContent = 'none';
+    if (ui.exportTrim) ui.exportTrim.textContent = '—';
     return;
   }
   const out = activeDeliverable.out ?? view.duration;
   const outStr = activeDeliverable.out === null ? 'end' : timecode(out);
-  ui.deliverableReadout.textContent = `${activeDeliverable.outputSize} @ ${activeDeliverable.outputFps}fps ${activeDeliverable.codec} [${timecode(activeDeliverable.in)} - ${outStr}]`;
+  ui.deliverableReadout.textContent = `${activeDeliverable.outputSize} ${activeDeliverable.codec}`;
+  if (ui.exportTrim) {
+    ui.exportTrim.textContent = `${timecode(activeDeliverable.in)} - ${outStr} · `
+      + `${Math.max(0, out - activeDeliverable.in).toFixed(2)}s at ${timeline ? timeline.outputFps : 30}fps`;
+  }
 }
 
 /**
@@ -7491,13 +7781,17 @@ ui.rate.addEventListener('input', () => {
   pumpDraft();
 });
 
+// The output rate, which is project state now and undoable because of it. It used to
+// write the deliverable as well as the transport, and `serialiseProjectBody` carried
+// neither - so the `history.commit()` at the end of this handler compared two identical
+// snapshots and pushed nothing, and a rate change was the one document edit in the editor
+// that could not be undone. The commit line has not moved; what changed is that there is
+// now something in the snapshot for it to notice.
 ui.fps?.addEventListener('change', () => {
   if (!timeline) return;
   const held = timeline.programSec;
   const fps = Number(ui.fps.value);
   timeline.outputFps = fps;
-  ensureActiveDeliverable();
-  activeDeliverable.outputFps = fps;
   paintDeliverable();
   const gen = takeTransport();
   const wasPlaying = timeline.playing;
@@ -10859,7 +11153,10 @@ function drawChrome() {
     chromeCtx.fillStyle = '#6d7683';
     chromeCtx.fillText('output', col1, y);
     chromeCtx.fillStyle = '#e8ecf1';
-    chromeCtx.fillText(`${targetSize.w}x${targetSize.h}`, col2, y); y += lineH;
+    // The deliverable's size rather than the project's shape, because this row is headed
+    // "output" and the output is a count of pixels. The shape is on screen already - it is
+    // the letterbox around this readout.
+    chromeCtx.fillText(`${activeDeliverable?.outputSize ?? '—'}`, col2, y); y += lineH;
     chromeCtx.fillStyle = '#6d7683';
     chromeCtx.fillText('buffer', col1, y);
     chromeCtx.fillStyle = '#e8ecf1';
@@ -11497,14 +11794,18 @@ paintExportSave();
 
 // ------------------------------------------------- the library controls in the editor
 
-// Changing the export size reframes the editor, because the point of letterboxing
-// the stage is that the two are never allowed to disagree.
+// Changing the resolution reframes nothing, and there is no `history.commit()` under it
+// any more. Both absences are the split: every size this menu offers is of the shape the
+// stage is already letterboxed to, and the pixel count is the deliverable's rather than
+// the document's - `serialiseProjectBody` does not write it, so a commit here would
+// compare two identical snapshots and push nothing, which is a stack entry an operator
+// would press undo for and not get. The shape is what commits, in `buildAspectSegments`.
 ui.exportSize.addEventListener('change', () => {
-  setTargetSize(ui.exportSize.value);
-  paintExportRatioSelection(exportRatioButtons, ui.exportSize);
-  history.commit();
+  setDeliverableSize(ui.exportSize.value);
 });
-setTargetSize(DEFAULT_EXPORT_SIZE, { fromDocument: true });
+// The opening shape, through the same door a document arrives by, which is what fills
+// the resolution menu for the first time - it is empty in the markup until this runs.
+setProjectAspect(defaultAspect(), { fromDocument: true });
 
 ui.mark.addEventListener('click', () => { markHere().catch(showTimelineError); });
 
@@ -11899,7 +12200,7 @@ function shellElements(ids) {
 const shell = shellElements({
   surfaceName: 'surfaceName',
   saveProject: 'menuSaveProject',
-  render: 'menuRender',
+  projectSettings: 'menuProjectSettings',
   export: 'menuExport',
   obs: 'menuObs',
   cameraReset: 'menuCameraReset',
@@ -11913,6 +12214,9 @@ const shell = shellElements({
   lookExport: 'menuLookExport',
   state: 'menuState',
   exportClose: 'exportClose',
+  projectDialog: 'projectDialog',
+  projectClose: 'projectClose',
+  projectDone: 'projectDone',
   obsDialog: 'obsDialog',
   obsClose: 'obsClose',
   obsDone: 'obsDone',
@@ -11935,7 +12239,9 @@ const shell = shellElements({
 shell.menus = [...document.querySelectorAll('.appmenu')];
 
 shell.surfaceName.textContent = EDITING ? 'Editor' : 'Record';
-for (const control of [shell.saveProject, shell.render, shell.export, shell.lookImport, shell.lookExport]) {
+for (const control of [
+  shell.saveProject, shell.projectSettings, shell.export, shell.lookImport, shell.lookExport,
+]) {
   control.disabled = !EDITING;
 }
 
@@ -11986,21 +12292,31 @@ function openDialog(dialog) {
   }
 }
 
-function openExportDialog() {
-  paintExportRatioSelection(exportRatioButtons, ui.exportSize);
-  openDialog(ui.exportDialog);
-}
-
-shell.render.addEventListener('click', openExportDialog);
-shell.export.addEventListener('click', () => {
-  closeApplicationMenus();
-  // Straight into the save, and only when the same predicate the button reads says a
-  // copy can be handed over. A sequence render cannot, so this falls through to the
-  // dialog - which is the useful answer anyway: the frames are already on the server
-  // and what is left to do with them is render something else.
-  if (canSaveExportCopy()) saveExportCopy();
-  else openExportDialog();
-});
+// **Neither of these repaints on the way open, and the absence is checked rather than
+// assumed.** Everything the two dialogs show already has a writer that paints it where it
+// is written, which is where this file puts a repaint everywhere else - `paintExportFormats`
+// sits in `applyDeliverable` for exactly that reason. The shape buttons and the resolution
+// menu are painted by `setProjectAspect`, the only thing that writes `projectAspect`; the
+// deliverable's summary and its trim by `paintDeliverable`, which `setClipInOut`,
+// `setDeliverableSize` and `applyDeliverable` all reach; and `#tFps` by `timingChanged`,
+// which the comment above it calls the place undo, a project load and an output-rate change
+// all pass through.
+//
+// Measured with both dialogs shut rather than reasoned about, because that is the only way
+// to tell a writer that covers a path from one that looks like it does: a speed change from
+// 1.00x to 4.00x moved the trim readout from 75.62s to 18.90s, and an undo of a rate change
+// put the select back from 60 to 30. A repaint here would be a second reader of state that
+// is already current - it would cost nothing today and would hide the day one of those
+// writers stops, which is the wrong direction for something only ever seen inside a modal.
+shell.projectSettings.addEventListener('click', () => openDialog(shell.projectDialog));
+// One command for the deliverable, where there were two. `Render` opened this dialog and
+// `Export` jumped past it into `saveExportCopy` when there was something to hand over,
+// which meant one menu item did two unrelated things according to state nothing in the menu
+// showed. Handing a finished file over is a button *inside* the dialog - it is about an
+// artifact rather than about starting one - so the menu opens the dialog and the button
+// beside the note is where the copy is taken, enabled by the predicate that always decided
+// it. `openDialog` shuts the menus itself, so there is no `closeApplicationMenus` here.
+shell.export.addEventListener('click', () => openDialog(ui.exportDialog));
 shell.saveProject.addEventListener('click', () => {
   closeApplicationMenus();
   saveProjectAs();
@@ -12288,6 +12604,8 @@ shell.state.addEventListener('click', () => {
 });
 
 shell.exportClose.addEventListener('click', () => ui.exportDialog.close());
+shell.projectClose.addEventListener('click', () => shell.projectDialog.close());
+shell.projectDone.addEventListener('click', () => shell.projectDialog.close());
 shell.obsClose.addEventListener('click', () => shell.obsDialog.close());
 shell.obsDone.addEventListener('click', () => shell.obsDialog.close());
 
@@ -12317,13 +12635,17 @@ addEventListener('keydown', (event) => {
   } else if (key === 's' && event.shiftKey && EDITING) {
     event.preventDefault();
     saveProjectAs();
-  } else if (key === 'r' && EDITING) {
-    event.preventDefault();
-    openExportDialog();
   } else if (key === 'e' && EDITING) {
     event.preventDefault();
     shell.export.click();
   }
+  // **There is no Command-R here any more, and its absence is the merge rather than a
+  // dropped binding.** It opened this dialog while Command-E jumped into the save, and
+  // the two menu items behind them are now one. A shortcut that outlived the command it
+  // belonged to is worse than no shortcut: every key this program binds is printed in a
+  // `<kbd>` beside the item that runs it, so a live Command-R would be a gesture with
+  // nothing on screen declaring it - and in a browser it is the reload the operator
+  // meant, silently swallowed by a `preventDefault` for a command that no longer exists.
 });
 
 /**
@@ -13017,12 +13339,34 @@ globalThis.__kinect = {
   // every size a user could pick. A tool reading this cannot drift from the menu,
   // because it is the menu.
   //
-  // `setTargetSize` is here for the same reason the editor letterboxes: the stage's
+  // `setOutputSize` is here for the same reason the editor letterboxes: the stage's
   // shape is the export's shape now, so a tool asking for a stage of some size has to
   // say which shape it means rather than assuming the window decides.
+  //
+  // **Both gestures, because an operator making that happen performs both.** The shape
+  // moved onto the project and the pixel count stayed on the deliverable, so putting the
+  // product on 2048x1080 is Project settings then Export - and a hook that did only the
+  // first would leave the deliverable on whichever size the new shape opens with, which
+  // is not the size the tool asked for. Sweeping every size in `exportSizes` is exactly
+  // what `export-check` does, and a sweep whose arms silently render a neighbour is the
+  // four-arms-all-16:9 hole this hook was added to close, back under a different name.
+  //
+  // A size of a shape the table has nothing for - `640x400` is `[8, 5]`, and four tools
+  // use it to keep the stage cheap - lands the same way a legacy project's does: the
+  // shape is adopted, the size is appended to the menu as its own, and the two agree, so
+  // `exportClip` has nothing to refuse.
+  //
+  // It renames `setTargetSize`, which was named for a `targetSize` that no longer exists.
+  // Five of its six callers reached it as `setTargetSize?.(...)`, so the old name left
+  // behind would not have thrown anywhere - it would have quietly stopped resizing while
+  // every arm went on reporting, which is the failure mode this repo keeps finding.
   exportSizes: () => EXPORT_SIZES.flatMap((g) => g.sizes.map(([w, h]) => ({ ratio: g.ratio, w, h }))),
-  setTargetSize: (text) => setTargetSize(text, { fromDocument: true }),
-  targetSize: () => ({ ...targetSize }),
+  setOutputSize: (text) => setProjectAspect(aspectOfSize(text), { fromDocument: true })
+    && setDeliverableSize(text),
+  outputSize: () => ({
+    aspect: [...projectAspect],
+    size: activeDeliverable?.outputSize ?? null,
+  }),
 
   // The registry and the one bulk write a user gesture performs. Both refuse while a
   // frame is being evaluated, which means exactly what it says: the evaluator runs

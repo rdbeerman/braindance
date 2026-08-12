@@ -341,19 +341,22 @@
      on disk and nothing near this control could reach a grabber, so the same line
      there would be a warning about an impossibility. */
   body.editing #recRange { display: none; }
-  /* Menu items that only apply to the editor: opening a clip, rendering, exporting,
+  /* Menu items that only apply to the editor: opening a clip, its settings, exporting,
      the top-down inset, and look import/export. The record surface has no clip to
-     render or export, no composition to frame in the top-down, and look management
+     shape or export, no composition to frame in the top-down, and look management
      happens through the preset library visible in the Look tab. */
   body:not(.editing) #toLibrary,
-  body:not(.editing) #menuRender,
+  body:not(.editing) #menuProjectSettings,
   body:not(.editing) #menuExport,
   body:not(.editing) #menuTopView,
   body:not(.editing) #menuLookImport,
   body:not(.editing) #menuLookExport { display: none; }
   /* Hide separators that end up orphaned after the items above are hidden. The Output
-     menu keeps only OBS, so its separator goes; the View menu loses its middle section
-     entirely, leaving Default camera position and Stats for nerds with no separator. */
+     menu keeps only OBS, so its separator goes; the File menu keeps only Save as, which
+     leaves its separator with nothing below it; and the View menu loses its middle
+     section entirely, leaving Default camera position and Stats for nerds with no
+     separator. */
+  body:not(.editing) #fileMenu .menu-separator,
   body:not(.editing) #outputMenu .menu-separator,
   body:not(.editing) #viewMenu .menu-separator { display: none; }
   .check input:disabled { opacity: 0.4; }
@@ -523,6 +526,9 @@
   .dialog-copy button { flex: 0 0 52px; }
   .dialog-actions { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
   .dialog-actions .note { flex: 1; min-width: 0; color: var(--dim); font-size: 9px; }
+  /* What a dialog with nothing to say puts in the note's place, so its actions sit at the
+     right edge like the other two rather than drifting left on their own. */
+  .dialog-spacer { flex: 1; min-width: 0; }
   /* The 8px dot the design draws, dim until something is actually pulling the stream.
      Both halves move together - a lit dot beside dim text, or the reverse, would be two
      answers to one question. */
@@ -536,6 +542,16 @@
   .dialog-secondary:disabled { opacity: 0.38; cursor: default; }
   #exportDialog { width: min(480px, calc(100vw - 32px)); }
   #obsDialog { width: min(480px, calc(100vw - 32px)); }
+  #projectDialog { width: min(480px, calc(100vw - 32px)); }
+  /* The two readouts inside the export dialog - what the chosen deliverable is, and the
+     range the press will take. Both are `<b>` in a field rather than an input, because
+     neither is typed into here, and both want the dim monospaced voice the rest of the
+     editor's readouts use rather than the label weight above them. */
+  #tDeliverableReadout,
+  #tExportTrim {
+    display: block; margin-top: 6px; font-weight: 400; font-size: 10px;
+    color: var(--dim); font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+  }
 
   /* The camera path, its nodes and the top-down orthographic, on a canvas of their
      own over the stage. Deliberately not in the rendered frame: that buffer is
@@ -1057,12 +1073,18 @@
         <div class="appmenu-popover" id="fileMenu" role="menu" hidden>
           <a class="menu-command" id="toLibrary" href="/gallery" role="menuitem"><span>Open</span><kbd>&#8984;O</kbd></a>
           <button class="menu-command" id="menuSaveProject" type="button" role="menuitem"><span>Save as</span><kbd>&#8679;&#8984;S</kbd></button>
+          <div class="menu-separator"></div>
+          <!-- The two things about the edit that a deliverable is not allowed to decide:
+               the shape the stage is letterboxed to and the rate the frames come out at.
+               Under File rather than Output because both are properties of the clip -
+               the camera was keyed against a frame, and `trails` is counted in output
+               frames - where everything under Output is a thing to make from it. -->
+          <button class="menu-command" id="menuProjectSettings" type="button" role="menuitem"><span>Project settings&hellip;</span><kbd></kbd></button>
         </div>
       </div>
       <div class="appmenu">
         <button class="appmenu-trigger" id="outputMenuButton" type="button" aria-expanded="false" aria-controls="outputMenu">Output</button>
         <div class="appmenu-popover" id="outputMenu" role="menu" hidden>
-          <button class="menu-command" id="menuRender" type="button" role="menuitem"><span>Render</span><kbd>&#8984;R</kbd></button>
           <button class="menu-command" id="menuExport" type="button" role="menuitem"><span>Export</span><kbd>&#8984;E</kbd></button>
           <div class="menu-separator"></div>
           <button class="menu-command" id="menuObs" type="button" role="menuitem"><span>Output to OBS</span><kbd></kbd></button>
@@ -1320,10 +1342,10 @@
          right edge at 1512px with nothing on screen to say it existed.
 
          What is here is what something drives. The rework took the whole row away and
-         left the drivers behind, and the six controls below are the ones a proof tool
+         left the drivers behind, and the controls below are the ones a proof tool
          presses or reads: `editor-check` section 3 sets and clears the range through
-         these three buttons and reads the three readouts beside them, and section 6
-         plants a deliverable in the picker. The readouts the row also used to carry -
+         these three buttons and reads the three readouts beside them, and section 13
+         opens a project through the picker. The readouts the row also used to carry -
          pre-roll, last cost, undo depth, mark count - are not back, because nothing
          drives them and the design dropped them on purpose; they are a decision rather
          than an oversight, which is the difference this row is drawn along. -->
@@ -1336,22 +1358,20 @@
         <span class="tchip">in <b id="tInOut">00:00.000</b><button id="tSetIn" type="button">set</button></span>
         <span class="tchip">out <b id="tOutOut">end</b><button id="tSetOut" type="button">set</button></span>
         <span class="tchip">length <b id="tClipLen">&mdash;</b><button id="tClearRange" type="button">whole clip</button></span>
-        <!-- The deliverable, beside its own readout. It is here and not in the export
-             dialog because it is a document the editor holds open rather than a setting
-             the dialog gathers: the in/out to its left are its fields, `paintDeliverable`
-             writes the summary, and a refused one has to leave the picker showing the
-             adopted name rather than the refused one - which is a thing to see without
-             opening a modal. -->
         <!-- Opening a saved edit onto the take already open. File > Open goes to the
              gallery, which opens a *take* - a different question from putting one of
              several edits of this take on screen, and the gallery has no answer to it.
              `loadProjectNamed` is the door both the resume chip and this button use, so
-             the hash refusal on the way in is one behaviour rather than two. -->
+             the hash refusal on the way in is one behaviour rather than two.
+
+             The deliverable picker used to sit beside this one and is in `#exportDialog`
+             now, where the rest of the deliverable's fields are. The two are not the same
+             kind of thing despite having looked alike here: a project is what is on screen,
+             which is why its picker stays out in the open, and a deliverable is one of
+             several files you might make from it, which is a question that only comes up
+             at the point of making one. -->
         <label class="tchip">project<select id="tProject"><option value="">&mdash;</option></select>
           <button id="tProjectOpen" type="button">open</button></label>
-        <label class="tchip">deliverable<select id="tDeliverable"><option value="">&mdash;</option></select>
-          <button id="tDeliverableNew" type="button">new</button>
-          <b id="tDeliverableReadout"></b></label>
       </div>
     </div>
     <!-- The lanes live inside `tRailLanes`/`tLanes` rather than directly in these two
@@ -1400,32 +1420,91 @@
     </div>
   </section>
 
+  <!-- What the clip *is*, as opposed to what is made from it. Built like `#exportDialog`
+       and `#obsDialog` below - the same head, the same `.dialog-field` rows, the same
+       actions row - because three modals reached by three menu commands that each looked
+       slightly different would be three patterns to keep in step, and the shell already
+       opens all of them through one `openDialog`.
+
+       Both rows here are undoable project state and neither is a deliverable's business.
+       The shape, because the camera was keyed against a frame and reopening a 65:24 shot
+       at 16:9 is a different shot with the same keys. The rate, because `trails` is the
+       one look term whose length is counted in output frames rather than in seconds - at
+       damp 0.9 a trail is down to 12% after twenty frames, which is 0.83s at 24fps and
+       0.33s at 60fps, so the same document at two rates is two different looks. -->
+  <dialog id="projectDialog" aria-labelledby="projectTitle">
+    <div class="dialog-head">
+      <h2 id="projectTitle">Project settings</h2>
+      <button class="dialog-close" id="projectClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <!-- Empty in the markup and filled from `EXPORT_SIZES` at boot, for the reason that
+         list exists at all: a shape written here would be a second list, and the one that
+         drifts is the one nobody exports with. -->
+    <div class="dialog-field">
+      <span class="dialog-label">Aspect ratio</span>
+      <div class="dialog-segments" id="projectAspects"></div>
+    </div>
+    <!-- A `<select>` and not a segmented row because the four rates are a list that could
+         grow, and because everything that reads this - the `change` handler that retimes
+         the open clip, `timingChanged`, and the restore from a saved project - already
+         speaks `.value` and `change`. The id is unchanged from when this sat in the export
+         dialog: the element moved surfaces, and nothing about what it drives did.
+
+         Empty here and filled from `OUTPUT_RATES` at boot, because `restoreProject`
+         refuses a document naming a rate this build does not offer and the list it refuses
+         against has to be the list this control shows. Four `<option>`s written here would
+         be that list twice. -->
+    <div class="dialog-field">
+      <label for="tFps">Frame rate</label>
+      <select id="tFps"></select>
+    </div>
+    <p id="projectNote">The shape and the rate belong to the edit, so changing either is
+      undoable and every deliverable made from this clip inherits it. Resolution and format
+      are per-deliverable and live in Export.</p>
+    <div class="dialog-actions">
+      <!-- The spacer the other two dialogs get from their status note, and not a `.note`
+           of its own, because a `.note` is a place a message lands and this dialog has no
+           message to land there: both of its controls are built from the lists this build
+           offers, so neither can express a value that would be refused. An element named
+           for a job nothing gives it is the dead markup the swept-control rules exist
+           against, so it is named for the job it does. -->
+      <span class="dialog-spacer"></span>
+      <button class="dialog-action" id="projectDone" type="button">done</button>
+    </div>
+  </dialog>
+
   <dialog id="exportDialog" aria-labelledby="exportTitle">
     <div class="dialog-head">
       <h2 id="exportTitle">Export</h2>
       <button class="dialog-close" id="exportClose" type="button" aria-label="Close">&times;</button>
     </div>
-    <div class="dialog-field">
-      <span class="dialog-label">Aspect ratio</span>
-      <div class="dialog-segments" id="exportRatios"></div>
-    </div>
+    <!-- The deliverable, moved in from the timeline bar. It used to sit out there with an
+         argument attached - that it is a document the editor holds open rather than a
+         setting a dialog gathers, and that a refused one has to leave the picker showing
+         the adopted name somewhere you can see without opening a modal. Both halves are
+         still true and neither survives what this dialog became: every other field here
+         *is* the deliverable now - its resolution, its format, its output name, the trim
+         it will take - so the picker sitting somewhere else meant choosing a document on
+         one surface and editing it on another. The refusal still lands on `#tNote` in the
+         application bar, which is visible whether this is open or not, so the case the
+         old position was protecting is covered by the element that always carried it. -->
+    <label class="dialog-field" for="tDeliverable">
+      <span class="dialog-label">Deliverable</span>
+      <div class="dialog-input-row">
+        <select id="tDeliverable"><option value="">&mdash;</option></select>
+        <button class="dialog-secondary" id="tDeliverableNew" type="button">new</button>
+      </div>
+      <b id="tDeliverableReadout"></b>
+    </label>
+    <!-- Constrained to the project's shape rather than offering every size in the table,
+         which is the whole of what makes resolution a per-deliverable choice: two sizes of
+         one shape are the same picture, because every screen-space term is expressed
+         against 1080p and bloom's chain is frozen regardless, so 1920x1080 and 1280x720 of
+         one edit need no re-keying. A size of a *different* shape would be a reframe, and
+         reframing is what Project settings is for. -->
     <div class="dialog-field">
       <label for="tExportSize">Resolution</label>
       <select id="tExportSize"></select>
-    </div>
-    <!-- The rate the deliverable comes out at, which used to be a chip in the timeline
-         bar and belongs here now that the bar states where the playhead is rather than
-         what leaves the building. It is a `<select>` and not a segmented row because the
-         four rates are a list that could grow, and because everything that reads this -
-         the `change` handler that retimes the open clip, `paintDeliverable`, and the
-         restore from a saved deliverable - already speaks `.value` and `change`.
-
-         Losing it was not a control going quiet: `outputFps` still had a default, so an
-         edit exported at 30 with nothing on screen saying that was a choice, and a saved
-         deliverable was the only way to get any other rate. -->
-    <div class="dialog-field">
-      <label for="tFps">Frame rate</label>
-      <select id="tFps"><option>24</option><option>30</option><option>60</option><option>120</option></select>
     </div>
     <div class="dialog-field">
       <span class="dialog-label">Format</span>
@@ -1442,10 +1521,26 @@
           title="letters, digits, dot, dash and underscore - it names a file">
       </div>
     </div>
+    <!-- Read-only, and it is a readout rather than a pair of fields on purpose: the cuts
+         are set on the ruler, where you can see the frames either side of them, and a
+         second place to type them would be a second writer for `clipIn`/`clipOut` that
+         the marker drags and the speed rescale would both have to agree with. What this
+         answers is the question the dialog could not before - what range is this press
+         actually going to render - which two thin lines on a strip behind a modal cannot. -->
+    <div class="dialog-field">
+      <span class="dialog-label">Trim</span>
+      <b id="tExportTrim">&mdash;</b>
+    </div>
+    <!-- `save a copy` is still here, and it is the one control in this row that survives a
+         render rather than starting one: `paintExportSave` enables it once there is an
+         artifact to hand over and titles it with why when there is not. It stayed while the
+         row around it was rewritten because nothing about the aspect/rate split touches
+         what a finished file is - the merge above took `Render` and `Export` down to one
+         command, and neither of those was this. -->
     <div class="dialog-actions">
       <span class="note" id="tExportNote"></span>
       <button class="dialog-secondary" id="tExportSave" type="button" disabled>save a copy&hellip;</button>
-      <button class="dialog-action" id="tExport" type="button">render</button>
+      <button class="dialog-action" id="tExport" type="button">Export</button>
     </div>
   </dialog>
 

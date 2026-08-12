@@ -476,7 +476,7 @@ if (MUTATE && mutantServed === 0) {
 // drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
 // makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
 // every buffer-size expectation and every pointer coordinate in this file.
-await page.evaluate('globalThis.__kinect.setTargetSize?.("640x400")');
+await page.evaluate('globalThis.__kinect.setOutputSize?.("640x400")');
 // And the viewport is sized to whatever fixed furniture actually surrounds the stage,
 // measured rather than assumed. `TIMELINE_H` was a constant that went stale the moment
 // the bar became two rows, and the Pencil shell adds the same risk at the top: every

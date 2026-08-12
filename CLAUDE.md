@@ -44,6 +44,16 @@ left naming that bundle for code that had moved out of it. Cite a function by na
 than by a line: a path is checked for resolving and never for being *right*, so a line that
 has drifted into the middle of something else passes here.
 
+**Both walks read every file this repo ships, which they did not at first.** The citing set
+was a list — root markdown, `docs/**.md`, and the code under four directories — so a citation
+written anywhere else was never looked at while the row went on printing that every cited
+module resolves. Three were outside it and all three name a module: `native/grabber.cpp`,
+`presets-builtin/README.md` and the CI workflow. The set is now a walk of the whole tree
+minus what `.gitignore` declares this repo does not ship, so a source tree added next year is
+read by existing rather than by somebody remembering to add it. `--mutate
+citation-outside-the-prose` is the control, and it is a control the old walk could not fail:
+with the mutation declared and the old citing set in place the run came back 0 failed.
+
 ## Measurement culture
 
 This repo measures rather than reasons. Several inherited estimates turned out ~40% wrong when
@@ -444,6 +454,7 @@ node tools/syntax-check.mjs --mutate shell-id-renamed # ... and a surface whose 
 node tools/syntax-check.mjs --mutate shell-key-undeclared # ... and the other direction, which is the one a merge produces
 node tools/syntax-check.mjs --mutate web-citation-outlives-its-module # ... and a module this repo's own prose names, renamed to something the tree does not hold
 node tools/syntax-check.mjs --mutate line-citation-past-the-end # ... and the line half of that, which rots without the path rotting
+node tools/syntax-check.mjs --mutate citation-outside-the-prose # ... and one written in the C++, which is the half of the tree the walk used to skip
 node tools/release-gate-check.mjs                    # the .npmrc supply-chain gate is actually armed
 node tools/release-gate-check.mjs --mutate wrong-unit # ... and must FAIL (also: no-gate, absent)
 ```

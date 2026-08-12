@@ -6,14 +6,19 @@
 # and ignored by the second, so they are named at the bottom rather than attempted.
 #
 # One of the three jobs installs a dependency of this repo, and it is worth saying which
-# and why rather than leaving the reader to infer it. `syntax-check` parses the tree and
-# needs nothing; the gate job reaches the registry twice on purpose, pinning npm itself
-# and asking npm to resolve a package so it can read the refusal - which replaced a
-# version-dependent config reading that passed locally and failed on the runner while the
-# gate was armed the whole time. The unit job now runs `npm ci`, because four of the
-# modules extracted out of `web/main.js` return three.js types and a node test of them
-# cannot resolve `three` out of source alone. The comment on that job carries the
-# measurement that forced it.
+# and why rather than leaving the reader to infer it. `syntax-check` and `module-check`
+# both need nothing, which is why they share the first job; the gate job reaches the
+# registry twice on purpose, pinning npm itself and asking npm to resolve a package so it
+# can read the refusal - which replaced a version-dependent config reading that passed
+# locally and failed on the runner while the gate was armed the whole time. The unit job
+# now runs `npm ci`, because four of the modules extracted out of `web/main.js` return
+# three.js types and a node test of them cannot resolve `three` out of source alone. The
+# comment on that job carries the measurement that forced it.
+#
+# The list at the foot is the other half of this comment and has to be read as a claim:
+# every proof tool in `tools/` is either run above or named down there with what it would
+# need. `module-check` was in neither for one commit, which is how a tool that could run
+# on every push came to run on none of them.
 #
 # `npm ci` installs clean from a directory holding nothing but package.json, the lockfile
 # and .npmrc, and the lockfile is the reason it is `ci` rather than `install`: it takes
@@ -36,7 +41,7 @@ permissions:
 
 jobs:
   syntax:
-    name: parse every JavaScript file
+    name: the checks that need nothing
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -56,6 +61,19 @@ jobs:
       # no "type", measured on v26.0.0. So a green tick here is the mechanism having been
       # shown to work on this runner rather than an assumption that it does.
       - run: node tools/syntax-check.mjs
+      # **The other proof tool that needs nothing, and it was left out of both lists.**
+      # `module-check` reads `web/` off disk - no port, no browser, no install, no sensor -
+      # because every failure it is about is a failure to *boot*, and an instrument that
+      # needs the page running cannot see one. It was neither run here nor named at the
+      # bottom as deliberately excluded, which is the worst of the two: a reader of this
+      # file could conclude the suite had been accounted for. So an import cycle, an import
+      # naming a file or an exported name that is not there, state crossing a boundary as a
+      # writable object, or a name only one end wanted could all pass every hosted check
+      # and wait for somebody to run it locally.
+      #
+      # It goes in this job rather than its own because the job is the checks that need
+      # nothing, which is why the job's name is that rather than the parse it started as.
+      - run: node tools/module-check.mjs
 
   unit:
     name: the scalar maths, called directly
@@ -141,12 +159,21 @@ jobs:
             node tools/release-gate-check.mjs --mutate "$m"
           done
 
-# Not run here, and what each would need:
+# Not run here, and what each would need. `tools/` holds 19 `*-check` proof tools; four run
+# above and the fifteen below are the rest, and the arithmetic is written down because a list
+# nobody adds up is how this one came to be missing three of them at once - `module-check`,
+# which needed nothing and is now run, and the two directly below, which had been in neither
+# list since they were written.
 #
 #   determinism, index, registry, timeline, keyframe, export, library, editor, monitor,
 #   jobs, sensor-view   a running server and a GPU browser; export also needs ffmpeg and
 #                       ffprobe, and jobs needs a real Chromium rather than the bundled
 #                       headless shell, which it refuses to substitute for
+#   level-check         a GPU browser, but no server and no sensor - it spawns its own on
+#                       8377 and plants analytic planes straight into the depth texture,
+#                       which is what lets it grade the plane fit against a normal it chose
+#   vcam-check          a GPU browser, and its own server on 8361. What it proves is about
+#                       the bytes leaving for OBS, so there is nothing to assert without one
 #   guard-check         no browser, but it spawns servers that import ws out of
 #                       node_modules, and it needs a non-internal IPv4 to prove the bind -
 #                       so it needs the install this workflow deliberately does not do

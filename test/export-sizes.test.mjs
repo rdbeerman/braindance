@@ -18,7 +18,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EXPORT_SIZES, DEFAULT_EXPORT_SIZE } from '../web/export-sizes.js';
+import {
+  EXPORT_SIZES, DEFAULT_EXPORT_SIZE, reduceAspect, exportAspects, sizesForAspect,
+} from '../web/export-sizes.js';
 
 /**
  * The ratio a label claims, as a number.
@@ -102,4 +104,100 @@ test('no two entries share a WxH, because that string is the menu option\'s valu
 test('the default names a size the table actually offers', () => {
   assert.ok(every().some(({ w, h }) => `${w}x${h}` === DEFAULT_EXPORT_SIZE),
     `${DEFAULT_EXPORT_SIZE} is not in the table, so the menu opens on nothing`);
+});
+
+// ------------------------------------------------- the shape a size is, and back again
+//
+// The three rows above this line are about the table. These are about the arithmetic over
+// it that the aspect/rate split rests on: a project stores the reduced integer pair rather
+// than a size, so `[16, 9]` from one document has to equal `[16, 9]` from another, and the
+// resolution menu is `sizesForAspect` of whatever the document holds. Every claim below is
+// one a comment in `web/export-sizes.js` makes in prose, asserted here because that file is
+// data and a module that throws while it is being imported takes the page down at boot
+// rather than saying which row is wrong.
+
+test('a pair reduces to lowest terms, so two sizes of one shape compare equal', () => {
+  assert.deepEqual(reduceAspect(1920, 1080), [16, 9]);
+  assert.deepEqual(reduceAspect(1280, 720), [16, 9]);
+  // The case `reduceAspect`'s comment argues from: DCI is 1.8963 as a decimal and exact as
+  // a pair, which is why the pair is what a document carries.
+  assert.deepEqual(reduceAspect(2048, 1080), [256, 135]);
+  assert.deepEqual(reduceAspect(1000, 1000), [1, 1]);
+});
+
+test('a degenerate pair answers [0, 0] rather than dividing by zero', () => {
+  // `aspectOfSize` in `web/main.js` leans on this: a document field that is not a size at
+  // all has to come back as a shape nothing matches, not as a NaN that compares unequal to
+  // itself and lights no button for a reason nobody can read.
+  assert.deepEqual(reduceAspect(0, 0), [0, 0]);
+  assert.deepEqual(reduceAspect(1920, 0), [1, 0]);
+});
+
+test('every size in a group reduces to the same integer pair, not merely the same ratio', () => {
+  // **Stronger than the float row above, and the difference is what the split needs.** That
+  // row asks whether `w/h` agrees to within 1e-12, which is a question about a quotient;
+  // this asks whether the *pairs* are identical, which is the question `sameAspect` actually
+  // puts. A group whose sizes agreed as quotients but reduced differently would offer a
+  // resolution menu that dropped half its own rows, because `sizesForAspect` matches on the
+  // pair.
+  for (const group of EXPORT_SIZES) {
+    const first = reduceAspect(group.sizes[0][0], group.sizes[0][1]);
+    for (const [w, h] of group.sizes) {
+      assert.deepEqual(reduceAspect(w, h), first,
+        `${group.ratio}: ${w}x${h} reduces to ${reduceAspect(w, h)} where the group is ${first}`);
+    }
+  }
+});
+
+test('no two groups are the same shape, or one of them is unreachable', () => {
+  // `sizesForAspect` finds the *first* group of a shape, so a second group carrying the same
+  // pair would be a set of sizes the product ships and no menu can ever show. That is the
+  // one failure in this file that hides rather than shows: nothing throws, the menu is
+  // simply short.
+  const seen = new Map();
+  for (const { ratio, aspect } of exportAspects()) {
+    const key = aspect.join(':');
+    assert.ok(!seen.has(key), `${ratio} is ${key}, which ${seen.get(key)} already is`);
+    seen.set(key, ratio);
+  }
+});
+
+test('exportAspects names every group once, with the label the menu prints', () => {
+  const aspects = exportAspects();
+  assert.equal(aspects.length, EXPORT_SIZES.length);
+  for (const [i, group] of EXPORT_SIZES.entries()) {
+    assert.equal(aspects[i].ratio, group.ratio);
+    assert.deepEqual(aspects[i].aspect, reduceAspect(group.sizes[0][0], group.sizes[0][1]));
+  }
+});
+
+test('sizesForAspect returns exactly the group of that shape, which is the round trip', () => {
+  for (const { ratio, aspect } of exportAspects()) {
+    const group = EXPORT_SIZES.find((g) => g.ratio === ratio);
+    assert.deepEqual(sizesForAspect(aspect), group.sizes,
+      `${ratio} does not come back as the sizes it is made of`);
+  }
+});
+
+test('sizesForAspect hands back a copy, so a caller cannot edit the table', () => {
+  // The one list is the whole argument of this file, and a returned alias would let the
+  // resolution menu's builder mutate it - which is the second list arriving by the back
+  // door rather than by a second declaration.
+  const [{ aspect }] = exportAspects();
+  const sizes = sizesForAspect(aspect);
+  sizes[0][0] = -1;
+  sizes.push([1, 1]);
+  assert.notEqual(EXPORT_SIZES[0].sizes[0][0], -1, 'a row of the table was edited through the copy');
+  assert.equal(EXPORT_SIZES[0].sizes.length, sizesForAspect(aspect).length, 'the table grew');
+});
+
+test('a shape the table has nothing for is empty rather than a nearest neighbour', () => {
+  // `[8, 5]` on purpose: 1600x1000 is the hand-typed `outputSize` a project saved before
+  // the split could carry, and 1.6 is the exact ratio of the four-arms failure this file's
+  // header records. `openingSizeForAspect` in `web/main.js` reads this empty answer as
+  // "keep the size the document actually named", so an empty array here is a documented
+  // answer with a caller rather than an oversight.
+  assert.deepEqual(reduceAspect(1600, 1000), [8, 5]);
+  assert.deepEqual(sizesForAspect([8, 5]), []);
+  assert.deepEqual(sizesForAspect([0, 0]), []);
 });
