@@ -2403,8 +2403,20 @@ const RERUN = {
 // pixels are covered indirectly: the lossless arm above proves export pixels are
 // the editor's at the stage size, and section 2 proves the look holds at a size and
 // an aspect the editor is not.
+// **800x500 rather than the 800x600 this was, and the change is the aspect and not the
+// size.** What this row asserts is metadata: that the size asked for is the size the file
+// comes out at, so an output size that never reached the renderer cannot look like one that
+// did. That needs a size the editor's buffer is not, and 800x500 is one - it is 8:5 like
+// the 640x400 stage and it is nowhere in `EXPORT_SIZES`, so it stays as unfamiliar as it
+// ever was.
+//
+// The 600 was chosen for a look comparison the comment above says was deliberately not
+// built, and it stopped being free when the letterbox became the project's shape: rendering
+// 4:3 out of an 8:5 edit is a reframe, `exportClip` refuses it at the press now, and this
+// row went red naming exactly that. The refusal is right and the fixture was carrying a
+// leftover - a picture at another shape is not this clip at another size.
 const ODD_SIZE = {
-  width: 800, height: 600, fps: EXPORT_FPS,
+  width: 800, height: 500, fps: EXPORT_FPS,
   from: 0, to: 3, name: 'check-size', codec: 'h264',
 };
 
