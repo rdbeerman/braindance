@@ -851,6 +851,32 @@ const MUTATIONS = {
         + '  history.commit();'],
     ],
   },
+  // **The shape is written and the stage is not letterboxed to it.** `setProjectAspect`
+  // adopts the pair, brings the deliverable's size along and repaints the buttons - and
+  // then does not `resize()`, so the document says 4:3 and the picture is still the 16:9
+  // it was. That is the exact failure the split has to make impossible, because the whole
+  // argument for putting the shape on the document is that a composition and the frame it
+  // was composed for are one thing.
+  //
+  // It is here rather than as a picture comparison because a letterbox is geometry, not
+  // pixels: the stage's own box is what changes, and reading it is a stronger question
+  // than a render diff would ask - a build that reframed to *some* other shape would pass
+  // a "did the picture change" test and fail this one.
+  //
+  // **Separable from the read rows on purpose, and the counts are how you tell.** The
+  // three rows that read the dialog stay green under this, because the buttons really are
+  // painted and the document really does hold the new shape; the resolution menu really is
+  // rebuilt, so that row stays green too. What reddens is the press row, which asks the
+  // stage. One failed assertion, and if this ever catches with two the second one is
+  // telling you the mutation did something else as well.
+  'aspect-skips-the-letterbox': {
+    file: 'web/main.js',
+    edits: [[
+      '  void fromDocument;\n  paintDeliverable();\n  resize();\n  return true;',
+      '  void fromDocument;\n  paintDeliverable();\n  return true;',
+    ]],
+  },
+
   'plant-unswept-control': {
     file: 'web/index.html',
     edits: [[
@@ -3379,7 +3405,21 @@ try {
       '  and the rate it came in on goes back, so no later section counts frames at another one',
       `${rateBack} -> ${rateOther} -> ${restoredRate}`);
   }
+  // **Both ways out, because the rule claims both.** `shelldialogs` says section 1 drives
+  // every enabled control in this dialog, and `done` and the `x` are two controls with one
+  // job - so shutting it with only one of them would leave the other claimed by a rule and
+  // pressed by nothing, which is the attribution failure three entries in `DRIVER_IDS`
+  // were just corrected for. Asked as two rows rather than one because they fail
+  // separately: a `done` that does not close is a different build from an `x` that does
+  // not.
+  await page.locator('#projectDone').click();
+  check(await page.evaluate('!document.getElementById("projectDialog").open'),
+    '  and done shuts it, rather than being a button that only looks like the way out');
+  await page.locator('#fileMenuButton').click();
+  await page.locator('#menuProjectSettings').click();
   await page.locator('#projectClose').click();
+  check(await page.evaluate('!document.getElementById("projectDialog").open'),
+    '  and so does the close corner, so the dialog has two ways out and both of them work');
 
   const cameraBefore = await page.evaluate('__kinect.freeCamera.position.toArray()');
   await page.evaluate('__kinect.freeCamera.position.x += 2; __kinect.controls.update()');

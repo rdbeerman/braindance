@@ -228,6 +228,13 @@ node tools/library-check.mjs --mutate open-ignores-format          # ... the cap
 node tools/library-check.mjs --mutate shipped-look-drops-a-value   # ... a shipped look with a hole in it, which is the last look staying under the next one
 node tools/library-check.mjs --mutate complete-look-drops-a-group  # ... and the definition those documents are written against, which is code where they are data
 node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g # the editor's controls: that they exist, that pressing them changes something
+node tools/editor-check.mjs --mutate aspect-skips-the-letterbox --no-render # ... the shape written into the document
+                                                                       #     and the stage not framed to it, which is the
+                                                                       #     one thing putting the shape on the document
+                                                                       #     was for. Reads the stage's own box rather than
+                                                                       #     the button that was just pressed, so a build
+                                                                       #     that lights the control and reframes nothing
+                                                                       #     fails here and passes on the attribute
 node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
 node tools/editor-check.mjs --mutate plant-unswept-control --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate ease-gate-hardcodes-scalar --no-render # ... the ease gate naming one kind instead of asking
