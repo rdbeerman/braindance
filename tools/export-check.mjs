@@ -1438,12 +1438,23 @@ const asOldBuild = (look) => {
  * normalised away by name rather than skipped, so a rename nobody knew about does not
  * pass quietly - it fails, with both chains printed in the row's own message, which is
  * an instrument asking a question rather than assuming an answer.
+ *
+ * **An empty chain is a failed readback, not a match.** `chainOf` reads `arm.passes ?? []`
+ * and joins, so an arm off a page that stopped publishing its composer answers `''` - and
+ * two arms that both answer `''` compare equal, which is an assertion that has stopped
+ * being able to fail while reading exactly like one that passes. That is this repo's most
+ * frequently recorded defect and it is closed here rather than at the five call sites,
+ * because a sixth cross-build row added later would otherwise inherit the hole. Nothing
+ * legitimately renders through no passes: `RenderPass` and `OutputPass` are added in
+ * `web/post-chain.js` and neither is ever disabled - only the afterimage, the bloom and
+ * the grade are - so the floor for a healthy arm is two names, and requiring one is a
+ * requirement no correct build can trip over.
  */
 const chainOf = (arm) => (arm.passes ?? [])
   .filter((p) => p.endsWith(':on'))
   .map((p) => p.split(':')[0].replace(/^Unreal/, ''))
   .join('+');
-const sameChain = (a, b) => chainOf(a) === chainOf(b);
+const sameChain = (a, b) => chainOf(a) !== '' && chainOf(a) === chainOf(b);
 
 // The region itself, on the subject. Everything here is metres in the sensor frame, and
 // that is the claim the two rows using it exist to enforce: not one of these is a
@@ -1999,9 +2010,26 @@ for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFu
     + `${arm.sizes.smallest.toFixed(2)}..${arm.sizes.largest.toFixed(1)}px`;
   const worstFull = Math.max(...arm.tiles.map((v, i) => Math.abs(v - rebaseFullOld.tiles[i])));
   const ratioFull = arm.lum.mean / rebaseFullOld.lum.mean;
-  check(clear && Math.abs(ratioFull - 1) <= 0.02 && worstFull <= 2.0,
+  // And the chain, which these two rows were the last cross-build comparisons in this
+  // file to be judged without.
+  //
+  // The argument for leaving them out was that they were green through the whole episode
+  // that produced `sameChain` - these arms spread nothing, so Blackwall's own `rgbSplit`,
+  // `scanlines` and `grain` survive on both sides and both builds run the grade, where the
+  // three arms that spread `OFF` had it switch off on one side only. That is a true
+  // statement about the builds this pair currently spans and a bad reason to exempt a row,
+  // because it is the *conclusion* of the investigation being used as a precondition of the
+  // next one: whether a pass runs is derived from a set of parameter names, and the defect
+  // is a future build changing that set. A row that judges only clamps and pixels then
+  // reports a chain divergence as a luminance ratio, which is the exact hour this tool
+  // already spent once. Green rows are where an exemption is cheapest to write and where it
+  // costs the most, since nothing draws attention to it until the build it was wrong about
+  // arrives.
+  const chains = sameChain(arm, rebaseFullOld);
+  check(clear && chains && Math.abs(ratioFull - 1) <= 0.02 && worstFull <= 2.0,
     `and the whole look rebases, not just the points: Blackwall at ${label} is Blackwall at 960x600`,
-    `${ends}; luminance ratio ${fixed(ratioFull, 5)}, worst of 40 tile means ${fixed(worstFull)}/255`);
+    `${ends}; luminance ratio ${fixed(ratioFull, 5)}, worst of 40 tile means ${fixed(worstFull)}/255; `
+    + `chain ${chainOf(arm)} against ${chainOf(rebaseFullOld)}`);
 }
 
 {

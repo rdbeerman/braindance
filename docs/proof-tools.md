@@ -243,6 +243,19 @@ row requires the two builds to have run the same chain — printed in the row's 
 way. `UnrealBloomPass` becoming `BloomPass` is normalised by name rather than skipped, so a
 rename nobody knew about fails loudly instead of passing quietly.
 
+**"Every cross-build row" was three of five when that paragraph was written, and the two it
+missed are the two the paragraph above explains were green.** The guard went on the arms the
+vignette had reddened and not on the `rebase-full` pair, whose exemption is the sentence
+ending "so both builds run the grade" — a finding about the two builds this pair spans now,
+used as a standing precondition for whatever it spans later. That is the instance rather than
+the class, wearing the class's own paragraph, and it survived a round of review because a
+green row is where an exemption is cheapest to write and hardest to see. Both rows carry
+`sameChain` now and print both chains. The same edit closed a second hole underneath all five:
+`chainOf` answers `''` for an arm off a page that stopped publishing its composer, and two
+empty chains compared equal, so a failed readback read exactly like a match. It now requires
+a non-empty chain, which no correct build can trip over — `RenderPass` and `OutputPass` are
+never disabled, so the floor for a healthy arm is two names.
+
 One row beside them **could not fail on any input**: "every parameter every row asks for
 exists on this build" read `Object.entries` over a `Map`, which is `[]`, so it printed a pass
 whatever the arms had dropped. Nothing was hiding behind it — `dropped` is genuinely empty on

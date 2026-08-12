@@ -2026,6 +2026,41 @@ take and a closed one, GET and HEAD, document names that exist and names that do
 asserts by name that every route got past the 409 — with any route it cannot build a concrete
 URL for named rather than silently driven at a URL still carrying a literal `:foo`.
 
+### A class closed over the rows that were red, with the green ones exempted by the diagnosis
+
+`export-check` compares one look through two builds in five places, and the episode that
+produced `sameChain` — two builds silently running different post chains, reported for as long
+as those rows existed as a luminance ratio — put the guard on three of them. The two it skipped
+are the `rebase-full` pair, and the reason they were skipped is written down in
+`docs/proof-tools.md`: they spread nothing, so Blackwall's own `rgbSplit`, `scanlines` and
+`grain` survive on both sides and both builds run the grade, which is why they stayed green
+while the other three went red. The commit that landed all this then claimed in prose that
+**every** cross-build row required a matching chain. It was three of five.
+
+The exemption is the investigation's own conclusion used as the next investigation's
+precondition. "Both builds run the grade" is a true statement about the pair of builds this row
+spans today; whether a pass runs is derived from a *set* of parameter names, and the defect the
+guard exists for is a future build changing that set. So the exempted rows are exactly the rows
+that would go on reporting a chain divergence as a ratio — the failure the guard was written
+after an hour of chasing.
+
+**The thing worth taking is where the exemption was.** It was on the two rows that were passing.
+A red row gets an explanation and the explanation gets read; a green row gets one sentence in a
+document and nothing ever looks at it again, because nothing is drawing attention to it until
+the build it was wrong about arrives. An external reviewer found this, on a diff that had been
+read by the author and by a panel, and what it had to notice was not a defect in the code but a
+gap between a list of three call sites and the word "every" one paragraph away.
+
+Underneath all five sat a second hole with the shape this file records most often. `chainOf`
+reads `arm.passes ?? []` and joins, so an arm off a page that stopped publishing its composer
+answers `''` — and `'' === ''` is a match, so a failed readback passed as agreement and would
+have kept passing. It was closed in `sameChain` rather than at the call sites, which is the
+same argument as the section this sits under: a sixth cross-build row added next year inherits
+the requirement by calling the predicate. The floor is a chain of at least one name, and no
+correct build can trip over it, because `RenderPass` and `OutputPass` are added in
+`web/post-chain.js` and neither is ever disabled — only the afterimage, the bloom and the grade
+are.
+
 ### The half measured by hand is the half the next round finds
 
 `readPathFor` used to treat every `stat` failure as "there is no fork" and fall back to the
