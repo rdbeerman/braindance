@@ -1508,7 +1508,33 @@ async function openPage({
   // drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
   // makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
   // every buffer-size expectation and every pointer coordinate in this file.
-  await page.evaluate('globalThis.__kinect.setOutputSize?.("640x400")');
+  //
+  // **Asked for by both names, because this is the tool that boots two builds.** This hook
+  // was `setTargetSize` until the shape moved onto the document and the pixel count onto
+  // the deliverable, and the arms below are `git show` of a `web/main.js` from before
+  // that - so the name the current tree answers to is not the name they answer to. A
+  // single name reaches one arm and not the other, and spelled `?.` the miss is silent:
+  // `f49c833^` publishes `setTargetSize`, so under the new name alone that arm skipped
+  // its resize, kept the default 16:9 letterbox at 640x360, and every one of the six
+  // cross-build rows went red naming pixels that differ - a rename reading as six
+  // findings about readings. Measured, not reasoned: that is what the run printed.
+  //
+  // A tool that loads two builds has to address each in its own language, which `git
+  // show` above already commits it to. It is not a compatibility path inside the program,
+  // which is the thing this repo refuses.
+  //
+  // **And optional after both, which is the half that is easy to get backwards.** The
+  // instinct is to throw when neither name answers, on the grounds that a stage which
+  // silently did not resize is a geometry failure wearing the shape of a colour finding.
+  // That is true of an arm that *has* a letterbox and false of `151020b^`, which is the
+  // boot-state arm and predates letterboxing entirely: its buffer is the viewport's, it
+  // publishes neither name, and it arrives at 640x400 by having nothing to fit. Throwing
+  // there turns a correct no-op into DID NOT RUN for the whole file, which is what it did
+  // before this comment was rewritten.
+  await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    (k.setOutputSize ?? k.setTargetSize)?.('640x400');
+  })()`);
 
   // Proof the interception held, independent of the readings it protects. The
   // sensor's hello carries fx as 366.031494 and the uniform defaults to exactly
