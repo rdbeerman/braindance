@@ -6177,16 +6177,34 @@ async function exportClip(options = {}) {
   // press costs a message; rendering would cost a file that is not the picture on screen,
   // which is the failure this whole letterbox exists to make impossible.
   const requested = options.outputSize ?? d.outputSize;
-  if (options.width === undefined && options.height === undefined
-    && !sameAspect(aspectOfSize(requested), projectAspect)) {
-    throw new Error(
-      `this clip is framed at ${projectAspect.join(':')} and the deliverable renders ${requested}: `
-      + 'pick a resolution of the project\'s shape in Export, or change the shape in Project settings',
-    );
-  }
   const deliverableSize = parseSize(requested);
   const width = Math.trunc(options.width ?? deliverableSize.w);
   const height = Math.trunc(options.height ?? deliverableSize.h);
+  // **Asked of the size this render will actually use, which is the half the first version
+  // of this check got wrong.** It skipped itself entirely when `options.width` or
+  // `options.height` was supplied, on the reasoning that an explicit size is the caller's
+  // business - and the lines below then write that size into `outputSize` and call
+  // `resize()`, so an explicit pair does not sit beside the letterbox, it *replaces* it.
+  // A job carrying 320x200 against a 16:9 project reframed the camera to 1.6 and rendered
+  // a picture nobody composed, which is precisely the failure the comment below claims to
+  // be the backstop against. `tools/render-worker.mjs` supplies both fields on every job,
+  // so the one path that renders unattended was the one path with no check on it.
+  //
+  // A well-formed job cannot trip this: the worker restores the job's own project first,
+  // so `projectAspect` is that project's shape and the width and height it was queued with
+  // are of that shape. What trips it is a job whose size and whose project disagree, which
+  // is a reframe wearing the shape of a resolution.
+  const effective = reduceAspect(width, height);
+  if (!sameAspect(effective, projectAspect)) {
+    const asked = options.width === undefined && options.height === undefined
+      ? `the deliverable renders ${requested}`
+      : `this render was asked for at ${width}x${height}`;
+    throw new Error(
+      `this clip is framed at ${projectAspect.join(':')} and ${asked}, which is `
+      + `${effective.join(':')}: pick a resolution of the project's shape in Export, or change `
+      + 'the shape in Project settings',
+    );
+  }
   // The project's rate, since it left the deliverable. `options.fps` is still ahead of it
   // because a queued job names the rate it was queued at, and re-rendering that job has to
   // reproduce the file rather than whatever the project has since been set to.
@@ -13719,6 +13737,12 @@ globalThis.__kinect = {
     // would throw away the document the section under it is standing on.
     refreshPresets,
     setActiveDeliverable,
+    // The door beside the bare assignment above, and both are here on purpose. A check
+    // that wants a deliverable *placed* uses the setter; anything adopting one the way a
+    // surface does has to use this, because the version gate and the shape refusal live in
+    // it. `tools/render-worker.mjs` used the setter and so rendered documents the editor
+    // refuses - one take, one set of rules, whichever surface asks.
+    applyDeliverable,
     activeDeliverable: () => activeDeliverable,
     appliedPreset: () => appliedPreset,
     /**

@@ -297,7 +297,15 @@ try {
         // as the active deliverable and lets `exportClip` resolve the export
         // settings from there. Older jobs carry explicit width/height/fps/codec and
         // still need to work, so those override when no deliverable is present.
-        if (j.deliverable) globalThis.__kinect.library.setActiveDeliverable(j.deliverable);
+        // **Through `applyDeliverable`, which is the door, rather than assigned past it.**
+        // `setActiveDeliverable` is a bare assignment - it is what `applyDeliverable` calls
+        // once it has finished refusing - so adopting a job's deliverable with it skipped
+        // every check the editor applies to the same document: the version gate, and the
+        // refusal of a stored size belonging to another shape. A version 1 deliverable is
+        // refused at the editor's picker and rendered without comment here, which is the
+        // worse half of the pair, because this is the path that runs with nobody watching.
+        // One document, one set of rules, whichever surface adopts it.
+        if (j.deliverable) globalThis.__kinect.library.applyDeliverable(j.deliverable);
         // **Settled before exporting, or the restore's own repaint lands inside
         // the export's first seek.** `ExportTransport` counts how many times each
         // program position reaches the sink and throws on anything but one,

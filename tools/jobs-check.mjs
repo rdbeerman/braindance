@@ -315,14 +315,27 @@ const PROJECT = {
     retime: { rate: 1, keys: [] },
     camera: [],
   },
-  outputSize: '1920x1080',
+  // **The project's own shape, and it has to be the shape the jobs below render at.** This
+  // said `1920x1080` while every job here is enqueued at 640x400 or 320x200, which are 8:5
+  // - so the fixture was a 16:9 edit rendered at a different shape, and it passed because
+  // the only thing asserting anything about size was a dimension read off the finished
+  // file. That is the mismatch this fixture is *for* only if something checks it; nothing
+  // did, and `exportClip` skipped its own check whenever a width and height were supplied,
+  // which is on every job. Now that the check is total, a fixture that disagrees with
+  // itself is a fixture that cannot render - which is the correct answer to it, and the
+  // reason this line moved rather than the check being softened.
+  outputSize: '640x400',
   appliedPreset: null,
 };
+// Version 2, and no `outputFps`. The rate moved onto the project, so a deliverable naming
+// one is a version 1 document - and this fixture was one, which mattered more than it
+// looks: `applyDeliverable` refuses those, the worker used to adopt with a bare assignment
+// that refused nothing, and so the suite's own fixture was the proof that the batch path
+// skipped the gate. Both ends are fixed together, or this file greens a hole.
 const DELIVERABLE = {
-  version: 1,
+  version: 2,
   in: 0,
   out: null,
-  outputFps: 30,
   outputSize: '640x400',
   codec: 'h264',
 };
