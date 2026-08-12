@@ -3541,6 +3541,110 @@ try {
   check(await page.evaluate('!document.getElementById("projectDialog").open'),
     '  and so does the close corner, so the dialog has two ways out and both of them work');
 
+  // **The two refusals the whole split rests on, and nothing in this suite reached either
+  // of them.** `applyDeliverable` throws when a stored size belongs to another shape, and
+  // `exportClip` throws when the size a render will actually use does - and every document
+  // and every job any tool here builds is internally consistent, so both `if` blocks could
+  // be deleted and the suite would stay green. A completeness pass found that, and it is
+  // the shape `docs/instruments.md` names: the rows above prove the menu cannot *offer* an
+  // off-shape size, which is a different claim from the backstop firing when something
+  // arrives past the menu. The job queue is exactly that something.
+  //
+  // Driven through the hooks rather than through the UI, deliberately and for the reason
+  // `restoreProject` is exposed raw: no gesture can build these documents, so a check that
+  // could only reach them by clicking could never hand them over at all.
+  //
+  // The whole block restores the document it found, because everything after section 1
+  // reads it.
+  const liveProject = await page.evaluate('__kinect.keyframes.project()');
+  const liveSize = await page.evaluate('__kinect.outputSize().size');
+  const refusals = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const out = {};
+    const shape = k.outputSize().aspect.join(':');
+    // A deliverable this build *can* read - version 2, everything else valid - whose only
+    // fault is a size of another shape. Version 1 would be refused a line earlier by the
+    // version gate, which is why the row that queues one cannot reach this.
+    const wrongShape = shape === '16:9' ? '1080x1080' : '1920x1080';
+    try {
+      k.library.applyDeliverable({
+        version: 2, in: 0, out: null, outputSize: wrongShape, codec: 'h264', name: '',
+      });
+      out.deliverable = 'adopted';
+    } catch (err) { out.deliverable = err.message; }
+    // And the size a render will use, handed over the way a queued job hands it over.
+    // exportClip reads width and height ahead of the deliverable's own size, so this is the
+    // only door that can be asked this question. No backticks in this comment on purpose -
+    // it lives inside a template literal, and one here ends the literal. Eighth time.
+    const [w, h] = wrongShape.split('x').map(Number);
+    try {
+      await k.export.run({ from: 0, to: 0, width: w, height: h, name: 'ec-shape-probe' });
+      out.render = 'rendered';
+    } catch (err) { out.render = err.message; }
+    out.shape = shape;
+    out.asked = wrongShape;
+    return out;
+  })()`);
+  check(/framed at/.test(refusals.deliverable) && /not the/.test(refusals.deliverable),
+    'a stored deliverable whose size is another shape is refused, which is the reframe a deliverable is not allowed to perform',
+    `${refusals.shape} clip, ${refusals.asked} deliverable: ${String(refusals.deliverable).slice(0, 90)}`);
+  check(/framed at/.test(refusals.render),
+    'and a render handed a size of another shape is refused at the press, which is the backstop the job queue arrives through',
+    `${refusals.shape} clip, asked for ${refusals.asked}: ${String(refusals.render).slice(0, 90)}`);
+
+  // **The path every project saved before this branch takes on its next open, and nothing
+  // drove it.** A legacy document carries `outputSize` and no `aspect`, so the shape is
+  // derived from it and the size is handed to the deliverable in the same breath - which is
+  // new logic rather than a refactor, and the completeness pass found it reached by no row
+  // at all. Both halves are asked: the shape came out right, and the pixels survived.
+  //
+  // `1600x900` rather than a size the table lists, because the interesting case is a
+  // hand-typed size the menu never offered - that is what a pre-branch document could hold,
+  // and keeping its exact pixels is the whole promise of reading the legacy field.
+  const legacy = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const doc = JSON.parse(JSON.stringify(${JSON.stringify(liveProject)}));
+    delete doc.aspect;
+    delete doc.outputFps;
+    doc.outputSize = '1600x900';
+    try {
+      k.library.restoreProject(doc);
+      return {
+        ok: true, aspect: k.outputSize().aspect.join(':'), size: k.outputSize().size,
+        fps: k.timeline.transport().outputFps,
+      };
+    } catch (err) { return { ok: false, error: err.message }; }
+  })()`);
+  check(legacy.ok && legacy.aspect === '16:9',
+    'a project carrying only the legacy outputSize is framed at the shape that size is',
+    legacy.ok ? `1600x900 gives ${legacy.aspect}` : `refused: ${String(legacy.error).slice(0, 80)}`);
+  check(legacy.size === '1600x900',
+    '  and the pixels it named survive onto the deliverable, so it renders what it rendered before',
+    `the deliverable reads ${legacy.size}`);
+  check(legacy.fps === 30,
+    '  and a document with no rate reads as 30, which is what absent has to mean for every project written before the rate moved',
+    `${legacy.fps}fps`);
+
+  // And the other half of the same rule: a legacy size whose *shape* the table cannot serve
+  // is refused rather than opened into a state with no resolution to render at.
+  const legacyOff = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const doc = JSON.parse(JSON.stringify(${JSON.stringify(liveProject)}));
+    delete doc.aspect;
+    doc.outputSize = '1600x1000';
+    try { k.library.restoreProject(doc); return { ok: true }; } catch (err) { return { ok: false, error: err.message }; }
+  })()`);
+  check(!legacyOff.ok && /offers no resolution for/.test(String(legacyOff.error)),
+    '  while one whose shape this build has no size for is refused, rather than opened onto an export that cannot run',
+    legacyOff.ok ? 'adopted 8:5' : String(legacyOff.error).slice(0, 100));
+
+  await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    k.library.restoreProject(${JSON.stringify(liveProject)});
+    k.setOutputSize(${JSON.stringify(liveSize)});
+  })()`);
+  await settle();
+
   const cameraBefore = await page.evaluate('__kinect.freeCamera.position.toArray()');
   await page.evaluate('__kinect.freeCamera.position.x += 2; __kinect.controls.update()');
   await page.locator('#viewMenuButton').click();
