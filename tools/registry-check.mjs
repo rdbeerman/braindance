@@ -537,18 +537,22 @@ const MUTATIONS = {
   // boot failure would arrive as four separate landing rows and it arrives as one row
   // naming four terms in its detail, which is the sort of thing only a run settles.
   //
-  // Note what reddening 1b's readGhost row means here, since that row is red in every run
-  // of this tool: it goes from its own standing 2 of 6 frames to 6 of 6. A row already
-  // failing is exactly where a new defect hides, so the count is not the reading - the
-  // frame tally is.
+  // 1b's readGhost row used to be red in every run of this tool, and the note here used to
+  // say so - it went from a standing 2 of 6 frames to 6 of 6, and the count was not the
+  // reading because a row already failing is exactly where a new defect hides. That is
+  // fixed rather than still true: the standing failure was one byte of 1,024,000 differing
+  // by 1, which is two compilers rounding a fragment differently, and 1b compares pictures
+  // now. All five of its rows are green at baseline, so all five reddening here is five
+  // clean signals rather than four and a widening.
   'crush-gates-the-grade': {
     file: 'web/main.js',
     edits: [[
       '  return grade.uniforms.rgbSplit.value > 0',
       '  return grade.uniforms.crush.value > 0 || grade.uniforms.rgbSplit.value > 0',
     ]],
-    fails: 'the pass-gate row for crush, all five rows of 1b (readGhost widening from 2 of 6 '
-      + 'frames to 6 of 6), and the boot comparison naming all four gating terms',
+    fails: 'the pass-gate row for crush, all five rows of 1b (each at 6 of 6 frames and '
+      + 'about three quarters of every frame), and the boot comparison naming all four '
+      + 'gating terms',
   },
 };
 
@@ -2051,12 +2055,24 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
         ${extra}
         k.drive.reset();
         pinCamera(k.freeCamera);
-        const hashes = [];
+        // The frames themselves rather than digests of them, because the comparison
+        // downstream is a measurement and a hash answers only "same or not". Base64 so
+        // the bridge carries a string: five readings by six frames of 640x400 RGBA is
+        // about 41MB per arm, which node holds without complaint and which buys the row
+        // the ability to say *how* two builds differ rather than only that they do.
+        // Chunked into the encoder because a single spread of a million-element typed
+        // array overflows the argument list.
+        const frames = [];
         for (const t of ${JSON.stringify(at)}) {
           k.drive.stepTo(t);
-          hashes.push(await sha256(k.drive.readPixels()));
+          const px = k.drive.readPixels();
+          let bin = '';
+          for (let i = 0; i < px.length; i += 0x8000) {
+            bin += String.fromCharCode.apply(null, px.subarray(i, i + 0x8000));
+          }
+          frames.push(btoa(bin));
         }
-        return hashes;
+        return frames;
       })()`.replace(/\$MODE/g, String(mode)).replace(/\$READING/g, JSON.stringify(reading)));
     }
     await p.close();
@@ -2073,23 +2089,80 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
   );
   console.log(`  comparison geometry old ${JSON.stringify(oldArm.meta)} new ${JSON.stringify(newArm.meta)}`);
 
+  // **The same picture, which is not the same bytes, and the gap between those was a red
+  // row in every run of this tool for as long as it existed.**
+  //
+  // `readGhost` disagreed with its pinned mode at frames 2 and 3 and nothing else did. It
+  // was carried as a known standing failure - `crush-gates-the-grade` was calibrated
+  // against it, and two comments in `web/cloud-shader.js` record it reproducing unchanged
+  // across shader rewrites - which is the worst place for a defect to sit, because a row
+  // already red is where a new one hides. So it was measured rather than carried further.
+  //
+  // The two frames differ by **one byte out of 1,024,000, by exactly 1**. That is a single
+  // colour channel of a single fragment landing the other side of a rounding boundary, and
+  // it is the shape `web/cloud-shader.js` already has two case files about: adding a branch
+  // the shader never takes reddened three of these rows, because a branch in the common
+  // path costs the compiler the contractions it was making either side. The two arms are
+  // independently compiled shaders whose source differs by everything the registry did, so
+  // asking them for identical bytes asks the two compilations to agree - which is a claim
+  // about a driver rather than about a reading, and not one this product can keep.
+  //
+  // **The threshold is derived from both ends rather than picked.** Measured noise is 1
+  // byte at delta 1. The smallest true positive this row has to catch is
+  // `ghost-alpha-term-dropped`, which removes one term from the ghost's alpha: it moves
+  // 187,245 to 191,215 bytes - about 18.6% of the frame - with deltas of 47 to 52. So 64
+  // bytes sits 64x above the noise and 2,900x below the quietest real defect, and there is
+  // no value in between that a sane instrument would disagree about.
+  //
+  // Two conditions rather than one, because a defect can be loud in either dimension: a
+  // handful of fragments moved a long way trips the delta, and a great many moved one step
+  // trips the count. What neither catches is a defect that moves one fragment by one step,
+  // and that is stated rather than hidden - such a change is *by construction*
+  // indistinguishable from the compiler noise this row has been printing since it shipped.
+  const TOLERATED_BYTES = 64;
+  const framePixels = (s) => Buffer.from(s, 'base64');
+  const frameDelta = (x, y) => {
+    const A = framePixels(x);
+    const B = framePixels(y);
+    if (A.length !== B.length) return { bytes: Infinity, max: Infinity, sized: [A.length, B.length] };
+    let bytes = 0;
+    let max = 0;
+    for (let i = 0; i < A.length; i++) {
+      const d = Math.abs(A[i] - B[i]);
+      if (d) { bytes++; if (d > max) max = d; }
+    }
+    return { bytes, max, of: A.length };
+  };
+
   for (const [reading, mode] of Object.entries(READING_WAS)) {
     const a = oldArm.out[reading];
     const b = newArm.out[reading];
-    const first = a.findIndex((h, i) => h !== b[i]);
-    check(eq(a, b),
-      `${reading.padEnd(13)} at 1.0 is bit-identical to mode ${mode} at ${AGAINST_REV}`,
-      // **Which frames, not which frame.** Reporting only the first mismatch cannot
-      // tell a transient from a divergence, and those are different findings: one
-      // frame out of a walk is a warm-up the two builds enter differently, while every
-      // frame from some index on is a term that has actually changed. `readGhost` is
-      // the row that needed asking - it disagrees at exactly one frame of however many
-      // are walked - and the old detail line looked identical either way.
-      first < 0
-        ? `${a.length} frames`
-        : `${a.filter((h, i) => h !== b[i]).length} of ${a.length} frames differ, first at `
-          + `${first}: ${a[first].slice(0, 12)} vs ${b[first].slice(0, 12)} `
-          + `(mismatched: ${a.map((h, i) => (h === b[i] ? null : i)).filter((i) => i !== null).join(', ')})`);
+    const deltas = a.map((frame, i) => frameDelta(frame, b[i]));
+    const moved = deltas
+      .map((d, i) => ({ ...d, frame: i }))
+      .filter((d) => d.bytes > TOLERATED_BYTES || d.max > 1);
+    const touched = deltas.filter((d) => d.bytes > 0).length;
+    check(moved.length === 0,
+      `${reading.padEnd(13)} at 1.0 renders the same picture as mode ${mode} at ${AGAINST_REV}`,
+      // **Which frames and by how much, not which frame.** Reporting only the first
+      // mismatch cannot tell a transient from a divergence, and those are different
+      // findings: one frame out of a walk is a warm-up the two builds enter differently,
+      // while every frame from some index on is a term that has actually changed. The
+      // magnitudes are printed beside them for the same reason one step further on - a
+      // row that says "2 of 6 frames differ" and a row that says "1 byte of 1,024,000 by
+      // 1" are the same row, and only the second one lets a reader tell a defect from two
+      // compilers rounding a fragment differently.
+      //
+      // The passing line names what was tolerated rather than saying nothing, because a
+      // green row that quietly absorbed a difference is how a tolerance turns into a
+      // blindfold. On this rig it reads `6 frames, 2 within tolerance`, and a day when it
+      // reads 6 is a day to come back and look.
+      moved.length === 0
+        ? `${a.length} frames${touched ? `, ${touched} within tolerance `
+          + `(worst ${Math.max(...deltas.map((d) => d.bytes))} bytes of ${deltas[0].of}, `
+          + `delta ${Math.max(...deltas.map((d) => d.max))})` : ''}`
+        : `${moved.length} of ${a.length} frames differ beyond ${TOLERATED_BYTES} bytes or 1 step: `
+          + moved.map((d) => `f${d.frame} ${d.bytes} bytes of ${d.of} max ${d.max}`).join(', '));
   }
 
   // ---- the grade term whose default is not zero, at the value the shipped look uses.

@@ -3010,3 +3010,52 @@ so a different cause. A worktree at the commit before the branch's work, served 
 port and checked from its own tree, produced the identical row with identical hashes. That
 row is older than the change sitting on top of it, and ten minutes of `git worktree` is what
 separates "pre-existing" from "mine" when both readings fit.
+
+## A row that has always been red is measuring something it never claimed
+
+`registry-check` section 1b renders each of the five readings at 1.0 against the pinned
+build's numbered shading mode and asserted the two came back bit-identical over six frames.
+Four rows passed. `readGhost` disagreed at frames 2 and 3, and had done since the section was
+written — carried as a known standing failure, calibrated into `crush-gates-the-grade`'s
+expected-failure string as "widening from its own standing 2 of 6 frames to 6 of 6", and
+recorded twice in `web/cloud-shader.js` as reproducing unchanged across shader rewrites.
+
+**Nobody had measured how much it differed by.** One byte out of 1,024,000, by exactly 1 —
+one colour channel of one fragment, on each of two frames. Everything else was identical.
+That is not a reading rendering differently; it is two independently compiled shaders
+rounding one fragment the other way, which is the effect `web/cloud-shader.js` already had
+two case files about: adding a branch the shader never takes reddened three of these rows,
+because a branch in the common path costs the compiler the contractions it was making either
+side. The row claimed "this reading renders what its mode rendered" and enforced "these two
+compilations agree", which is a claim about a driver and not one this product can keep.
+
+The general shape: **an exact-equality assertion across two independently built artifacts is
+measuring the toolchain as well as the thing.** That is fine while it passes and worthless the
+moment it does not, because the standing failure cannot be told from a new one — and a row
+already red is exactly where a new defect hides, which this repository says out loud in the
+comment beside the mutation that was calibrated against it.
+
+Two things made the repair safe rather than a loosening.
+
+**The threshold came from both ends, measured.** Noise is 1 byte at delta 1. The quietest true
+positive the row must catch is `ghost-alpha-term-dropped`, one term removed from the ghost's
+alpha: 187,245 to 191,215 bytes — about 18.6% of the frame — at deltas of 47 to 52. Sixty-four
+bytes sits 64x above the noise and 2,900x below the defect, and no value in between is
+arguable. Two conditions rather than one, because a defect can be loud in either dimension:
+many fragments moved one step trips the count, a few moved far trips the delta. What neither
+catches is one fragment moved one step, and that is stated in the tool rather than left to be
+discovered — such a change is by construction indistinguishable from the noise the row had
+been printing since it shipped.
+
+**The passing line names what it absorbed.** It reads `6 frames, 2 within tolerance (worst 1
+bytes of 1024000, delta 1)`. A tolerance that reports nothing is a blindfold: the day that
+line says 6 frames, or the worst byte count climbs, is a day to come back and look, and a bare
+`PASS` would never say so.
+
+The result is worth recording because it runs against the intuition that relaxing a check
+weakens it. Before, `ghost-alpha-term-dropped` was caught against a row that was already red,
+so its claim to redden "the readGhost row of 1b, alone" could not be read off a run. After,
+it fires exactly one assertion and that row is green at baseline. Every mutation that touches
+the section got sharper: `rgb-contributes-no-alpha` now shows the other four readings visibly
+passing, and `mix-ignores-normalisation` — whose whole point is that 1b keeps passing while 8b
+fails — can finally demonstrate it.

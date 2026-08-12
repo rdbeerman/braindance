@@ -797,8 +797,19 @@ void main() {
   // pinned pre-registry build: readRgb, readDepth, readContour and readBlackwall all came
   // back bit-identical over six frames, and readGhost reproduced its own pre-existing
   // failure unchanged - the same two frames, 2 and 3, and the same pair of hashes
-  // 55d01311394e against 36fb79d8fa45. That last part is the half that matters, because a
-  // row already red is where a new perturbation would hide.
+  // 55d01311394e against 36fb79d8fa45. That last part was the half that mattered, because
+  // a row already red is where a new perturbation would hide.
+  //
+  // **That standing failure has since been measured and it was never this file's.** The
+  // two frames differed by one byte of 1,024,000, by exactly 1 - one channel of one
+  // fragment landing the other side of a rounding boundary between two independently
+  // compiled builds, which is the same contraction effect the flare below records rather
+  // than a term. registry-check's section 1b compares pictures now, with the threshold
+  // derived from that noise at one end and from ghost-alpha-term-dropped at the other,
+  // no backticks in this comment on purpose - it sits inside the GLSL template literal,
+  // and one here ends the shader. That is the seventh time in this repo,
+  // which moves 187k bytes by 47. So the row is green at baseline and a re-measurement
+  // like this one no longer has to reason around a red row while doing it.
   if (duotoneDepth > 0.0) {
     vec3 cold = hueSpin(vec3(0.020, 0.030, 0.075), duotoneHue);
     vec3 heat = hueSpin(vec3(1.000, 0.380, 0.120), duotoneHue);
@@ -895,6 +906,15 @@ void main() {
   // again and only the pre-existing readGhost failure remains. So the cost of a fragment
   // being able to skip a multiply-add it does not need is three false regressions in a
   // check with no tolerance and no way to re-baseline, and the multiply-add is cheaper.
+  //
+  // **The readGhost failure named above was the same effect as the three, and it has since
+  // been measured rather than lived with**: one byte of 1,024,000 differing by exactly 1,
+  // which is one fragment rounding the other way between two independently compiled
+  // builds. Section 1b compares pictures now, so "a check with no tolerance" is no longer
+  // the situation - but the conclusion above stands unchanged, because a tolerance sized
+  // to admit one byte at one step admits nothing like the three regressions that
+  // paragraph is about, and writing the multiply-add straight through is still cheaper
+  // than reasoning about what a branch did to the contractions around it.
   col += vec3(0.2, 0.9, 1.0) * vGlitch;
 
   // Cross-fade. A dying point thins out where it stood instead of blinking off,
