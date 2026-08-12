@@ -86,7 +86,13 @@ const HEADED = argv.includes('--headed');
 const MUTATE = flag('--mutate');
 const SHOTS = flag('--shots');
 
-const STAGE = { width: 640, height: 400 };
+// 16:9, and the shape matters as much as the size. This was 640x400, which is 8:5 - a shape
+// `EXPORT_SIZES` offers no resolution for, so `restoreProject` refuses a document framed at
+// it, and this file undoes. The run died mid-way with "this project is framed at 8:5, which
+// this build offers no resolution for" coming out of an undo restoring a snapshot this tool
+// had put the editor into. A stage no user gesture can reach and no document can hold is a
+// stage this file should never have been measuring in.
+const STAGE = { width: 640, height: 360 };
 // A first guess at the timeline strip; the real height is measured after load and the
 // viewport corrected. See the resize below the goto.
 const CHROME_H_GUESS = 148;
@@ -858,12 +864,12 @@ if (MUTATE && mutantServed === 0) {
     + 'requested it, so this run would have measured the unmutated build');
   process.exit(2);
 }
-// **The page frames at the stage this tool asked for.** The editor letterboxes
-// itself to the export aspect now, so a viewport alone no longer decides the
-// drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
-// makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
-// every buffer-size expectation and every pointer coordinate in this file.
-await page.evaluate('globalThis.__kinect.setOutputSize?.("640x400")');
+// **The page frames at the stage this tool asked for.** The editor letterboxes itself to the
+// project's shape, so a viewport alone no longer decides the drawing buffer. Asked for as
+// 16:9 because that is a shape the product actually offers: at 8:5 the editor sits in a
+// framing `restoreProject` refuses, and every undo in this file restores a document written
+// out of that framing.
+await page.evaluate(`globalThis.__kinect.setOutputSize?.("${STAGE.width}x${STAGE.height}")`);
 // The viewport is then sized to whatever the strip actually is, measured off the
 // page. `CHROME_H_GUESS` is a first guess and nothing more: it was 104 while the bar was
 // one row, the bar became two, and the stage quietly came out 570x356 while every

@@ -3420,6 +3420,41 @@ function restoreProject(project) {
   if (project.outputSize !== undefined && !/^[1-9][0-9]*x[1-9][0-9]*$/.test(String(project.outputSize))) {
     throw new Error(`outputSize is ${JSON.stringify(project.outputSize)}: it reads as WIDTHxHEIGHT`);
   }
+  // **A shape this build can offer no resolution for is refused, and refusing it here is
+  // what stops a document becoming a trap.**
+  //
+  // `outputSize` used to carry the shape *and* the pixel count; `aspect` carries only the
+  // shape, and the pixels come off the deliverable by looking the shape up in
+  // `EXPORT_SIZES`. For every shape the table holds that is a lossless split. For one it
+  // does not - a hand-typed 1600x1000 is 8:5, and no group here offers 8:5 - the pixel
+  // count has nowhere to live once `outputSize` stops being written, so the document
+  // reopens framed at 8:5 with a deliverable holding some 16:9 size, a resolution menu
+  // whose only entry is that wrong-shape size, and an export that refuses. A dead end with
+  // no route out of it through the product.
+  //
+  // Refused at the door rather than repaired, because the repair anybody reaches for makes
+  // it worse. Refusing only the saved form leaves the legacy document openable and turns
+  // *saving* into the destructive step: open it, save it, and it can never be opened again.
+  // Manufacturing a size at that ratio would put a resolution the product does not offer
+  // into a deliverable and then into a filename, which is what `web/export-sizes.js` refuses
+  // in as many words. So the rule is one rule, asked of the shape however it arrived - the
+  // field, or derived from a legacy size - and it costs the ability to open a project framed
+  // at a shape this build has no sizes for, which is a project it could not have rendered
+  // either.
+  const framedAt = project.aspect
+    ?? (project.outputSize === undefined ? defaultAspect() : aspectOfSize(String(project.outputSize)));
+  const framedShape = reduceAspect(framedAt[0], framedAt[1]);
+  if (sizesForAspect(framedShape).length === 0) {
+    throw new Error(
+      `this project is framed at ${framedShape.join(':')}, which this build offers no resolution for - `
+      // The labels the shape buttons print, not the reduced pairs. `[256, 135]` is the
+      // honest reduction of the DCI group and is the one thing on screen nobody can match
+      // to a control, because the button beside it says `1.90:1`. A refusal is read by
+      // somebody about to go looking for the thing it names.
+      + `it renders ${exportAspects().map((a) => a.ratio).join(', ')}, so there is no size to `
+      + 'export it at and no menu entry to pick one from',
+    );
+  }
   // The rate against the list the control is built from, so a document naming 25 is
   // refused rather than adopted into a `<select>` that cannot show it. Refused rather
   // than snapped to the nearest offered rate for the reason every other refusal here
@@ -13461,6 +13496,22 @@ globalThis.__kinect = {
   // use it to keep the stage cheap - lands the same way a legacy project's does: the
   // shape is adopted, the size is appended to the menu as its own, and the two agree, so
   // `exportClip` has nothing to refuse.
+  //
+  // **This can put the editor in a framing `restoreProject` will refuse, and no user
+  // gesture can.** The shape buttons only offer what `EXPORT_SIZES` holds; this takes any
+  // size, so `setOutputSize('640x400')` frames at 8:5 - a shape the table has no resolution
+  // for - and a document written out of that framing is refused on the way back in. Three
+  // tools asked for exactly that as a cheap small stage, and the one of them that undoes
+  // died mid-run on its own snapshot. `keyframe-check` is 640x360 now for that reason;
+  // `registry-check` and `timeline-check` still ask for 640x400 and pass because neither
+  // restores a project, which is a fact about those files rather than a safe state. A tool
+  // wanting a small stage should ask for a shape the product offers.
+  //
+  // Not refused here, because the refusal that matters is on the document and Tim's call
+  // put it there: this hook exists so a tool can frame the stage at a size the *product*
+  // would never offer either, which is how `export-check` sweeps sizes the menu does not
+  // list. Narrowing it to table shapes would take that away to fix a hazard a comment
+  // closes.
   //
   // It renames `setTargetSize`, which was named for a `targetSize` that no longer exists.
   // Five of its six callers reached it as `setTargetSize?.(...)`, so the old name left

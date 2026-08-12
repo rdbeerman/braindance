@@ -315,16 +315,18 @@ const PROJECT = {
     retime: { rate: 1, keys: [] },
     camera: [],
   },
-  // **The project's own shape, and it has to be the shape the jobs below render at.** This
-  // said `1920x1080` while every job here is enqueued at 640x400 or 320x200, which are 8:5
-  // - so the fixture was a 16:9 edit rendered at a different shape, and it passed because
-  // the only thing asserting anything about size was a dimension read off the finished
-  // file. That is the mismatch this fixture is *for* only if something checks it; nothing
-  // did, and `exportClip` skipped its own check whenever a width and height were supplied,
-  // which is on every job. Now that the check is total, a fixture that disagrees with
-  // itself is a fixture that cannot render - which is the correct answer to it, and the
-  // reason this line moved rather than the check being softened.
-  outputSize: '640x400',
+  // **The project's own shape, and every job below renders at that shape.** This said
+  // `1920x1080` while the jobs were enqueued at 640x400 and 320x200, which are 8:5 - a 16:9
+  // edit rendered at another shape, green because the only thing asserting anything about
+  // size was a dimension read off the finished file. `exportClip` skipped its own check
+  // whenever a width and a height were supplied, which is on every job, so nothing looked.
+  //
+  // It is 16:9 throughout now, and 16:9 rather than the 8:5 it briefly became: `restoreProject`
+  // refuses a shape `EXPORT_SIZES` offers no resolution for, and 8:5 is one of those - so an
+  // 8:5 fixture is a project this build will not open, which is a worse fixture than a
+  // mismatched one. The sizes below are 16:9 at every scale the queue rows need: 640x360 for
+  // the enqueue rows, 320x180 for the two that really render, 64x36 for the planted records.
+  outputSize: '1280x720',
   appliedPreset: null,
 };
 // Version 2, and no `outputFps`. The rate moved onto the project, so a deliverable naming
@@ -336,7 +338,7 @@ const DELIVERABLE = {
   version: 2,
   in: 0,
   out: null,
-  outputSize: '640x400',
+  outputSize: '1280x720',
   codec: 'h264',
 };
 // **The default output is unique per call, and that is load bearing.**
@@ -347,7 +349,7 @@ const DELIVERABLE = {
 // neighbouring reason reads exactly like the one being tested.
 let outputSeq = 0;
 const enqueue = (over = {}) => post('/jobs', {
-  project: PROJECT, deliverable: DELIVERABLE, capture: HASH_A, output: `check${++outputSeq}`, width: 640, height: 400, fps: 30, ...over,
+  project: PROJECT, deliverable: DELIVERABLE, capture: HASH_A, output: `check${++outputSeq}`, width: 640, height: 360, fps: 30, ...over,
 });
 // And a refusal is asserted by what it says, not only by its status, for the same
 // reason: 400 is the answer to several different questions.
@@ -482,11 +484,11 @@ try {
   // with it, because the even-dimension rule now hangs off the resolved entry rather
   // than off the string, and a lookup that resolved nothing would take this row with it.
   const goodCodec = await enqueue({ codec: 'h264' });
-  const oddH264 = await enqueue({ codec: 'h264', width: 641, height: 400 });
+  const oddH264 = await enqueue({ codec: 'h264', width: 641, height: 360 });
   check(goodCodec.status === 200 && refusedBecause(oddH264, 'even dimensions'),
     'while h264 is still accepted, and still refuses an odd dimension - the rule travels with the entry now, not with the name',
     `${goodCodec.status}, then ${oddH264.status} ${(oddH264.body.error ?? '').slice(0, 40)}`);
-  const lossless = await enqueue({ codec: 'lossless', width: 641, height: 400 });
+  const lossless = await enqueue({ codec: 'lossless', width: 641, height: 360 });
   check(lossless.status === 200,
     'and lossless takes the odd dimension it has no reason to refuse, so that rule is a property of the codec rather than of every export',
     `${lossless.status} ${(lossless.body.error ?? '').slice(0, 40)}`);
@@ -612,7 +614,7 @@ try {
   const plantedId = `job-${'ab'.repeat(8)}`;
   writeFileSync(join(jobsDir, `${plantedId}.json`), `${JSON.stringify({
     id: plantedId, version: 1, project: PROJECT, capture: HASH_A, renderer: METAL,
-    output: 'planted', width: 64, height: 64, fps: 30, codec: 'h264',
+    output: 'planted', width: 64, height: 36, fps: 30, codec: 'h264',
     state: 'running', created: 1, claimed: 2, finished: null, worker: 'ghost',
     error: null, attempts: 1, lease: null,
   }, null, 2)}\n`);
@@ -653,7 +655,7 @@ try {
   const deadId = `job-${'cd'.repeat(8)}`;
   writeFileSync(join(jobsDir, `${deadId}.json`), `${JSON.stringify({
     id: deadId, version: 1, project: PROJECT, capture: HASH_A, renderer: METAL,
-    output: 'orphan', width: 64, height: 64, fps: 30, codec: 'h264',
+    output: 'orphan', width: 64, height: 36, fps: 30, codec: 'h264',
     state: 'running', created: 1, claimed: 1, heartbeat: 1, finished: null,
     worker: 'killed-mid-render', error: null, attempts: 1, lease: 'lease-that-died-with-it',
   }, null, 2)}\n`);
@@ -723,7 +725,7 @@ try {
     const { takes } = await get('/library/takes');
     const take = takes[0];
     if (!take) throw new Error('no take in the staged library to render');
-    const real = await enqueue({ capture: take.hash, output: 'jobs-check-render', width: 320, height: 200 });
+    const real = await enqueue({ capture: take.hash, output: 'jobs-check-render', width: 320, height: 180 });
     check(real.status === 200, 'a job against real footage is queued', real.body.id ?? real.body.error);
     const worker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
       '--url', URL_, '--name', 'jobs-check', '--drain', '--max', '1'], { stdio: 'ignore' });
@@ -751,7 +753,7 @@ try {
       capture: take.hash,
       output: 'jobs-check-refused',
       width: 320,
-      height: 200,
+      height: 180,
       deliverable: { ...DELIVERABLE, version: 1, outputFps: 30 },
     });
     check(refusedJob.status === 200,
@@ -772,7 +774,7 @@ try {
       probed = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,nb_frames',
         '-of', 'default=nw=1', record.artifactPath], { encoding: 'utf8' });
     } catch (err) { probed = `ffprobe failed: ${err.message}`; }
-    check(/width=320/.test(probed) && /height=200/.test(probed),
+    check(/width=320/.test(probed) && /height=180/.test(probed),
       'the file it wrote is a video at the size the job asked for, which is the only thing a metadata check cannot fake',
       probed.trim().replace(/\n/g, ' '));
     // **"It has frames in it" was the first version of this row, and a worker that
@@ -804,7 +806,7 @@ try {
     // same seven and just does it sooner.
     const proxy = await startDroppingProxy(PROXY_PORT, PORT);
     proxies.push(proxy);
-    const beaten = await enqueue({ capture: take.hash, output: 'jobs-check-heartbeat', width: 320, height: 200 });
+    const beaten = await enqueue({ capture: take.hash, output: 'jobs-check-heartbeat', width: 320, height: 180 });
     const beatWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
       '--url', proxy.url, '--name', 'jobs-check-beat', '--drain', '--max', '1', '--beat', '1000'],
     { stdio: 'ignore' });
