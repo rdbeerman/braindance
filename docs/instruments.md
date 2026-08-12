@@ -1877,6 +1877,74 @@ other one, that a name appearing only inside a string body reads as used. Both a
 negatives, which is the direction an instrument may be wrong in — but the rule is that a
 limitation lives in a comment, never inside a control, where it reads as the rule not working.
 
+**And the row written to close that hole shipped six of its own**, found by reading the rule
+rather than by running it, which is the part worth keeping. `module-check` came back **60
+assertions, 0 failed, PASS** while every one of the following was true of the tree it passed.
+They are one family: each is a place where the run *held* the fact and did not *ask* it.
+
+**Two halves computed in one run and never joined.** Rule 4 asks whether an import is read and
+whether an export is asked for, and the second half took the import declaration as its evidence
+without consulting the first. So the same run reddened `web/main.js` for not reading
+`easeSlopeAt` and, five lines further down, counted that identical dead line as the consumer
+keeping `web/curve.js`'s export of it alive. Measured against `883f070^` rather than forced:
+that is what it printed. The dead export became findable only because a person had removed the
+import by hand in the commit before — and a name moved out of a module leaves exactly that pair
+behind, so unjoined they conceal each other indefinitely. With the halves joined, the same tree
+reddens both rows in one run and names all six imports and the export. **When one row's answer
+is another row's input, join them or the run can be right twice and say so once.**
+
+**A population walked for one purpose and trusted for another.** The consumer set had already
+been widened to the whole checkout, for the good reason that seven of `web/`'s exports are read
+only from `server/`, `tools/` and `test/`. But the widening carried 55 name-level bindings into
+the join that were never asked the use question the tool exists to ask, because that question
+was scoped to `web/`. An export whose only importer was outside `web/` and itself dead therefore
+read as asked-for — the same defect, one directory over, in the machinery built to close it.
+**A row that reaches outside its subject to collect evidence has to apply its own standard to
+what it collects.**
+
+**A binding that stands in for a whole module, with nothing saying it had.** A namespace import
+consumed every export of its target, so the single `import * as clip` in
+`test/clip-range.test.mjs` switched the export row off for `web/clip-range.js` entirely: an
+export nothing wanted reddened the row when it was appended to `web/view-window.js` and did not
+when it was appended there. What makes it the worst of the six is that the passing output said
+nothing about a module having gone blind. The repair is narrowing plus disclosure — a dotted
+reach asks for one name, a destructure asks for its pattern's names, and **everything else is
+one bucket that consumes the module and fails a row of its own**. Enumerating the opaque cases
+instead would have been the mistake: `ns[k]` is the one that comes to mind, and `Object.keys`,
+`{ ...ns }`, `for (const k in ns)` and passing the binding to a function are the ones that do
+not, and a narrowing that consumed nothing for them would redden a clean tree.
+
+**A limitation written down is not a limitation measured.** The header named two false negatives
+in the use question and was wrong about the shape of both. It said a name mentioned only inside a
+GLSL template literal would read as used; template text is left at mask 0 by the lexer and blanked
+to spaces, so that plant was caught the whole time and the surviving case was the quoted string.
+It named the property-key case as unclosable, on a measurement of a lookahead over `:` or `(` at
+the head of a line that cost twelve false positives — but the narrower question, are the nearest
+code characters either side of the hit a `{` or `,` and a `:`, costs none on this tree and closes
+the object-literal key outright. Both closures were free, and both had been sitting behind a
+paragraph confident enough to stop anybody re-measuring. The method shorthand `{ poll(gl) { … } }`
+really is open, and it was re-measured afterwards rather than inherited: the `poll` alias still
+comes back NOT CAUGHT. **Re-run the measurement a limitation rests on when you touch the thing it
+is about**, because a limitation is a claim about the instrument like any other.
+
+**And the floor lesson two sections up, repeated in a new row by the same author in the same
+week.** Rule 4's import row printed `118 names across 28 in-tree and 17 bare declarations` with
+the bare count taken off the collection rather than off the sweep, so a version that iterated
+`inTree` alone — measured by forcing exactly that — left the clean run green at 60 assertions,
+every one of the twenty controls then declared still catching, and the row still claiming its 17.
+The counts are now incremented where the question is asked, and `--mutate dead-bare-import` is
+the arm that half never had. **A rule you have written down about one row is not a rule the next
+row inherits**; the only version that holds is the one where the count cannot be computed anywhere
+but at the point of the work.
+
+Two notes for anybody re-running those forcings. A scratch copy of the tool needs
+`--root <checkout>`, because `ROOT` is derived from `import.meta.url` and a copy living in a
+temporary directory otherwise exits 2 with "no web/ or no package.json" — which reads as the
+forcing having broken something when it is the copy looking in the wrong place. And the in-tree
+declaration count the import row prints is two below rule 2's edge count on this tree: those two
+are the pages' `<script src>` edges, which bind no name, so the gap is the count being taken
+where the question is asked rather than a population going missing.
+
 ### The third form: a fixture symmetric under the very transform you are testing
 
 The two forms above are about arms agreeing and about an object nobody looks at. There is a

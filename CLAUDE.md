@@ -350,6 +350,13 @@ node tools/module-check.mjs --mutate import-nothing-uses       # ... a name brou
 node tools/module-check.mjs --mutate import-used-under-its-far-side-name # ... asked of the binding an import makes rather than the name it asks for, which a rename separates
 node tools/module-check.mjs --mutate export-nothing-imports    # ... and the other direction, a name let out that nothing anywhere asks for
 node tools/module-check.mjs --mutate consumer-outside-web-drops-the-name # ... where the only reader is outside web/, and the join is per name rather than per module
+node tools/module-check.mjs --mutate dead-import-is-not-a-consumer # ... and the two halves joined, so a dead import stops holding up the export on the far side of it
+node tools/module-check.mjs --mutate outside-consumer-imports-a-name-it-never-reads # ... the use question asked of the importers outside web/, which used to enter the join unasked
+node tools/module-check.mjs --mutate dead-bare-import          # ... and asked of a package name, the half of that row nothing controlled
+node tools/module-check.mjs --mutate import-used-only-in-a-string # ... a use read at a code position rather than anywhere in the text
+node tools/module-check.mjs --mutate import-used-only-as-an-object-key # ... and not in the one position this file is full of, a property key
+node tools/module-check.mjs --mutate namespace-hides-a-dead-export # ... a namespace import asking for the names it reaches rather than for all of them
+node tools/module-check.mjs --mutate namespace-reach-cannot-be-named # ... and a reach that names none of them, which costs an assertion rather than a blind module
 ```
 
 `jobs-check` needs a GPU browser and ffprobe and renders one real job through
@@ -374,7 +381,10 @@ object anybody can write into, or a name crossing one that only one end wanted -
 import, or an export nothing imports. That last pair reads **every JavaScript file in the
 checkout** rather than only `web/`, because seven of this tree's exports have their only
 reader in `server/`, `tools/` or `test/` and a row scoped to `web/` reddens all seven on a
-healthy tree. **What it does not test is the intra-module dead zone**,
+healthy tree — and it asks its use question of those outside importers too, because the two
+halves are one question and **a dead import is not a consumer**, which is the shape that let
+`web/curve.js::easeSlopeAt` sit exported to nothing while the tool printed the export row
+green. **What it does not test is the intra-module dead zone**,
 which is the fault `web/main.js` has actually shipped twice: that reach runs through property
 dispatch and is not statically decidable, so it belongs to a post-boot state diff rather than
 to a source scan, and the tool says so in its own output rather than leaving it to be

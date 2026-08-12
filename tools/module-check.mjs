@@ -120,30 +120,63 @@
 // consumers would have reddened seven honest exports on its first run, and the fix for a row
 // that cries wolf is always to delete the row.
 //
-// **What the use question can get wrong, both of them found rather than reasoned about.**
-// It is a question about a name and not about a scope, so two things read as uses that are
-// not references. A name that appears **only inside a string body** is the first: the
-// blanking that removes comments deliberately keeps string bodies, because the specifier of
-// every import lives in one, so a look parameter mentioned by name in a GLSL literal and
-// nowhere else would not be reported. Measured, on this tree and on the one the six dead
-// imports were found in: the strict reading - a use has to sit at a position the mask calls
-// code - names the same six and nothing more, and of the 118 names swept here **none has zero
-// code-position hits**, so nothing is standing on the loose reading either way. Four names do
-// pick up extra hits inside string bodies - `grade`, `afterimage`, `bloom` and `material`,
-// which are words the GLSL says too - and every one of them is read in code as well.
+// **The first version of rule 4 held both halves in one run and never joined them**, and that
+// is the second thing this file has passed a wrong tree over. A dead import reddened the
+// import row and was then counted, further down the same run, as the reader keeping the far
+// side's export alive - so the run held the two facts and printed one. Measured on the real
+// tree rather than forced: at `883f070^` it reddened `web/main.js` for not reading
+// `easeSlopeAt` and printed the export row green about `web/curve.js`, whose only importer
+// anywhere in that checkout was that identical dead line. The export became findable only
+// because a person had removed the import by hand first. So the use question is asked once,
+// of every declaration that carries a name across this directory's edge wherever it is
+// written, and its answer feeds both halves: a binding no line reads fails the import row and
+// asks the far side for nothing. One plant of that pair reddens two rows on purpose - both
+// sentences are true and each has to be fixed - which is what `dead-import-is-not-a-consumer`
+// is the arm for.
 //
-// The second was found by a control coming back NOT CAUGHT. A **property key or a method
-// name written in code position** is a name with no dot in front of it, so the lookbehind
-// that refuses `obj.name` cannot refuse `{ name(gl) { ... } }` - which is what
-// `web/main.js:9860` is, and what made an alias of `poll` look read. That one is not closable
-// with a lookahead, and the measurement says so rather than the argument: excluding a hit
-// followed by `:` or by `(` at the head of a line calls **twelve** live imports unused,
-// `writeClipRange`, `tiltQuaternion` and `pollRecordState` among them, because a call written
-// as its own statement is at the head of a line too. Telling those apart needs a scope
-// analysis rather than a search, which is a different instrument.
+// The same join is what put the outside walk under the use question. Fifty-five name-level
+// bindings arrive from `server/`, `tools/` and `test/`, and a consumer nobody asked the
+// question of cannot be trusted to be one: an export whose only importer lived outside `web/`
+// and was itself dead read as asked-for, which is the six-dead-imports defect one directory
+// over. A namespace binding went the same way for the same reason - it used to mark every
+// export of its target consumed, which switched the export row off for `web/clip-range.js`
+// entirely, so it is now narrowed to the names it actually reaches.
 //
-// Both are false negatives, which is the direction an instrument may be wrong in: each costs
-// a dead import this row does not find rather than a clean tree it fails. Naming them is the
+// **What the use question can still get wrong, and the two it no longer can.** It is a
+// question about a name and not about a scope, so a name written in code position that is not
+// a reference reads as one.
+//
+// A hit inside a **quoted string body** used to be the first of those. The blanking that
+// removes comments keeps string bodies, because the specifier of every import lives in one
+// and taking them out would take the graph with them - so the mask is asked instead of the
+// text, and a hit at a string-body position is not a use. Measured over this tree: the strict
+// reading takes hits off four names, `grade`, `afterimage`, `bloom` and `material`, which are
+// words the quoted parameter ids say too, and leaves every swept name still read in code, so
+// it closed the hole at no cost. What is *not* true, and this file said it was, is that a name
+// mentioned only in a GLSL literal survived: template text is left at mask 0 by `codeMask` and
+// blanked to spaces by `parse`, so the twelve hundred lines of GLSL here were never a masking
+// surface, and a plant named only inside a template literal is caught with the strict reading
+// and without it.
+//
+// A **property key** was the second, and it is decided by the two neighbours rather than by a
+// lookahead: the nearest code character before the hit is `{` or `,` and the nearest after it
+// is `:`. That is the object-literal key and the destructuring pattern key and nothing else -
+// `case name:` has a word before it, `a ? b : c` has a `?`, `{ [name]: 1 }` has a `[`, and the
+// shorthand `{ name }` has no colon at all. Measured, it takes no name off the swept set here,
+// which is what makes it free in the one file that is full of registries and menu tables.
+//
+// What is left open is the **method shorthand**, `{ poll(gl) { ... } }`, found by a control
+// coming back NOT CAUGHT: `web/main.js:9860` defines one, and it made an alias of `poll` look
+// read. It is not closable by widening the rule above, and the measurement says so rather than
+// the argument - excluding a hit followed by `:` or by `(` at the head of a line calls
+// **twelve** live imports unused, `writeClipRange`, `tiltQuaternion` and `pollRecordState`
+// among them, because a call written as its own statement is at the head of a line too.
+// Telling those apart needs a scope analysis rather than a search, which is a different
+// instrument. Re-measured after the two closures above: the `poll` alias still comes back NOT
+// CAUGHT, so the limitation is where it was and is exactly this wide.
+//
+// It is a false negative, which is the direction an instrument may be wrong in: it costs a
+// dead import this row does not find rather than a clean tree it fails. Naming it is the
 // difference between a limitation and a hole - and a limitation belongs in a comment, never
 // inside a control, where it reads as the rule not working.
 //
@@ -164,12 +197,15 @@ const argv = process.argv.slice(2);
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = argv.includes('--root') ? argv[argv.indexOf('--root') + 1] : REPO;
 
-// Every mutation lands in `web/`, in the `{ file, edits }` shape `syntax-check`'s anchor
-// row reads, and every one of them is delivered by the same mechanism the clean run uses:
-// this tool only ever reads source, so `read()` below is the single door and there is no
-// second delivery to drift from the first. The table is self-contained on purpose - it
-// references no neighbouring const - so the anchor row can read it by cutting the
-// declaration alone rather than importing this file's prefix.
+// Every mutation is written in the `{ file, edits }` shape `syntax-check`'s anchor row reads,
+// and every one of them is delivered by the same mechanism the clean run uses: this tool only
+// ever reads source, so `read()` below is the single door and there is no second delivery to
+// drift from the first. Four of them land outside `web/` - in `server/`, `tools/` and `test/`
+// - which is not an exception to the subject but a consequence of it: rule 4's consumer set is
+// the whole checkout, so the file that keeps an export alive, or fails to, is often not one of
+// the modules under test. The table is self-contained on purpose - it references no
+// neighbouring const - so the anchor row can read it by cutting the declaration alone rather
+// than importing this file's prefix.
 const MUTATIONS = {
   // Rule 1's control, and it plants the import `web/scene.js`'s own header says does not
   // exist. A side-effect import rather than a named one, so the only row that can go red
@@ -231,7 +267,7 @@ const MUTATIONS = {
   // This one, and the two below it that plant the same object under a different keyword,
   // redden **two** rows since rule 4 arrived: the shape row here, and rule 4's export row,
   // because a planted export nothing imports is also a name only one end wanted. Measured
-  // rather than predicted - `[module] 60 assertions, 2 failed` on each of the three. The
+  // rather than predicted - `[module] 61 assertions, 2 failed` on each of the three. The
   // blast radius is recorded rather than removed, because both rows are true of the plant
   // and each of the two claims has a control of its own that reddens exactly one row;
   // making these plants imported somewhere would need a second edit in a second file, which
@@ -414,13 +450,109 @@ const MUTATIONS = {
   // And the half of that second question `web/` cannot ask, because the consumer that keeps
   // the export alive is outside it. `server/library.js` is the only importer of
   // `POLLED_NODE_FIELDS` anywhere, so taking the name off that one import declaration - and
-  // leaving the module still imported, by the other name it exports - is a dead export and
-  // nothing else. It separates a join done per name from one done per module: a check that
-  // marked every export of a module consumed the moment anything imported the module would
-  // read this tree as unchanged and come back NOT CAUGHT.
+  // leaving the module still imported, by the other name it exports - lets the export out to
+  // nothing. It separates a join done per name from one done per module: a check that marked
+  // every export of a module consumed the moment anything imported the module would read this
+  // tree as unchanged and come back NOT CAUGHT.
+  //
+  // **Two rows, and the second one is the point.** The name this substitutes in is not read
+  // by `server/library.js` either, so the import row names the dead import and the export row
+  // names the export it stopped holding up. Both sentences are true about the same edit, and
+  // a control that reddened only one of them would be a control for a rule 4 whose two halves
+  // never met - which is exactly the version this replaced.
   'consumer-outside-web-drops-the-name': {
     file: 'server/library.js',
     edits: [["import { POLLED_NODE_FIELDS } from '../web/record-poll.js';", "import { pollRecordState } from '../web/record-poll.js';"]],
+  },
+
+  // The join itself, planted from the direction the tool shipped blind to: the import stays
+  // exactly where it is and the one line that *reads* it stops. Before the two halves were
+  // joined this run came back green at every row - the import row had nothing to say about a
+  // file outside `web/`, and the export row counted the surviving declaration as the reader
+  // keeping `POLLED_NODE_FIELDS` alive. It is the shape `883f070^` was actually in, one
+  // directory over, and it reddens the same two rows for the same reason as the control above.
+  'dead-import-is-not-a-consumer': {
+    file: 'server/library.js',
+    edits: [[
+      'const missing = POLLED_NODE_FIELDS.filter((f) => body[f] === undefined);',
+      "const missing = ['writingId'].filter((f) => body[f] === undefined);",
+    ]],
+  },
+
+  // A dead import declared outside `web/`, where the name has other live readers so the
+  // export row stays green and this reddens one claim. `tools/fake-grabber.mjs` spells
+  // `DEPTH_W` nowhere, and `server/capture.js` and `web/main.js` both read it, so what is
+  // wrong with the tree afterwards is one declaration in one file - which is the shape a
+  // dead import has, and the shape the use question was never asked of outside `web/`.
+  'outside-consumer-imports-a-name-it-never-reads': {
+    file: 'tools/fake-grabber.mjs',
+    edits: [["import { CAPTURE_FORMAT } from '../web/format.js';", "import { CAPTURE_FORMAT, DEPTH_W } from '../web/format.js';"]],
+  },
+
+  // The bare-specifier half of the import row, which had no arm at all: measured by forcing
+  // `for (const edge of [...inTree, ...tree.bareEdges])` down to `inTree` alone, the clean run
+  // stayed green at 60 assertions and every one of the twenty controls then declared still
+  // caught, while the row went on printing "17 bare declarations" in its detail. So the half
+  // that asks whether `OutputPass` went dead when a pass moved out was carried by a sentence
+  // rather than by a check.
+  //
+  // Nothing resolves a bare specifier - `three` is not a file under `web/` - so the far side
+  // is never consulted and the spelling of the planted name is not checked against anything.
+  // A plausible pass name rather than a real one is the honest way to write that down: what is
+  // being planted is a binding no line of the module reads.
+  'dead-bare-import': {
+    file: 'web/post-chain.js',
+    edits: [[
+      "import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';",
+      "import { OutputPass, ClearPass } from 'three/addons/postprocessing/OutputPass.js';",
+    ]],
+  },
+
+  // A name whose only occurrences in the importing module sit inside quoted strings. `main.js`
+  // says `duotone` five times and every one of them is a parameter id in a string body, so
+  // before the read question was asked at a code position this binding read as used and the
+  // declaration came back green. A rename rather than an invented line, the same way the
+  // far-side-name control is one: nothing is added to the file, and what changes is which name
+  // the declaration binds.
+  'import-used-only-in-a-string': {
+    file: 'web/main.js',
+    edits: [["import { pollRecordState } from './record-poll.js';", "import { pollRecordState as duotone } from './record-poll.js';"]],
+  },
+
+  // The same, for a name whose only occurrences are property keys. `main.js` writes `fov:` in
+  // five object literals and nowhere else, which is a name in code position with no dot in
+  // front of it - the shape that keeps a dead import green in the one file that is full of
+  // registries and menu tables. What must not serve here is the method shorthand, `poll(gl) {`
+  // at `web/main.js:9860`: measured with the alias put back to `poll`, this run comes back
+  // NOT CAUGHT, and that limitation belongs in the header rather than inside a control.
+  'import-used-only-as-an-object-key': {
+    file: 'web/main.js',
+    edits: [["import { pollRecordState } from './record-poll.js';", "import { pollRecordState as fov } from './record-poll.js';"]],
+  },
+
+  // A dead export in the one module this checkout reaches through a namespace import. Before
+  // the reach was narrowed to the names it actually asks for, `test/clip-range.test.mjs`'s
+  // `import * as clip` marked every export of this module consumed, so the export row was
+  // switched off for the whole file and this plant read as unchanged: measured, the identical
+  // line appended to `web/view-window.js` reddened the row and appended here it did not. A
+  // number rather than an object, so the rule 3 rows stay green and this reddens one claim.
+  'namespace-hides-a-dead-export': {
+    file: 'web/clip-range.js',
+    edits: [['export let clipOut = null;', 'export let clipOut = null;\nexport const CLIP_EPSILON = 1e-6;']],
+  },
+
+  // And the branch the narrowing needs to have: a reach through the namespace that names no
+  // export. `Object.keys` is the ordinary spelling of it - `{ ...clip }`, `for (const k in
+  // clip)` and handing the binding to a function are the same thing - and a narrowing that
+  // consumed nothing for those would redden every export of the module on a tree doing
+  // something legitimate. It consumes all of them, exactly as the old join did, and the row
+  // says so, so a module going blind costs an assertion rather than passing in silence.
+  'namespace-reach-cannot-be-named': {
+    file: 'test/clip-range.test.mjs',
+    edits: [[
+      'const { clipBoundOrThrow, writeClipRange } = clip;',
+      'const { clipBoundOrThrow, writeClipRange } = clip;\nconst reached = Object.keys(clip);',
+    ]],
   },
 };
 
@@ -1903,75 +2035,152 @@ for (const verdict of auditExemptions(EXEMPTIONS, exportsByModule, r3.used, 'web
 // ---------- rule 4: a name crosses a boundary because both ends wanted it
 console.log('\n[module] rule 4: every import is read, and every export is asked for');
 
-// The text a use is looked for in: the same scan every rule above runs over - comments
-// blanked, string bodies kept, newlines in place - with every import declaration in the
-// body blanked out on top of that. All of them rather than the one under the question,
-// because two declarations importing the same name from two modules would otherwise each
-// read as a use of the other, which is the shape a name-moved-between-modules refactor
-// produces and so exactly the one that must not pass.
+// **One question, asked once of every declaration that carries a name across this
+// directory's edge, and both halves of the rule read the same answer.** Does the file that
+// wrote the declaration read the name it binds? The import half fails on the bindings that
+// answer no; the export half counts as a consumer only the ones that answer yes.
 //
-// A name mentioned only inside a string body reads as used, and that is the false negative
-// this file's header names: the specifier of every import lives in a string, so the blanking
-// cannot take strings out without taking the graph with it. It costs a fault this row does
-// not find, never a clean tree this row fails, which is the direction an instrument is
-// allowed to be wrong in.
-const scanned = new Map();
-const bodyWithoutImports = (id) => {
-  if (scanned.has(id)) return scanned.get(id);
-  const { scan } = parse(bodies.get(id));
+// That join is the repair for the shape this rule shipped with. The two halves used to be
+// computed in one run and never compared, so a dead import reddened the import row and was
+// then counted, five lines later, as the reader keeping the far side's export alive - and
+// the run held both facts while saying only one of them. It is not hypothetical: at
+// `883f070^` this tool reddened `web/main.js` for not reading `easeSlopeAt` and printed the
+// export row green about `web/curve.js`, whose only importer anywhere in that checkout was
+// that same dead line. The export became findable only because a person removed the import
+// first. A name moved out of a module leaves a dead import and a dead export behind, and
+// unjoined they conceal each other, which is why one plant of that pair reddens two rows
+// here on purpose: both sentences are true and each has to be fixed.
+//
+// The population is every such declaration wherever it is written - `web/` modules, a page's
+// inline module, a bare-specifier declaration in one of them, and a file outside `web/` that
+// imports out of it. The last of those is not generosity either. The consumer set for the
+// export half has to be the whole repository, because seven of this tree's exports have no
+// importer inside `web/` at all; and a consumer nobody asked the use question of is a
+// consumer that cannot be trusted to be one. Measured: 55 name-level bindings arrive from
+// `server/`, `tools/` and `test/`, and a join that took them on faith let a dead export whose
+// only importer was itself dead read as asked-for, which is the same defect one directory
+// over.
+
+// The text a use is looked for in, and the mask that says what each position of it is: the
+// same scan every rule above runs over - comments blanked, string bodies kept, newlines in
+// place - with every import declaration in the file blanked out on top of that. All of them
+// rather than the one under the question, because two declarations importing the same name
+// from two modules would otherwise each read as a use of the other, which is the shape a
+// name-moved-between-modules refactor produces and so exactly the one that must not pass.
+// Blanking writes spaces rather than cutting, so every index into this text is still an index
+// into the mask and into the file.
+const surfaces = new Map();
+const useSurface = (key, src, spans) => {
+  if (surfaces.has(key)) return surfaces.get(key);
+  const { scan, mask } = parse(src);
   const chars = scan.split('');
-  for (const [from, to] of tree.importSpans.get(id) ?? []) {
+  for (const [from, to] of spans) {
     for (let i = from; i < to && i < chars.length; i++) if (chars[i] !== '\n') chars[i] = ' ';
   }
-  const text = chars.join('');
-  scanned.set(id, text);
-  return text;
+  const answer = { text: chars.join(''), mask };
+  surfaces.set(key, answer);
+  return answer;
 };
-const readsName = (id, name) => {
-  const text = bodyWithoutImports(id);
+
+// **A use is a hit in code position that is not a property key**, and both halves of that
+// were measured rather than argued.
+//
+// String bodies survive the blanking above because the specifier of every import lives in one
+// and taking them out would take the graph with them, so the mask is asked instead of the
+// text: a hit at a position the lexer calls a string body is not a use. Measured over this
+// tree, that reading takes hits off four names - `grade`, `afterimage`, `bloom` and
+// `material`, which are words the quoted parameter ids say too - and leaves every swept name
+// still read in code, so it closes the hole at no cost. Template *text* was never part of
+// this: `codeMask` leaves it at mask 0 and `parse` blanks it to spaces, so the twelve hundred
+// lines of GLSL in this tree are not a masking surface and never were. The sentence that used
+// to sit here said the opposite, and a plant of a dead import named only inside a template
+// literal is caught either way, which is how that was found.
+//
+// A property key is the other half, and it is the one this file is full of surfaces for:
+// `{ fov: 1 }` writes a name in code position with no dot in front of it, so the lookbehind
+// that refuses `obj.fov` cannot refuse it, and a registry or a menu table using the same word
+// as an import keeps a dead import green. It is decided by the two neighbours rather than by
+// a lookahead - the nearest code character before the hit is `{` or `,` and the nearest after
+// it is `:` - which is the object-literal key and the destructuring pattern key and nothing
+// else: `case name:` has a word before it, `a ? b : c` has a `?`, `{ [name]: 1 }` has a `[`,
+// and the shorthand `{ name }` has no colon at all. The neighbours are read through the mask
+// as well, because a `,` inside a surviving string body would otherwise serve as one.
+// Measured: it takes no name off the swept set on this tree, where the wider lookahead this
+// header used to reject - any hit followed by `:` or by `(` at the head of a line - called
+// twelve live imports dead.
+//
+// What is still open, and it is a comment rather than a control because a limitation inside a
+// control reads as the rule not working: the **method shorthand**, `{ poll(gl) { ... } }`,
+// which is a name in code position followed by `(` and is indistinguishable from a call
+// written as its own statement. `web/main.js` has one, and it is why the far-side-name
+// control below aliases to `recordPoll` rather than to `poll`. Telling those apart needs a
+// scope analysis rather than a search, which is a different instrument.
+const codeAt = (surface, i) => (i >= 0 && i < surface.text.length && surface.mask[i] === CODE);
+const nextCode = (surface, from, step) => {
+  let i = from;
+  while (i >= 0 && i < surface.text.length && /\s/.test(surface.text[i])) i += step;
+  return i;
+};
+const isPropertyKey = (surface, at, name) => {
+  const before = nextCode(surface, at - 1, -1);
+  if (!codeAt(surface, before) || (surface.text[before] !== '{' && surface.text[before] !== ',')) return false;
+  const after = nextCode(surface, at + name.length, 1);
+  return codeAt(surface, after) && surface.text[after] === ':';
+};
+const readsName = (surface, name) => {
   const re = new RegExp(String.raw`(?<![.\w$])${rxName(name)}(?![\w$])`, 'g');
-  for (const m of text.matchAll(re)) return lineAt(text, m.index);
+  for (const m of surface.text.matchAll(re)) {
+    if (surface.mask[m.index] !== CODE) continue;
+    if (isPropertyKey(surface, m.index, name)) continue;
+    return lineAt(surface.text, m.index);
+  }
   return null;
 };
 
-const unusedImports = [];
-const unsweptEdges = [];
-let sweptImportNames = 0;
-// Bare-specifier declarations are asked here and nowhere else. They are not edges in this
-// graph - `three` is not a file under `web/` - but the binding a bare import makes is
-// declared in a module that is, and `OutputPass` going dead when a pass moves out is the
-// same fault as `BloomPass` going dead when a constructor does.
-for (const edge of [...inTree, ...tree.bareEdges]) {
-  const src = bodies.get(edge.from);
-  // An edge asked of a body this run does not hold would be a name silently not asked
-  // about, which is the population fault `docs/instruments.md` records against rule 3's
-  // sweep. Folded into the row below rather than given one of its own, because the row can
-  // only mean what it says if it was asked of every edge.
-  if (src === undefined) { unsweptEdges.push(`web/${edge.from}:${edge.line}`); continue; }
-  const exported = edge.to === null ? null : new Set((exportsByModule.get(edge.to) ?? []).map((e) => e.name));
-  for (const b of edge.bindings) {
-    // A re-export binds nothing on this side, so there is nothing here to read.
-    if (!b.local) continue;
-    // A name the other side does not export is already named by rule 2's row, and asking a
-    // second question about the same binding would make one plant redden two rows - the
-    // blast radius that stops a control saying which claim it was about. The class stays
-    // closed: a dead import of a name that exists is caught here, and one of a name that
-    // does not is caught there.
-    if (exported && b.kind !== 'namespace' && !exported.has(b.imported)) continue;
-    sweptImportNames++;
-    if (readsName(edge.from, b.local) === null) {
-      unusedImports.push(`web/${edge.from}:${edge.line} imports ${b.kind === 'namespace' ? `the namespace ${b.local}` : b.local}`
-        + ` from ${edge.to === null ? edge.spec : `web/${edge.to}`}, and no line of that module reads it`);
+/**
+ * Which exports a namespace binding actually reaches, and where it reaches the module in a
+ * way this scan cannot put a name to.
+ *
+ * A namespace import binds one object whose properties are every export the target has, and
+ * the join used to take that as a request for all of them. It is not one: `test/clip-range.
+ * test.mjs` is the only namespace importer in this checkout, and marking all four of
+ * `web/clip-range.js`'s exports consumed the moment it appeared switched the export row off
+ * for that whole module - add an export nothing wants and the row stays green, which is the
+ * blind spot measured before this narrowing went in. So a dotted reach asks for that one
+ * name, a destructure off the binding asks for the names in its pattern, and everything else
+ * is a reach this scan cannot name.
+ *
+ * That last bucket is a catch-all rather than the computed-index case alone, and it has to
+ * be: `Object.keys(ns)`, `{ ...ns }`, `for (const k in ns)` and handing the binding to a
+ * function all reach exports without naming one, and a narrowing that consumed nothing for
+ * them would redden every export of that module on a tree doing something legitimate. It
+ * consumes everything, the way the old join did for all of them, **and says so in a row of
+ * its own** - so a module going blind costs an assertion rather than passing in silence.
+ */
+const readsThroughNamespace = (surface, ns) => {
+  const names = new Set();
+  const opaque = [];
+  const re = new RegExp(String.raw`(?<![.\w$])${rxName(ns)}(?![\w$])`, 'g');
+  for (const m of surface.text.matchAll(re)) {
+    if (surface.mask[m.index] !== CODE) continue;
+    const dotted = /^\s*\.\s*([A-Za-z_$][\w$]*)/.exec(surface.text.slice(m.index + ns.length, m.index + ns.length + 120));
+    if (dotted) { names.add(dotted[1]); continue; }
+    const pattern = /\{([^{}]*)\}\s*=\s*$/.exec(surface.text.slice(0, m.index));
+    // A rest element takes whatever the pattern did not name, which is the same unnameable
+    // reach as the ones below rather than a shorter list.
+    if (pattern && !pattern[1].includes('...')) {
+      for (const part of pattern[1].split(',')) {
+        const key = part.split(':')[0].split('=')[0].trim();
+        if (/^[A-Za-z_$][\w$]*$/.test(key)) names.add(key);
+      }
+      continue;
     }
+    opaque.push(lineAt(surface.text, m.index));
   }
-}
-ok('no module imports a name it does not use',
-  unusedImports.length === 0 && unsweptEdges.length === 0 && sweptImportNames > 0,
-  unusedImports.length || unsweptEdges.length
-    ? [...unusedImports, ...unsweptEdges.map((e) => `${e} was asked of a body this run does not hold`)].join('; ')
-    : `${sweptImportNames} names across ${inTree.length} in-tree and ${tree.bareEdges.length} bare declarations`);
+  return { names, opaque };
+};
 
-// ---------- who asks for what web/ lets out, from anywhere in this repository
+// ---------- who imports out of web/ from outside it
 //
 // **The consumer set is the repository and not `web/`**, and that is load-bearing rather
 // than generous. Seven of this tree's exports have no importer inside `web/` at all:
@@ -2003,41 +2212,140 @@ const walkOutside = (dir) => {
 walkOutside(ROOT);
 outsideFiles.sort();
 
-const consumers = new Map();
-const consumeName = (rel, name, where) => {
-  const key = `${rel}::${name}`;
-  if (!consumers.has(key)) consumers.set(key, new Set());
-  consumers.get(key).add(where);
-};
-// A namespace import binds one object whose properties are every export the target has, so
-// it asks for all of them and none of them by name - `test/clip-range.test.mjs` reaches
-// `web/clip-range.js` that way and would otherwise read as a file importing nothing.
-const consumeEverything = (rel, where) => {
-  for (const e of exportsByModule.get(rel) ?? []) consumeName(rel, e.name, where);
-};
-for (const edge of inTree) {
-  for (const b of edge.bindings) {
-    if (b.kind === 'namespace' || b.kind === 'star') { consumeEverything(edge.to, `web/${edge.from}`); continue; }
-    consumeName(edge.to, b.imported, `web/${edge.from}`);
-  }
+// Every declaration the use question is asked of, gathered before any of it is asked so the
+// question is one loop over one list rather than three loops that agree today. `kind` is
+// carried per declaration because the row below counts its population where the sweep
+// happens: a floor computed over a collection the sweep then skips part of is the fault
+// `docs/instruments.md` records against rule 3's, and it is the fault this row had - it went
+// on printing the bare-specifier half of its population while a version that never asked one
+// of them read exactly the same.
+//
+// Counting there is why the in-tree number the row prints is **26 against rule 2's 28 edges**,
+// and the gap is not a lost population: the two edges are `web/index.html`'s and
+// `web/library.html`'s `<script src>`, which bind no name and so have nothing for this
+// question to be about. An edge dropped for want of a body would be a different thing
+// entirely and is named in `unsweptEdges` below rather than left to be read out of a count -
+// measured on this tree, zero of them.
+const crossings = [];
+const unsweptEdges = [];
+for (const edge of [...inTree, ...tree.bareEdges]) {
+  const src = bodies.get(edge.from);
+  // An edge asked of a body this run does not hold would be a name silently not asked about.
+  // Folded into the row below rather than given one of its own, because that row can only
+  // mean what it says if it was asked of every declaration.
+  if (src === undefined) { unsweptEdges.push(`web/${edge.from}:${edge.line}`); continue; }
+  crossings.push({
+    kind: edge.to === null ? 'bare' : 'in-tree',
+    where: `web/${edge.from}`,
+    surface: useSurface(edge.from, src, tree.importSpans.get(edge.from) ?? []),
+    target: edge.to,
+    spec: edge.spec,
+    line: edge.line,
+    bindings: edge.bindings,
+  });
 }
 let outsideImports = 0;
 for (const rel of outsideFiles) {
   const src = read(rel);
   if (src === null) continue;
-  for (const imp of importsIn(src).imports) {
+  const { imports } = importsIn(src);
+  const surface = useSurface(rel, src, imports.map((imp) => imp.span));
+  for (const imp of imports) {
     if (imp.spec === null || (!imp.spec.startsWith('.') && !imp.spec.startsWith('/'))) continue;
     const where = resolveSpec(imp.spec, rel);
     if (where.kind !== 'in-tree' || !where.path.startsWith('web/')) continue;
     const target = where.path.slice('web/'.length);
     if (!sources.has(target)) continue;
     outsideImports++;
-    for (const b of imp.bindings) {
-      if (b.kind === 'namespace' || b.kind === 'star') { consumeEverything(target, rel); continue; }
-      consumeName(target, b.imported, rel);
-    }
+    crossings.push({
+      kind: 'outside', where: rel, surface, target, spec: imp.spec, line: imp.line, bindings: imp.bindings,
+    });
   }
 }
+
+const consumers = new Map();
+const consumeName = (rel, name, where) => {
+  const key = `${rel}::${name}`;
+  if (!consumers.has(key)) consumers.set(key, new Set());
+  consumers.get(key).add(where);
+};
+const consumeEverything = (rel, where) => {
+  for (const e of exportsByModule.get(rel) ?? []) consumeName(rel, e.name, where);
+};
+
+const unusedImports = [];
+const opaqueReaches = [];
+const asked = { 'in-tree': 0, bare: 0, outside: 0 };
+let sweptImportNames = 0;
+let liveBindings = 0;
+let deadBindings = 0;
+let namespaceBindings = 0;
+for (const c of crossings) {
+  let any = false;
+  const exported = c.target === null ? null : new Set((exportsByModule.get(c.target) ?? []).map((e) => e.name));
+  for (const b of c.bindings) {
+    // A re-export binds nothing on this side, so there is no name here to read - and it does
+    // ask the far side for one, so it counts as a consumer unasked. `export * from` asks for
+    // all of them. Both are refused outright by the barrel row above, which is the row that
+    // says what to do about them; this branch is what keeps that mutation reddening one claim
+    // rather than two.
+    if (!b.local) {
+      if (c.target === null) continue;
+      if (b.kind === 'star') consumeEverything(c.target, c.where);
+      else consumeName(c.target, b.imported, c.where);
+      continue;
+    }
+    // A name the other side does not export is already named by rule 2's row, and asking a
+    // second question about the same binding would make one plant redden two rows - the
+    // blast radius that stops a control saying which claim it was about. The class stays
+    // closed: a dead import of a name that exists is caught here, and one of a name that
+    // does not is caught there.
+    //
+    // For a declaration outside `web/` that skip is a scope boundary rather than a handoff,
+    // and it is named here rather than left to be discovered: rule 2's row ranges over the
+    // in-tree edges, so a test or a tool importing a name `web/` has *stopped* exporting is
+    // asked by neither row. Measured on this tree, none of the 55 outside bindings names a
+    // missing export, so the branch is inert today - and what would find one is
+    // `npm run test:unit` for the files it runs, which is not all of them.
+    if (exported && b.kind !== 'namespace' && !exported.has(b.imported)) continue;
+    any = true;
+    sweptImportNames++;
+    if (readsName(c.surface, b.local) === null) {
+      deadBindings++;
+      unusedImports.push(`${c.where}:${c.line} imports ${b.kind === 'namespace' ? `the namespace ${b.local}` : b.local}`
+        + ` from ${c.target === null ? c.spec : `web/${c.target}`}, and no line of ${c.where} reads it`);
+      // **The join.** A binding no line reads asks the far side for nothing, so it does not
+      // enter the consumer map and cannot hold an export up.
+      continue;
+    }
+    liveBindings++;
+    if (c.target === null) continue;
+    if (b.kind === 'namespace') {
+      namespaceBindings++;
+      const { names, opaque } = readsThroughNamespace(c.surface, b.local);
+      if (opaque.length) {
+        opaqueReaches.push(`${c.where}:${opaque.join(', ')} reaches web/${c.target} through ${b.local} without naming an export`);
+        consumeEverything(c.target, c.where);
+        continue;
+      }
+      for (const name of names) consumeName(c.target, name, c.where);
+      continue;
+    }
+    consumeName(c.target, b.imported, c.where);
+  }
+  if (any) asked[c.kind]++;
+}
+ok('no module imports a name it does not use',
+  unusedImports.length === 0 && unsweptEdges.length === 0 && sweptImportNames > 0,
+  unusedImports.length || unsweptEdges.length
+    ? [...unusedImports, ...unsweptEdges.map((e) => `${e} was asked of a body this run does not hold`)].join('; ')
+    : `${sweptImportNames} names across ${asked['in-tree']} in-tree, ${asked.bare} bare and ${asked.outside} outside-web declarations, each counted where it was asked`);
+
+ok('and every namespace import reaches its target by name, so no module\'s exports go unasked behind one',
+  opaqueReaches.length === 0,
+  opaqueReaches.length
+    ? opaqueReaches.join('; ')
+    : `${namespaceBindings} namespace binding${namespaceBindings === 1 ? '' : 's'} into web/, and every reach through one of them names an export`);
 
 const unconsumed = [];
 const outsideOnly = [];
@@ -2047,16 +2355,17 @@ for (const [rel, list] of exportsByModule) {
     // A re-export is refused outright by the barrel row above rather than joined here.
     if (e.form === 're-export') continue;
     consideredExports++;
-    const asked = consumers.get(`${rel}::${e.name}`);
-    if (!asked) { unconsumed.push(`web/${rel}:${e.line} exports ${e.name}, and nothing in this checkout imports it`); continue; }
-    if (![...asked].some((w) => w.startsWith('web/'))) outsideOnly.push(`web/${rel}::${e.name} from ${[...asked].join(', ')}`);
+    const by = consumers.get(`${rel}::${e.name}`);
+    if (!by) { unconsumed.push(`web/${rel}:${e.line} exports ${e.name}, and nothing in this checkout imports it and reads it`); continue; }
+    if (![...by].some((w) => w.startsWith('web/'))) outsideOnly.push(`web/${rel}::${e.name} from ${[...by].join(', ')}`);
   }
 }
 ok('no module exports a name nothing imports',
   unconsumed.length === 0 && consideredExports > 0,
   unconsumed.length
     ? unconsumed.join('; ')
-    : `${consideredExports} exports, every one of them asked for by ${consumers.size} name-level consumers`);
+    : `${consideredExports} exports, every one of them asked for by one of ${liveBindings} bindings that read what they bring across`
+      + `, with ${deadBindings} dead one${deadBindings === 1 ? '' : 's'} counting for nothing`);
 
 ok('and the consumers counted include the ones outside web/, which is where the only reader of some of these exports lives',
   outsideImports > 0 && outsideOnly.length > 0,

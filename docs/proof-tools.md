@@ -1071,19 +1071,42 @@ an orphan — so nothing in rules 1 to 3 could see one. Both halves are built ou
 already had in hand, the edge list and `exportsByModule`, which is what made the hole cheap to
 close and embarrassing to have had.
 
-**No module imports a name it does not use.** The search runs over the same scan the rest of the
-tool runs over, with every import declaration in the body blanked on top of it — all of them
-rather than the one under the question, because two declarations importing one name from two
-modules would otherwise each read as a use of the other, and a name moving between modules is
-exactly what this refactor does all day. The population is the in-tree edges **and the
-bare-specifier declarations**: `three` is not a file under `web/`, but `OutputPass` going dead
-when a pass moves out is the same fault as `BloomPass` going dead when a constructor does. A
-binding whose far-side name the target does not export is skipped here and left to rule 2's row,
+**One use question, asked once, feeding both halves.** Does the file that wrote a declaration
+read the name it binds? The search runs over the same scan the rest of the tool runs over, with
+every import declaration in the body blanked on top of it — all of them rather than the one under
+the question, because two declarations importing one name from two modules would otherwise each
+read as a use of the other, and a name moving between modules is exactly what this refactor does
+all day. The population is every declaration that carries a name across the edge of `web/`,
+wherever it is written: the in-tree edges, a page's inline module, the **bare-specifier
+declarations** (`three` is not a file under `web/`, but `OutputPass` going dead when a pass moves
+out is the same fault as `BloomPass` going dead when a constructor does), and the declarations in
+`server/`, `tools/` and `test/` that import out of `web/`. 173 name-level bindings on the current
+tree — 118 inside and 55 outside — and the row counts each of the three populations where it asks
+them rather than off a collection it might skip part of.
+
+A binding whose far-side name the target does not export is skipped here and left to rule 2's row,
 so `--mutate import-names-a-missing-export` still reddens one row and not two. `--mutate
-import-nothing-uses` adds a real export of `record-poll.js` to `main.js`'s import of it, and
+import-nothing-uses` adds a real export of `record-poll.js` to `main.js`'s import of it;
 `--mutate import-used-under-its-far-side-name` renames the binding so the file is full of the
 name the import *asks for* and holds no reference to the one it *makes* — the fault
-`docs/instruments.md` records against rule 3's sweep, planted here before it can be made again.
+`docs/instruments.md` records against rule 3's sweep, planted here before it can be made again;
+`--mutate outside-consumer-imports-a-name-it-never-reads` plants the same thing in
+`tools/fake-grabber.mjs`, where the row used to have nothing to say; and `--mutate
+dead-bare-import` plants it on a package name, the half of the population that had no arm at all
+until forcing it out of the loop left the clean run green at 60 assertions with all twenty
+controls of the day still catching.
+
+**A dead import is not a consumer.** The two halves used to be computed in one run and never
+compared, so the same run could redden `web/main.js` for not reading `easeSlopeAt` and five lines
+later count that identical dead line as the reader keeping `web/curve.js`'s export of it alive.
+Measured at `883f070^` rather than forced: that is exactly what it printed, and the dead export
+only became findable because a person removed the import by hand first. Now a binding no line
+reads fails the import row **and** asks the far side for nothing, so the pair a name moved out of
+a module leaves behind cannot conceal each other. `--mutate dead-import-is-not-a-consumer` leaves
+`server/library.js`'s import of `POLLED_NODE_FIELDS` exactly where it is and stops the one line
+that reads it: before the join that run was green at every row, and it now reddens two — the dead
+import and the export it stopped holding up. Both sentences are true of one edit, and each of the
+two claims has a control of its own that reddens exactly one row.
 
 **No module exports a name nothing imports, and the consumer set is the checkout rather than
 `web/`.** Seven of this tree's exports have no importer inside `web/` at all: `server/library.js`
@@ -1095,39 +1118,64 @@ rather than fixed. So the walk is the whole checkout minus `node_modules`, `vend
 and `web/` itself, and the direction it is allowed to be wrong in is set deliberately — a
 directory it fails to walk costs a consumer and reddens a live export, which somebody sees, while
 a directory it walks that it should not manufactures a consumer and keeps a dead export green.
-A namespace import consumes every export of its target, which is how `test/clip-range.test.mjs`
-reaches `web/clip-range.js`. `--mutate export-nothing-imports` plants a number nothing asks for,
-and `--mutate consumer-outside-web-drops-the-name` takes the name off `server/library.js`'s import
-while leaving the module imported, which separates a join done per name from one done per module:
-a check that marked every export consumed the moment anything imported the module reads that tree
-as unchanged. A row beside them asserts the outside walk is load-bearing rather than decorative —
-if no export ever depended on a reader outside `web/`, it says so, in the shape of
-`--mutate one-spelling-for-every-module`.
+`--mutate export-nothing-imports` plants a number nothing asks for, and `--mutate
+consumer-outside-web-drops-the-name` takes the name off `server/library.js`'s import while leaving
+the module imported, which separates a join done per name from one done per module: a check that
+marked every export consumed the moment anything imported the module reads that tree as unchanged.
+A row beside them asserts the outside walk is load-bearing rather than decorative — if no export
+ever depended on a reader outside `web/`, it says so, in the shape of `--mutate
+one-spelling-for-every-module`.
 
-**What the use question gets wrong, both found rather than reasoned about.** It asks about a name
-and not about a scope, so two things read as uses that are not references. A name appearing only
-inside a **string body** is the first, because the blanking that removes comments deliberately
-keeps string bodies — the specifier of every import lives in one. Measured on both trees, the
-strict reading, where a use has to sit at a position the mask calls code, names the same six and
-nothing more, and none of the 118 names swept on the current tree has zero code-position hits, so
-nothing is standing on the loose one either way — four names pick up extra hits inside strings
-(`grade`, `afterimage`, `bloom`, `material`, words the GLSL says too) and every one is read in
-code as well. The second was found by a control coming back NOT CAUGHT: a **property key or a
-method name in code position** has no dot in front of it, so the lookbehind that refuses
-`obj.name` cannot refuse `{ name(gl) { … } }`, which is what `web/main.js:9860` is and what made
-an alias of `poll` look read. That one will not close with a lookahead, and the measurement says
-so rather than the argument — excluding a hit followed by `:` or by `(` at the head of a line
-calls twelve live imports unused, `writeClipRange`, `tiltQuaternion` and `pollRecordState` among
-them, because a call written as its own statement is at the head of a line too. Both are false
-negatives, each costing a dead import this row does not find rather than a clean tree it fails,
-and telling a definition from a reference needs a scope analysis rather than a search.
+**A namespace import asks for the names it reaches, not for all of them.** `test/clip-range.test.
+mjs` is the only one in the checkout, and taking `import * as clip` as a request for every export
+`web/clip-range.js` has switched the export row off for that whole module: measured, an added
+export nothing wants reddens the row when it is appended to `web/view-window.js` and did not when
+it was appended here. A dotted reach asks for that one name, a destructure off the binding asks
+for the names in its pattern, and **everything else is a reach this scan cannot name** — a
+catch-all rather than the computed-index case alone, because `Object.keys(ns)`, `{ ...ns }`,
+`for (const k in ns)` and handing the binding to a function all reach exports without naming one,
+and a narrowing that consumed nothing for those would redden every export of the module on a tree
+doing something legitimate. It consumes all of them, exactly as the old join did, and says so in a
+row of its own, so a module going blind costs an assertion instead of passing in silence.
+`--mutate namespace-hides-a-dead-export` is the arm for the narrowing and `--mutate
+namespace-reach-cannot-be-named` for the row.
 
-**Its first catch was real.** On the tree as it stood after the six imports came off, the export
-half reddened `web/curve.js:66`: `easeSlopeAt` was let out through the trailing export list, its
-last importer was the dead import in `main.js`, and removing that one left an export with no
-consumer anywhere in the checkout. Fixed by taking the name off the list — `scalarSlopeAt` calls
-the function four lines down, so it is a name coming off a boundary rather than code being
-deleted.
+**What the use question gets wrong, and the two it no longer does.** It asks about a name and not
+about a scope, so a name written in code position that is not a reference reads as one. A hit
+inside a **quoted string body** used to be the first of those, because the blanking that removes
+comments keeps string bodies — the specifier of every import lives in one. The mask is asked
+instead of the text now: measured over the current tree, the strict reading takes hits off four
+names (`grade`, `afterimage`, `bloom`, `material`, words the quoted parameter ids say too) and
+leaves every swept name still read in code, so it closed the hole at no cost, with `--mutate
+import-used-only-in-a-string` as its arm. What is *not* true, and this page and the tool both said
+it was, is that a name mentioned only in a GLSL literal survived — template text is left at mask 0
+and blanked to spaces, so the twelve hundred lines of GLSL here were never a masking surface, and
+a plant named only inside a template literal is caught either way.
+
+A **property key** was the second, and it is decided by the two neighbours rather than by a
+lookahead: the nearest code character before the hit is `{` or `,` and the nearest after it is
+`:`, which is the object-literal key and the destructuring pattern key and nothing else. Measured,
+it takes no name off the swept set, which is what makes it free in the one file that is full of
+registries and menu tables; `--mutate import-used-only-as-an-object-key` is the arm. What is left
+open is the **method shorthand**, found by a control coming back NOT CAUGHT: `{ name(gl) { … } }`
+has no dot in front of it either, which is what `web/main.js:9860` is and what made an alias of
+`poll` look read. That one will not close with a lookahead, and the measurement says so rather
+than the argument — excluding a hit followed by `:` or by `(` at the head of a line calls twelve
+live imports unused, `writeClipRange`, `tiltQuaternion` and `pollRecordState` among them, because
+a call written as its own statement is at the head of a line too. Re-measured after the two
+closures above, the `poll` alias still comes back NOT CAUGHT, so the limitation is exactly this
+wide: it is a false negative, costing a dead import this row does not find rather than a clean
+tree it fails, and telling a definition from a reference needs a scope analysis rather than a
+search.
+
+**Its first catch was real, and it arrived one commit late.** On the tree as it stood after the
+six imports came off, the export half reddened `web/curve.js:66`: `easeSlopeAt` was let out
+through the trailing export list, its last importer was the dead import in `main.js`, and removing
+that one left an export with no consumer anywhere in the checkout. Fixed by taking the name off
+the list — `scalarSlopeAt` calls the function four lines down, so it is a name coming off a
+boundary rather than code being deleted. What the join says about that catch is that it depended
+on the hand edit: run the joined rule against `883f070^` and both rows redden in the same run,
+which is the version of this that does not need somebody to have removed the import first.
 
 **`prof-summary.mjs <profile> [warmup]`** reads `grabber --profile` output and flags any run
 under 29.5fps as contended, because the segment timings from a run that dropped frames are
