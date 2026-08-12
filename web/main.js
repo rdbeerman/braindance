@@ -11772,10 +11772,17 @@ function paintExportName() {
  * the document should hold what the box shows. `paintExportName` disables the export button
  * for one, and `applyDeliverable` calls it after adopting, so a stored bad name arrives
  * refused rather than silently renamed.
+ *
+ * **Stored exactly as typed, including the spaces, because the line above is a promise.**
+ * It was stored trimmed, which made that promise false in the one case anybody would
+ * notice: type `" foo "`, save the deliverable, reopen it, and the box comes back holding
+ * something different from what it held when you saved - a document quietly editing the
+ * operator's text. Trimming belongs where the name becomes a filename, and `exportBaseName`
+ * already does it there, so nothing downstream needed the trim to be here.
  */
 function takeExportName() {
   ensureActiveDeliverable();
-  activeDeliverable.name = ui.exportName.value.trim();
+  activeDeliverable.name = ui.exportName.value;
   paintDeliverable();
 }
 
