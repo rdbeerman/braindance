@@ -317,6 +317,16 @@ const targetAspect = () => projectAspect[0] / projectAspect[1];
 // forgive.
 let aspectButtons = null;
 
+/**
+ * The resolution each shape was last on, so returning to a shape returns to its size.
+ *
+ * Session state and deliberately not in any document: a deliverable records the one size
+ * it renders at, and this is only the memory that stops a shape change from throwing away
+ * a size the operator picked. Persisting it would be a second place a resolution is
+ * written, which is the shape of drift this whole split exists to remove.
+ */
+const sizeForShape = new Map();
+
 // Where the letterboxed stage sits in the window. Set by `resize`, read by the
 // overlay so both canvases cover the same pixels.
 const stageBox = { left: 0, top: 0 };
@@ -451,13 +461,29 @@ function paintAspectSelection(buttons) {
 function setProjectAspect(aspect, { fromDocument = false } = {}) {
   const [w, h] = reduceAspect(aspect[0], aspect[1]);
   if (!(w > 0 && h > 0)) return false;
+  const leaving = projectAspect.join(':');
   projectAspect = [w, h];
   ensureActiveDeliverable();
   if (!sameAspect(aspectOfSize(activeDeliverable.outputSize), projectAspect)) {
+    // **The size this shape was last on, before the size this shape opens on.** A shape
+    // change replaces a resolution it cannot keep, and the deliverable is not undoable, so
+    // without a memory the replacement is one-way: pick 3840x2160, change the shape, press
+    // undo, and the stage comes back to where it was while the 4K the operator chose has
+    // become 1920x1080 - the document restored and a per-file setting silently downgraded
+    // by an edit that claims to move nothing but the frame.
+    //
+    // Keyed by shape rather than kept as a single previous value, because the question a
+    // returning shape asks is "what was I last rendered at", and one slot answers that for
+    // one shape and then lies to the next. Recorded on the way out rather than on the way
+    // in, so the size being displaced is the one that gets remembered.
+    sizeForShape.set(leaving, activeDeliverable.outputSize);
     // A shape the table has nothing for leaves the deliverable where it was, and
     // `exportClip` is what says so - refusing at the press rather than rendering a file
     // that is not the shape on screen.
-    activeDeliverable.outputSize = openingSizeForAspect(projectAspect) ?? activeDeliverable.outputSize;
+    const remembered = sizeForShape.get(projectAspect.join(':'));
+    const fits = remembered && sameAspect(aspectOfSize(remembered), projectAspect);
+    activeDeliverable.outputSize = (fits ? remembered : openingSizeForAspect(projectAspect))
+      ?? activeDeliverable.outputSize;
   }
   buildResolutionMenu(ui?.exportSize, activeDeliverable.outputSize);
   if (ui?.exportSize) ui.exportSize.value = activeDeliverable.outputSize;
@@ -2553,11 +2579,22 @@ function applyDeliverable(deliverable) {
   // precisely what a version gate is for, and there is nothing here to convert: the rate
   // it names belongs to a project this deliverable does not know the identity of.
   if (deliverable.version !== DELIVERABLE_VERSION) {
+    // **The rate it named is in the message, because it is the only copy left.** Refusing
+    // a version 1 document without saying what it held sends the operator to Project
+    // settings with nothing to type: the rate lived on the deliverable and nowhere else,
+    // the project it belonged to carries no `outputFps` at all, and this build reads that
+    // absence as 30. So a 24fps edit whose only record of 24 is the document being refused
+    // becomes a 30fps edit silently, and saving the project writes 30 down for good. This
+    // cannot migrate it - a deliverable does not know which project it belongs to - but it
+    // can hand the number back rather than dropping it on the floor.
+    const named = Number.isFinite(deliverable.outputFps)
+      ? ` it was written at ${deliverable.outputFps}fps, which is the only record of that rate,`
+      : '';
     throw new Error(
       `this deliverable is version ${JSON.stringify(deliverable.version)} and this build writes `
       + `${DELIVERABLE_VERSION}: the output rate lives on the project now, so a version 1 document `
-      + 'would render at a rate nothing on screen agrees with - set the rate in Project settings and '
-      + 'save the deliverable again',
+      + `would render at a rate nothing on screen agrees with -${named} so set the rate in Project `
+      + 'settings and save the deliverable again',
     );
   }
   clipBoundOrThrow(deliverable.in, 'in');
@@ -3367,7 +3404,13 @@ function restoreProject(project) {
   // `[16, 9]` under `sameAspect` and light no button while framing identically, which is
   // the kind of near-miss that reads as a rendering bug.
   const aspectShape = Array.isArray(project.aspect) && project.aspect.length === 2
-    && project.aspect.every((n) => Number.isInteger(n) && n > 0);
+    // `isSafeInteger` rather than `isInteger`, because above 2^53 the integers stop being
+    // distinct: `[9007199254740993, 9007199254740992]` is parsed as two copies of the same
+    // number, passes `isInteger`, reduces to `[1, 1]` and frames the clip square. A shape
+    // nobody can have meant, adopted rather than refused, is the class this validator is
+    // here for - and the pair is a *ratio*, so a value that cannot be told from its
+    // neighbour is not a ratio at all.
+    && project.aspect.every((n) => Number.isSafeInteger(n) && n > 0);
   if (project.aspect !== undefined && !aspectShape) {
     throw new Error(`aspect is ${JSON.stringify(project.aspect)}: it reads as [width, height] in whole positive numbers`);
   }
@@ -12144,7 +12187,14 @@ ui.deliverable?.addEventListener('change', async () => {
     const doc = await (await fetch(`/deliverables/${encodeURIComponent(name)}`)).json();
     if (doc.error) throw new Error(doc.error);
     applyDeliverable(doc.body);
-    history.commit();
+    // **No `history.commit()` here, and its absence is the split rather than an
+    // oversight.** There was one, and it had become dead: everything `applyDeliverable`
+    // writes - the trim, the resolution, the codec, the output name - is the deliverable's,
+    // and `serialiseProjectBody` writes none of it, so the commit compared two identical
+    // snapshots and pushed nothing on every adoption. A call that cannot ever add an entry
+    // reads as "choosing a deliverable is undoable" to anybody maintaining this, which is
+    // the opposite of what the design decided. Choosing a deliverable is not an edit to the
+    // clip; it is choosing which file to make from it.
     showAdoptedDeliverable(name);
     say(`deliverable ${name}`);
   } catch (err) {

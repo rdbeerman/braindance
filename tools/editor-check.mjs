@@ -3423,6 +3423,30 @@ try {
       `nothing to press: lit ${wasLit?.label ?? 'none'}, unlit ${toPress?.label ?? 'none'}`);
   } else {
     const before = await stageAspect();
+    // The resolution the deliverable is on before the shape moves, because a shape change
+    // has to replace a size it cannot keep and must not lose the one it displaced. Without
+    // a memory that replacement is one-way: pick a size, change the shape, come back, and
+    // the size the operator chose has become whatever the shape opens on - a per-file
+    // setting silently downgraded by an edit that claims to move only the frame. Undo is
+    // the sharpest way in, because it advertises that it puts things back.
+    // **Moved off the size this shape opens on first, or the row below cannot fail.** The
+    // opening size for 16:9 is the table's default, so a round trip that starts there ends
+    // there whether the displaced size is remembered or recomputed - the first version of
+    // this row read `1920x1080 -> replaced -> 1920x1080` and would have passed against a
+    // build with no memory at all. Picking any other size of the same shape is what makes
+    // the two answers different.
+    const otherSize = await page.evaluate(`(() => {
+      const sel = document.getElementById('tExportSize');
+      const other = [...sel.options].map((o) => o.value).find((v) => v !== sel.value);
+      if (!other) return null;
+      sel.value = other;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return other;
+    })()`);
+    const sizeBefore = await page.evaluate('__kinect.outputSize().size');
+    check(otherSize !== null && sizeBefore === otherSize,
+      '  and this shape offers a second size to sit on, or the round trip below proves nothing',
+      `moved to ${JSON.stringify(otherSize)}, the deliverable reads ${JSON.stringify(sizeBefore)}`);
     await page.locator(`#projectAspects button[data-aspect="${toPress.aspect}"]`).click();
     await settle();
     const pressed = await page.evaluate(`(() => ({
@@ -3446,6 +3470,21 @@ try {
     check(Math.abs(restored - before) < 1e-6,
       '  and pressing the shape it came in on puts the stage back, so no later section reads a frame this block moved',
       `${before.toFixed(6)} -> ${after.toFixed(6)} -> ${restored.toFixed(6)}`);
+    const sizeRestored = await page.evaluate('__kinect.outputSize().size');
+    const opens = await page.evaluate('__kinect.outputSize().size');
+    check(sizeRestored === sizeBefore,
+      '  and the resolution that shape was on comes back with it, rather than the one it opens on',
+      `${sizeBefore} -> ${pressed.sizes[0]} -> ${sizeRestored}`
+      + (sizeRestored === opens && sizeRestored !== sizeBefore ? ' (the opening size, so the displaced one was lost)' : ''));
+    // Put the deliverable back on the size this section found it on, for the reason the
+    // shape is put back: section 7 renders with it.
+    await page.evaluate(`(() => {
+      const sel = document.getElementById('tExportSize');
+      if (sel.value !== ${JSON.stringify(exportDialog.chosenSize)}) {
+        sel.value = ${JSON.stringify(exportDialog.chosenSize)};
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    })()`);
   }
   // **The rate, driven through the control rather than through the transport.** It was
   // credited in `DRIVER_IDS` to `timeline-check` and `export-check`, and neither of them
