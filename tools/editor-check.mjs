@@ -869,6 +869,27 @@ const MUTATIONS = {
   // rebuilt, so that row stays green too. What reddens is the press row, which asks the
   // stage. One failed assertion, and if this ever catches with two the second one is
   // telling you the mutation did something else as well.
+  // **The output name is read out of the deliverable and never written back into it.**
+  // This is the shipped defect, not a hypothetical: `applyDeliverable` copied
+  // `deliverable.name` into the field and `ensureActiveDeliverable` seeded it empty, and
+  // nothing carried the other direction - so typing a name and pressing `new` stored the
+  // empty string, and every deliverable of one take went on proposing the same filename.
+  // The comment on `applyDeliverable` claims that field is what stops two of them writing
+  // over each other's file, which is a claim a check has to be able to falsify.
+  //
+  // Aimed at the listener rather than at the assignment, because the assignment is what a
+  // reader would fix and the listener is what was missing. It leaves `paintExportName`
+  // alone, so the field still validates and the export button still disables on a bad
+  // name - a build under this mutation looks completely healthy until a document is saved
+  // and read back, which is the whole reason the row walks a round trip.
+  'export-name-not-taken': {
+    file: 'web/main.js',
+    edits: [[
+      'ui.exportName.addEventListener(\'input\', () => {\n  takeExportName();\n  paintExportName();\n});',
+      'ui.exportName.addEventListener(\'input\', () => {\n  paintExportName();\n});',
+    ]],
+  },
+
   'aspect-skips-the-letterbox': {
     file: 'web/main.js',
     edits: [[
@@ -3265,6 +3286,66 @@ try {
     check(codecCleanup, 'and the deliverable this block planted was removed again',
       codecCleanup ? `${codecDoor} deleted` : `DELETE refused for ${codecDoor}`);
   }
+  // **The output name, round-tripped through a document rather than read off the field it
+  // was typed into.** Typing a name and reading it straight back proves only that an input
+  // holds text. What the deliverable claims is that the name *travels with it* - that is
+  // the whole reason the field exists on the document - so the only assertion worth making
+  // walks it out to the server and back through an adoption.
+  //
+  // It shipped broken in exactly the gap a field-only row would have missed: the name was
+  // read out of a document on adoption and never written into one, so a saved deliverable
+  // carried the empty string and every deliverable of one take proposed the same filename.
+  // `export-name-not-taken` is the control.
+  //
+  // Restored to what it found afterwards, because section 7 renders with this field and a
+  // name left here would name that file.
+  const nameBefore = await page.evaluate('document.getElementById("tExportName").value');
+  const nameDoc = `ec${process.pid}-name`;
+  const nameTrip = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const el = document.getElementById('tExportName');
+    el.value = 'round-trip-probe';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    const inDocument = k.library.activeDeliverable()?.name ?? null;
+    const put = await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(k.library.activeDeliverable()),
+    });
+    if (!put.ok) return { failed: 'PUT ' + put.status };
+    const stored = (await (await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}))).json()).body?.name ?? null;
+    // Typed over before the adoption, so what comes back cannot be what is already there.
+    el.value = 'a-different-name';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    const sel = document.getElementById('tDeliverable');
+    if (![...sel.options].some((o) => o.value === ${JSON.stringify(nameDoc)})) {
+      sel.append(new Option(${JSON.stringify(nameDoc)}, ${JSON.stringify(nameDoc)}));
+    }
+    sel.value = ${JSON.stringify(nameDoc)};
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 400));
+    return { inDocument, stored, afterAdoption: el.value };
+  })()`);
+  check(nameTrip.inDocument === 'round-trip-probe',
+    'the name typed for the output reaches the deliverable that is supposed to remember it',
+    nameTrip.failed ?? `the document reads ${JSON.stringify(nameTrip.inDocument)}`);
+  check(nameTrip.stored === 'round-trip-probe',
+    '  and the deliverable written to the server carries it, rather than the empty one it was seeded with',
+    `stored ${JSON.stringify(nameTrip.stored)}`);
+  check(nameTrip.afterAdoption === 'round-trip-probe',
+    '  and adopting that deliverable puts it back, which is what makes two of them name two files',
+    `the field reads ${JSON.stringify(nameTrip.afterAdoption)} after adopting over ${JSON.stringify('a-different-name')}`);
+  await page.evaluate(`(async () => {
+    const el = document.getElementById('tExportName');
+    el.value = ${JSON.stringify(nameBefore)};
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('tDeliverable').value = '';
+    // The header is not decoration on a DELETE here - this server answers 415 without it,
+    // and a rejected cleanup leaves the document behind and reddens the page-errors row.
+    await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}), {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    });
+  })()`);
+
   // **The deliverable's `new` button, driven the way Save as is driven.** It came into
   // this dialog with the picker and was credited to `library-check`, which has never
   // referenced it - so nothing pressed it, and the `shelldialogs` rule's claim to drive

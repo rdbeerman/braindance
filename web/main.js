@@ -11690,7 +11690,38 @@ function paintExportName() {
   return ok;
 }
 
-ui.exportName.addEventListener('input', paintExportName);
+/**
+ * The typed name, into the document that is supposed to remember it.
+ *
+ * **Without this the field was read and never written, so the deliverable it belongs to
+ * always saved an empty one.** `applyDeliverable` copies `deliverable.name` into this box
+ * on adoption and `ensureActiveDeliverable` seeds it empty, and that was the whole of the
+ * wiring - nothing carried the other direction, so typing a name and pressing `new` stored
+ * `""`, and reopening that deliverable put the box back to the take's id. The comment on
+ * `applyDeliverable` says this field is "what stops two of them writing over each other's
+ * file", and until this listener existed it stopped nothing: every deliverable of one take
+ * proposed the same filename, which is the exact defect that comment describes fixing.
+ *
+ * Written on every keystroke rather than on blur or on save, because a deliverable is not
+ * undoable state - there is no stack to flood - and because the two places that persist one
+ * (`new`, and the autosave behind the picker) both read `activeDeliverable` directly. A
+ * write at save time would be a second place that knows this field exists.
+ *
+ * An invalid name is written too, and that is deliberate: the box shows what was typed, so
+ * the document should hold what the box shows. `paintExportName` disables the export button
+ * for one, and `applyDeliverable` calls it after adopting, so a stored bad name arrives
+ * refused rather than silently renamed.
+ */
+function takeExportName() {
+  ensureActiveDeliverable();
+  activeDeliverable.name = ui.exportName.value.trim();
+  paintDeliverable();
+}
+
+ui.exportName.addEventListener('input', () => {
+  takeExportName();
+  paintExportName();
+});
 
 // The last render, and where to read it back from. `output` is an absolute path on
 // the server and the page cannot fetch it; `href` is the same file under the prefix
