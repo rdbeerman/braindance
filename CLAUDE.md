@@ -365,7 +365,10 @@ node tools/vcam-check.mjs --mutate refusal-ignores-webcam # ... what the take is
 node tools/guard-check.mjs                                # the socket's origin rule, the bind, and the rebinding rule
 node tools/guard-check.mjs --mutate upgrade-skips-origin  # ... and must FAIL mutated
 node tools/guard-check.mjs --mutate host-accepts-a-name   # ... and must FAIL mutated
-node tools/jobs-check.mjs                                 # step 8: the queue, the pin, and a real render
+node tools/jobs-check.mjs                                 # step 8: the queue, the pin, a real render, and a job
+                                                          #   whose deliverable this build cannot read, which has to
+                                                          #   come back failed rather than rendered - the batch path
+                                                          #   adopted past the version gate until it did
 node tools/jobs-check.mjs --mutate claim-ignores-renderer # ... and must FAIL mutated
 node tools/module-check.mjs                               # the boundaries in web/: the import graph, what an import names, what crosses it
 node tools/module-check.mjs --mutate cycle-planted        # ... the import web/scene.js's own header says does not exist

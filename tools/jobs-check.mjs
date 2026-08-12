@@ -734,6 +734,39 @@ try {
     check(/ANGLE/.test(String(record.renderer)),
       'and the class on the record is the one the browser actually reported, not one the worker was told',
       String(record.renderer).slice(0, 46));
+
+    // **The door, asserted rather than assumed, because the fixture above cannot see it.**
+    // Everything this file renders is a document the editor would also accept, so a worker
+    // that went back to adopting with a bare `setActiveDeliverable` - which is what it did
+    // until the shape and the rate moved onto the project - would render every job here
+    // exactly as it does now and nothing would say a gate had gone. That is the shape of a
+    // check that greens a hole: the rows above prove a good job renders, and no row proved
+    // a bad one does not.
+    //
+    // A version 1 deliverable is the cheapest document that must be refused, and it is the
+    // one this fixture itself carried. The refusal has to arrive as a *failed job* rather
+    // than as a thrown worker: the queue's contract is that a claim ends in done or failed
+    // with a reason, and a render that cannot legally happen is a reason.
+    const refusedJob = await enqueue({
+      capture: take.hash,
+      output: 'jobs-check-refused',
+      width: 320,
+      height: 200,
+      deliverable: { ...DELIVERABLE, version: 1, outputFps: 30 },
+    });
+    check(refusedJob.status === 200,
+      'a job carrying a deliverable this build cannot read is queued, because the queue is not where that is decided',
+      refusedJob.body.id ?? refusedJob.body.error);
+    const refuser = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', URL_, '--name', 'jobs-check-refuse', '--drain', '--max', '1'], { stdio: 'ignore' });
+    await new Promise((done) => refuser.on('close', done));
+    const refusedRecord = await get(`/jobs/${refusedJob.body.id}`);
+    check(refusedRecord.state === 'failed',
+      '  and the worker refuses it instead of rendering it, so the version gate reaches the path that runs unattended',
+      `state ${refusedRecord.state}${refusedRecord.error ? `, ${refusedRecord.error.slice(0, 80)}` : ''}`);
+    check(/version 1/.test(String(refusedRecord.error ?? '')),
+      '  and the reason it carries is the version rather than something it failed at later',
+      String(refusedRecord.error ?? 'no reason recorded').slice(0, 100));
     let probed = '';
     try {
       probed = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,nb_frames',
