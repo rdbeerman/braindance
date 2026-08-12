@@ -5,15 +5,20 @@
 # the USB bus. Wiring those in would produce a workflow that is red from the first push
 # and ignored by the second, so they are named at the bottom rather than attempted.
 #
-# Nothing here installs a *dependency of this repo* - the checks need no module the tree
-# does not already contain. The gate job does reach the registry twice, and both are the
-# point rather than a compromise: it pins npm itself, and the check asks npm to resolve a
-# package so it can read the refusal. That replaced a version-dependent config reading
-# which passed locally and failed on the runner while the gate was armed the whole time.
+# One of the three jobs installs a dependency of this repo, and it is worth saying which
+# and why rather than leaving the reader to infer it. `syntax-check` parses the tree and
+# needs nothing; the gate job reaches the registry twice on purpose, pinning npm itself
+# and asking npm to resolve a package so it can read the refusal - which replaced a
+# version-dependent config reading that passed locally and failed on the runner while the
+# gate was armed the whole time. The unit job now runs `npm ci`, because four of the
+# modules extracted out of `web/main.js` return three.js types and a node test of them
+# cannot resolve `three` out of source alone. The comment on that job carries the
+# measurement that forced it.
 #
-# `npm ci` does work, for the record: the lockfile carries the declared devDependency
-# and installs clean from a directory holding nothing but package.json, the lockfile
-# and .npmrc. It is left out because it is not needed here, not because it is broken.
+# `npm ci` installs clean from a directory holding nothing but package.json, the lockfile
+# and .npmrc, and the lockfile is the reason it is `ci` rather than `install`: it takes
+# the versions this tree declares instead of resolving fresh ones, which is what keeps
+# the `.npmrc` release gate meaningful on a machine nobody owns.
 #
 # The actions are pinned by commit rather than by tag, because a tag is mutable and this
 # tree enforces a 48-hour release age on everything else it pulls in. The tag each SHA
@@ -75,8 +80,23 @@ jobs:
       # here would go red on the runner's own npm while the gate was armed the whole
       # time, which is the exact failure the comment on that job records.
       #
-      # It needs no install: both files import `node:test` and the tree's own modules,
-      # and nothing else. And it arrives with its own falsification control -
+      # **It needs an install now, and the extraction is what changed that.** When this
+      # job was written the whole of `test/` was two files importing `node:test` and the
+      # tree's own arithmetic, so the tick was worth having partly because it depended on
+      # nothing. Four of the modules pulled out of `main.js` reach three.js for a type
+      # they exist to return - `world-tilt` a Quaternion, `plan-geometry` a Vector3,
+      # `gpu-textures` a DataTexture, `bloom-pass` a Pass - and a test of those cannot
+      # resolve `three` out of a tree that holds only source. Measured rather than
+      # predicted: the first push after the extraction went red on all four arms with
+      # `ERR_MODULE_NOT_FOUND: Cannot find package 'three'`, 47 tests, 4 failed.
+      #
+      # `npm ci` rather than `npm install`, because the lockfile is the point: it installs
+      # the versions this tree declares instead of resolving fresh ones, which is what
+      # keeps the `.npmrc` release gate meaningful on a runner. The comment at the head of
+      # this file recorded that `npm ci` works here and was left out only because nothing
+      # needed it; something needs it.
+      - run: npm ci
+      # And it arrives with its own falsification control -
       # `test/runner-control.test.mjs` plants a failing test, runs the real runner on it
       # in a directory of its own, and reddens if the run comes back green or unnamed. So
       # a tick here is the runner having been shown to report failures on this machine

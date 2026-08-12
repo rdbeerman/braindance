@@ -412,7 +412,14 @@ The two below are two of CI's three jobs. `syntax-check` needs nothing at all;
 `release-gate-check` needs the registry and exits 2 when it cannot reach it, because it proves
 the gate by npm's refusal rather than by reading a config key. The third is `npm run test:unit`,
 which is `test/` rather than `tools/` and so is not in the arithmetic below — it needs no server,
-no sensor, no browser and no install, and `test/runner-control.test.mjs` is its control:
+no sensor and no browser, but it **does need `npm ci`**, and that changed with the extraction
+rather than being true all along. Four of the modules taken out of `web/main.js` return
+three.js types they exist to build — `world-tilt` a Quaternion, `plan-geometry` a Vector3,
+`gpu-textures` a DataTexture, `bloom-pass` a Pass — so a node test of them cannot resolve
+`three` out of a tree holding only source. Measured on the first push after the extraction:
+`ERR_MODULE_NOT_FOUND: Cannot find package 'three'`, 47 tests, 4 failed, on all four CI arms
+while the same suite ran 68 green locally against an installed tree. `test/runner-control.test.mjs`
+is its control:
 
 ```
 node tools/syntax-check.mjs                          # every JS file this repo ships parses, and the two
