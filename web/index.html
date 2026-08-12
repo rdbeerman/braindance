@@ -476,7 +476,11 @@
     cursor: pointer;
   }
   .dialog-close:hover { color: var(--ink); background: var(--paper-2); }
-  .dialog-field { margin-bottom: 14px; }
+  /* `display` stated rather than inherited from whichever element carries the class, which
+     closes the class instead of the one instance that found it: a `label` is inline by
+     default, so this margin silently did nothing on the one field that was written as one
+     and the row below it collided with the next field's label. */
+  .dialog-field { display: block; margin-bottom: 14px; }
   .dialog-field > label,
   .dialog-label {
     display: block;
@@ -750,7 +754,14 @@
   }
   .tchip button[disabled] { color: var(--dim); cursor: default; }
   .tchip.warn, #tNote { border-color: var(--warn); color: var(--warn); }
-  #tNote:empty, #tExportNote:empty { display: none; }
+  /* `#tNote` only, and `#tExportNote` deliberately not. The app bar's chip is a bordered
+     box, so an empty one draws a stray outline and collapsing it is the whole point. The
+     export dialog's note has no box at all - it is the `flex: 1` that pushes that dialog's
+     actions to the right edge - so collapsing it bought nothing and cost the alignment:
+     with no render yet the note is empty, the spacer vanishes and `save a copy` and
+     `Export` sat hard left, 278px from the right edge the other two dialogs' actions sit
+     on. Measured at 1512px wide. */
+  #tNote:empty { display: none; }
   #tResume { border: none; background: none; padding: 0; }
   #tResumeOpen { padding: 5px 10px; }
   /* `hidden` on a chip, which needs saying because `.tchip` already sets a display and
@@ -1488,14 +1499,22 @@
          one surface and editing it on another. The refusal still lands on `#tNote` in the
          application bar, which is visible whether this is open or not, so the case the
          old position was protecting is covered by the element that always carried it. -->
-    <label class="dialog-field" for="tDeliverable">
-      <span class="dialog-label">Deliverable</span>
+    <!-- A `div` carrying the field and a `label` naming the control, which is the shape
+         every other field in all three dialogs has. Written as `<label class="dialog-field">`
+         wrapping the lot when the picker moved in here, and that is two faults rather than
+         a style: a `label` is `display: inline`, so the class's own `margin-bottom` did
+         nothing at all and the readout below ended up touching the next field's label with
+         zero pixels between them - measured, 6px above and 0 below, which reads as though
+         "1920x1080 h264" were labelling Resolution. And a `for=` label wrapping the `new`
+         button puts a control inside the thing that names another control. -->
+    <div class="dialog-field">
+      <label class="dialog-label" for="tDeliverable">Deliverable</label>
       <div class="dialog-input-row">
         <select id="tDeliverable"><option value="">&mdash;</option></select>
         <button class="dialog-secondary" id="tDeliverableNew" type="button">new</button>
       </div>
       <b id="tDeliverableReadout"></b>
-    </label>
+    </div>
     <!-- Constrained to the project's shape rather than offering every size in the table,
          which is the whole of what makes resolution a per-deliverable choice: two sizes of
          one shape are the same picture, because every screen-space term is expressed
