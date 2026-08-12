@@ -3008,8 +3008,13 @@ try {
     open: !document.getElementById('fileMenu').hidden,
     items: [...document.querySelectorAll('#fileMenu [role=menuitem]')].map((el) => el.textContent.trim()),
   }))()`);
-  check(fileMenu.open && fileMenu.items.length === 2,
-    'File opens from the fixed bar and offers the two designed commands', fileMenu.items.join(' | '));
+  // Three, since the shape and the rate became the edit's rather than a deliverable's and
+  // needed a door. Counted rather than listed, and the count is the assertion: this row
+  // went red on the commit that added Project settings, which is the number doing its job
+  // - a menu that grows an entry nobody decided to add is a surface drifting from its
+  // design, and that is what a literal here catches that a `>= 2` would not.
+  check(fileMenu.open && fileMenu.items.length === 3,
+    'File opens from the fixed bar and offers the three designed commands', fileMenu.items.join(' | '));
   let savePrompt = '';
   page.once('dialog', async (dialog) => { savePrompt = dialog.message(); await dialog.dismiss(); });
   await page.locator('#menuSaveProject').click();
@@ -3271,9 +3276,12 @@ try {
       selected: button.getAttribute('aria-pressed'),
     })),
     // Read off the control rather than off a list written here, for the reason the markup
-    // gives for leaving it empty: `restoreProject` refuses a rate this build does not
+    // gives for leaving it empty: restoreProject refuses a rate this build does not
     // offer, and a tool spelling the rates out again would be a third statement of a list
     // that is supposed to have one.
+    // No backticks in this comment on purpose - it lives inside a template literal, and
+    // one here ends the literal. That is the sixth time in this repo, and the fifth is
+    // noted twenty lines up in this same section.
     rates: [...(document.getElementById('tFps')?.options ?? [])].map((o) => o.value),
     rate: document.getElementById('tFps')?.value ?? '',
   }))()`);
@@ -7837,9 +7845,22 @@ try {
     // the take. `differ` changes one field away from the value a fresh open gives, and
     // the row below asserts that it did - the offer is deliberately silent when the two
     // agree, so a document that accidentally matched would test the wrong branch.
+    // **The field these rows tell two documents apart by, which used to be `outputSize`.**
+    // The shape moved onto the document as `aspect` and the pixel count moved onto the
+    // deliverable, so `outputSize` is no longer written by `serialiseProjectBody` - and
+    // every row below read `undefined` on the restored side the moment it went. They
+    // failed rather than passing, which is the arrangement working: the comment further
+    // down records that the first draft of one of these moved a field the project does
+    // not carry, both sides read `undefined`, and the row passed on every build.
+    //
+    // Compared joined rather than with `===`, and that is not a detail: `aspect` is an
+    // array, so two documents holding the same shape are two objects and `===` is false
+    // for every pair. A row that is always red is better than one that is always green
+    // and worse than one that asks the question, which is what the join makes it ask.
+    const shapeOf = (doc) => (doc?.aspect ?? []).join(':') || 'none';
     const workingBody = (stamp, differ = true) => {
       const body = JSON.parse(JSON.stringify(fresh));
-      if (differ) body.outputSize = fresh.outputSize === '1280x720' ? '1920x1080' : '1280x720';
+      if (differ) body.aspect = shapeOf(fresh) === '4:3' ? [16, 9] : [4, 3];
       return { ...body, take: stamp };
     };
     // Long enough that it cannot be read off a chip, and different footage besides.
@@ -7847,9 +7868,9 @@ try {
 
     // ---- reload one: the offer is made, and then the note has to carry a refusal
     const differing = workingBody({ id: openId, hash: openHash });
-    check(differing.outputSize !== fresh.outputSize,
+    check(shapeOf(differing) !== shapeOf(fresh),
       'the document about to be planted differs from what a fresh open puts on screen, or there is nothing for the offer to be about',
-      `${differing.outputSize} against ${fresh.outputSize}`);
+      `${shapeOf(differing)} against ${shapeOf(fresh)}`);
     await putDoc(WORKING, differing);
     await putDoc(OTHER, { ...JSON.parse(JSON.stringify(fresh)), take: { id: 'some-other-take', hash: foreignHash } });
     await reopen();
@@ -7879,9 +7900,9 @@ try {
     await page.click('#tResumeOpen');
     await settle();
     const restored = await page.evaluate('__kinect.keyframes.project()');
-    check(restored.outputSize === differing.outputSize,
+    check(shapeOf(restored) === shapeOf(differing),
       'and pressing it restores the autosaved document onto the open take, without leaving the page for a URL that would drop the take',
-      `${restored.outputSize} against the autosave's ${differing.outputSize} and the fresh clip's ${fresh.outputSize}`);
+      `${shapeOf(restored)} against the autosave's ${shapeOf(differing)} and the fresh clip's ${shapeOf(fresh)}`);
     // **And the offer survives the store moving under it.** `__working__` is the one
     // name in this library that rewrites itself: `history.commit()` autosaves over it on
     // every edit, so between the chip appearing and somebody pressing it the document it
@@ -7904,15 +7925,15 @@ try {
     // reported NOT CAUGHT - which is the honest reading of a row testing nothing.
     const moved = workingBody({ id: openId, hash: openHash }, false);
     await putDoc(WORKING, moved);
-    check(offeredBeforeMove.shown && moved.outputSize !== differing.outputSize,
+    check(offeredBeforeMove.shown && shapeOf(moved) !== shapeOf(differing),
       'the offer is on screen and then the document behind its name is replaced by a different one, which is what an edit made while the chip is up does to it',
-      `chip ${offeredBeforeMove.shown ? 'shown' : 'hidden'}, offered ${differing.outputSize} against the store's new ${moved.outputSize}`);
+      `chip ${offeredBeforeMove.shown ? 'shown' : 'hidden'}, offered ${shapeOf(differing)} against the store's new ${shapeOf(moved)}`);
     await page.click('#tResumeOpen');
     await settle();
     const restoredAfterMove = await page.evaluate('__kinect.keyframes.project()');
-    check(restoredAfterMove.outputSize === differing.outputSize,
+    check(shapeOf(restoredAfterMove) === shapeOf(differing),
       'and pressing it restores the document that was offered rather than whatever the name holds by then, since the work it was advertising is the work being recovered',
-      `${restoredAfterMove.outputSize} against the offered ${differing.outputSize} and the store's ${moved.outputSize}`);
+      `${shapeOf(restoredAfterMove)} against the offered ${shapeOf(differing)} and the store's ${shapeOf(moved)}`);
 
     // **And the store holds it afterwards, or the recovery lasted only as long as the
     // tab.** Holding the offered body fixed which document the press restores; it did
@@ -7922,11 +7943,11 @@ try {
     // "restored the autosaved edit" loaded the overwriting edit straight back.
     const storedAfterRestore = await page.evaluate(`(async () => {
       const doc = await (await fetch('/projects/${WORKING}')).json();
-      return doc.body?.outputSize ?? null;
+      return doc.body?.aspect ?? null;
     })()`);
-    check(storedAfterRestore === differing.outputSize,
+    check(shapeOf({ aspect: storedAfterRestore }) === shapeOf(differing),
       'and the auto-save is rewritten with what was restored, so a reload after the recovery loads the recovered work rather than the edit that had overwritten it',
-      `stored ${storedAfterRestore} against the restored ${differing.outputSize} and the ${moved.outputSize} it had been overwritten with`);
+      `stored ${shapeOf({ aspect: storedAfterRestore })} against the restored ${shapeOf(differing)} and the ${shapeOf(moved)} it had been overwritten with`);
 
     const afterRestore = await offerState();
     check(!afterRestore.shown,
@@ -8001,11 +8022,11 @@ try {
     await page.unroute('**/projects/__working__');
     const storedAfterRace = await page.evaluate(`(async () => {
       const doc = await (await fetch('/projects/${WORKING}')).json();
-      return doc.body?.outputSize ?? null;
+      return doc.body?.aspect ?? null;
     })()`);
-    check(storedAfterRace === differing.outputSize,
+    check(shapeOf({ aspect: storedAfterRace }) === shapeOf(differing),
       'and the recovery is written after the auto-saves already in flight, so an edit still on the wire cannot land behind it and put back the document the operator just recovered from',
-      `stored ${storedAfterRace} against the restored ${differing.outputSize}`);
+      `stored ${shapeOf({ aspect: storedAfterRace })} against the restored ${shapeOf(differing)}`);
 
     // **A neighbour that will not list must not take the recovery with it.** Opening a
     // take refreshes three libraries and lets all three fail softly, and the offer used
