@@ -142,6 +142,11 @@ node tools/timeline-check.mjs --mutate draft-always-resets # ... and must FAIL m
 node tools/timeline-check.mjs --mutate reading-write-skips-repaint # ... and must FAIL mutated
 node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, retime curve, undo
 node tools/keyframe-check.mjs --mutate pose-linear        # ... and must FAIL mutated
+node tools/keyframe-check.mjs --mutate pose-ignores-ease  # ... the camera's handles, which shape when it arrives and never
+                                                          #     where it goes. Separable from `pose-linear` on purpose and the
+                                                          #     counts are how you tell: 4 rows here against that one's 6, and
+                                                          #     every route row stays green, because a camera ignoring its
+                                                          #     handles still travels the same curve at the wrong times
 node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, export, the file
 node tools/export-check.mjs --mutate pointsize-absolute   # ... and must FAIL mutated
 node tools/export-check.mjs --mutate cropoutside-reaches-the-export # ... the crop box's faint pass, one edit from being in a deliverable
@@ -215,6 +220,16 @@ node tools/library-check.mjs --mutate complete-look-drops-a-group  # ... and the
 node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g # the editor's controls: that they exist, that pressing them changes something
 node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
 node tools/editor-check.mjs --mutate plant-unswept-control --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate ease-gate-hardcodes-scalar --no-render # ... the ease gate naming one kind instead of asking
+                                                                       #     the table, which is what locked the camera out
+node tools/editor-check.mjs --mutate pose-segments-never-shaped --no-render # ... and a pose segment that never has a shape to
+                                                                       #     edit, which is the NaN the old subtraction returned
+node tools/editor-check.mjs --mutate pose-lane-draws-flat --no-render  # ... the lane's drawn curve, which every other pose row
+                                                                       #     reads past on its way to the evaluator
+node tools/editor-check.mjs --mutate pose-handle-overshoots --no-render # ... a pose handle leaving the unit box, which sends the
+                                                                       #     camera past the pose it was keyed at
+node tools/editor-check.mjs --mutate beads-evenly-spaced --no-render   # ... and the path's beads marking distance rather than
+                                                                       #     time, which is an overlay that redraws the route
 node tools/editor-check.mjs --mutate import-skips-normalise --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate import-saves-before-validating --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate picker-ignores-the-boxes --no-render # ... the subset a preset is written with

@@ -21,7 +21,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   EASE_OUT_LINEAR, EASE_IN_LINEAR, easeAt, easeParam, keyBefore,
-  HOLD_ENDS, EXTEND_ENDS, scalarAt, scalarSlopeAt, stepAt, hermite,
+  HOLD_ENDS, EXTEND_ENDS, scalarAt, scalarSlopeAt, stepAt, hermite, tangentAt,
 } from '../web/curve.js';
 
 /** A key as the tracks build one: a time, a value, and the two handles around it. */
@@ -110,4 +110,84 @@ test('scalarSlopeAt is positive while rising, negative while falling, flat when 
 test('hermite lands on its endpoints, so a segment meets the keys it spans', () => {
   assert.ok(near(hermite(0, 10, 0, 0, 1, 0), 0, 1e-9));
   assert.ok(near(hermite(0, 10, 0, 0, 1, 1), 10, 1e-9));
+});
+
+/** A pose key as the camera track builds one, position only - what `tangentAt` reads. */
+const pose = (t, x) => ({ t, value: { position: [x, 0, 0] } });
+
+test('tangentAt mirrors the missing neighbour a segment outside, not on top of the end key', () => {
+  // The end key duplicated at its own instant would make `span` one segment rather
+  // than two and double the tangent, so the curve would leave its first key at twice
+  // the speed - and the non-uniform form would then disagree with the textbook
+  // uniform one on evenly spaced keys, which is the single case they have to match.
+  const keys = [pose(0, 0), pose(1, 3), pose(2, 4)];
+  assert.ok(near(tangentAt(keys, 0, 0), 3 / 2, 1e-9), 'half the first segment\'s average velocity');
+  assert.ok(near(tangentAt(keys, 2, 0), 1 / 2, 1e-9), 'and half the last segment\'s');
+  // The interior one is the plain central difference over neighbour *time*.
+  assert.ok(near(tangentAt(keys, 1, 0), 4 / 2, 1e-9));
+});
+
+test('tangentAt divides by neighbour time, so uneven spacing is not read as an index', () => {
+  // The same three positions, with the middle key moved late. The textbook uniform
+  // formula reads the parameter as an index and would answer identically for both;
+  // dividing by real time is what stops the camera lurching out of a tight pair.
+  const tight = [pose(0, 0), pose(0.2, 3), pose(3.2, 4)];
+  const even = [pose(0, 0), pose(1.6, 3), pose(3.2, 4)];
+  assert.ok(near(tangentAt(tight, 1, 0), 4 / 3.2, 1e-9));
+  assert.ok(near(tangentAt(even, 1, 0), 4 / 3.2, 1e-9));
+  // Equal only at the interior key, where both spans are the whole width. The end
+  // tangents are where the spacing actually shows, and there they differ by 8x.
+  assert.ok(near(tangentAt(tight, 0, 0), 3 / 0.4, 1e-9));
+  assert.ok(near(tangentAt(even, 0, 0), 3 / 3.2, 1e-9));
+});
+
+test('a linear ease composed into a segment is the identity, which is why the default renders as it did', () => {
+  // The property `poseAt` leans on: it eases `u` before handing it to `hermite`, and
+  // a key created plain must therefore traverse its segment exactly as it used to.
+  // One ulp is the whole budget - anything looser and "unchanged" would be a claim
+  // about a tolerance rather than about the arithmetic.
+  let worst = 0;
+  for (let i = 0; i <= 1000; i++) {
+    const u = i / 1000;
+    worst = Math.max(worst, Math.abs(easeAt(EASE_OUT_LINEAR, EASE_IN_LINEAR, u) - u));
+  }
+  assert.ok(worst <= 4e-16, `worst departure from the identity was ${worst}`);
+  // And exactly, not nearly, at the ends - a segment starts on its key and finishes
+  // on the next one however the handles in between are placed.
+  assert.equal(easeAt(EASE_OUT_LINEAR, EASE_IN_LINEAR, 0), 0);
+  assert.equal(easeAt(EASE_OUT_LINEAR, EASE_IN_LINEAR, 1), 1);
+});
+
+test('an eased u traverses the same points, so shaping the timing cannot move the path', () => {
+  // The claim the whole camera-ease change rests on. Easing remaps *when* a segment
+  // is at a given fraction, so every position it visits is one the unmapped curve
+  // visits too - at a different moment. Sampling the eased curve densely and looking
+  // each point up on the unmapped one is the direct way to say that.
+  const keys = [pose(0, 0), pose(1, 3), pose(2, 4)];
+  const raw = (u) => hermite(0, 3, tangentAt(keys, 0, 0), tangentAt(keys, 1, 0), 1, u);
+  const eased = (u) => raw(easeAt([0.42, 0], [0.58, 1], u));
+  for (let i = 0; i <= 100; i++) {
+    const u = i / 100;
+    // Every eased sample is `raw` at some parameter in the unit range, and the ease
+    // is monotonic, so it suffices that the value stays inside the raw curve's own
+    // span and that the ends are pinned.
+    const v = eased(u);
+    assert.ok(v >= Math.min(raw(0), raw(1)) - 1e-9 && v <= Math.max(raw(0), raw(1)) + 1e-9,
+      `eased sample ${v} left the raw curve's span at u=${u}`);
+  }
+  assert.ok(near(eased(0), raw(0), 1e-9));
+  assert.ok(near(eased(1), raw(1), 1e-9));
+  // And it is genuinely a different traversal rather than a no-op. Without this the
+  // whole test would pass against an ease that did nothing at all, which is the shape
+  // of a control that looks like it works.
+  //
+  // **Not at the midpoint, and that is the finding rather than a detail.** The first
+  // version of this line sampled u=0.5 and failed against a correct build, because
+  // `smooth` is [0.42,0]/[0.58,1] - symmetric about the centre, so the one parameter
+  // it provably cannot move is the one that was convenient to ask about. A quarter of
+  // the way in is where an ease-out has actually done something.
+  assert.ok(!near(eased(0.25), raw(0.25), 1e-6),
+    `a smooth ease left the quarter point where linear put it: ${eased(0.25)}`);
+  assert.ok(near(eased(0.5), raw(0.5), 1e-9),
+    'and the midpoint of a symmetric ease is where it started, which is why it is not the probe');
 });

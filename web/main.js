@@ -27,7 +27,7 @@ import {
 // file reads them and nothing outside `writeClipRange` may write them, and an import is
 // read-only where a comment is a promise.
 import {
-  EASE_OUT_LINEAR, EASE_IN_LINEAR, keyBefore,
+  EASE_OUT_LINEAR, EASE_IN_LINEAR, easeAt, keyBefore,
   HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
@@ -2513,7 +2513,9 @@ function setClipInOut(values) {
 //   pose    position, orientation and field of view moving together. Position
 //           runs a Catmull-Rom through the keys, because a camera cornering on
 //           straight lines reads as a mistake rather than as a move; orientation
-//           slerps, and fov lerps.
+//           slerps, and fov lerps. All three read the same eased fraction the
+//           scalars do, so the handles shape *when* the camera gets where it is
+//           going and never the route it takes - see `poseAt`.
 
 // The scalar curve maths moved to `curve.js`; the pose track below still needs
 // three.js and stays here.
@@ -2530,7 +2532,27 @@ function poseAt(keys, t) {
   const b = keys[i + 1];
   const span = b.t - a.t;
   if (span <= 0) return b.value;
-  const u = (t - a.t) / span;
+  // The ease handles, and they are what make this a *timing* control rather than a
+  // second path editor. `easeAt` remaps how far through the segment we are and
+  // nothing else, so the Catmull-Rom through the keys is the same curve and only the
+  // rate along it changes. That is the whole reason composition can have this without
+  // getting the graph the design deliberately keeps it off: you still cannot judge a
+  // camera move from a lane, and the lane is no longer being asked to show you one.
+  //
+  // All three channels read the remapped value because `u` is computed once. Easing
+  // position alone would slide the camera along a path it is no longer aimed down,
+  // and it is also the only thing short of squad interpolation that softens the
+  // quaternion's corner at a key - `smooth` handles bring du/dt to zero there, so the
+  // slerp's rate arrives and leaves at nothing instead of stepping.
+  //
+  // Measured, because the default has to be the old behaviour rather than nearly it:
+  // with the linear handles every key is created with, this is the identity to within
+  // one ulp - worst |easeAt(u) - u| over 100,001 samples is 1.665e-16, exact at both
+  // ends, 58,363 of them bit-identical - so a project saved before this existed
+  // renders as it did. There is deliberately no short-circuit for that case. A second
+  // path past this line is a second thing to keep in step, which is the trade this
+  // design keeps refusing, and 1.665e-16 does not buy one.
+  const u = easeAt(a.easeOut, b.easeIn, (t - a.t) / span);
 
   const position = [0, 1, 2].map((axis) => hermite(
     a.value.position[axis], b.value.position[axis],
@@ -7682,7 +7704,122 @@ function pumpParkedDraft() {
 // shape of this and it spends the strip on rows that say nothing; five that are
 // all animated is the same information in half the height.
 
-const LANE_H = { scalar: 34, step: 22, pose: 22 };
+/**
+ * What a track kind is on the timeline, declared once instead of asked for as
+ * `row.kind !== 'scalar'` at each site that needs to know.
+ *
+ * The camera gaining ease handles is the change that shows why the comparison was
+ * the wrong shape. It appeared at five places - the curve, the handles, a key's
+ * height, the lane's range and the preset row's gate - so opening the pose track
+ * would have been five edits each of which had to be *found*, and a fourth kind
+ * added next year would need all five found again. Reading a table means a kind is
+ * asked about by existing, which is the difference between closing the class and
+ * closing the instance this repo keeps having to relearn.
+ *
+ *   eases      whether the handles mean anything here. `step` is the one that does
+ *              not: a checkbox has nothing between true and false, so there is no
+ *              timing to shape and no shape to draw.
+ *   laneH      the strip's height. An eased kind gets the taller one because the
+ *              handles are dragged in it, so pose grew when it gained them.
+ *   range      the lane's own y-axis. A scalar's is the parameter's registry range,
+ *              in the units the panel types in. A pose has no such number - see
+ *              `ends` for what its axis is instead.
+ *   ends       where a segment's two ends sit on that axis. A scalar's are the key
+ *              values. A pose's are 0 and 1, because its lane draws the fraction of
+ *              *that segment* completed and nothing else: the ease curve in its own
+ *              coordinates, carrying no spatial quantity anybody could misread as a
+ *              camera move. Arc length was the tempting alternative and it lies -
+ *              a camera pivoting in place travels nothing, so the lane would report
+ *              an empty segment for a move you can plainly see.
+ *   at         the value the lane's curve is drawn from, at a program time.
+ *   keyValue   where a key's own diamond sits on the axis, so it lands on the drawn
+ *              curve the way a scalar's does.
+ *   axisIsValue whether that axis *is* the key's own value, which is what decides
+ *              whether dragging a key up and down writes one. Only a scalar's is:
+ *              a pose is placed in the world and a step has nothing between its two
+ *              states, so for both the drag moves the key in time alone.
+ *   overshoots whether a handle may be dragged outside the lane. A scalar's may: a
+ *              value that swings past its key and comes back is an ordinary creative
+ *              choice. A pose's may not, and the reason is the same one the retime
+ *              gives rather than a preference - its axis is a *fraction of a segment*,
+ *              so a handle above the box asks for a fraction past 1, which sends
+ *              `hermite` off the end of the segment's own cubic. That is no longer the
+ *              Catmull-Rom through the keys, and the camera would fly past the very
+ *              pose it was keyed at. Overshoot has no meaning on an axis that is
+ *              already normalised.
+ *   moved      whether two keys differ by enough for a handle to change anything.
+ *              Same arithmetic claim in all three cases - a segment whose ends are
+ *              equal renders identically for every handle position, so offering one
+ *              is offering a control that writes a number nothing reads.
+ */
+const KINDS = {
+  scalar: {
+    eases: true,
+    laneH: 34,
+    range: (spec) => ({ min: spec.min, max: spec.max }),
+    ends: (keys, seg) => ({ lo: keys[seg].value, hi: keys[seg + 1].value }),
+    at: (owner, t) => tracks.get(owner).valueAt(t),
+    keyValue: (keys, i) => keys[i].value,
+    axisIsValue: true,
+    overshoots: true,
+    moved: (a, b) => Math.abs(b.value - a.value) > 1e-9,
+  },
+  step: {
+    eases: false,
+    laneH: 22,
+    range: () => ({ min: 0, max: 1 }),
+    ends: () => ({ lo: 0, hi: 1 }),
+    at: () => 0.5,
+    keyValue: () => 0.5,
+    axisIsValue: false,
+    overshoots: false,
+    moved: () => false,
+  },
+  pose: {
+    eases: true,
+    laneH: 34,
+    range: () => ({ min: 0, max: 1 }),
+    ends: () => ({ lo: 0, hi: 1 }),
+    at: (owner, t) => poseLaneFraction(keysOf(owner), t),
+    // The foot of its own outgoing ramp, and the top of the incoming one for the
+    // last key, so the diamonds sit *on* the curve exactly as a scalar's do. A lone
+    // key has no ramp to sit on and stays mid-lane, which is where it already was.
+    keyValue: (keys, i) => (keys.length < 2 ? 0.5 : (i === keys.length - 1 ? 1 : 0)),
+    axisIsValue: false,
+    overshoots: false,
+    moved: (a, b) => poseMoved(a.value, b.value),
+  },
+};
+
+/** Whether two poses differ at all - in place, in aim, or in field of view. */
+const poseMoved = (a, b) => Math.abs(a.fov - b.fov) > 1e-9
+  || a.position.some((v, i) => Math.abs(v - b.position[i]) > 1e-9)
+  || a.quaternion.some((v, i) => Math.abs(v - b.quaternion[i]) > 1e-9);
+
+/**
+ * How far through its current segment a pose track is, eased - which is the whole
+ * of what a pose lane draws.
+ *
+ * The branches mirror `poseAt`'s deliberately: the lane has to be a picture of the
+ * thing being evaluated, and a second reading of "which segment is t in" is a second
+ * thing to keep in step. What it is *not* is a picture of the path, and the sawtooth
+ * it produces is the point rather than an artefact - every linear segment draws the
+ * same diagonal, so the one segment somebody has eased is the one that looks
+ * different. The cost worth naming: continuity across a key reads as two parallel
+ * slopes at opposite edges of the lane rather than as a smooth join, because each
+ * segment is drawn in its own coordinates.
+ */
+const poseLaneFraction = (keys, t) => {
+  const n = keys.length;
+  if (n < 2) return 0.5;
+  const i = keyBefore(keys, t);
+  if (i < 0) return 0;
+  if (i >= n - 1) return 1;
+  const span = keys[i + 1].t - keys[i].t;
+  if (span <= 0) return 1;
+  return easeAt(keys[i].easeOut, keys[i + 1].easeIn, (t - keys[i].t) / span);
+};
+
 const RETIME_LANE_H = 40;
 // How far a curve is sampled across a lane. The viewBox is resolution-independent,
 // so this is a smoothness choice and not a pixel count.
@@ -7707,7 +7844,7 @@ function laneRange(owner) {
     return { min: 0, max: total };
   }
   const spec = params.spec(owner);
-  return { min: spec.min, max: spec.max };
+  return KINDS[spec.kind].range(spec);
 }
 
 function laneRows() {
@@ -7720,7 +7857,7 @@ function laneRows() {
   for (const name of ['camera', ...params.names('look')]) {
     const track = tracks.get(name);
     if (!track || track.keys.length === 0) continue;
-    rows.push({ owner: name, label: name, kind: track.kind, height: LANE_H[track.kind] });
+    rows.push({ owner: name, label: name, kind: track.kind, height: KINDS[track.kind].laneH });
   }
   return rows;
 }
@@ -7829,7 +7966,7 @@ function repositionLanes() {
       if (i < 0 || seg < 0 || seg >= keys.length - 1) return false;
       // A segment that went flat under the drag has no shape left to edit, so its
       // handle has to go rather than be moved - which is a rebuild, not a move.
-      if (!segmentHasShape(keys, seg)) return false;
+      if (!segmentHasShape(keys, seg, row.kind)) return false;
       const point = handlePoint(row, keys, seg, handle.__side);
       handle.__seg = seg;
       handle.style.left = `${view.pct(point.t)}%`;
@@ -7843,10 +7980,16 @@ function repositionLanes() {
 }
 
 /**
- * The curve a scalar lane draws, as a `points` attribute in the 0..1000 by 0..100
+ * The curve a lane draws, as a `points` attribute in the 0..1000 by 0..100
  * viewBox. One function because two callers want the same line: `drawLane` builds
  * the polyline and `repositionLanes` rewrites it during a drag, and a second copy of
  * this arithmetic would be a second thing to keep in step.
+ *
+ * What the curve is *of* comes off `KINDS[kind].at`, and the two answers are
+ * different in kind rather than in units: a scalar lane draws the value being
+ * rendered, and a pose lane draws how far through its segment the camera is. Neither
+ * is a picture of a camera path, which is the property that lets the composition
+ * track have a lane at all.
  *
  * **Known gap, carried deliberately.** The curve is drawn from the raw eased value
  * while the parameter itself is clamped to its range on the way in, so an
@@ -7860,7 +8003,7 @@ function lanePoints(owner) {
   const span = Math.max(1e-9, max - min);
   const at = owner === 'retime'
     ? (t) => retime.sourceSecAt(t)
-    : (t) => tracks.get(owner).valueAt(t);
+    : (t) => KINDS[tracks.get(owner).kind].at(owner, t);
   const points = [];
   // Sampled across the *visible* window rather than the clip, which does two things at
   // once: nothing is drawn outside the lane, so there is no horizontal overflow to clip
@@ -7885,14 +8028,20 @@ function lanePoints(owner) {
  * The old code half-knew this - it guarded the y write against a division by zero
  * and left the handle on screen, so the control moved, wrote a number nothing reads,
  * and looked broken. Not drawing it is the honest answer to the same fact.
+ *
+ * The kind is asked for rather than assumed because the same sentence is true of a
+ * pose and the arithmetic is not: a pose value is an object, so the subtraction this
+ * used to do answered `NaN` for every camera segment, and `NaN > 1e-9` is false -
+ * which read as "the camera never has a shape to edit" and would have been a silent
+ * floor under the whole feature. `KINDS[kind].moved` carries the per-kind test.
  */
-const segmentHasShape = (keys, seg) => Math.abs(keys[seg + 1].value - keys[seg].value) > 1e-9;
+const segmentHasShape = (keys, seg, kind) => KINDS[kind].moved(keys[seg], keys[seg + 1]);
 
 function drawLane(lane, row) {
   const keys = keysOf(row.owner);
   const x = (t) => view.pct(t);
 
-  if (row.kind === 'scalar') {
+  if (KINDS[row.kind].eases) {
     // The curve itself, because a row of diamonds says where the keys are and
     // nothing at all about the shape between them - and the shape is exactly what
     // an ease handle edits. Drawn in a 0..1000 by 0..100 viewBox stretched to the
@@ -7918,7 +8067,7 @@ function drawLane(lane, row) {
     node.__row = row;
   }
 
-  if (row.kind !== 'scalar' || !selection || keys.indexOf(selection.key) < 0) return;
+  if (!KINDS[row.kind].eases || !selection || keys.indexOf(selection.key) < 0) return;
   // Handles only on the selected key, and only where there is a segment for them
   // to shape. Two of them at once on every key is a lane nobody can read.
   const i = keys.indexOf(selection.key);
@@ -7926,7 +8075,7 @@ function drawLane(lane, row) {
     const seg = side === 'easeOut' ? i : i - 1;
     if (seg < 0 || seg >= keys.length - 1) continue;
     // A flat segment gets none, for the reason `segmentHasShape` gives.
-    if (!segmentHasShape(keys, seg)) continue;
+    if (!segmentHasShape(keys, seg, row.kind)) continue;
     const handle = document.createElement('div');
     handle.className = 'thandle';
     const point = handlePoint(row, keys, seg, side);
@@ -7944,9 +8093,9 @@ function drawLane(lane, row) {
 
 /** A key's vertical place in its lane, as a percentage from the top. */
 function keyY(row, key) {
-  if (row.kind !== 'scalar') return 50;
+  const keys = keysOf(row.owner);
   const { min, max } = laneRange(row.owner);
-  const v = typeof key.value === 'number' ? key.value : min;
+  const v = KINDS[row.kind].keyValue(keys, keys.indexOf(key));
   return Math.max(0, Math.min(100, 100 - ((v - min) / Math.max(1e-9, max - min)) * 100));
 }
 
@@ -7956,7 +8105,8 @@ function handlePoint(row, keys, seg, side) {
   const b = keys[seg + 1];
   const h = side === 'easeOut' ? a.easeOut : b.easeIn;
   const { min, max } = laneRange(row.owner);
-  const value = a.value + (b.value - a.value) * h[1];
+  const { lo, hi } = KINDS[row.kind].ends(keys, seg);
+  const value = lo + (hi - lo) * h[1];
   return {
     t: a.t + (b.t - a.t) * h[0],
     y: Math.max(-15, Math.min(115, 100 - ((value - min) / Math.max(1e-9, max - min)) * 100)),
@@ -9378,10 +9528,10 @@ ui.beds.addEventListener('pointermove', (e) => {
 
   if (laneDrag.role === 'key') {
     key.t = Math.max(0, laneProgramAt(e.clientX));
-    if (row.kind === 'scalar') key.value = value;
+    if (KINDS[row.kind].axisIsValue) key.value = value;
     if (row.owner === 'retime') clampRetimeKey(keys, key);
     else {
-      if (row.kind === 'scalar') {
+      if (KINDS[row.kind].axisIsValue) {
         // Through the registry's own snapping without writing the parameter, so a
         // key dragged in a lane and one written from the slider hold the same
         // value. Writing it would also be wrong: the key being dragged is usually
@@ -9402,7 +9552,12 @@ ui.beds.addEventListener('pointermove', (e) => {
     const a = keys[laneDrag.seg];
     const b = keys[laneDrag.seg + 1];
     const dt = Math.max(1e-9, b.t - a.t);
-    const dv = b.value - a.value;
+    // Off the kind rather than off the key values, because a pose value is an object
+    // and subtracting two of them is `NaN`. A pose lane's ends are 0 and 1 - it draws
+    // the fraction of the segment completed - so `h[1]` stays what it has always been:
+    // a fraction of whatever the lane's own axis spans between these two keys.
+    const { lo, hi } = KINDS[row.kind].ends(keys, laneDrag.seg);
+    const dv = hi - lo;
     const h = laneDrag.side === 'easeOut' ? a.easeOut : b.easeIn;
     // x stays inside the segment because the ease is a function of time within it:
     // a handle past either end makes the timing curve fold back on itself and the
@@ -9414,11 +9569,22 @@ ui.beds.addEventListener('pointermove', (e) => {
     // than the reason y appears not to move. That was the old reading of the same
     // line and it was wrong: on a flat segment y genuinely cannot do anything, and
     // the fix was to stop drawing the handle rather than to force the write.
-    if (segmentHasShape(keys, laneDrag.seg)) h[1] = (value - a.value) / dv;
+    if (segmentHasShape(keys, laneDrag.seg, row.kind)) h[1] = (value - lo) / dv;
     // A look handle may overshoot - a value that swings past its key and comes
     // back is an ordinary creative choice. The retime's may not: y outside the unit
     // range makes the eased source time leave the segment's own bounds and run
     // downhill inside it, which is a reverse authored through the back door.
+    //
+    // **And a pose's may not, for a third reason that reads the same and is not.** Its
+    // lane axis is already a fraction of the segment, so a handle above the box asks
+    // `hermite` for a fraction past 1 and it obliges, continuing the segment's own cubic
+    // past the key rather than following the spline - the camera overshoots the pose it
+    // was keyed at and comes back. That contradicts the one thing easing a camera is
+    // promised not to do, and the promise is in `poseAt`'s comment and in
+    // `docs/reference.md` in as many words. The clamp is where the promise is kept.
+    // It is off `KINDS` rather than named here because `row.owner === 'retime'` beside a
+    // second hardcoded kind is the shape this whole change went to the trouble of
+    // removing.
     //
     // But the overshoot is bounded, and the bound is what makes the control usable
     // rather than a nicety. `h[1]` is a fraction of the *segment's* value span, so a
@@ -9428,7 +9594,7 @@ ui.beds.addEventListener('pointermove', (e) => {
     // range put y at **-5.73**, a curve leaving its lane six times over for a
     // gesture that looked like a nudge. One segment-span of overshoot each way keeps
     // "past the key and back" and drops the part nobody can aim.
-    if (row.owner === 'retime') h[1] = Math.min(1, Math.max(0, h[1]));
+    if (row.owner === 'retime' || !KINDS[row.kind].overshoots) h[1] = Math.min(1, Math.max(0, h[1]));
     else h[1] = Math.min(2, Math.max(-1, h[1]));
   }
   lanesMoved();
@@ -9522,9 +9688,19 @@ function deleteSelectedKey() {
  * The shapes a handle drag is usually reaching for, as one press each.
  *
  * A key's `easeOut` is the first control point of the segment leaving it and its
- * `easeIn` is the second control point of the segment arriving - see `scalarAt`. So
- * "ease in" is about the incoming side and writes `easeIn`, "ease out" is about the
- * outgoing side and writes `easeOut`, and they are not two halves of one number.
+ * `easeIn` is the second control point of the segment arriving - see `scalarAt`, and
+ * `poseAt` for the camera, which reads the identical pair. So "ease in" is about the
+ * incoming side and writes `easeIn`, "ease out" is about the outgoing side and writes
+ * `easeOut`, and they are not two halves of one number.
+ *
+ * These five are what the camera track is usually eased with, and the pair that
+ * matters there is `smooth` on the first key and on the last: the spline holds the end
+ * pose beyond the outer keys while its tangent there is half the first segment's
+ * average velocity, so an unshaped move departs and arrives with a step in speed.
+ * Measured on three keys dollying 4m over 4s - 0 to 0.6262 m/s in one frame at the
+ * start, 0.3125 to 0 at the end, against 0.0007 and 0.0005 once eased. Pressing it on
+ * an *interior* key is a different edit and rarely the wanted one, because a key eased
+ * on both sides brings the camera to a near halt as it passes.
  *
  * `hold` is the one that reaches past the selected key, and it has to: holding a
  * value across a segment means flattening *both* of that segment's control points,
@@ -9553,9 +9729,9 @@ function selectionEaseState() {
   const i = keys.indexOf(selection.key);
   if (i < 0) return null;
   const row = laneRows().find((r) => r.owner === selection.owner);
-  if (!row || row.kind !== 'scalar') return null;
-  const before = i > 0 && segmentHasShape(keys, i - 1);
-  const after = i < keys.length - 1 && segmentHasShape(keys, i);
+  if (!row || !KINDS[row.kind].eases) return null;
+  const before = i > 0 && segmentHasShape(keys, i - 1, row.kind);
+  const after = i < keys.length - 1 && segmentHasShape(keys, i, row.kind);
   return before || after ? { keys, i } : null;
 }
 
@@ -9998,6 +10174,61 @@ function drawNodes(project) {
     chromeCtx.lineWidth = 1.4;
     chromeCtx.stroke();
   });
+}
+
+// One bead every fourth sample rather than all 120 of them. The count is a legibility
+// choice and not a resolution: 120 dots on a short on-screen path close back up into
+// the line they exist to break, and every fourth is still exactly proportional to the
+// speed because the samples it thins were evenly spaced in time to begin with.
+const BEAD_EVERY = 4;
+
+/**
+ * The camera's timing, drawn on its own path.
+ *
+ * `pathPoints` already samples `poseAt` at equal intervals of program time, so the
+ * gaps between consecutive samples *are* how fast the camera is going - and
+ * `strokePolyline` throws exactly that away by joining them into one continuous line.
+ * Drawing the samples puts it back: beads bunch where the camera is slow and spread
+ * where it is fast, so an ease is visible as spacing without anything being measured
+ * or labelled. Nothing is sampled here that was not already computed.
+ *
+ * This is the half of the ease that lives in the world, and it is deliberately not a
+ * second place to edit one. The timing law is shaped in the lane, where a cubic is a
+ * picture of itself and carries no spatial quantity to misread; what that law *did* is
+ * judged out here, which is where this design has always said a camera move gets
+ * judged. Neither surface can answer the other's question, which is why there are two.
+ */
+/**
+ * Which of the path's samples get a bead, in world space.
+ *
+ * Separate from the drawing because it is the half that carries the claim, and a proof
+ * tool cannot ask a canvas what it drew. `editor.pathBeads` hands this straight out, so
+ * the check reads the same function the overlay does rather than a second opinion about
+ * it - which is what stops the tool agreeing with a build that draws something else.
+ *
+ * The thinning is by index into a series that is already uniform in program time, so
+ * what comes back is still uniform in time. Resampling it evenly along the path would
+ * be the plausible wrong version and is the mutation this is controlled by: beads at
+ * equal *distances* are a picture of the route, which the line already gives, and say
+ * nothing at all about when the camera is anywhere.
+ */
+function beadPoints(points) {
+  const out = [];
+  for (let i = 0; i < points.length; i += BEAD_EVERY) out.push(points[i]);
+  return out;
+}
+
+function drawBeads(points, project) {
+  chromeCtx.fillStyle = 'rgba(90, 209, 196, 0.55)';
+  for (const point of beadPoints(points)) {
+    const p = project(point);
+    // Behind the eye, so it has no place on screen at all - the same answer
+    // `drawNodes` gives, and for the same reason.
+    if (!p) continue;
+    chromeCtx.beginPath();
+    chromeCtx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
+    chromeCtx.fill();
+  }
 }
 
 /** The point cloud from above, straight off the depth texture's own array. */
@@ -10474,11 +10705,13 @@ function drawChrome() {
     chromeCtx.lineWidth = 1.4;
     chromeCtx.strokeStyle = 'rgba(90, 209, 196, 0.85)';
     strokePolyline(path.map((p) => projectThrough(p, viewCamera, stage)));
+    drawBeads(path, (p) => projectThrough(p, viewCamera, stage));
     chromeCtx.strokeStyle = 'rgba(255, 157, 90, 0.9)';
     chromeCtx.lineWidth = 1;
     for (const [a, b] of frustumSegments()) {
       strokePolyline([projectThrough(a, viewCamera, stage), projectThrough(b, viewCamera, stage)]);
     }
+    // After the beads, so a key's own node reads over the timing rather than under it.
     drawNodes((p) => projectThrough(p, viewCamera, stage));
   }
 
@@ -10527,6 +10760,7 @@ function drawChrome() {
   chromeCtx.strokeStyle = 'rgba(90, 209, 196, 0.9)';
   chromeCtx.lineWidth = 1.4;
   strokePolyline(path.map((p) => planPoint(rect, p[0], p[2])));
+  drawBeads(path, (p) => planPoint(rect, p[0], p[2]));
   chromeCtx.strokeStyle = 'rgba(255, 157, 90, 0.9)';
   chromeCtx.lineWidth = 1;
   for (const [a, b] of frustumSegments()) {
@@ -12951,6 +13185,13 @@ globalThis.__kinect = {
       return k ? { easeOut: [...k.easeOut], easeIn: [...k.easeIn] } : null;
     },
     easePresets: () => Object.keys(EASE_PRESETS),
+    // Read off `KINDS` rather than written down again, so a proof tool asks which
+    // kinds claim to be easable instead of asserting against the two that happen to
+    // exist today. A kind added later arrives in the sweep by existing.
+    easedKinds: () => Object.keys(KINDS).filter((k) => KINDS[k].eases),
+    // The beads the path overlay draws, in world space. A canvas cannot be asked what
+    // it drew, so the check reads the function the drawing reads - see `beadPoints`.
+    pathBeads: () => beadPoints(pathPoints()),
     shortcuts: () => SHORTCUTS,
     exportName: () => ({ base: exportBaseName(), valid: EXPORT_NAME_OK.source, canSaveAs: CAN_SAVE_AS }),
     lastExport: () => (lastExport ? { ...lastExport } : null),

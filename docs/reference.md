@@ -51,6 +51,32 @@ zoom about the pointer, `+`/`-` about the playhead, `,`/`.` to pan, `F` to fit t
 to frame the trim. The overview underneath is always the whole clip: drag its box to pan, an
 edge to zoom, click to go there.
 
+**Easing a move.** Select a key and the `key options` row shapes the segments either side of
+it: `lin`, `in`, `out`, `smooth` and `hold`, or drag the handles in the lane for anything in
+between. `in` writes the incoming side and `out` the outgoing one, so they are two different
+numbers rather than two halves of one, and `hold` reaches into the next key because holding a
+value across a segment means flattening both ends of it.
+
+This works on the camera track as well as on the look scalars, and what it shapes there is
+*when* the camera arrives rather than where it goes. The route stays the Catmull-Rom through
+your keys whatever the handles say — easing remaps the traversal and moves no key — which is
+why the composition track can have a lane at all without contradicting the rule that a camera
+move cannot be judged from a graph. The camera lane draws that remap directly: one ramp per
+segment, rising from the key it leaves to the key it reaches, so a linear segment is a plain
+diagonal and an eased one visibly is not. Judge the result in the world instead — the beads
+on the path are sampled at equal intervals of program time, so they bunch where the camera is
+slow and spread where it is fast.
+
+**A camera move starts and stops at speed until you ease it**, and this is worth knowing
+because nothing on screen announces it. The spline holds the end pose beyond the outer keys
+while its tangent there is half the first segment's average velocity, so the camera departs
+the first key and arrives at the last with a step in speed rather than a ramp — measured on
+three keys dollying 4m over 4s, 0 to 0.63 m/s across a single 30fps output frame at the
+start, and 0.31 to 0 at the end. Pressing `smooth` on the first key and on the last is the whole fix: the same move then
+departs at 0.0007 m/s and arrives at 0.0005. Leave the keys in between alone unless you want
+the camera to stop at each one, because `smooth` on an interior key brings it to a near halt
+there.
+
 **Glitch** tears bands of the feed sideways, and it is seven controls rather than
 one because the interesting looks live off the diagonal. `amount` is the master and the one
 worth keyframing — it scales density and shove together, so corruption fades in and out on a

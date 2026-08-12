@@ -45,7 +45,17 @@
 //
 //   node server/index.js --port 8080 --replay captures/fixture-1g.knct &
 //   node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g
-//   node tools/keyframe-check.mjs --mutate pose-linear     # must FAIL
+//   node tools/keyframe-check.mjs --mutate pose-linear       # must FAIL
+//   node tools/keyframe-check.mjs --mutate pose-ignores-ease # must FAIL
+//
+// **The last two are separable on purpose and the counts are how you tell.**
+// `pose-linear` fires 6 - the spline rows, the uniform-formula anchor, and section
+// 1c's route row, because a straight line between the keys really is a different
+// route. `pose-ignores-ease` fires 4 - the three channels of section 1c plus its
+// handles-do-something control - and leaves every route row green, because a camera
+// that ignores its handles still travels the same curve, just at the wrong times.
+// Two claims, two sets of rows: one says the route is a spline, the other says the
+// traversal of it is shaped.
 //
 // **The take has to be at least `NEEDS_TAKE_SEC` long and the run refuses one that is
 // not**; the reasoning is beside that declaration. The cadence is read off the take
@@ -135,6 +145,20 @@ const MUTATIONS = {
   ));`,
     `  const position = [0, 1, 2].map((axis) => a.value.position[axis]
     + (b.value.position[axis] - a.value.position[axis]) * u);`,
+  ]] },
+  // The camera goes back to ignoring its handles, which is what it did before the
+  // pose track was eased at all: the raw fraction of the way through the segment
+  // reaches the spline, the slerp and the fov lerp, so the five preset buttons write
+  // numbers nothing reads and a move departs and arrives at speed.
+  //
+  // Aimed at the remap alone rather than at anything around it. The `hermite` block
+  // below it is what `pose-linear` anchors and the two must stay separable, because a
+  // mutation that reddened both rows could not say which term broke - and these are
+  // genuinely different claims: one is that the route is a spline, the other is that
+  // the traversal of it is shaped.
+  'pose-ignores-ease': { file: 'web/main.js', edits: [[
+    '  const u = easeAt(a.easeOut, b.easeIn, (t - a.t) / span);',
+    '  const u = (t - a.t) / span;',
   ]] },
   // The carried finding, put back: the pre-roll reads the slope at the target and
   // multiplies, instead of asking how far back the curve covers the span. A hold
@@ -438,6 +462,18 @@ function paramAt(ax, bx, x) {
 const easeOf = (key) => key.easeOut ?? LIN_OUT;
 const easeIn = (key) => key.easeIn ?? LIN_IN;
 
+/**
+ * How far through a segment the handles say we are, by this file's own bisection
+ * rather than the page's Newton - which is the point of it existing twice.
+ *
+ * Both the scalar curve and the pose track want this, and a pose wants it for the
+ * same reason a scalar does: the handles remap time and leave the values alone. It
+ * is written here rather than imported from `web/curve.js` because an oracle that
+ * calls the thing under test agrees with it by construction and proves nothing.
+ */
+const easedFraction = (a, b, x) => bez1(easeOf(a)[1], easeIn(b)[1],
+  paramAt(easeOf(a)[0], easeIn(b)[0], x));
+
 function before(keys, t) {
   let i = -1;
   for (let k = 0; k < keys.length; k++) if (keys[k].t <= t) i = k;
@@ -459,9 +495,7 @@ function scalarAt(keys, t, extend = false) {
   }
   const a = keys[i];
   const b = keys[i + 1];
-  const x = (t - a.t) / (b.t - a.t);
-  const u = paramAt(easeOf(a)[0], easeIn(b)[0], x);
-  return a.value + (b.value - a.value) * bez1(easeOf(a)[1], easeIn(b)[1], u);
+  return a.value + (b.value - a.value) * easedFraction(a, b, (t - a.t) / (b.t - a.t));
 }
 
 /** The segment's slope at one of its ends, by a one-sided difference. */
@@ -529,7 +563,17 @@ function quatAngle(qa, qb) {
   return (2 * Math.acos(Math.min(1, dot)) * 180) / Math.PI;
 }
 
-/** Non-uniform Catmull-Rom in Hermite form, tangents divided by neighbour time. */
+/**
+ * Non-uniform Catmull-Rom in Hermite form, tangents divided by neighbour time, and
+ * the whole traversal put through the handles first.
+ *
+ * The ease enters exactly once, and that is the claim rather than a convenience: all
+ * three channels read the same remapped fraction, so shaping the timing cannot move
+ * the curve through space. A build that eased position alone would still round its
+ * corners and would still be wrong - the camera would slide along a path it was no
+ * longer aimed down - and this oracle would catch it, because the quaternion it
+ * predicts is the one taken at the eased fraction.
+ */
 function poseValueAt(keys, t) {
   if (keys.length === 1) return keys[0].value;
   const i = before(keys, t);
@@ -538,7 +582,7 @@ function poseValueAt(keys, t) {
   const a = keys[i];
   const b = keys[i + 1];
   const span = b.t - a.t;
-  const u = (t - a.t) / span;
+  const u = easedFraction(a, b, (t - a.t) / span);
   // The end keys are mirrored one segment outside the path, which is what the
   // textbook clamp means once the parameter is time rather than an index.
   const at = (k) => {
@@ -1155,6 +1199,171 @@ console.log('\n== 1b. evenly spaced keys agree with the textbook uniform formula
   console.log(`  4 keys 2s apart, 31 positions: worst disagreement ${err.toExponential(1)} m`);
   check(err < 1e-12, 'the non-uniform form is the uniform one when the spacing is uniform',
     `worst ${err.toExponential(2)} m`);
+}
+
+// ---------------- 1c. the camera's handles shape when it arrives, not where it goes
+
+// The camera track used to ignore its handles entirely: `poseAt` computed the raw
+// fraction of the way through a segment and handed it straight to the spline, the
+// slerp and the fov lerp, so the five preset buttons were disabled for a pose key and
+// a hand-edited document could not have eased one either. What it cost was a move
+// that departs and arrives at speed - measured on three keys dollying 4m over 4s, the
+// camera stepped from 0 to 0.6262 m/s in one frame at the first key and from 0.3125
+// to 0 at the last, because `tangentAt` mirrors the end key one segment outside the
+// path while the evaluator holds the end value beyond it.
+//
+// **The claim that needs enforcing is not "the numbers changed".** It is that the
+// handles moved the timing and left the route alone, which is the whole reason the
+// composition track can have a lane at all without contradicting the design's rule
+// that a camera move cannot be judged from a graph. So the rows below come in pairs:
+// each measurement of agreement is followed by the reading a build that got it wrong
+// would produce, and the last pair is the important one - every pose the eased run
+// visits has to lie on the curve the linear run draws, and a control that fails that
+// same test proves the measure can tell.
+console.log('\n== 1c. the camera\'s handles shape when it arrives, not where it goes ==');
+{
+  // `smooth` on the first and the last key and nothing in between - the two presses
+  // `docs/reference.md` describes, rather than a shape invented for the check. The
+  // interior keys stay linear on purpose: easing every key would stop the camera dead
+  // at each one, which is a different edit and not the one anybody wants.
+  const SMOOTH_OUT = [0.42, 0];
+  const SMOOTH_IN = [0.58, 1];
+  const RAMPED = PATH.map((k, i) => ({
+    ...k,
+    easeOut: i === 0 ? [...SMOOTH_OUT] : [...LIN_OUT],
+    easeIn: i === PATH.length - 1 ? [...SMOOTH_IN] : [...LIN_IN],
+  }));
+
+  await setTracks({ camera: RAMPED });
+  const at = [];
+  for (let i = 0; i <= 96; i++) at.push((i / 96) * 12);
+  const read = await page.evaluate(
+    `${src(at)}.map((t) => globalThis.__kinect.keyframes.valueAt('camera', t))`,
+  );
+
+  const wantEased = at.map((t) => poseValueAt(RAMPED, t));
+  const posErr = worst(read.map((v, i) => worst(
+    v.position.map((x, axis) => Math.abs(x - wantEased[i].position[axis])),
+  )));
+  const fovErr = worst(read.map((v, i) => Math.abs(v.fov - wantEased[i].fov)));
+  const angErr = worst(read.map((v, i) => quatAngle(v.quaternion, wantEased[i].quaternion)));
+
+  // The control for all three at once: the same keys with the handles taken off. That
+  // is exactly what the page did before this feature, so a build that still ignores
+  // its handles reads as this and every row above it collapses.
+  const wantRaw = at.map((t) => poseValueAt(PATH, t));
+  const rawPosGap = worst(read.map((v, i) => worst(
+    v.position.map((x, axis) => Math.abs(x - wantRaw[i].position[axis])),
+  )));
+  const rawAngGap = worst(read.map((v, i) => quatAngle(v.quaternion, wantRaw[i].quaternion)));
+  const rawFovGap = worst(read.map((v, i) => Math.abs(v.fov - wantRaw[i].fov)));
+
+  console.log(`  5 pose keys, smooth on the first and last: worst position error `
+    + `${posErr.toExponential(1)} m, fov ${fovErr.toExponential(1)}, orientation ${angErr.toExponential(1)}°`);
+  console.log(`  the same keys with the handles ignored would be ${rawPosGap.toFixed(3)} m, `
+    + `${rawFovGap.toFixed(2)} fov and ${rawAngGap.toFixed(1)}° away`);
+  check(posErr < VALUE_EPS, 'a pose track eases its position through the handles it carries',
+    `worst ${posErr.toExponential(2)} m`);
+  // Not `VALUE_EPS`, and the reason is the same one the orientation row below carries.
+  // Both sides solve the same cubic for the eased fraction and they reach it by
+  // different routes - the page runs Newton and falls back to bisection, this file
+  // bisects throughout - so the two agree in `u` to about 1.4e-10 rather than to the
+  // last bit. Position hardly notices because a segment spans about a metre; fov spans
+  // 18 units across this fixture, so the same disagreement arrives eighteen times
+  // larger and lands at 2.5e-9, just outside 1e-9. The threshold is set against the
+  // control rather than against the result: ignoring the handles reads 0.93 fov out,
+  // so 1e-7 sits six orders inside the gap it has to separate.
+  check(fovErr < 1e-7, 'and its field of view with the same fraction',
+    `worst ${fovErr.toExponential(2)} against a 1e-7 tolerance, where the control is ${rawFovGap.toFixed(2)}`);
+  // The orientation row is the one that separates "eased" from "eased position only",
+  // which was the plausible half-implementation: a camera whose position ramps while
+  // its aim does not is sliding down a path it is no longer pointed along.
+  check(angErr < 1e-3, 'and slerps its orientation at that same eased fraction, not the raw one',
+    `worst ${angErr.toExponential(2)}°`);
+  check(rawPosGap > 0.02 && rawAngGap > 1 && rawFovGap > 0.5,
+    'and the handles are doing the work, because ignoring them lands somewhere else in all three',
+    `${rawPosGap.toFixed(3)} m, ${rawAngGap.toFixed(1)}°, ${rawFovGap.toFixed(2)} fov`);
+
+  // Every key still holds its own pose exactly. An ease that shifted a key would be a
+  // timing control that edits the shot, which is the thing this must never become.
+  // Asked at each key's own time rather than fished out of the sweep above. The first
+  // version indexed `at` with `findIndex`, and `at` is 97 samples on a 0.125s grid
+  // while the keys sit at 1.2s and 6.2s among others - so `findIndex` answered -1 for
+  // the two interior keys and the `got ? ... : 0` arm scored them as perfectly held.
+  // A row claiming "every key" was enforcing three of five, and the two it skipped were
+  // the ones an ease is most likely to drag off their marks.
+  const atKeys = await page.evaluate(
+    `${src(RAMPED.map((k) => k.t))}.map((t) => globalThis.__kinect.keyframes.valueAt('camera', t))`,
+  );
+  const keyErr = worst(RAMPED.map((k, i) => worst(
+    k.value.position.map((x, axis) => Math.abs(x - atKeys[i].position[axis])),
+  )));
+  check(keyErr < VALUE_EPS, `and all ${RAMPED.length} keys still hold the pose they were given`,
+    `worst ${keyErr.toExponential(2)} m across every key time`);
+
+  // **The route is the same route.** Every position the eased run passes through has
+  // to be one the unmapped curve passes through too, at some other moment - that is
+  // what "remaps time and nothing else" means, and it is the property the lane's whole
+  // justification rests on. Measured as the distance from each eased sample to the
+  // nearest point on a densely sampled unmapped curve.
+  const dense = [];
+  for (let i = 0; i <= 3200; i++) dense.push(poseValueAt(PATH, (i / 3200) * 12).position);
+  // To the nearest point on the *polyline*, not to the nearest sample. The first
+  // version of this measured sample-to-sample and read 6.26e-3 m against a correct
+  // build, which is a picture of how far apart the samples are rather than of how far
+  // the run left the curve: `dense` is uniform in time and the camera is not uniform
+  // in speed, so the fast stretch between the 1.2s and 6.2s keys gets the sparsest
+  // samples exactly where a wrong answer would hide. Projecting onto the segment
+  // between two samples takes that floor out, and what is left shrinks with the square
+  // of the density rather than linearly.
+  //
+  // That last sentence is measured rather than assumed, because it is the difference
+  // between a residual that is the instrument and a residual that is the build: at 800
+  // samples this reads 2.03e-5 m and at 3200 it reads 1.36e-6, a factor of 14.9 where
+  // pure chord error predicts 16. A real displacement of the path would not have moved
+  // when the sampling did.
+  const distToSegment = (p, a, b) => {
+    const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
+    const len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+    const s = len2 > 0
+      ? Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2))
+      : 0;
+    return Math.hypot(ap[0] - s * ab[0], ap[1] - s * ab[1], ap[2] - s * ab[2]);
+  };
+  const nearest = (p) => {
+    let best = Infinity;
+    for (let i = 0; i < dense.length - 1; i++) {
+      best = Math.min(best, distToSegment(p, dense[i], dense[i + 1]));
+    }
+    return best;
+  };
+  const offPath = worst(read.map((v) => nearest(v.position)));
+
+  // And the control for that measure, because "every sample is near some point of a
+  // densely sampled curve" is a test a surprising number of wrong answers pass. The
+  // straight-line traversal of the same keys is a genuinely different route, and it
+  // has to read far - otherwise `offPath` is measuring the density of `dense` rather
+  // than the shape of anything.
+  const straightPath = at.map((t) => {
+    const i = before(PATH, t);
+    if (i < 0 || i >= PATH.length - 1) {
+      return PATH[Math.max(0, Math.min(PATH.length - 1, i))].value.position;
+    }
+    const u = (t - PATH[i].t) / (PATH[i + 1].t - PATH[i].t);
+    return [0, 1, 2].map((d) => PATH[i].value.position[d]
+      + (PATH[i + 1].value.position[d] - PATH[i].value.position[d]) * u);
+  });
+  const straightOff = worst(straightPath.map((p) => nearest(p)));
+
+  console.log(`  the eased run leaves the unmapped curve by at most ${offPath.toExponential(1)} m; `
+    + `a straight-line traversal of the same keys leaves it by ${straightOff.toFixed(3)} m`);
+  check(offPath < 1e-5,
+    'and the route is untouched - every pose the eased run visits is one the unmapped curve visits',
+    `worst ${offPath.toExponential(2)} m off the curve`);
+  check(straightOff > 0.02,
+    'and that measure can tell, because a genuinely different route through the same keys reads far',
+    `${straightOff.toFixed(3)} m off the curve`);
 }
 
 // ============================== 2. evaluating writes those values through the registry

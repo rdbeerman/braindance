@@ -1709,6 +1709,22 @@ test. The menu is the door a document from another build actually arrives throug
 to the console is part of what arriving through it does. **When an instrument's own noise
 collides with a sweep, move the noise, never the sweep.**
 
+### The one parameter a symmetric ease provably cannot move
+
+`test/curve.test.mjs` gained a row asserting that easing a segment is a different traversal
+of it rather than a no-op — without one, the whole "handles shape the timing" test passes
+against a build whose ease does nothing at all. The probe went at the midpoint, which is the
+obvious place to stand and the only place in the unit interval where the answer is fixed:
+`smooth` is `[0.42, 0]` and `[0.58, 1]`, symmetric about the centre, so `easeAt(0.5)` is
+0.5 for it and for linear alike. The row failed against a correct build, reporting a midpoint
+that had not moved because a correct build does not move it.
+
+A quarter of the way in is where an ease-out has actually done something, and the repair kept
+both samples rather than swapping one for the other: the quarter point is the claim, and the
+midpoint is now asserted to be *unchanged*, which turns an accident into the statement that
+the ease is symmetric. **Rule 4 again, in its purest form — the convenient place to stand and
+the fixed point of the thing being measured were the same place.**
+
 ## What do my arms agree about
 
 **When one probe turns out to be blind to something, ask what all of them are blind to
@@ -2815,3 +2831,112 @@ Three lessons, and the second is the one that generalises:
 - **A residual an order of magnitude below the band is worth explaining before the band is
   chosen.** The 0.03 would have been covered by any tolerance anybody picked, and the picking
   is what would have buried it. It was the whole bug.
+
+## A residual that is the instrument, and how to tell it from one that is the build
+
+`keyframe-check` section 1c asserts that easing the camera remaps *when* it arrives and leaves
+the route it takes alone. The measure is the distance from each pose the eased run visits to
+the nearest point on the unmapped curve, and the first version of it took that distance to the
+nearest *sample* of a densely sampled curve. It read **6.26e-3 m** against a correct build.
+
+Six millimetres is a number that could plausibly be either a genuine displacement of the path
+or a picture of how far apart the samples are, and nothing about the reading says which. Two
+things separated them:
+
+- **The samples were uniform in time, and the camera is not uniform in speed.** So the sparsest
+  samples sat on the fast stretch between the 1.2s and 6.2s keys, which is exactly where a real
+  path shift would hide. Projecting onto the segment between two samples rather than onto the
+  samples themselves took that floor out and the reading fell to **2.03e-5 m**, a factor of 300
+  for a change that touched no build code.
+- **What was left was then made to prove which kind of thing it was.** Chord error against a
+  polyline falls with the square of the density, so quadrupling the sample count has to divide
+  it by about 16 while a real displacement would not move at all. Measured: 2.03e-5 at 800
+  samples and **1.36e-6** at 3200, a factor of **14.9** against a predicted 16.
+
+**The scaling test is the point, not the smaller number.** Tightening a threshold until a row
+goes green is indistinguishable, from the outside, from having measured something — and this
+repo's own history is mostly of bands re-derived to suit the reading in front of somebody. A
+residual that responds to the instrument the way theory says it should is an instrument
+artefact; one that does not is a finding. Ask the residual to move before deciding it is noise.
+
+The fov row in the same section is the smaller sibling of the same lesson and is left at a
+looser tolerance than its neighbours on purpose. Both sides solve the same cubic by different
+routes — the page runs Newton with a bisection fallback, the tool bisects throughout — so they
+agree in the eased fraction to about 1.4e-10. Position spans about a metre and does not notice;
+fov spans 18 units across that fixture, so the same disagreement arrives eighteen times larger
+at 2.5e-9 and lands just outside the 1e-9 the positions get. **The threshold is set against the
+control rather than against the result**: ignoring the handles entirely reads 0.93 fov out, so
+1e-7 sits six orders inside the gap it has to separate rather than being the number that let
+the run through.
+
+## A mutation that disables a control hangs the check that presses it
+
+`editor-check`'s `ease-gate-hardcodes-scalar` puts the ease gate back to naming one kind, which
+shuts the preset row for pose keys. The section that presses those five buttons did what every
+other press in the file does — `page.locator(...).click()` — and Playwright's click waits for a
+control to become actionable rather than failing on one that is not. So the mutated run sat for
+the full 30s timeout and reported **`DID NOT RUN`, exit 2, with zero failed assertions**.
+
+That is a crash wearing the shape of a catch, and the two are distinguishable only by reading
+which assertions fired. CLAUDE.md's rule 3 is the general form and this is its browser-shaped
+instance: the tools disagree about what a caught mutation exits, and a run with no failed
+assertions and a non-zero exit is something to investigate rather than a catch to record. It is
+also the same lesson `lanes-clear-siblings` taught — a check has to survive the fault it checks
+for, or a caught mutation reads as an untested one.
+
+The repair is to read the disabled state and assert on it instead of walking into it: the dead
+preset row *is* the finding, so the row now fails with `the preset row is dead for a pose key,
+so nothing could be pressed` and the run continues. The handle-drag rows needed the same
+treatment for the same reason — `pose-segments-never-shaped` leaves no handle on the lane, and
+a `boundingBox()` of null dereferenced is another exit 2 where a clean red was owed.
+
+**Any mutation that removes a control, rather than changing what a control does, has this
+shape.** When adding one, ask what the check does when the thing it reaches for is not there.
+
+**And the paragraph above did not stop it happening again**, which is the part worth keeping.
+A row added to the same section later that session — the one asserting a pose handle cannot
+be dragged out of the unit box — reached for `.first().boundingBox()` with no count in front
+of it, and `pose-segments-never-shaped` went straight back to DID NOT RUN and exit 2 with
+eight clean reds owed. Two guarded call sites and a written-up case file were sitting a few
+hundred lines away. A lesson recorded in prose is not a lesson the next row inherits: what
+would have caught this is the guard being the only shape this file reaches for a handle in,
+so the unguarded version has nowhere to be copied from.
+
+## A sweep that reads its coverage domain off the thing under test
+
+The camera track gaining ease handles replaced five scattered `row.kind !== 'scalar'`
+comparisons with one `KINDS` table, and `editor-check` section 5 was rewritten to enumerate
+that table through a page hook — `easedKinds()` — so that a fourth track kind added later
+would be asked about by existing rather than by somebody remembering. Both of section 5's
+loops then ranged over the returned list, and a row asserted that every kind in it had a
+fixture in the tool.
+
+**That row is one-directional, and the direction it does not cover is the reported bug.**
+Flip a single token — `eases: false` on the pose entry — and `easedKinds()` returns
+`['scalar']`. Both loops silently stop producing pose rows. The fixture-completeness row
+passes, because nothing is unfixtured when nothing is claimed. `keyframe-check` stays green
+too, because the evaluator never consults the table. The result is the original defect back
+in the product — preset buttons dead on a camera key, no handles, no lane curve — with the
+entire suite green and one word changed.
+
+The general shape is worth naming, because "have the check enumerate it" is otherwise good
+advice this repository gives itself: **an enumeration that closes the class must not be read
+from the subject.** A sweep driven by the subject's own declaration of what it does can be
+switched off by editing the declaration, and it will report full coverage of the empty set.
+Enumerating from the *tool* is not the answer either — that is the hand-maintained list the
+enumeration was introduced to replace. Both directions together are:
+
+- every kind the page declares easable has a fixture here (the tool cannot fall behind the
+  page), and
+- every kind the tool has a fixture for is still declared easable (the page cannot shrink
+  its own coverage).
+
+The second is the one that carries the falsification, and it works because the fixture table
+lives in a file the mutation cannot reach.
+
+A related trap sat in the comment beside the mutation aimed at this area. It justified
+aiming at one call site rather than at the table by claiming a table edit "would redden every
+kind-dependent row at once", which is true of most of the table's fields and exactly false of
+the one that gates the sweep: editing `eases` reddens **zero** rows. A plausible-sounding
+reason for a scoping decision is worth re-deriving against the specific field, because the
+comment was what stopped anybody looking.

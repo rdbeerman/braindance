@@ -53,6 +53,11 @@
 //   node tools/editor-check.mjs --mutate delete-ignores-selection --no-render  # must FAIL
 //   node tools/editor-check.mjs --mutate ease-handles-on-flat  --no-render  # must FAIL
 //   node tools/editor-check.mjs --mutate ease-preset-ignored   --no-render  # must FAIL
+//   node tools/editor-check.mjs --mutate ease-gate-hardcodes-scalar --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate pose-segments-never-shaped --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate pose-handle-overshoots --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate beads-evenly-spaced --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate pose-lane-draws-flat --no-render # must FAIL
 //   node tools/editor-check.mjs --mutate scroller-cannot-shrink --no-render # must FAIL
 //   node tools/editor-check.mjs --mutate camera-motion-keeps-history --no-render # must FAIL
 //   node tools/editor-check.mjs --mutate orbit-uses-scrub-draft --no-render # must FAIL
@@ -1885,16 +1890,123 @@ const MUTATIONS = {
     edits: [
       [
         '    // A flat segment gets none, for the reason `segmentHasShape` gives.\n'
-        + '    if (!segmentHasShape(keys, seg)) continue;\n',
+        + '    if (!segmentHasShape(keys, seg, row.kind)) continue;\n',
         '',
       ],
       [
         '      // A segment that went flat under the drag has no shape left to edit, so its\n'
         + '      // handle has to go rather than be moved - which is a rebuild, not a move.\n'
-        + '      if (!segmentHasShape(keys, seg)) return false;\n',
+        + '      if (!segmentHasShape(keys, seg, row.kind)) return false;\n',
         '',
       ],
     ],
+  },
+
+  // The gate goes back to naming one kind instead of asking the table - the shape the
+  // camera track was locked out by, and the reason `KINDS` exists at all.
+  //
+  // **Aimed at one site rather than at the table**, so that what reddens is exactly the
+  // pose preset rows and the scalar ones beside them stay green as the control. It
+  // leaves the handles drawing and the lane drawn, and takes away only the preset row's
+  // permission.
+  //
+  // An earlier version of this comment justified that by claiming a table edit "would
+  // redden every kind-dependent row at once". For the `eases` flag the truth is the
+  // exact opposite and worth stating, because it is the trap: flipping `eases` to false
+  // reddens **zero** rows, since both sweeps in section 5 read their coverage domain out
+  // of `easedKinds()`. That is what the reverse-inclusion row up there is for, and it is
+  // the assertion that makes this mutation's scoping a choice rather than a hole.
+  //
+  // Measured: 5 assertions, all five `... on a pose key`. Its neighbour below fires 8
+  // - the same five plus the three handle rows - and the difference is the point: two
+  // mutations that both "break the camera's ease" have to be tellable apart, or the
+  // table cannot say which term broke.
+  'ease-gate-hardcodes-scalar': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (!row || !KINDS[row.kind].eases) return null;',
+      "  if (!row || row.kind !== 'scalar') return null;",
+    ]],
+  },
+
+  // A pose handle gets the scalar overshoot band back, which is what it inherited
+  // before anybody asked what overshoot means on an axis that is already a fraction.
+  // The handle leaves the unit box, the eased fraction goes past 1, and `hermite`
+  // continues the segment's own cubic past the key - so the camera sails through the
+  // pose it was keyed at and swings back to it.
+  'pose-handle-overshoots': {
+    file: 'web/main.js',
+    edits: [[
+      "    if (row.owner === 'retime' || !KINDS[row.kind].overshoots) h[1] = Math.min(1, Math.max(0, h[1]));",
+      "    if (row.owner === 'retime') h[1] = Math.min(1, Math.max(0, h[1]));",
+    ]],
+  },
+
+  // The pose lane draws a flat line through the middle of the strip - a lane that is
+  // there, is the right height, holds its diamonds and says nothing. Every other pose
+  // row in section 5 reads the evaluator, the handle geometry or the presets, so this
+  // is the only mutation any of them can see the drawn curve through.
+  'pose-lane-draws-flat': {
+    file: 'web/main.js',
+    edits: [[
+      '    at: (owner, t) => poseLaneFraction(keysOf(owner), t),',
+      '    at: () => 0.5,',
+    ]],
+  },
+
+  // The beads stop being drawn, so the path says where the camera goes and nothing
+  // about when it gets there. Kept as a named mutation after the row that was supposed
+  // to catch it was measured NOT CAUGHT and replaced - see section 5's comment for what
+  // a pixel diff of this canvas actually measures.
+  // The beads mark equal *distances* along the path instead of equal times - the
+  // plausible wrong version, and a much more convincing one than drawing none at all,
+  // because the overlay still looks like an overlay. What it loses is the only thing
+  // it was for: evenly spaced dots are a second drawing of the route, which the line
+  // already gives, and they say nothing about when the camera is anywhere. Their
+  // spacing stops responding to the handles, so section 5's spread ratio collapses
+  // towards 1 on both arms.
+  'beads-evenly-spaced': {
+    file: 'web/main.js',
+    edits: [[
+      '  const out = [];\n'
+      + '  for (let i = 0; i < points.length; i += BEAD_EVERY) out.push(points[i]);\n'
+      + '  return out;',
+      '  const seg = [];\n'
+      + '  let total = 0;\n'
+      + '  for (let i = 1; i < points.length; i++) {\n'
+      + '    const d = Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1],\n'
+      + '      points[i][2] - points[i - 1][2]);\n'
+      + '    total += d;\n'
+      + '    seg.push(total);\n'
+      + '  }\n'
+      + '  const want = Math.ceil(points.length / BEAD_EVERY);\n'
+      + '  const out = [];\n'
+      + '  for (let n = 0; n < want; n++) {\n'
+      + '    const target = (total * n) / Math.max(1, want - 1);\n'
+      + '    let i = seg.findIndex((s) => s >= target);\n'
+      + '    if (i < 0) i = points.length - 2;\n'
+      + '    out.push(points[i]);\n'
+      + '  }\n'
+      + '  return out;',
+    ]],
+  },
+
+  // The NaN that a pose value's subtraction used to produce, restored as its honest
+  // consequence: `segmentHasShape` answers false for every camera segment, so a pose
+  // lane draws no handle and the preset row goes dead beside keys that plainly differ.
+  // This is the defect the kind-aware `segmentHasShape` was written for, and it is
+  // worth its own mutation because it fails *quietly* - a lane with no handles reads
+  // as a lane with nothing to edit.
+  //
+  // Measured: 8 assertions - the five pose preset rows, and the three handle rows that
+  // report `no handle drawn on the pose lane at all` and a drag that moved the value
+  // from 0.8313 to 0.8313. Every scalar row stays green.
+  'pose-segments-never-shaped': {
+    file: 'web/main.js',
+    edits: [[
+      '    moved: (a, b) => poseMoved(a.value, b.value),',
+      '    moved: () => false,',
+    ]],
   },
 
   // The preset buttons stay live, stay enabled and write nothing - the shape of a
@@ -2676,7 +2788,7 @@ try {
 
   const covered = (row) => {
     if (row.id && DRIVER_IDS[row.id]) return `named: ${DRIVER_IDS[row.id]}`;
-    if (row.ease) return 'rule: an ease preset, section 5 presses all five';
+    if (row.ease) return 'rule: an ease preset, section 5 presses all five on every easable kind';
     return DRIVER_RULES.find((rule) => rule.match(row))?.by ?? null;
   };
 
@@ -4192,33 +4304,107 @@ try {
   const presetNames = await page.evaluate('__kinect.editor.easePresets()');
   check(presetNames.length === Object.keys(EXPECTED).length,
     'the preset row offers exactly the presets this file knows', presetNames.join(', '));
-  for (const name of presetNames) {
-    // Every key starts bent, and `linear` is why. A key created plain already carries
-    // the linear handles, so pressing `linear` on it agrees with a build that writes
-    // nothing at all - the row would be green against a preset row that had been
-    // disconnected. Measured: `--mutate ease-preset-ignored` fired four of the five
-    // preset rows and left this one passing. Starting from a shape none of the five
-    // produces gives every preset something to undo.
-    await plant({
-      bloom: [
-        { t: 1, value: 0.2, easeOut: [0.9, 0.1], easeIn: [0.1, 0.9] },
-        { t: 5, value: 0.9, easeOut: [0.9, 0.1], easeIn: [0.1, 0.9] },
-        { t: 9, value: 0.3, easeOut: [0.9, 0.1], easeIn: [0.1, 0.9] },
+
+  // **One fixture per kind that claims to be easable, enumerated off the page's own
+  // table.** This used to press the five presets on `bloom` and nothing else, while
+  // `covered()` credited every `data-ease` button with "section 5 presses all five" -
+  // true of scalars and, the day the camera track gained handles, a coverage claim
+  // nothing satisfied for the new kind. Asking `easedKinds()` means the claim is true
+  // by construction, and a fourth kind added next year fails the row below until
+  // somebody gives it a fixture, which is the right answer rather than a nuisance:
+  // an untested kind should be loud, not absent.
+  //
+  // Every key starts bent, and `linear` is why. A key created plain already carries the
+  // linear handles, so pressing `linear` on it agrees with a build that writes nothing
+  // at all - the row would be green against a preset row that had been disconnected.
+  // Measured: `--mutate ease-preset-ignored` fired four of the five preset rows and
+  // left this one passing. Starting from a shape none of the five produces gives every
+  // preset something to undo.
+  const BENT = { easeOut: [0.9, 0.1], easeIn: [0.1, 0.9] };
+  const KIND_FIXTURES = {
+    scalar: {
+      owner: 'bloom',
+      keys: [
+        { t: 1, value: 0.2, ...BENT },
+        { t: 5, value: 0.9, ...BENT },
+        { t: 9, value: 0.3, ...BENT },
       ],
-    });
-    await page.evaluate(`__kinect.editor.select('bloom', 1)`);
-    await settle();
-    await page.locator(`#tEase button[data-ease=${name}]`).click();
-    await settle();
-    const got = await page.evaluate(`__kinect.editor.easeOf('bloom', 1)`);
-    const next = await page.evaluate(`__kinect.editor.easeOf('bloom', 2)`);
-    const want = EXPECTED[name];
-    const okOut = !want.out || (near(got.easeOut[0], want.out[0], 1e-9) && near(got.easeOut[1], want.out[1], 1e-9));
-    const okIn = !want.in || (near(got.easeIn[0], want.in[0], 1e-9) && near(got.easeIn[1], want.in[1], 1e-9));
-    const okNext = !want.nextIn || (near(next.easeIn[0], want.nextIn[0], 1e-9) && near(next.easeIn[1], want.nextIn[1], 1e-9));
-    check(okOut && okIn && okNext, `the "${name}" preset writes the handles it names`,
-      `out ${JSON.stringify(got.easeOut)} in ${JSON.stringify(got.easeIn)}`
-      + (want.nextIn ? ` next-in ${JSON.stringify(next.easeIn)}` : ''));
+      // Inside the segment the selected key's `easeOut` shapes, and inside the one it
+      // does not - see the drag rows below for why the pair matters.
+      inside: 7,
+      outside: 3,
+      read: (v) => v,
+    },
+    pose: {
+      owner: 'camera',
+      // Three poses that differ in every channel, so `segmentHasShape` has something to
+      // find whichever term a broken build drops. Unevenly spaced for the same reason
+      // `keyframe-check`'s own path is.
+      keys: [[-1.1, 0.9, 50], [0.2, 1.15, 44], [1.3, 0.8, 58]].map(([x, z, fov], i) => ({
+        t: 1 + i * 4,
+        value: { position: [x, 0.35, z], quaternion: [0, 0, 0, 1], fov },
+        ...BENT,
+      })),
+      inside: 7,
+      outside: 3,
+      read: (v) => v.position[0],
+    },
+  };
+  const easedKinds = await page.evaluate('__kinect.editor.easedKinds()');
+  const unfixtured = easedKinds.filter((k) => !KIND_FIXTURES[k]);
+  check(unfixtured.length === 0,
+    'every kind the page declares easable has a fixture here, so a kind added later is asked about by existing',
+    unfixtured.length ? `nothing drives ${unfixtured.join(', ')}` : `${easedKinds.join(', ')} all driven`);
+  // **And the reverse inclusion, which is the half that stops this section being
+  // circular.** The row above enumerates the page's own declaration and then loops over
+  // it, so both loops take their coverage from the thing under test: flipping `eases`
+  // to false on `pose` shrinks `easedKinds()` to `['scalar']`, every pose row below
+  // silently stops existing, that row passes because nothing is unfixtured, and
+  // `keyframe-check` stays green too because `poseAt` never consults the table. One
+  // token would have put the reported bug back - preset buttons dead on a camera key -
+  // with the whole suite green. This table is the independent statement of which kinds
+  // must ease, and it is in a file the page cannot edit.
+  const undeclared = Object.keys(KIND_FIXTURES).filter((k) => !easedKinds.includes(k));
+  check(undeclared.length === 0,
+    'and every kind this file has a fixture for is still declared easable, so the page cannot shrink its own coverage',
+    undeclared.length ? `the page no longer eases ${undeclared.join(', ')}` : `${Object.keys(KIND_FIXTURES).join(', ')} all declared`);
+
+  for (const kind of easedKinds.filter((k) => KIND_FIXTURES[k])) {
+    const fx = KIND_FIXTURES[kind];
+    for (const name of presetNames) {
+      await plant({ [fx.owner]: fx.keys });
+      await page.evaluate(`__kinect.editor.select('${fx.owner}', 1)`);
+      await settle();
+      // **Asked before it is pressed, and this is not defensive coding.** Playwright's
+      // `click` waits for a control to become actionable, so pressing a *disabled*
+      // button does not fail - it hangs for the full 30s timeout and takes the whole
+      // run down with it. Measured: `--mutate ease-gate-hardcodes-scalar` shuts the
+      // preset row for pose keys, and the first version of this loop reported
+      // `DID NOT RUN` with **zero** failed assertions, which is a crash wearing the
+      // shape of a catch - and by this file's own verdict block, exit 2 rather than
+      // exit 1. A check has to survive the fault it checks for, or a caught mutation
+      // reads as an untested one; the dead row is the finding, so it is read rather
+      // than walked into.
+      const live = await page.evaluate(
+        `document.querySelector('#tEase button[data-ease=${name}]').disabled`,
+      ) === false;
+      if (live) {
+        await page.locator(`#tEase button[data-ease=${name}]`).click();
+        await settle();
+      }
+      const got = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 1)`);
+      const next = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 2)`);
+      const want = EXPECTED[name];
+      const okOut = !want.out || (near(got.easeOut[0], want.out[0], 1e-9) && near(got.easeOut[1], want.out[1], 1e-9));
+      const okIn = !want.in || (near(got.easeIn[0], want.in[0], 1e-9) && near(got.easeIn[1], want.in[1], 1e-9));
+      const okNext = !want.nextIn || (near(next.easeIn[0], want.nextIn[0], 1e-9) && near(next.easeIn[1], want.nextIn[1], 1e-9));
+      check(live && okOut && okIn && okNext,
+        `the "${name}" preset writes the handles it names on a ${kind} key`,
+        live
+          ? `out ${JSON.stringify(got.easeOut)} in ${JSON.stringify(got.easeIn)}`
+            + (want.nextIn ? ` next-in ${JSON.stringify(next.easeIn)}` : '')
+          : `the preset row is dead for a ${kind} key, so nothing could be pressed`);
+    }
   }
 
   // The flat-segment rule. A segment whose two keys hold the same value renders the
@@ -4242,42 +4428,202 @@ try {
   check(await page.evaluate(`document.querySelector('#tEase button[data-ease=linear]').disabled`) === true,
     'and goes dead for the key that has nothing to shape, rather than writing into nothing');
 
-  // And a handle that does exist still moves the curve.
-  await plant({ bloom: [{ t: 1, value: 0.2 }, { t: 5, value: 0.9 }, { t: 9, value: 0.3 }] });
-  await page.evaluate(`__kinect.editor.select('bloom', 1)`);
-  await settle();
-  // **The first handle drawn on a key is its `easeOut`**, which shapes the segment
-  // *after* it - `drawLane` walks `['easeOut', 'easeIn']` in that order. So the curve
-  // is sampled at 7s, inside 5s..9s, and not at 3s. Sampling at 3s is what this row
-  // did first and it failed against a working build: the handle had moved, the curve
-  // it shapes had moved, and the probe was sitting in the neighbouring segment where
-  // the answer is the same either way. That is `docs/instruments.md`'s "place a probe
-  // where its answer would be different" arriving one more time.
+  // And a handle that does exist still moves the curve - asked of every easable kind,
+  // for the reason the preset loop above is. The pose arm is the one that would have
+  // caught the shape this repo already shipped once on scalars: a handle that draws,
+  // drags and writes a number nothing reads. `segmentHasShape` answered `NaN > 1e-9`
+  // for every camera segment before it took the kind, which is `false` - so a pose
+  // lane would have drawn no handle at all and the whole feature would have been a
+  // preset row with nothing under it.
+  for (const kind of easedKinds.filter((k) => KIND_FIXTURES[k])) {
+    const fx = KIND_FIXTURES[kind];
+    await plant({ [fx.owner]: fx.keys.map(({ easeOut, easeIn, ...rest }) => rest) });
+    await page.evaluate(`__kinect.editor.select('${fx.owner}', 1)`);
+    await settle();
+    // **The first handle drawn on a key is its `easeOut`**, which shapes the segment
+    // *after* it - `drawLane` walks `['easeOut', 'easeIn']` in that order. So the curve
+    // is sampled at 7s, inside 5s..9s, and not at 3s. Sampling at 3s is what this row
+    // did first and it failed against a working build: the handle had moved, the curve
+    // it shapes had moved, and the probe was sitting in the neighbouring segment where
+    // the answer is the same either way. That is `docs/instruments.md`'s "place a probe
+    // where its answer would be different" arriving one more time.
+    //
+    // Both samples are kept, which makes the row say more than it used to: the handle
+    // shapes its own segment *and leaves its neighbour alone*, which is two claims a
+    // single sample cannot separate.
+    // Counted before it is reached for, for the reason the preset loop above states: a
+    // build with no handle to drag has to redden these rows rather than throw out of the
+    // run. `--mutate pose-segments-never-shaped` is exactly that build - it puts back the
+    // `NaN` the old subtraction returned for a pose, so the lane draws nothing - and a
+    // `boundingBox()` of null dereferenced is a crash, which this file reports as
+    // DID NOT RUN and exit 2 rather than as the catch it actually is.
+    const drawn = await page.locator(`.tlane[data-owner=${fx.owner}] .thandle`).count();
+    const hb = drawn > 0
+      ? await page.locator(`.tlane[data-owner=${fx.owner}] .thandle`).first().boundingBox()
+      : null;
+    check(hb !== null && hb.width >= 10 && hb.height >= 10, `a ${kind} ease handle is big enough to hit`,
+      hb ? `${hb.width}x${hb.height}px` : `no handle drawn on the ${kind} lane at all`);
+    const at = (t) => page.evaluate(`__kinect.keyframes.valueAt('${fx.owner}', ${t})`).then(fx.read);
+    const easeBefore = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 1)`);
+    const ownBefore = await at(fx.inside);
+    const neighbourBefore = await at(fx.outside);
+    if (hb) {
+      await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(hb.x + hb.width / 2 - 40, hb.y + hb.height / 2 - 20, { steps: 5 });
+      await page.mouse.up();
+      await settle();
+    }
+    const easeAfter = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 1)`);
+    const ownAfter = await at(fx.inside);
+    const neighbourAfter = await at(fx.outside);
+    check(JSON.stringify(easeBefore.easeOut) !== JSON.stringify(easeAfter.easeOut),
+      `dragging a ${kind} handle rewrites it`,
+      `easeOut ${JSON.stringify(easeBefore.easeOut)} -> ${JSON.stringify(easeAfter.easeOut)}`);
+    check(Math.abs(ownAfter - ownBefore) > 1e-4,
+      `  and the ${kind} value inside the segment it shapes follows, which is the only thing a handle is for`,
+      `${ownBefore.toFixed(4)} -> ${ownAfter.toFixed(4)} at ${fx.inside}s`);
+    check(Math.abs(neighbourAfter - neighbourBefore) < 1e-9,
+      '  and the segment on the other side of the key does not move',
+      `${neighbourBefore.toFixed(4)} -> ${neighbourAfter.toFixed(4)} at ${fx.outside}s`);
+  }
+
+  // **A pose handle stays inside the box, however hard it is dragged.** A scalar's may
+  // leave it - a value that swings past its key and comes back is an ordinary creative
+  // choice - and the pose lane inherited that band without anybody noticing what it
+  // meant there. Its axis is already a fraction of the segment, so a handle above the
+  // box asks `hermite` for a fraction past 1, and `hermite` obliges by continuing the
+  // segment's own cubic past the key: the camera overshoots the pose it was keyed at
+  // and swings back. That is precisely the thing easing a camera is promised not to do,
+  // in `poseAt`'s comment and in `docs/reference.md` in as many words, so the promise
+  // needs a row rather than a sentence.
   //
-  // Both samples are kept, which makes the row say more than it used to: the handle
-  // shapes its own segment *and leaves its neighbour alone*, which is two claims a
-  // single sample cannot separate.
-  const hb = await page.locator('.tlane[data-owner=bloom] .thandle').first().boundingBox();
-  check(hb.width >= 10 && hb.height >= 10, 'an ease handle is big enough to hit', `${hb.width}x${hb.height}px`);
-  const easeBefore = await page.evaluate(`__kinect.editor.easeOf('bloom', 1)`);
-  const ownBefore = await page.evaluate(`__kinect.keyframes.valueAt('bloom', 7)`);
-  const neighbourBefore = await page.evaluate(`__kinect.keyframes.valueAt('bloom', 3)`);
-  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(hb.x + hb.width / 2 - 40, hb.y + hb.height / 2 - 20, { steps: 5 });
-  await page.mouse.up();
+  // Dragged well past the lane's own height, because the clamp is only interesting at
+  // the extreme - a gentle drag lands inside the box whether or not anything clamps.
+  await plant({ camera: KIND_FIXTURES.pose.keys.map(({ easeOut, easeIn, ...rest }) => rest) });
+  await page.evaluate(`__kinect.editor.select('camera', 1)`);
   await settle();
-  const easeAfter = await page.evaluate(`__kinect.editor.easeOf('bloom', 1)`);
-  const ownAfter = await page.evaluate(`__kinect.keyframes.valueAt('bloom', 7)`);
-  const neighbourAfter = await page.evaluate(`__kinect.keyframes.valueAt('bloom', 3)`);
-  check(JSON.stringify(easeBefore.easeOut) !== JSON.stringify(easeAfter.easeOut), 'dragging it rewrites the handle',
-    `easeOut ${JSON.stringify(easeBefore.easeOut)} -> ${JSON.stringify(easeAfter.easeOut)}`);
-  check(Math.abs(ownAfter - ownBefore) > 1e-4,
-    'and the value inside the segment it shapes follows, which is the only thing a handle is for',
-    `${ownBefore.toFixed(4)} -> ${ownAfter.toFixed(4)} at 7s`);
-  check(Math.abs(neighbourAfter - neighbourBefore) < 1e-9,
-    '  and the segment on the other side of the key does not move',
-    `${neighbourBefore.toFixed(4)} -> ${neighbourAfter.toFixed(4)} at 3s`);
+  // Counted before it is reached for. `.first().boundingBox()` on a lane with no handle
+  // does not fail, it waits the full 30s and takes the run down with it - which this
+  // row did against `--mutate pose-segments-never-shaped`, reporting DID NOT RUN and
+  // exit 2 where eight clean reds were owed. That is the same trap the preset loop and
+  // the drag rows above already carry a guard for, walked into once more by a row added
+  // after them, which is the argument for the guard being the house pattern rather than
+  // a note in one place.
+  const poseHandles = await page.locator('.tlane[data-owner=camera] .thandle').count();
+  const poseHandle = poseHandles > 0
+    ? await page.locator('.tlane[data-owner=camera] .thandle').first().boundingBox()
+    : null;
+  if (poseHandle) {
+    await page.mouse.move(poseHandle.x + poseHandle.width / 2, poseHandle.y + poseHandle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(poseHandle.x + poseHandle.width / 2, poseHandle.y - 400, { steps: 6 });
+    await page.mouse.up();
+    await settle();
+  }
+  const dragged = await page.evaluate(`__kinect.editor.easeOf('camera', 1)`);
+  check(poseHandle !== null && dragged.easeOut[1] <= 1 + 1e-9 && dragged.easeOut[1] >= -1e-9,
+    'a pose handle dragged far past the lane stays inside the unit box, so the camera cannot overshoot its own key',
+    // The two ways this fails say different things and the detail has to as well. Under
+    // `pose-segments-never-shaped` there is no handle to drag, so the y sits at its
+    // untouched default - and a bare number here read as "0.3333 is outside the box",
+    // which is a row blaming the clamp for a lane that drew nothing.
+    poseHandle === null
+      ? `no handle on the pose lane to drag, so the clamp was never exercised (y still ${dragged.easeOut[1].toFixed(4)})`
+      : `easeOut y ${dragged.easeOut[1].toFixed(4)} after a 400px drag`);
+
+  // **The world half of the ease: the beads on the path.** `pathPoints` samples
+  // `poseAt` at equal intervals of program time, so the gaps between consecutive
+  // samples *are* the camera's speed, and drawing them puts back what the stroke that
+  // joins them throws away - the timing, visible as spacing, where a camera move has
+  // always been judged.
+  //
+  // **The first version of this row measured pixels and was NOT CAUGHT**, which is
+  // worth recording because it looked like the stronger test. It diffed the chrome
+  // canvas between a linear and an eased build of one path, on the reasoning that the
+  // route is unchanged so the stroke is unchanged and every moved pixel is a bead.
+  // The reasoning is wrong: `strokePolyline` joins the samples, easing moves where the
+  // samples fall along the curve, so the chord distribution changes and the line
+  // redraws by itself. Against a build whose bead loop drew nothing at all the row
+  // still read 312 moved pixels and still passed - it was measuring the stroke. A count
+  // of ink cannot be narrowed to rescue it either: 21,000 pixels of this canvas sit
+  // above alpha 225 before the path contributes anything, because the point cloud and
+  // the range rings are drawn on it too.
+  //
+  // So the claim is asked of the geometry instead, through the same function the
+  // drawing walks. What the beads have to be is uniform in *time* and therefore
+  // non-uniform in *space* whenever the camera changes speed - which is exactly what
+  // `beads-evenly-spaced` takes away.
+  const beads = await page.evaluate(`(() => {
+    const P = (x, z) => ({ position: [x, 0.35, z], quaternion: [0, 0, 0, 1], fov: 50 });
+    const LIN_O = [1 / 3, 1 / 3];
+    const LIN_I = [2 / 3, 2 / 3];
+    const mk = (out0, in2) => [
+      { t: 2, value: P(-1.4, 1.5), easeOut: out0, easeIn: LIN_I },
+      { t: 5, value: P(0.2, 1.0), easeOut: LIN_O, easeIn: LIN_I },
+      { t: 8, value: P(1.6, 1.4), easeOut: LIN_O, easeIn: in2 },
+    ];
+    const gaps = () => {
+      const pts = __kinect.editor.pathBeads();
+      const out = [];
+      for (let i = 1; i < pts.length; i++) {
+        out.push(Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2]));
+      }
+      return out;
+    };
+    __kinect.keyframes.setTracks({ camera: mk(LIN_O, LIN_I) });
+    const flat = gaps();
+    __kinect.keyframes.setTracks({ camera: mk([0.42, 0], [0.58, 1]) });
+    const eased = gaps();
+    const spread = (g) => Math.max(...g) / Math.max(1e-9, Math.min(...g));
+    return { count: eased.length + 1, flatSpread: spread(flat), easedSpread: spread(eased) };
+  })()`);
+  // The count comes off the same two constants the drawing uses, so a thinning that
+  // changed would be caught here rather than silently drawing more or fewer dots.
+  check(beads.count === 30, 'the path overlay beads every fourth of its 120 samples',
+    `${beads.count} beads`);
+  // The eased path has to spread much wider than the unshaped one, because `smooth` on
+  // the outer keys is precisely a demand that the camera crawl at both ends. The
+  // unshaped arm is the control and is not itself uniform - a Catmull-Rom through
+  // unevenly spaced keys varies in speed on its own - so the claim is the ratio between
+  // them rather than flatness.
+  check(beads.easedSpread > beads.flatSpread * 3,
+    'and their spacing follows the easing, which is what makes the overlay a picture of the timing',
+    `widest-to-narrowest gap ${beads.easedSpread.toFixed(1)}x when eased against ${beads.flatSpread.toFixed(1)}x unshaped`);
+
+  // **The lane's own drawn curve**, which nothing else in this file looks at. Every
+  // other pose row reads the evaluator through `valueAt`, the handle geometry through
+  // `ends` or the presets through `easeOf` - so a build whose pose lane drew a flat
+  // line through the middle of the strip would pass all of them, and the lane is
+  // exactly what `docs/reference.md` promises draws the remap directly.
+  //
+  // Two claims, because a curve that merely exists is not the claim: it has to cross
+  // the lane, and it has to change when the easing does.
+  const lane = await page.evaluate(`(() => {
+    const P = (x, z) => ({ position: [x, 0.35, z], quaternion: [0, 0, 0, 1], fov: 50 });
+    const LIN_O = [1 / 3, 1 / 3];
+    const LIN_I = [2 / 3, 2 / 3];
+    const mk = (out0, in2) => [
+      { t: 2, value: P(-1.4, 1.5), easeOut: out0, easeIn: LIN_I },
+      { t: 5, value: P(0.2, 1.0), easeOut: LIN_O, easeIn: LIN_I },
+      { t: 8, value: P(1.6, 1.4), easeOut: LIN_O, easeIn: in2 },
+    ];
+    const ys = () => document.querySelector('.tlane[data-owner=camera] polyline')
+      .getAttribute('points').split(' ').map((p) => Number(p.split(',')[1]));
+    __kinect.keyframes.setTracks({ camera: mk(LIN_O, LIN_I) });
+    const flat = ys();
+    __kinect.keyframes.setTracks({ camera: mk([0.42, 0], [0.58, 1]) });
+    const eased = ys();
+    const span = (a) => Math.max(...a) - Math.min(...a);
+    const worstShift = Math.max(...eased.map((y, i) => Math.abs(y - flat[i])));
+    return { span: span(flat), worstShift };
+  })()`);
+  check(lane.span > 80,
+    'the camera lane draws a curve that crosses it, rather than a line through the middle',
+    `the drawn points span ${lane.span.toFixed(1)} of the lane's 100`);
+  check(lane.worstShift > 5,
+    '  and that curve is redrawn when the easing changes, which is the whole of what it is for',
+    `worst ${lane.worstShift.toFixed(1)} of 100 between the unshaped and eased curves`);
 
   // =====================================================================
   console.log('\n[6] the strip stays a fixed height and the render dialog stays reachable');
