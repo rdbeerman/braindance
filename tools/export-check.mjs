@@ -129,7 +129,13 @@ const SHOTS = flag('--shots');
 // The editor's stage for every claim that is not about resolution, and it is the
 // export's output size too - so the arm that exports and the arm that seeks are
 // rendering into the same drawing buffer and no resize sits between them.
-const STAGE = { width: 640, height: 400 };
+// 16:9, and the shape is the part that matters. This was 640x400 - 8:5, a shape
+// `EXPORT_SIZES` offers no resolution for - so this file framed its editor at something
+// `restoreProject` now refuses, and passed only because it never restores a project. That
+// is a fact about this file rather than a safe state: `keyframe-check` had the same line,
+// did restore one, and died mid-run on its own snapshot. All four tools that wanted a cheap
+// small stage ask for a shape the product offers now.
+const STAGE = { width: 640, height: 360 };
 // A starting guess at the timeline strip's height, and only a guess - `setStage`
 // measures the real one off the page and corrects the viewport.
 //
@@ -2403,11 +2409,11 @@ const RERUN = {
 // pixels are covered indirectly: the lossless arm above proves export pixels are
 // the editor's at the stage size, and section 2 proves the look holds at a size and
 // an aspect the editor is not.
-// **800x500 rather than the 800x600 this was, and the change is the aspect and not the
+// **800x450 rather than the 800x600 this was, and the change is the aspect and not the
 // size.** What this row asserts is metadata: that the size asked for is the size the file
 // comes out at, so an output size that never reached the renderer cannot look like one that
-// did. That needs a size the editor's buffer is not, and 800x500 is one - it is 8:5 like
-// the 640x400 stage and it is nowhere in `EXPORT_SIZES`, so it stays as unfamiliar as it
+// did. That needs a size the editor's buffer is not, and 800x450 is one - it is 16:9 like
+// the 640x360 stage and it is nowhere in `EXPORT_SIZES`, so it stays as unfamiliar as it
 // ever was.
 //
 // The 600 was chosen for a look comparison the comment above says was deliberately not
@@ -2416,7 +2422,7 @@ const RERUN = {
 // row went red naming exactly that. The refusal is right and the fixture was carrying a
 // leftover - a picture at another shape is not this clip at another size.
 const ODD_SIZE = {
-  width: 800, height: 500, fps: EXPORT_FPS,
+  width: 800, height: 450, fps: EXPORT_FPS,
   from: 0, to: 3, name: 'check-size', codec: 'h264',
 };
 

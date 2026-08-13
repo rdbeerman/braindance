@@ -67,10 +67,15 @@ const SAMPLES = Number(flag('--samples', '24'));
 const WARMUP = Number(flag('--warmup', '4'));
 const SHOTS = flag('--shots');
 
-// The stage is what gets hashed, so it is fixed at 640x400 - the size the design
-// document's draft-scrub figures were measured at - and the viewport is that plus
-// the timeline strip rather than the other way round.
-const STAGE = { width: 640, height: 400 };
+// The stage is what gets hashed, so it is fixed at 640x360 - 16:9, a shape
+// `EXPORT_SIZES` actually offers a resolution for. This was 640x400 (8:5), which
+// `restoreProject` refuses: `keyframe-check` died mid-run with "this project is
+// framed at 8:5, which this build offers no resolution for" out of an undo
+// restoring a snapshot the tool had put the editor into. This file never restores
+// a project, so 8:5 never crashed it, but it was still measuring the transport in
+// a framing no document here can hold. The viewport is the stage plus the
+// timeline strip rather than the other way round.
+const STAGE = { width: 640, height: 360 };
 // The first guess only. The strip is measured off the page after load and the
 // viewport corrected - see the resize below the goto, and the assertion beside it.
 const TIMELINE_H_GUESS = 148;
@@ -290,9 +295,9 @@ const check = (ok, label, detail = '') => {
 
 // --------------------------------------------------------------- in-page helpers
 //
-// Pixels never cross back over the wire - a 640x400 frame is a megabyte and there
-// are dozens per run - so every comparison is made in the page and only its
-// summary comes back.
+// Pixels never cross back over the wire - a 640x360 frame is most of a megabyte
+// and there are dozens per run - so every comparison is made in the page and only
+// its summary comes back.
 const INSTALL = `(() => {
   const k = globalThis.__kinect;
   globalThis.__tl = {
@@ -473,16 +478,15 @@ if (MUTATE && mutantServed === 0) {
 }
 // **The page frames at the stage this tool asked for.** The editor letterboxes
 // itself to the export aspect now, so a viewport alone no longer decides the
-// drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
-// makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
-// every buffer-size expectation and every pointer coordinate in this file.
-await page.evaluate('globalThis.__kinect.setOutputSize?.("640x400")');
+// drawing buffer - but 640x360 is 16:9, the menu's own default, so there is no
+// letterbox and no offset to carry: the buffer comes out exactly 640x360.
+await page.evaluate('globalThis.__kinect.setOutputSize?.("640x360")');
 // And the viewport is sized to whatever fixed furniture actually surrounds the stage,
 // measured rather than assumed. `TIMELINE_H` was a constant that went stale the moment
 // the bar became two rows, and the Pencil shell adds the same risk at the top: every
 // image in this file is compared against another image from the same run, so a shorter
 // stage agrees with itself perfectly and the header quietly stops being true. The
-// buffer is then asserted, because a tool whose first line says "640x400" should be the
+// buffer is then asserted, because a tool whose first line says "640x360" should be the
 // thing that enforces it.
 {
   const furniture = await page.evaluate(`(() => {

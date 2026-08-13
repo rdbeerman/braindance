@@ -680,7 +680,15 @@ const SOURCE_FRAMES = Number(flag('--frames', '6'));
 const STRIDE = Number(flag('--stride', '4'));
 const SUBSTEPS = Number(flag('--substeps', '3'));
 
-const VIEW = { width: 640, height: 400 };
+// 640x360 - 16:9, a shape `EXPORT_SIZES` actually offers a resolution for. This was
+// 640x400 (8:5), which `restoreProject` refuses: `keyframe-check` died mid-run with
+// "this project is framed at 8:5, which this build offers no resolution for" out of an
+// undo restoring a snapshot the tool had put the editor into. This file never restores
+// a project, so 8:5 never crashed it here, but it was still asking the editor to frame
+// at a shape no document in this product can hold. 640x360 matches the menu's own
+// default aspect, so the fit below has nothing to letterbox - the drawing buffer comes
+// out at exactly the viewport's own shape, minus only the application bar.
+const VIEW = { width: 640, height: 360 };
 // The height the current editor gives its fixed application bar, and it is **measured
 // off the page rather than declared here**. Historical comparison pages have no shell,
 // so their viewport is shortened by the same amount to make both arms render the same
@@ -1492,10 +1500,10 @@ async function openPage({
   if (comparisonShell) {
     // The comparison build predates the fixed application bar. Canonicalise both
     // revisions onto its existing bottom-strip allocation before changing target
-    // aspect, so the comparison viewport gives both the same 640x400 content box
+    // aspect, so the comparison viewport gives both the same 640x360 content box
     // through the same layout mechanism. The real current shell is measured separately
     // below and by editor-check; this arm is about shader identity across the old mode
-    // boundary, at the fixed 640x400 frame it was originally calibrated against.
+    // boundary, at the fixed 640x360 frame it is now calibrated against.
     await page.evaluate((height) => {
       const appBar = document.getElementById('appBar');
       if (appBar) appBar.style.display = 'none';
@@ -1509,19 +1517,35 @@ async function openPage({
   }
   // **The page frames at the stage this tool asked for.** The editor letterboxes
   // itself to the export aspect now, so a viewport alone no longer decides the
-  // drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
-  // makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
-  // every buffer-size expectation and every pointer coordinate in this file.
+  // drawing buffer - except here it still effectively does, because 640x360 is 16:9,
+  // the same shape the menu opens on by default, so there is nothing to letterbox:
+  // with or without this call the buffer lands at exactly 640x360. This was 640x400
+  // (8:5), which did letterbox against the 16:9 default and moved every buffer-size
+  // expectation in this file - see the header on `VIEW` for why that shape is gone.
   //
-  // **Asked for by both names, because this is the tool that boots two builds.** This hook
+  // **Asked for anyway, because this is the tool that boots two builds, and a default
+  // that happens to agree is not a guarantee this file gets to lean on.** This hook
   // was `setTargetSize` until the shape moved onto the document and the pixel count onto
   // the deliverable, and the arms below are `git show` of a `web/main.js` from before
   // that - so the name the current tree answers to is not the name they answer to. A
   // single name reaches one arm and not the other, and spelled `?.` the miss is silent:
   // `f49c833^` publishes `setTargetSize`, so under the new name alone that arm skipped
-  // its resize, kept the default 16:9 letterbox at 640x360, and every one of the six
-  // cross-build rows went red naming pixels that differ - a rename reading as six
-  // findings about readings. Measured, not reasoned: that is what the run printed.
+  // its resize. Measured at the time this ran at 640x400 (8:5) against a 16:9 default,
+  // a skipped resize was visibly the wrong shape: every one of the six cross-build rows
+  // went red naming pixels that differ - a rename reading as six findings about
+  // readings. Measured, not reasoned: that is what the run printed.
+  //
+  // **That particular tell is gone now, and it is worth saying rather than leaving to be
+  // found later.** At 640x360 the shape a silently-skipped call leaves an arm on is the
+  // default project aspect, and the default is 16:9 - the same shape this call now asks
+  // for - so *this specific* miss, on *this specific* revision, no longer produces a
+  // buffer of a different size and the six rows would not repeat this history. It is a
+  // narrower loss than it sounds: `frameDelta` below still fails hard on any arm whose
+  // buffer is a different pixel count than the other's, so a rename to a third spelling,
+  // or a future default that is not 16:9, is still caught the same way it always was.
+  // What is gone is protection against the one coincidence where the miss and the ask
+  // land on the same shape by accident. `?? k.setTargetSize` still has to be right; there
+  // is just one fewer way left for this file to notice on its own if it stops being so.
   //
   // A tool that loads two builds has to address each in its own language, which `git
   // show` above already commits it to. It is not a compatibility path inside the program,
@@ -1532,12 +1556,13 @@ async function openPage({
   // silently did not resize is a geometry failure wearing the shape of a colour finding.
   // That is true of an arm that *has* a letterbox and false of `151020b^`, which is the
   // boot-state arm and predates letterboxing entirely: its buffer is the viewport's, it
-  // publishes neither name, and it arrives at 640x400 by having nothing to fit. Throwing
+  // publishes neither name, and it arrives at 640x360 by having nothing to fit - which was
+  // true of it at any stage this file has ever asked for, letterboxed or not. Throwing
   // there turns a correct no-op into DID NOT RUN for the whole file, which is what it did
-  // before this comment was rewritten.
+  // before this comment was first rewritten.
   await page.evaluate(`(() => {
     const k = globalThis.__kinect;
-    (k.setOutputSize ?? k.setTargetSize)?.('640x400');
+    (k.setOutputSize ?? k.setTargetSize)?.('640x360');
   })()`);
 
   // Proof the interception held, independent of the readings it protects. The
@@ -1899,10 +1924,11 @@ for (const stage of Object.keys(beforeArm.out)) {
     wrong.length ? wrong.join('; ') : seen.join(', '));
 }
 
-// The fixed shell gives the renderer 32 fewer vertical pixels. With the proof's
-// 640x400 target aspect that content box is 589x368. The historical page has no target
-// fit, so it is opened directly at that content size; both arms must then land on the
-// same exact buffer rather than gaining a layout exception in the golden comparison.
+// The fixed shell gives the renderer 38 fewer vertical pixels - `web/nav.css`'s figure,
+// the same one `shellGeometry` measures rather than trusts. With the proof's 640x360
+// target aspect that content box is 572x322. The historical page has no target fit, so
+// it is opened directly at that content size; both arms must then land on the same
+// exact buffer rather than gaining a layout exception in the golden comparison.
 check(
   beforeArm.out.boot.landing.renderScale === SHELL_CONTENT.width
     && afterArm.out.boot.landing.renderScale === SHELL_CONTENT.width,
@@ -2057,8 +2083,8 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
         pinCamera(k.freeCamera);
         // The frames themselves rather than digests of them, because the comparison
         // downstream is a measurement and a hash answers only "same or not". Base64 so
-        // the bridge carries a string: five readings by six frames of 640x400 RGBA is
-        // about 41MB per arm, which node holds without complaint and which buys the row
+        // the bridge carries a string: five readings by six frames of 640x360 RGBA is
+        // about 37MB per arm, which node holds without complaint and which buys the row
         // the ability to say *how* two builds differ rather than only that they do.
         // Chunked into the encoder because a single spread of a million-element typed
         // array overflows the argument list.
@@ -2098,7 +2124,7 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
   // across shader rewrites - which is the worst place for a defect to sit, because a row
   // already red is where a new one hides. So it was measured rather than carried further.
   //
-  // The two frames differ by **one byte out of 1,024,000, by exactly 1**. That is a single
+  // The two frames differ by **one byte out of 921,600, by exactly 1**. That is a single
   // colour channel of a single fragment landing the other side of a rounding boundary, and
   // it is the shape `web/cloud-shader.js` already has two case files about: adding a branch
   // the shader never takes reddened three of these rows, because a branch in the common
@@ -2108,10 +2134,14 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
   // about a driver rather than about a reading, and not one this product can keep.
   //
   // **The threshold is derived from both ends rather than picked.** Measured noise is 1
-  // byte at delta 1. The smallest true positive this row has to catch is
-  // `ghost-alpha-term-dropped`, which removes one term from the ghost's alpha: it moves
-  // 187,245 to 191,215 bytes - about 18.6% of the frame - with deltas of 47 to 52. So 64
-  // bytes sits 64x above the noise and 2,900x below the quietest real defect, and there is
+  // byte at delta 1 - re-measured at 640x360 rather than carried over from the 640x400 stage
+  // this was first calibrated at, because a frame at a different pixel count is a different
+  // population and the old figures would be a number this repo would find later and have to
+  // correct. The smallest true positive this row has to catch is `ghost-alpha-term-dropped`,
+  // which removes one term from the ghost's alpha: it moves 156,247 to 159,539 bytes - about
+  // 17% of the frame - with deltas of 47 to 52, unchanged from before because a delta is a
+  // colour-channel magnitude and does not move with the frame's pixel count. So 64 bytes
+  // sits 64x above the noise and about 2,400x below the quietest real defect, and there is
   // no value in between that a sane instrument would disagree about.
   //
   // Two conditions rather than one, because a defect can be loud in either dimension: a
@@ -2149,7 +2179,7 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
       // findings: one frame out of a walk is a warm-up the two builds enter differently,
       // while every frame from some index on is a term that has actually changed. The
       // magnitudes are printed beside them for the same reason one step further on - a
-      // row that says "2 of 6 frames differ" and a row that says "1 byte of 1,024,000 by
+      // row that says "2 of 6 frames differ" and a row that says "1 byte of 921,600 by
       // 1" are the same row, and only the second one lets a reader tell a defect from two
       // compilers rounding a fragment differently.
       //

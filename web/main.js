@@ -13500,18 +13500,19 @@ globalThis.__kinect = {
   // **This can put the editor in a framing `restoreProject` will refuse, and no user
   // gesture can.** The shape buttons only offer what `EXPORT_SIZES` holds; this takes any
   // size, so `setOutputSize('640x400')` frames at 8:5 - a shape the table has no resolution
-  // for - and a document written out of that framing is refused on the way back in. Three
+  // for - and a document written out of that framing is refused on the way back in. Four
   // tools asked for exactly that as a cheap small stage, and the one of them that undoes
-  // died mid-run on its own snapshot. `keyframe-check` is 640x360 now for that reason;
-  // `registry-check` and `timeline-check` still ask for 640x400 and pass because neither
-  // restores a project, which is a fact about those files rather than a safe state. A tool
-  // wanting a small stage should ask for a shape the product offers.
+  // died mid-run on its own snapshot. All four are 640x360 now: `keyframe-check` because it
+  // died, and `registry-check`, `timeline-check` and `export-check` because passing on a
+  // framing no document could hold is a fact about those files rather than a state worth
+  // keeping. A tool wanting a small stage asks for a shape the product offers.
   //
-  // Not refused here, because the refusal that matters is on the document and Tim's call
-  // put it there: this hook exists so a tool can frame the stage at a size the *product*
-  // would never offer either, which is how `export-check` sweeps sizes the menu does not
-  // list. Narrowing it to table shapes would take that away to fix a hazard a comment
-  // closes.
+  // Not refused here, because the refusal that matters is on the document: this hook exists
+  // so a tool can frame the stage at a *size* the product does not list, which is how
+  // `export-check` sweeps sizes the menu never offers. Narrowing it to the table would take
+  // that away. What it may not do is pick a *shape* the table cannot serve, and the
+  // difference between those two is the whole reason `restoreProject` refuses shapes rather
+  // than sizes.
   //
   // It renames `setTargetSize`, which was named for a `targetSize` that no longer exists.
   // Five of its six callers reached it as `setTargetSize?.(...)`, so the old name left
