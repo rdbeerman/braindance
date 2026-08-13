@@ -625,6 +625,27 @@ untested surface. That is the misattribution the `DRIVER_RULES` array was re-key
 arriving as an ordering rather than as an index. A row that reddens for a control inside a
 dialog is therefore a coverage failure like any other and not an artifact of the widening.
 
+**Section 5's ease rows carry two fixture traps, and both were found by a row that refused to
+go green.** The first is that a segment's control polygon belongs to *two* keys: pressing
+`glide` on the key you have selected writes its outgoing side and leaves the next key's
+incoming side wherever it was, so a fixture planted bent and then "fixed" with `glide` still
+reads 0, 0.2, 0.4, 0.1, 1 — crossed, and crossed in a way that looks tidy. `ends` is what
+writes a whole polygon, because it writes the departure and the arrival. The second is that a
+synthetic drag has to be aimed at a coordinate the browser will deliver *and* at an element
+that will receive it: `.tcut` is a full-height clip marker parked over the head of the strip by
+section 3, so a handle drag planted at 1s and 5s pressed the marker instead and the handle it
+meant to move never moved. Both failures read identically from the assertion — a handle sitting
+where it started — and neither is distinguishable from a clamp doing its job, which is why the
+row asserts the point *landed on its neighbour* rather than that it stayed inside a bound.
+`document.elementFromPoint` at the press coordinate is what separated them, and it is the first
+thing to reach for when a synthetic drag appears to do nothing.
+
+Its `handle-clamped-to-the-segment` mutation is the control for that row, and it is only
+visible on a control point that is not index 0 — with one point a side, the neighbours *are*
+the segment's ends and the two clamps are the same clamp. Every other handle gesture in the
+file grabs the first `.thandle` in DOM order, so before this row the indexed drag had nothing
+asking about it at all.
+
 Its `nav-at-the-foot` mutation is the control for section 1's second claim, that the way out of
 the editor is *reachable* rather than merely present. Its own two flaws — a probe in a dead zone
 and a probe that moved the page it measured — are in `docs/instruments.md`, because both are

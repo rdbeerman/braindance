@@ -258,6 +258,12 @@ node tools/editor-check.mjs --mutate elevation-moves-the-curve --no-render # ...
                                                                        #     Only the sampled-curve row can see it, which is why
                                                                        #     that row samples the render instead of reading the
                                                                        #     handles back - every handle is meant to move
+node tools/editor-check.mjs --mutate handle-clamped-to-the-segment --no-render # ... a control point clamped to the segment's ends
+                                                                       #     rather than to its own neighbours, which was
+                                                                       #     complete while a side held one point - then the
+                                                                       #     neighbours *were* the ends - and lets two cross
+                                                                       #     once a side holds more. Only a drag of a point
+                                                                       #     that is not index 0 can see it
 node tools/editor-check.mjs --mutate points-reach-the-retime --no-render # ... and the point controls offered on the retime,
                                                                        #     whose unit-box monotonicity proof is a proof about
                                                                        #     a cubic and nothing else

@@ -8562,6 +8562,18 @@ function handlePoint(row, keys, seg, side, index) {
  * With one point a side that is exactly the `[0, 1]` clamp this replaced, which is why
  * there is one rule here rather than a rule and an exception: the cubic was never a
  * different case, it was the case where the neighbours happen to be the ends.
+ *
+ * **The point's own x is a third term, and leaving it out was a bug found by a drag.**
+ * Descending abscissae are only *sufficient* for a fold, never necessary, so a cubic can
+ * cross its own control polygon and still be perfectly single-valued - `easeOut [0.9, y]`
+ * against `easeIn [0.1, y]` is exactly that, its derivative bottoming out at 0.15 and
+ * never reaching zero. Those states are on disk and `elevate` carries them faithfully
+ * across a `+pt`, so a strict two-term span can arrive already inverted, with `lo` above
+ * `hi`; the min-then-max then collapses to `hi` and the first pointer move *teleports* a
+ * handle nobody dragged that far. Including the current position makes the span
+ * well-formed whatever it inherits: a drag can no longer jump, and on any polygon this
+ * editor can itself produce - where the point already lies between its neighbours - the
+ * third term changes nothing and this is the neighbour clamp exactly.
  */
 function handleSpan(keys, seg, side, index) {
   const out = keys[seg].easeOut;
@@ -8569,7 +8581,8 @@ function handleSpan(keys, seg, side, index) {
   const at = (k) => (k < 0 ? 0 : (k >= out.length + inn.length ? 1
     : (k < out.length ? out[k][0] : inn[k - out.length][0])));
   const k = side === 'easeOut' ? index : out.length + index;
-  return { lo: at(k - 1), hi: at(k + 1) };
+  const here = at(k);
+  return { lo: Math.min(at(k - 1), at(k + 1), here), hi: Math.max(at(k - 1), at(k + 1), here) };
 }
 
 /**
@@ -13772,6 +13785,28 @@ globalThis.__kinect = {
    * pass on a page that drew the right diamonds over the wrong curve.
    */
   keyframes: {
+    /**
+     * A handle as a tool hands one over, refused rather than repaired.
+     *
+     * Version 5 made a handle a list of control points, and the shape it replaced -
+     * a bare `[0.42, 0]` - survives `copyHandle` without complaint: mapping a pair of
+     * numbers gives `[[undefined, undefined], [undefined, undefined]]`, which evaluates
+     * to `NaN` and renders as a track that has silently stopped existing. Every tool in
+     * this tree was moved across with the format, so this guards nobody who exists today
+     * and exists for the one who writes the next one against a five-year-old example.
+     * A door that turns a stale fixture into a blank picture is the failure this whole
+     * version gate is about, arriving through the hook the checks come in by.
+     */
+    handleFrom(points, side, name) {
+      const list = points ?? EASE_OUT_LINEAR;
+      const ok = Array.isArray(list) && list.length >= 1
+        && list.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+      if (!ok) {
+        throw new Error(`${name}'s ${side} is ${JSON.stringify(points)}: since version 5 a handle is a `
+          + 'list of control points, so a bare pair means a fixture written against version 4');
+      }
+      return copyHandle(list);
+    },
     /** Writes a whole set of tracks at once. The keys are the tool's, not the page's. */
     setTracks(spec) {
       tracks.clear();
@@ -13781,8 +13816,8 @@ globalThis.__kinect = {
         track.keys = keys.map((k) => ({
           t: k.t,
           value: k.value,
-          easeOut: copyHandle(k.easeOut ?? EASE_OUT_LINEAR),
-          easeIn: copyHandle(k.easeIn ?? EASE_IN_LINEAR),
+          easeOut: this.handleFrom(k.easeOut ?? EASE_OUT_LINEAR, 'easeOut', name),
+          easeIn: this.handleFrom(k.easeIn ?? EASE_IN_LINEAR, 'easeIn', name),
         }));
         track.sort();
       }
@@ -13797,8 +13832,8 @@ globalThis.__kinect = {
       const built = keys.map((k) => ({
         t: k.t,
         value: k.value,
-        easeOut: copyHandle(k.easeOut ?? EASE_OUT_LINEAR),
-        easeIn: copyHandle(k.easeIn ?? EASE_IN_LINEAR),
+        easeOut: this.handleFrom(k.easeOut ?? EASE_OUT_LINEAR, 'easeOut', 'the retime'),
+        easeIn: this.handleFrom(k.easeIn ?? EASE_IN_LINEAR, 'easeIn', 'the retime'),
       }));
       retime.assertMonotonic(built);
       retime.keys = built;

@@ -98,7 +98,9 @@ export const PROJECT_VERSION = 5;
  * four versions. A refusal that diagnoses the wrong thing is worse than one that says
  * only "no", because it is followed.
  *
- * Three bands, which is what the shipped conversion actually distinguishes.
+ * Four bands, which is what the shipped conversion actually distinguishes - two of them
+ * convertible, because there are two migration steps and a document is told about the
+ * ones between it and this build rather than about all of them.
  * `convert-presets.mjs` is the only migration this repo has and it starts at 3, so 1
  * and 2 are honestly "known, and there is no path from here" rather than either
  * "convertible" or "unreadable units". Everything else - a later version, a version
@@ -114,17 +116,28 @@ export const PROJECT_VERSION = 5;
  * been told that nothing in this build knows what it means. The band is written as the
  * versions themselves so that adding a step means adding the number here, in the
  * sentence that sends somebody to the tool that gained it.
+ *
+ * **And it is two sentences rather than one, because a convertible document is told what
+ * moved under *it*.** The first draft of this band said both things to both versions, so
+ * a version 4 file was told about the shading mode that version 4 already has - true of
+ * the conversion as a whole and not true of that file, which is the shape the paragraph
+ * above spent four sentences removing the first time. A reader with a version 4 document
+ * needs one fact, that handles became lists; a version 3 reader needs both, because both
+ * steps really are between them and this build.
  */
 export function versionRefusal(what, version) {
-  const across = version === 3 || version === 4
-    ? `version ${PROJECT_VERSION} carries ease handles as lists of control points, and version 4 `
-      + 'carries the five reading weights where 3 carried a shading mode, so run '
-      + 'tools/convert-presets.mjs over the directory it is in to bring it across'
-    : version === 1 || version === 2
-      ? 'versions 1 and 2 predate the split into look and composition and the deliverable store, '
-        + `and the conversion this repo ships starts at 3, so there is no path from here to ${PROJECT_VERSION}`
-      : `nothing in this build knows what a version ${JSON.stringify(version)} document means - it is `
-        + 'either from a later build or was never one of these - so it is refused rather than guessed at';
+  const across = version === 4
+    ? `version ${PROJECT_VERSION} carries ease handles as lists of control points where 4 carried `
+      + 'one pair a side, so run tools/convert-presets.mjs over the directory it is in to bring it across'
+    : version === 3
+      ? `version ${PROJECT_VERSION} carries ease handles as lists of control points and version 4 `
+        + 'carries five reading weights where 3 carried a shading mode, so run '
+        + 'tools/convert-presets.mjs over the directory it is in to take it across both'
+      : version === 1 || version === 2
+        ? 'versions 1 and 2 predate the split into look and composition and the deliverable store, '
+          + `and the conversion this repo ships starts at 3, so there is no path from here to ${PROJECT_VERSION}`
+        : `nothing in this build knows what a version ${JSON.stringify(version)} document means - it is `
+          + 'either from a later build or was never one of these - so it is refused rather than guessed at';
   return `${what} is version ${JSON.stringify(version)} and this build reads version ${PROJECT_VERSION}: ${across}`;
 }
 

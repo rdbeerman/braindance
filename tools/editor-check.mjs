@@ -2058,6 +2058,21 @@ const MUTATIONS = {
 
   // The preset buttons stay live, stay enabled and write nothing - the shape of a
   // control that looks like it works.
+  // The x clamp written against the segment's ends rather than against the dragged
+  // point's neighbours - which is exactly the clamp that shipped, and was complete while
+  // a side held one control point, because then the neighbours *were* the ends. With two
+  // a side it lets them cross, and a crossed pair folds the timing curve back on itself
+  // so the segment holds two values at one instant. Only a drag of a point that is not
+  // index 0 can see it.
+  'handle-clamped-to-the-segment': {
+    file: 'web/main.js',
+    edits: [[
+      `    const span = handleSpan(keys, laneDrag.seg, laneDrag.side, laneDrag.index);
+    h[0] = Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt));`,
+      '    h[0] = Math.min(1, Math.max(0, (laneProgramAt(e.clientX) - a.t) / dt));',
+    ]],
+  },
+
   // `+pt` appends a control point instead of elevating the curve, which is the obvious
   // wrong implementation and the one this control exists to be safe from: the count goes
   // up, the lane draws the new handle, and the camera moves. Only the sampled-curve row
@@ -5025,6 +5040,104 @@ try {
   check(floored[0] === 1 && await page.evaluate(`document.getElementById('tDropPoint').disabled`),
     'and it stops at one point a side rather than emptying the handle',
     `easeOut holds ${floored[0]}, and the control is ${await page.evaluate(`document.getElementById('tDropPoint').disabled`) ? 'dead' : 'still live'}`);
+
+  // **The second control point, dragged.** Every other handle gesture in this file grabs
+  // the first `.thandle` in DOM order, which is `easeOut[0]` - index 0, the case that
+  // shipped before a handle was a list. So the indexed drag and `handleSpan` had nothing
+  // asking about them: a `handleSpan` that ignored its index entirely, or a clamp still
+  // written against the unit range, would pass every row above. What makes index 1
+  // different is that its neighbours are not the segment's ends, so the clamp has a
+  // narrower box to hold it in and that box is the thing under test.
+  //
+  // Planted through `ends` first, and that is the finding rather than tidiness. `BENT` is
+  // `easeOut [0.9, ...]` against `easeIn [0.1, ...]`, whose control abscissae already
+  // descend - a legal cubic, because descending control x is sufficient for a fold and
+  // never necessary, and that one bottoms out at a derivative of 0.15. `elevate` carries
+  // the crossing across faithfully, so a span asserted from an inherited crossing is a
+  // row about the fixture rather than about the clamp.
+  //
+  // **`ends` rather than `glide`, because a segment's polygon is owned by two keys.**
+  // `glide` writes the selected key only, so pressing it on key 0 leaves key 1's `easeIn`
+  // at BENT and the segment reads 0, 0.2, 0.4, 0.1, 1 - still crossed, and crossed in a
+  // way that looks fixed. `ends` writes the departure and the arrival, which is the whole
+  // polygon: 0, 0.2, 0.4, 0.6, 0.8, 1.
+  // **Planted mid-clip, and that is not arbitrary either.** Section 3 leaves the clip's
+  // in-marker parked over the head of the strip, and a `.tcut` is a full-height element
+  // that takes the press before a handle sitting under it ever sees one - so the same
+  // gesture that works on a fresh page silently lands on the marker here. The first
+  // version of this row put its keys at 1s and 5s and read a handle that had never been
+  // touched, which is a clamp row greened by a press that hit something else entirely.
+  // `document.elementFromPoint` at the press coordinate is how that was found and is the
+  // thing to reach for when a synthetic drag does nothing.
+  await plant({ bloom: [{ t: 30, value: 0.2, ...BENT }, { t: 38, value: 0.9, ...BENT }] });
+  await page.evaluate(`__kinect.editor.select('bloom', 0)`);
+  await settle();
+  await page.locator('#tEase button[data-ease=ends]').click();
+  await page.locator('#tAddPoint').click();
+  await settle();
+  const twoPoints = await page.evaluate(`__kinect.editor.easeOf('bloom', 0)`);
+  // The handles are drawn `easeOut` first and in index order, so the lane's second
+  // `.thandle` is `easeOut[1]` - the one whose x is fenced by its two neighbours rather
+  // than by 0 and 1.
+  const handles = page.locator('.tlane[data-owner=bloom] .thandle');
+  const first = await handles.nth(0).boundingBox();
+  const second = await handles.nth(1).boundingBox();
+  const dragY = second.y + second.height / 2;
+  await page.mouse.move(second.x + second.width / 2, dragY);
+  await page.mouse.down();
+  // **Nothing is awaited between the press and the throw, and that is load-bearing.** The
+  // press captures the pointer on the handle element, and `settle()` lets a lane rebuild
+  // run - which replaces that element, so every later move is delivered to a node no
+  // longer in the document and the handle sits exactly where it started. A row reading
+  // the handle back then reports a clamp holding when nothing was ever dragged. Measured:
+  // with a settle here the point stayed at 0.3333 against a neighbour at 0.1667; without
+  // one it lands on the neighbour.
+  //
+  // Aimed past the point before it rather than at a fixed pixel offset. The segment is
+  // four seconds of a seventy-five second clip, so it is a few dozen pixels wide and a
+  // round "drag 600px left" lands at a negative page coordinate that goes undelivered -
+  // the same failure wearing the other hat.
+  await page.mouse.move(first.x - 24, dragY, { steps: 8 });
+  await page.mouse.up();
+  await settle();
+  const afterPointDrag = await page.evaluate(`__kinect.editor.easeOf('bloom', 0)`);
+  check(afterPointDrag.easeOut.length === twoPoints.easeOut.length
+    && afterPointDrag.easeOut[0][0] === twoPoints.easeOut[0][0],
+    'dragging the second control point leaves the first one where it was, so the drag found its own index',
+    `first ${JSON.stringify(afterPointDrag.easeOut[0])}, second ${JSON.stringify(afterPointDrag.easeOut[1])}`);
+  // **Asserted on where the handle landed rather than on how far the curve moved**, and
+  // that is the fixture rather than a preference. Both of these control points sit at an
+  // ordinate of 0, so sliding one along x while its neighbour holds the same y is a
+  // change the *value* curve barely registers - a "the curve moved" row would be asking
+  // this drag for evidence it cannot produce. Landing exactly on the neighbour says both
+  // things at once: the gesture was delivered, and the thing that stopped it was the
+  // point before it rather than the segment start, which is 0 and is where the clamp
+  // this replaced would have put it.
+  const landed = afterPointDrag.easeOut[1][0];
+  const neighbour = afterPointDrag.easeOut[0][0];
+  check(landed !== twoPoints.easeOut[1][0] && Math.abs(landed - neighbour) < 1e-9,
+    'and it stops on the point before it rather than at the segment start, because the timing '
+    + 'curve has to stay single-valued in time and a crossed pair folds it',
+    `dragged from ${twoPoints.easeOut[1][0].toFixed(4)} to ${landed.toFixed(4)}, `
+    + `against a neighbour at ${neighbour.toFixed(4)}`);
+
+  // **The two-key move, which is the shape the reported defect arrived as.** Every ease
+  // fixture above is three keys deep, and on a two-key track `ends` writes both of its
+  // handles onto the *same* segment - `keys.length - 2` is 0, so the departure and the
+  // arrival are the two ends of one span. That is the arithmetic most likely to be got
+  // wrong by an off-by-one and the one case no other row here visits.
+  await plant({ bloom: [{ t: 1, value: 0.2, ...BENT }, { t: 6, value: 1.4, ...BENT }] });
+  await page.evaluate(`__kinect.editor.select('bloom', 0)`);
+  await settle();
+  await page.locator('#tEase button[data-ease=ends]').click();
+  await settle();
+  const pairFirst = await page.evaluate(`__kinect.editor.easeOf('bloom', 0)`);
+  const pairLast = await page.evaluate(`__kinect.editor.easeOf('bloom', 1)`);
+  const glideOut = JSON.stringify([[0.2, 0], [0.4, 0]]);
+  const glideIn = JSON.stringify([[0.6, 1], [0.8, 1]]);
+  check(JSON.stringify(pairFirst.easeOut) === glideOut && JSON.stringify(pairLast.easeIn) === glideIn,
+    'on a two-key move `ends` shapes both ends of the one segment there is',
+    `first-out ${JSON.stringify(pairFirst.easeOut)}, last-in ${JSON.stringify(pairLast.easeIn)}`);
 
   // **The retime is refused, and the reason is a proof rather than a preference.**
   // `assertMonotonic` argues that a handle anywhere in the unit box cannot run source
