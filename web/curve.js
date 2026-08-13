@@ -11,19 +11,93 @@
 
 // The handles of a linear segment. Named rather than written out at the four
 // places a key is made, because a key created with anything else silently eases.
-const EASE_OUT_LINEAR = [1 / 3, 1 / 3];
-const EASE_IN_LINEAR = [2 / 3, 2 / 3];
+//
+// A *list* of control points per side rather than one, and the single-element list
+// here is the whole of what a document written before that carried. The list is what
+// lets a segment be a cubic, a quintic or anything between without a second curve
+// family beside this one - see `SEGMENT_POINT_CEILING` for the far end and `elevate`
+// for how a side grows without the picture moving.
+//
+// Linearity is a property of the points and not of their count: a Bezier whose
+// control points all sit on a line lies on that line, so any set of interior points
+// with x equal to y is the identity ease at any degree. That is why `lin` can go on
+// meaning "no easing" after a side has grown, and why the two constants below did not
+// have to become functions of the degree.
+const EASE_OUT_LINEAR = [[1 / 3, 1 / 3]];
+const EASE_IN_LINEAR = [[2 / 3, 2 / 3]];
 
-// One coordinate of a unit cubic Bezier with its ends pinned at 0 and 1, which is
-// what lets a handle be two numbers instead of a control point.
-const bez = (a, b, u) => {
-  const v = 1 - u;
-  return 3 * v * v * u * a + 3 * v * u * u * b + u * u * u;
+/**
+ * A handle copied deeply enough that nothing shares a control point with it.
+ *
+ * A shallow `[...h]` was right while a handle was two numbers and is silently wrong
+ * now that it is a list of pairs: the copy would hold the *same* pair objects, so
+ * dragging a handle on a key would move the same handle in the undo snapshot the copy
+ * was taken for. That is the failure mode this exists to name - it is not a
+ * convenience, it is the one line standing between an edit and the history it is
+ * supposed to be undoable against.
+ */
+const copyHandle = (h) => h.map((p) => [p[0], p[1]]);
+
+// How many control points one side of a segment may hold. A ceiling rather than a
+// preference: de Casteljau is quadratic in the point count and a high-degree Bezier
+// loses its locality entirely - every control point pulls on every part of the curve,
+// so past about here another handle stops being a control anybody can aim. Four a
+// side is a degree-9 segment, which is more shape than a camera move has ever needed.
+const SEGMENT_POINT_CEILING = 4;
+
+/**
+ * One control ordinate of a segment's timing curve, by index over the whole list.
+ *
+ * The ends are pinned at (0,0) and (1,1) and are implied rather than stored, which is
+ * what lets a handle be a point instead of a point plus a promise about where the
+ * segment starts. `a` is the leading run - the `easeOut` of the key being left - and
+ * `b` is the trailing run, the `easeIn` of the key being arrived at. Reading them
+ * through here rather than concatenating them into one array is what keeps evaluation
+ * allocation-free: this runs per track per frame, and a pair of throwaway arrays per
+ * evaluation is garbage the render loop would be collecting.
+ */
+const ctrl = (a, b, k, axis) => {
+  if (k === 0) return 0;
+  if (k > a.length + b.length) return 1;
+  return k <= a.length ? a[k - 1][axis] : b[k - 1 - a.length][axis];
 };
-const bezSlope = (a, b, u) => {
-  const v = 1 - u;
-  return 3 * v * v * a + 6 * v * u * (b - a) + 3 * u * u * (1 - b);
-};
+
+// The de Casteljau working buffers, module-scoped and reused for the reason above.
+// Two of them because `bezSlopeAxis` needs its own while a value is being computed
+// beside it, and neither function calls itself or the other, so a shared buffer can
+// never be walked over mid-evaluation. They are sized to the ceiling twice over plus
+// the two implied ends, so nothing here ever grows one.
+const work = new Float64Array(2 * SEGMENT_POINT_CEILING + 2);
+const dwork = new Float64Array(2 * SEGMENT_POINT_CEILING + 2);
+
+/** One coordinate of the segment's timing curve at Bezier parameter `u`. */
+function bezAxis(a, b, axis, u) {
+  const n = 2 + a.length + b.length;
+  for (let i = 0; i < n; i++) work[i] = ctrl(a, b, i, axis);
+  for (let m = n - 1; m > 0; m--) {
+    for (let i = 0; i < m; i++) work[i] += (work[i + 1] - work[i]) * u;
+  }
+  return work[0];
+}
+
+/**
+ * The same coordinate's derivative with respect to `u`.
+ *
+ * A Bezier's derivative is a Bezier one degree down over the scaled differences of
+ * the control points, which is why this is the same loop over a different filling
+ * rather than a formula per degree - a formula per degree is what the fixed cubic
+ * had, and it is what stopped the curve being able to grow.
+ */
+function bezSlopeAxis(a, b, axis, u) {
+  const n = 1 + a.length + b.length;
+  for (let i = 0; i < n; i++) {
+    dwork[i] = n * (ctrl(a, b, i + 1, axis) - ctrl(a, b, i, axis));
+  }
+  for (let m = n - 1; m > 0; m--) {
+    for (let i = 0; i < m; i++) dwork[i] += (dwork[i + 1] - dwork[i]) * u;
+  }
+  return dwork[0];
+}
 
 /**
  * The Bezier parameter at which the curve's x reaches `x`. Newton first because it
@@ -31,14 +105,14 @@ const bezSlope = (a, b, u) => {
  * Newton stalls exactly where an ease handle is interesting: a hold at the start
  * of a segment is a near-zero derivative, and dividing by it walks off the curve.
  */
-function easeParam(ax, bx, x) {
+function easeParam(a, b, x) {
   if (x <= 0) return 0;
   if (x >= 1) return 1;
   let u = x;
   for (let i = 0; i < 8; i++) {
-    const err = bez(ax, bx, u) - x;
+    const err = bezAxis(a, b, 0, u) - x;
     if (Math.abs(err) < 1e-9) return u;
-    const d = bezSlope(ax, bx, u);
+    const d = bezSlopeAxis(a, b, 0, u);
     if (d < 1e-6) break;
     const next = u - err / d;
     if (!(next > 0 && next < 1)) break;
@@ -48,7 +122,7 @@ function easeParam(ax, bx, x) {
   let hi = 1;
   u = x;
   for (let i = 0; i < 60; i++) {
-    const err = bez(ax, bx, u) - x;
+    const err = bezAxis(a, b, 0, u) - x;
     if (Math.abs(err) < 1e-12) break;
     if (err > 0) hi = u; else lo = u;
     u = (lo + hi) / 2;
@@ -58,15 +132,46 @@ function easeParam(ax, bx, x) {
 
 /** Where in a segment's value range a fraction of the way through it lands. */
 function easeAt(a, b, x) {
-  const u = easeParam(a[0], b[0], x);
-  return bez(a[1], b[1], u);
+  return bezAxis(a, b, 1, easeParam(a, b, x));
+}
+
+/**
+ * The same segment with one more control point on `side`, and the *identical* curve.
+ *
+ * This is Bezier degree elevation, and that it is exact is the whole reason a control
+ * for adding a point can be offered at all. A press that gave you another handle and
+ * also moved the camera would be two edits wearing one button, and the one nobody
+ * asked for is the one that ruins a take - so the point appears, every other point
+ * shifts to the place that keeps the curve where it was, and not a rendered frame
+ * changes. `test/curve.test.mjs` holds it to that rather than this comment doing.
+ *
+ * The elevated interior runs one longer than it did, and which side gets the extra
+ * one is the caller's press: the leading run keeps `a.length + 1` of them when the
+ * outgoing side grew, and the trailing run takes the rest. Splitting it that way is
+ * what keeps `easeOut` and `easeIn` two different numbers rather than two halves of
+ * one, which is the distinction the whole preset table is written against.
+ *
+ * Removing a point has no such function and deliberately gets none. A degree-n curve
+ * is not generally a degree-(n-1) curve, so `-pt` drops a control point and the shape
+ * follows it - which is what removing a handle looks like everywhere else and is the
+ * honest behaviour rather than a least-squares fit nobody could predict.
+ */
+function elevate(a, b, side) {
+  const n = 1 + a.length + b.length;
+  const raised = [];
+  for (let i = 1; i <= n; i++) {
+    const w = i / (n + 1);
+    raised.push([0, 1].map((axis) => w * ctrl(a, b, i - 1, axis) + (1 - w) * ctrl(a, b, i, axis)));
+  }
+  const cut = side === 'easeOut' ? a.length + 1 : a.length;
+  return { easeOut: raised.slice(0, cut), easeIn: raised.slice(cut) };
 }
 
 /** d(value fraction)/d(time fraction), which is what a retime slope is built from. */
 function easeSlopeAt(a, b, x) {
-  const u = easeParam(a[0], b[0], x);
-  const dx = bezSlope(a[0], b[0], u);
-  if (dx > 1e-6) return bezSlope(a[1], b[1], u) / dx;
+  const u = easeParam(a, b, x);
+  const dx = bezSlopeAxis(a, b, 0, u);
+  if (dx > 1e-6) return bezSlopeAxis(a, b, 1, u) / dx;
   // A vertical tangent is a legitimate handle placement, and the analytic ratio is
   // infinite there. It used to report zero, which is the opposite of the truth and
   // the wrong kind of wrong: this is the slope step 6's audio gate reads to decide
@@ -194,8 +299,11 @@ function tangentAt(keys, i, axis) {
 export {
   EASE_OUT_LINEAR,
   EASE_IN_LINEAR,
+  SEGMENT_POINT_CEILING,
+  copyHandle,
   easeParam,
   easeAt,
+  elevate,
   keyBefore,
   HOLD_ENDS,
   EXTEND_ENDS,

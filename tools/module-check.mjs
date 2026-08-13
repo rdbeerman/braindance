@@ -327,7 +327,7 @@ const MUTATIONS = {
   // spelling nobody thought of leaving the tree with less in it than the tree has.
   'export-form-nothing-claims': {
     file: 'web/format.js',
-    edits: [['export const PROJECT_VERSION = 4;', 'export const PROJECT_VERSION = 4;\nexport const { major, minor } = { major: 1, minor: 0 };']],
+    edits: [['export const PROJECT_VERSION = 5;', 'export const PROJECT_VERSION = 5;\nexport const { major, minor } = { major: 1, minor: 0 };']],
   },
 
   // A barrel, refused rather than followed. Resolving one needs a second resolver - which
@@ -405,7 +405,7 @@ const MUTATIONS = {
   // so the entry names something and covers nothing, and one row goes red.
   'exemption-covers-nothing': {
     file: 'web/curve.js',
-    edits: [['const EASE_IN_LINEAR = [2 / 3, 2 / 3];', 'const EASE_IN_LINEAR = 2 / 3;']],
+    edits: [['const EASE_IN_LINEAR = [[2 / 3, 2 / 3]];', 'const EASE_IN_LINEAR = 2 / 3;']],
   },
 
   // Rule 4's first half, and it is the defect this tool shipped rather than a shape invented

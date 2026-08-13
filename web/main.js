@@ -27,7 +27,7 @@ import {
 // file reads them and nothing outside `writeClipRange` may write them, and an import is
 // read-only where a comment is a promise.
 import {
-  EASE_OUT_LINEAR, EASE_IN_LINEAR, easeAt, keyBefore,
+  EASE_OUT_LINEAR, EASE_IN_LINEAR, SEGMENT_POINT_CEILING, copyHandle, easeAt, elevate, keyBefore,
   HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
@@ -2800,7 +2800,7 @@ class Track {
       existing.value = value;
       return existing;
     }
-    const key = { t, value, easeOut: [...EASE_OUT_LINEAR], easeIn: [...EASE_IN_LINEAR] };
+    const key = { t, value, easeOut: copyHandle(EASE_OUT_LINEAR), easeIn: copyHandle(EASE_IN_LINEAR) };
     this.keys.push(key);
     this.sort();
     return key;
@@ -2821,7 +2821,7 @@ class Track {
 
   serialise() {
     return this.keys.map((k) => ({
-      t: k.t, value: k.value, easeOut: [...k.easeOut], easeIn: [...k.easeIn],
+      t: k.t, value: k.value, easeOut: copyHandle(k.easeOut), easeIn: copyHandle(k.easeIn),
     }));
   }
 }
@@ -3331,17 +3331,31 @@ function serialiseProject() {
  * linear when absent - a key written without them is linear, not handleless - and
  * are checked when present, because a handle outside the unit box bends a curve
  * back on itself inside a segment.
+ *
+ * **A handle is a list of control points and version 5 is what says so.** A version 4
+ * document wrote one pair per side, `[0.42, 0]`, and this reads `[[0.42, 0]]` - the
+ * same cubic with the count made explicit. The two shapes are not distinguishable by
+ * a length check, which is exactly why the conversion is a version gate upstream of
+ * here and a one-shot over files rather than a sniff at this line: `[0.42, 0]` is a
+ * two-element array and so is `[[0.2, 0], [0.4, 0]]`, so a loader that guessed would
+ * read a quintic's first control point as a whole cubic and render a move nobody
+ * authored. The count is checked against the same ceiling the editor's own control
+ * obeys, because a document is a caller like any other.
  */
 function restoreKey(owner, k) {
   if (!Number.isFinite(k?.t)) {
     throw new Error(`${owner} has a key at t=${JSON.stringify(k?.t)}: a key time has to be a finite number`);
   }
-  const handle = (side, xs, fallback) => {
-    if (xs === undefined) return [...fallback];
-    if (!Array.isArray(xs) || xs.length !== 2 || !xs.every(Number.isFinite)) {
-      throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle of ${JSON.stringify(xs)}: it takes two finite numbers`);
+  const handle = (side, points, fallback) => {
+    if (points === undefined) return copyHandle(fallback);
+    const ok = Array.isArray(points)
+      && points.length >= 1 && points.length <= SEGMENT_POINT_CEILING
+      && points.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+    if (!ok) {
+      throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle of ${JSON.stringify(points)}: it takes `
+        + `1 to ${SEGMENT_POINT_CEILING} control points, each two finite numbers`);
     }
-    return [...xs];
+    return copyHandle(points);
   };
   return {
     t: k.t,
@@ -4532,11 +4546,29 @@ const retime = {
       // hope: a cubic with ordinates 0, a, b, 1 has derivative
       // `3[a s² + 2(b−a)st + (1−b)t²]` for s = 1−u, t = u, which is non-negative
       // throughout [0,1]² - at worst zero, at a = 1, b = 0, where it is `3(1−2u)²`.
+      //
+      // **That proof is about a cubic, and the segment is only a cubic while each side
+      // holds one control point.** Look and camera tracks can grow a side past that -
+      // see `SEGMENT_POINT_CEILING` and the `+pt` control - and the argument above does
+      // not survive the elevation: a quintic with ordinates 0, 1, 0, 1, 0, 1, every one
+      // of them inside the box, oscillates. So the retime asserts the degree rather
+      // than inheriting a guarantee written for a different curve. It is an assertion
+      // and not a clamp because nothing offers the retime a second point: reaching here
+      // with one means a document or a caller got past the gates that stop it, and the
+      // honest answer to a curve this cannot vouch for is to refuse it by name.
       for (const [side, h] of [['easeOut', key.easeOut], ['easeIn', key.easeIn]]) {
-        if (!h.every((c) => c >= 0 && c <= 1)) {
+        if (h.length !== 1) {
+          throw new Error(
+            `the retime key at program ${key.t}s has a ${side} handle of ${h.length} control `
+            + 'points: the retime curve is a cubic, because the proof that a handle inside the '
+            + 'unit box cannot run source time backwards is a proof about a cubic and about '
+            + 'nothing else',
+          );
+        }
+        if (!h[0].every((c) => c >= 0 && c <= 1)) {
           throw new Error(
             `the retime key at program ${key.t}s has a ${side} handle at `
-            + `[${h.join(', ')}]: a handle outside the unit box bends the curve back on `
+            + `[${h[0].join(', ')}]: a handle outside the unit box bends the curve back on `
             + 'itself inside the segment, and source time cannot run backwards',
           );
         }
@@ -4558,7 +4590,7 @@ const retime = {
     return {
       rate: this.rate,
       keys: this.keys.map((k) => ({
-        t: k.t, value: k.value, easeOut: [...k.easeOut], easeIn: [...k.easeIn],
+        t: k.t, value: k.value, easeOut: copyHandle(k.easeOut), easeIn: copyHandle(k.easeIn),
       })),
     };
   },
@@ -6402,6 +6434,8 @@ const ui = {
   prevKey: document.getElementById('tPrevKey'),
   nextKey: document.getElementById('tNextKey'),
   deleteKey: document.getElementById('tDeleteKey'),
+  addPoint: document.getElementById('tAddPoint'),
+  dropPoint: document.getElementById('tDropPoint'),
   deliverable: document.getElementById('tDeliverable'),
   deliverableNew: document.getElementById('tDeliverableNew'),
   deliverableReadout: document.getElementById('tDeliverableReadout'),
@@ -8357,7 +8391,12 @@ function repositionLanes() {
       // A segment that went flat under the drag has no shape left to edit, so its
       // handle has to go rather than be moved - which is a rebuild, not a move.
       if (!segmentHasShape(keys, seg, row.kind)) return false;
-      const point = handlePoint(row, keys, seg, handle.__side);
+      // The point count is re-read for the reason the segment is. `+pt` and `-pt`
+      // rebuild, but a preset press changes a side's length without one, and a handle
+      // whose index no longer exists would position itself off `undefined`.
+      const points = handle.__side === 'easeOut' ? keys[seg].easeOut : keys[seg + 1].easeIn;
+      if (handle.__index >= points.length) return false;
+      const point = handlePoint(row, keys, seg, handle.__side, handle.__index);
       handle.__seg = seg;
       handle.style.left = `${view.pct(point.t)}%`;
       handle.style.top = `${point.y}%`;
@@ -8460,24 +8499,34 @@ function drawLane(lane, row) {
   if (!KINDS[row.kind].eases || !selection || keys.indexOf(selection.key) < 0) return;
   // Handles only on the selected key, and only where there is a segment for them
   // to shape. Two of them at once on every key is a lane nobody can read.
+  //
+  // One per *control point* rather than one per side, because a side is a list now.
+  // The loop walks the list rather than drawing a fixed pair for the same reason the
+  // curve evaluates a list rather than a formula: a count written down at the drawing
+  // site is a second declaration of the degree, and the two would disagree the first
+  // time `+pt` ran on a key this lane happened not to be showing.
   const i = keys.indexOf(selection.key);
   for (const side of ['easeOut', 'easeIn']) {
     const seg = side === 'easeOut' ? i : i - 1;
     if (seg < 0 || seg >= keys.length - 1) continue;
     // A flat segment gets none, for the reason `segmentHasShape` gives.
     if (!segmentHasShape(keys, seg, row.kind)) continue;
-    const handle = document.createElement('div');
-    handle.className = 'thandle';
-    const point = handlePoint(row, keys, seg, side);
-    handle.style.left = `${x(point.t)}%`;
-    handle.style.top = `${point.y}%`;
-    handle.hidden = !view.holds(point.t);
-    handle.dataset.role = 'handle';
-    handle.__key = selection.key;
-    handle.__row = row;
-    handle.__side = side;
-    handle.__seg = seg;
-    lane.appendChild(handle);
+    const points = side === 'easeOut' ? keys[seg].easeOut : keys[seg + 1].easeIn;
+    for (let index = 0; index < points.length; index++) {
+      const handle = document.createElement('div');
+      handle.className = 'thandle';
+      const point = handlePoint(row, keys, seg, side, index);
+      handle.style.left = `${x(point.t)}%`;
+      handle.style.top = `${point.y}%`;
+      handle.hidden = !view.holds(point.t);
+      handle.dataset.role = 'handle';
+      handle.__key = selection.key;
+      handle.__row = row;
+      handle.__side = side;
+      handle.__seg = seg;
+      handle.__index = index;
+      lane.appendChild(handle);
+    }
   }
 }
 
@@ -8489,11 +8538,11 @@ function keyY(row, key) {
   return Math.max(0, Math.min(100, 100 - ((v - min) / Math.max(1e-9, max - min)) * 100));
 }
 
-/** Where an ease handle sits, in program seconds and lane percentage. */
-function handlePoint(row, keys, seg, side) {
+/** Where one of an ease handle's control points sits, in program seconds and lane percentage. */
+function handlePoint(row, keys, seg, side, index) {
   const a = keys[seg];
   const b = keys[seg + 1];
-  const h = side === 'easeOut' ? a.easeOut : b.easeIn;
+  const h = (side === 'easeOut' ? a.easeOut : b.easeIn)[index];
   const { min, max } = laneRange(row.owner);
   const { lo, hi } = KINDS[row.kind].ends(keys, seg);
   const value = lo + (hi - lo) * h[1];
@@ -8501,6 +8550,26 @@ function handlePoint(row, keys, seg, side) {
     t: a.t + (b.t - a.t) * h[0],
     y: Math.max(-15, Math.min(115, 100 - ((value - min) / Math.max(1e-9, max - min)) * 100)),
   };
+}
+
+/**
+ * How far along the segment a control point may be dragged, as the two points either
+ * side of it.
+ *
+ * The timing curve has to stay single-valued in time, and the sufficient condition at
+ * any degree is that the control abscissae do not descend - so a point is held between
+ * its neighbours, with the segment's own pinned ends standing in at the two extremes.
+ * With one point a side that is exactly the `[0, 1]` clamp this replaced, which is why
+ * there is one rule here rather than a rule and an exception: the cubic was never a
+ * different case, it was the case where the neighbours happen to be the ends.
+ */
+function handleSpan(keys, seg, side, index) {
+  const out = keys[seg].easeOut;
+  const inn = keys[seg + 1].easeIn;
+  const at = (k) => (k < 0 ? 0 : (k >= out.length + inn.length ? 1
+    : (k < out.length ? out[k][0] : inn[k - out.length][0])));
+  const k = side === 'easeOut' ? index : out.length + index;
+  return { lo: at(k - 1), hi: at(k + 1) };
 }
 
 /**
@@ -9897,7 +9966,7 @@ ui.beds.addEventListener('pointerdown', (e) => {
   ui.beds.setPointerCapture(e.pointerId);
   const lane = el.closest('.tlane');
   laneDrag = {
-    el, row: el.__row, key: el.__key, side: el.__side, seg: el.__seg,
+    el, row: el.__row, key: el.__key, side: el.__side, seg: el.__seg, index: el.__index,
     role: el.dataset.role, rect: lane.getBoundingClientRect(),
     // Read before anything in the drag can change it - see `view.duration`.
     duration: timeline.duration,
@@ -9948,11 +10017,14 @@ ui.beds.addEventListener('pointermove', (e) => {
     // a fraction of whatever the lane's own axis spans between these two keys.
     const { lo, hi } = KINDS[row.kind].ends(keys, laneDrag.seg);
     const dv = hi - lo;
-    const h = laneDrag.side === 'easeOut' ? a.easeOut : b.easeIn;
+    const h = (laneDrag.side === 'easeOut' ? a.easeOut : b.easeIn)[laneDrag.index];
     // x stays inside the segment because the ease is a function of time within it:
     // a handle past either end makes the timing curve fold back on itself and the
-    // value would run backwards through part of the segment.
-    h[0] = Math.min(1, Math.max(0, (laneProgramAt(e.clientX) - a.t) / dt));
+    // value would run backwards through part of the segment. With more than one point
+    // a side, "either end" means the neighbouring control points rather than the
+    // segment's own - see `handleSpan`, where the two readings are one rule.
+    const span = handleSpan(keys, laneDrag.seg, laneDrag.side, laneDrag.index);
+    h[0] = Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt));
     // `dv` is non-zero by construction - a handle only exists where
     // `segmentHasShape` said there was a shape, and a handle drag moves no key
     // value - so this is a backstop against writing NaN into the document rather
@@ -10083,14 +10155,34 @@ function deleteSelectedKey() {
  * incoming side and writes `easeIn`, "ease out" is about the outgoing side and writes
  * `easeOut`, and they are not two halves of one number.
  *
- * These five are what the camera track is usually eased with, and the pair that
- * matters there is `smooth` on the first key and on the last: the spline holds the end
- * pose beyond the outer keys while its tangent there is half the first segment's
- * average velocity, so an unshaped move departs and arrives with a step in speed.
- * Measured on three keys dollying 4m over 4s - 0 to 0.6262 m/s in one frame at the
- * start, 0.3125 to 0 at the end, against 0.0007 and 0.0005 once eased. Pressing it on
- * an *interior* key is a different edit and rarely the wanted one, because a key eased
- * on both sides brings the camera to a near halt as it passes.
+ * These are what the camera track is usually eased with, and what matters there is the
+ * *track's* two outer keys: the spline holds the end pose beyond them while its tangent
+ * there is half the first segment's average velocity, so an unshaped move departs and
+ * arrives with a step in speed. Measured on three keys dollying 4m over 4s - 0 to
+ * 0.6262 m/s in one frame at the start, 0.3125 to 0 at the end, against 0.0007 and
+ * 0.0005 once eased.
+ *
+ * **`ends` is that edit as one press, and it exists because the two-press version was a
+ * trap rather than a chore.** Shaping a move's departure and arrival means selecting the
+ * first key, pressing, finding the last key, pressing again - and the obvious wrong move
+ * in between, pressing on an interior key, brings the camera to a near halt as it passes
+ * that key. `docs/reference.md` documented all of that and admitted "nothing on screen
+ * announces it", which is a design describing a defect rather than closing one. So
+ * `ends` reaches for the first key's outgoing side and the last key's incoming side
+ * whichever key is selected, and leaves everything between them alone. `hold` already
+ * reached past the selection through `nextIn`, so a preset whose reach is named in this
+ * table rather than assumed at the call site is the shape this was already growing.
+ *
+ * **`glide` is the same shape one degree up, and the degree is the whole point.** A
+ * cubic pinned at both ends can bring the *rate* to zero at a key but never the
+ * acceleration - `smooth` steps from 0 to 3.79 in normalised units at the boundary -
+ * because the second derivative there is fixed by three control points and two of them
+ * are the pinned end. Two points a side makes it a quintic, and with ordinates 0,0,1,1
+ * that quintic is exactly `6u^5 - 15u^4 + 10u^3`, whose first and second derivatives
+ * both vanish at each end. It costs 1.875x the average rate at the midpoint against the
+ * cubic's 1.724x, which is the entire price. `test/curve.test.mjs` holds it to being
+ * that polynomial rather than something shaped like it, because "nearly the smoothstep"
+ * is a claim no rendered frame could ever distinguish from the real one.
  *
  * `hold` is the one that reaches past the selected key, and it has to: holding a
  * value across a segment means flattening *both* of that segment's control points,
@@ -10101,10 +10193,12 @@ function deleteSelectedKey() {
  */
 const EASE_PRESETS = {
   linear: { out: EASE_OUT_LINEAR, in: EASE_IN_LINEAR },
-  in: { in: [0.58, 1] },
-  out: { out: [0.42, 0] },
-  smooth: { out: [0.42, 0], in: [0.58, 1] },
-  hold: { out: [1, 0], nextIn: [1, 0] },
+  in: { in: [[0.58, 1]] },
+  out: { out: [[0.42, 0]] },
+  smooth: { out: [[0.42, 0]], in: [[0.58, 1]] },
+  glide: { out: [[0.2, 0], [0.4, 0]], in: [[0.6, 1], [0.8, 1]] },
+  ends: { firstOut: [[0.2, 0], [0.4, 0]], lastIn: [[0.6, 1], [0.8, 1]] },
+  hold: { out: [[1, 0]], nextIn: [[1, 0]] },
 };
 
 /**
@@ -10122,17 +10216,32 @@ function selectionEaseState() {
   if (!row || !KINDS[row.kind].eases) return null;
   const before = i > 0 && segmentHasShape(keys, i - 1, row.kind);
   const after = i < keys.length - 1 && segmentHasShape(keys, i, row.kind);
-  return before || after ? { keys, i } : null;
+  // The kind travels with the answer rather than being looked up again by the caller.
+  // `applyEasePreset` needs it for the track-end reaches, and a second walk of
+  // `laneRows` to re-find the row this one already found is the duplicate lookup that
+  // drifts the first time either site learns a condition the other does not.
+  return before || after ? { keys, i, kind: row.kind } : null;
 }
 
 function applyEasePreset(name) {
   const state = selectionEaseState();
   const spec = EASE_PRESETS[name];
   if (!state || !spec) return false;
-  const { keys, i } = state;
-  if (spec.out) keys[i].easeOut = [...spec.out];
-  if (spec.in) keys[i].easeIn = [...spec.in];
-  if (spec.nextIn && i < keys.length - 1) keys[i + 1].easeIn = [...spec.nextIn];
+  const { keys, i, kind } = state;
+  if (spec.out) keys[i].easeOut = copyHandle(spec.out);
+  if (spec.in) keys[i].easeIn = copyHandle(spec.in);
+  if (spec.nextIn && i < keys.length - 1) keys[i + 1].easeIn = copyHandle(spec.nextIn);
+  // The two reaches that are about the track rather than about the selected key. Each
+  // is guarded by its own segment having a shape, for the same reason a flat segment
+  // gets no handle drawn: writing a number onto a segment whose ends are equal is
+  // offering a control that changes nothing, and here it would also be spending the
+  // undo step that press costs on an edit with no picture behind it.
+  if (spec.firstOut && segmentHasShape(keys, 0, kind)) {
+    keys[0].easeOut = copyHandle(spec.firstOut);
+  }
+  if (spec.lastIn && segmentHasShape(keys, keys.length - 2, kind)) {
+    keys[keys.length - 1].easeIn = copyHandle(spec.lastIn);
+  }
   // Cannot fire on the five above - every value is inside the unit box and none of
   // them moves a key value, which is all this refuses. Called anyway because it is
   // the guard that decides what a legal retime curve is, and a sixth preset added
@@ -10151,16 +10260,114 @@ for (const btn of ui.ease.querySelectorAll('button[data-ease]')) {
   });
 }
 
+/**
+ * Whether the selected key's handles may grow or shrink, and by how many sides.
+ *
+ * The retime is excluded, and the reason is `assertMonotonic`'s rather than a
+ * preference: the proof that a handle inside the unit box cannot run source time
+ * backwards is a proof about a cubic, and a retime segment stops being a cubic the
+ * moment a side grows. Excluding it here is what makes that assertion an assertion
+ * about documents from elsewhere rather than something this editor can walk into.
+ *
+ * A side counts only where it has a segment to shape, so the first key offers its
+ * outgoing side alone and the last its incoming - the same rule the handles are drawn
+ * under, because a control that grew a list the lane would not draw is a control whose
+ * effect is invisible until somebody selects a different key.
+ *
+ * The state is handed in rather than looked up, because `paintEase` asks this twice per
+ * repaint and `selectionEaseState` walks `laneRows()` to find the kind. Four walks a
+ * frame to paint two buttons is the panel cost `panel-rederives-per-write` exists about,
+ * arriving through a control row instead of through the panel.
+ */
+function pointSides(delta, state) {
+  if (!state || selection.owner === 'retime') return [];
+  const { keys, i, kind } = state;
+  const sides = [];
+  if (i < keys.length - 1 && segmentHasShape(keys, i, kind)) sides.push('easeOut');
+  if (i > 0 && segmentHasShape(keys, i - 1, kind)) sides.push('easeIn');
+  // Only the sides the change is actually available on. Growth stops at the ceiling and
+  // shrink at one point, and a press that could move one side but not the other moves
+  // the one it can rather than refusing both - the alternative is a button that goes
+  // dead because the *other* side of a key you were not thinking about is full.
+  return sides.filter((side) => {
+    // The selected key's own handle either way - `easeOut` shapes the segment after it
+    // and `easeIn` the one before, but both lists hang off this key.
+    const n = keys[i][side].length;
+    return delta > 0 ? n < SEGMENT_POINT_CEILING : n > 1;
+  });
+}
+
+/**
+ * Adds or removes a control point on every shapeable side of the selected key.
+ *
+ * Growth is `elevate`, which is exact: the curve after the press is the curve before
+ * it, so this hands over another handle and changes no rendered frame. That is what
+ * lets it be an ordinary undoable edit rather than something that needs a warning -
+ * see `elevate` in `web/curve.js`, and `test/curve.test.mjs`, which holds it to being
+ * exact rather than nearly.
+ *
+ * Shrink drops the control point nearest the far end of the run, which is the one whose
+ * removal disturbs the segment's own end least: the points closest to a key are the ones
+ * holding the departure and arrival rates that the presets exist to set.
+ */
+function changePointCount(delta) {
+  const state = selectionEaseState();
+  const sides = pointSides(delta, state);
+  if (sides.length === 0) return false;
+  const { keys, i } = state;
+  for (const side of sides) {
+    const seg = side === 'easeOut' ? i : i - 1;
+    const a = keys[seg];
+    const b = keys[seg + 1];
+    if (delta > 0) {
+      const up = elevate(a.easeOut, b.easeIn, side);
+      a.easeOut = up.easeOut;
+      b.easeIn = up.easeIn;
+    } else if (side === 'easeOut') {
+      a.easeOut = a.easeOut.slice(0, -1);
+    } else {
+      b.easeIn = b.easeIn.slice(1);
+    }
+  }
+  lanesChanged();
+  requestRepaint();
+  history.commit();
+  return true;
+}
+
+for (const [button, delta] of [[ui.addPoint, 1], [ui.dropPoint, -1]]) {
+  button.addEventListener('click', () => {
+    const owner = selection?.owner ?? '';
+    if (!changePointCount(delta)) return;
+    // Re-read after the edit rather than before it, because the counts in the readout
+    // are the ones the press produced.
+    const { keys, i } = selectionEaseState();
+    say(`${delta > 0 ? 'added' : 'removed'} an ease control point on ${owner}: `
+      + `${keys[i].easeOut.length} out, ${keys[i].easeIn.length} in`);
+  });
+}
+
 // Only meaningful while a key is selected, so the row goes quiet rather than staying
 // live and writing into nothing. The two halves have different conditions on purpose:
 // anything selected can be deleted, and only a key with a shapeable neighbour can be
 // eased - a lone key, or one between two flat segments, has nothing for a curve to say.
 function paintEase() {
   const selected = Boolean(selection && keysOf(selection.owner).includes(selection.key));
-  const shapeable = Boolean(selectionEaseState());
+  // Once per paint, and read four times below. This runs on every repaint.
+  const easeState = selectionEaseState();
+  const shapeable = Boolean(easeState);
   ui.ease.classList.toggle('off', !selected);
   for (const btn of ui.ease.querySelectorAll('button[data-ease]')) btn.disabled = !shapeable;
   ui.deleteKey.disabled = !selected;
+  // The point controls have a condition of their own and it is narrower than
+  // `shapeable` in two directions at once: the retime is refused whatever is selected,
+  // and a key already at the ceiling or already down to a single point offers nothing
+  // in that direction. Asking `pointSides` rather than restating either rule, because a
+  // button whose enabled state is computed from a second reading of the condition it
+  // fires under is the pair that drifts - and the drift shows up as a live control that
+  // does nothing, which is the exact defect this whole row is being extended to close.
+  ui.addPoint.disabled = pointSides(1, easeState).length === 0;
+  ui.dropPoint.disabled = pointSides(-1, easeState).length === 0;
   // A third condition, and deliberately not `selected`: walking to the next key is
   // meaningful the moment the track has one to walk to, and it is how you *reach* a key
   // in order to select it. Tying it to a selection would make the control that finds a
@@ -10261,12 +10468,12 @@ ui.rateKey?.addEventListener('click', () => {
     if (retime.keys.length === 0 && t > 0) {
       retime.keys.push({
         t: 0, value: retime.sourceSecAt(0),
-        easeOut: [...EASE_OUT_LINEAR], easeIn: [...EASE_IN_LINEAR],
+        easeOut: copyHandle(EASE_OUT_LINEAR), easeIn: copyHandle(EASE_IN_LINEAR),
       });
     }
     retime.keys.push({
       t, value: retime.sourceSecAt(t),
-      easeOut: [...EASE_OUT_LINEAR], easeIn: [...EASE_IN_LINEAR],
+      easeOut: copyHandle(EASE_OUT_LINEAR), easeIn: copyHandle(EASE_IN_LINEAR),
     });
     retime.keys.sort((x, y) => x.t - y.t);
   }
@@ -13574,8 +13781,8 @@ globalThis.__kinect = {
         track.keys = keys.map((k) => ({
           t: k.t,
           value: k.value,
-          easeOut: [...(k.easeOut ?? EASE_OUT_LINEAR)],
-          easeIn: [...(k.easeIn ?? EASE_IN_LINEAR)],
+          easeOut: copyHandle(k.easeOut ?? EASE_OUT_LINEAR),
+          easeIn: copyHandle(k.easeIn ?? EASE_IN_LINEAR),
         }));
         track.sort();
       }
@@ -13590,8 +13797,8 @@ globalThis.__kinect = {
       const built = keys.map((k) => ({
         t: k.t,
         value: k.value,
-        easeOut: [...(k.easeOut ?? EASE_OUT_LINEAR)],
-        easeIn: [...(k.easeIn ?? EASE_IN_LINEAR)],
+        easeOut: copyHandle(k.easeOut ?? EASE_OUT_LINEAR),
+        easeIn: copyHandle(k.easeIn ?? EASE_IN_LINEAR),
       }));
       retime.assertMonotonic(built);
       retime.keys = built;
@@ -13684,7 +13891,7 @@ globalThis.__kinect = {
     },
     easeOf: (owner, i) => {
       const k = keysOf(owner)[i];
-      return k ? { easeOut: [...k.easeOut], easeIn: [...k.easeIn] } : null;
+      return k ? { easeOut: copyHandle(k.easeOut), easeIn: copyHandle(k.easeIn) } : null;
     },
     easePresets: () => Object.keys(EASE_PRESETS),
     // Read off `KINDS` rather than written down again, so a proof tool asks which

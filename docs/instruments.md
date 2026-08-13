@@ -3059,3 +3059,35 @@ it fires exactly one assertion and that row is green at baseline. Every mutation
 the section got sharper: `rgb-contributes-no-alpha` now shows the other four readings visibly
 passing, and `mix-ignores-normalisation` — whose whole point is that 1b keeps passing while 8b
 fails — can finally demonstrate it.
+
+## An assertion that reads back what the edit was allowed to move
+
+`+pt` on a key is Bezier degree elevation, and the property worth having is that the picture
+does not change: the extra control point appears, every other one shifts to the place that
+keeps the curve where it was, and no rendered frame moves. That is what lets the control be an
+ordinary undoable press rather than something a take has to be judged after.
+
+**The obvious row for that claim is the wrong row, and it is wrong in the dangerous
+direction.** Reading the handles back and requiring them to be unchanged fails against a
+correct build — every control point is *supposed* to move — and passes against the one
+implementation this needs to catch: an `elevate` that appends a point and leaves the others
+alone keeps the earlier handles exactly where they were and bends the curve. So the row that
+looks like the tightest statement is satisfied by the defect and reddened by the fix.
+
+The row that works samples the *rendered* curve through `valueAt` at seven points inside the
+segment and requires the two sets to agree. In the browser it agrees to `0.000e+0`, and
+`--mutate elevation-moves-the-curve` — which appends a control point at (0.5, 0.5) instead of
+elevating — moves it by `3.590e-2`. The lesson generalises past this control: when an edit is
+*defined* as moving its own representation while preserving what the representation means, the
+assertion belongs downstream of the meaning. Asserting on the representation asks whether the
+edit happened, which is the question the count already answers.
+
+**The same shape one layer up.** `editor-check`'s preset sweep compared `got.easeOut[0]`
+against `want.out[0]`, which read the first control point of each. That was a complete
+comparison while a handle *was* one control point and became a prefix comparison the moment it
+became a list — so `glide` writing only its first point would have passed, leaving a cubic
+wearing a quintic's first handle. `--mutate glide-is-a-cubic` is the control, and it is worth
+keeping because everything else about that mutation stays green: the ordinates are still 0 and
+1, so the camera's *rate* still reaches zero at the key and every velocity assertion in the
+suite passes. What goes is only the degree, and with it the acceleration claim that was the
+whole reason for the second point.

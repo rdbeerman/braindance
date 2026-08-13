@@ -124,8 +124,7 @@ const MUTATIONS = {
   // lerp whatever its handles say.
   'ease-ignored': { file: 'web/curve.js', edits: [[
     `function easeAt(a, b, x) {
-  const u = easeParam(a[0], b[0], x);
-  return bez(a[1], b[1], u);
+  return bezAxis(a, b, 1, easeParam(a, b, x));
 }`,
     'function easeAt(a, b, x) { return x; }',
   ]] },
@@ -299,7 +298,7 @@ const MUTATIONS = {
   // mutation rather than part of `retime-unclamped`, because they are two claims:
   // one is about where a key may sit, the other about where its handles may.
   'retime-handle-unchecked': { file: 'web/main.js', edits: [[
-    '        if (!h.every((c) => c >= 0 && c <= 1)) {',
+    '        if (!h[0].every((c) => c >= 0 && c <= 1)) {',
     '        if (false) {',
   ]] },
   // The animation loop stops catching, so the pair source's refusal escapes it and
@@ -444,23 +443,43 @@ function src(value) {
 // found by plain bisection over sixty halvings rather than by Newton, and the
 // spline is anchored against the textbook uniform formula below.
 
-const LIN_OUT = [1 / 3, 1 / 3];
-const LIN_IN = [2 / 3, 2 / 3];
+const LIN_OUT = [[1 / 3, 1 / 3]];
+const LIN_IN = [[2 / 3, 2 / 3]];
 
-const bez1 = (a, b, u) => {
-  const v = 1 - u;
-  return 3 * v * v * u * a + 3 * v * u * u * b + u * u * u;
+/**
+ * One coordinate of a segment's timing curve, summed as Bernstein terms.
+ *
+ * **The page evaluates the same curve by de Casteljau, and this does not, on purpose.**
+ * A handle is a list of control points now rather than a fixed pair, so the closed-form
+ * cubic this replaced could not answer the question any more - and the obvious
+ * replacement, the same recurrence the page runs, is the one formulation that would
+ * agree with it by construction whatever either of them got wrong. The binomial row is
+ * built as it goes by Pascal's rule, so nothing here shares a line of reasoning with
+ * `bezAxis` beyond the definition of a Bezier itself.
+ *
+ * `mid` is the interior ordinates in order; the ends are pinned at 0 and 1.
+ */
+const bezN = (mid, u) => {
+  const c = [0, ...mid, 1];
+  const n = c.length - 1;
+  let binom = 1;
+  let sum = 0;
+  for (let k = 0; k <= n; k++) {
+    sum += binom * c[k] * ((1 - u) ** (n - k)) * (u ** k);
+    binom = (binom * (n - k)) / (k + 1);
+  }
+  return sum;
 };
 
-function paramAt(ax, bx, x) {
+function paramAt(mid, x) {
   if (x <= 0) return 0;
   if (x >= 1) return 1;
   let lo = 0;
   let hi = 1;
   for (let i = 0; i < 60; i++) {
-    const mid = (lo + hi) / 2;
-    if (bez1(ax, bx, mid) < x) lo = mid;
-    else hi = mid;
+    const at = (lo + hi) / 2;
+    if (bezN(mid, at) < x) lo = at;
+    else hi = at;
   }
   return (lo + hi) / 2;
 }
@@ -477,8 +496,11 @@ const easeIn = (key) => key.easeIn ?? LIN_IN;
  * is written here rather than imported from `web/curve.js` because an oracle that
  * calls the thing under test agrees with it by construction and proves nothing.
  */
-const easedFraction = (a, b, x) => bez1(easeOf(a)[1], easeIn(b)[1],
-  paramAt(easeOf(a)[0], easeIn(b)[0], x));
+const ordinates = (a, b, axis) => [
+  ...easeOf(a).map((point) => point[axis]),
+  ...easeIn(b).map((point) => point[axis]),
+];
+const easedFraction = (a, b, x) => bezN(ordinates(a, b, 1), paramAt(ordinates(a, b, 0), x));
 
 function before(keys, t) {
   let i = -1;
@@ -510,10 +532,7 @@ function endSlope(keys, i, side) {
   const b = keys[i + 1];
   const h = 1e-7;
   const x = side === 0 ? h : 1 - h;
-  const at = (xx) => {
-    const u = paramAt(easeOf(a)[0], easeIn(b)[0], xx);
-    return a.value + (b.value - a.value) * bez1(easeOf(a)[1], easeIn(b)[1], u);
-  };
+  const at = (xx) => a.value + (b.value - a.value) * easedFraction(a, b, xx);
   return (at(Math.min(1, x + h)) - at(Math.max(0, x - h))) / ((b.t - a.t) * (Math.min(1, x + h) - Math.max(0, x - h)));
 }
 
@@ -720,8 +739,8 @@ const HOLD = {
 const EASED_RAMP = {
   rate: 1,
   keys: [
-    { t: 0, value: 0, easeOut: [0.85, 0.05], easeIn: LIN_IN },
-    { t: 10, value: 20, easeOut: LIN_OUT, easeIn: [0.15, 0.95] },
+    { t: 0, value: 0, easeOut: [[0.85, 0.05]], easeIn: LIN_IN },
+    { t: 10, value: 20, easeOut: LIN_OUT, easeIn: [[0.15, 0.95]] },
   ],
 };
 const FLAT = { rate: 1, keys: [] };
@@ -1045,9 +1064,9 @@ console.log('\n== 1. scalar with ease handles, step, and pose ==');
 // A check run on default handles would agree with a lerp everywhere and prove
 // nothing about handles at all.
 const EASED = [
-  { t: 0, value: 0, easeOut: [0.75, 0], easeIn: LIN_IN },
-  { t: 4, value: 5, easeOut: [0.2, 0.9], easeIn: [0.25, 1] },
-  { t: 9, value: 1, easeOut: LIN_OUT, easeIn: [0.6, 0.05] },
+  { t: 0, value: 0, easeOut: [[0.75, 0]], easeIn: LIN_IN },
+  { t: 4, value: 5, easeOut: [[0.2, 0.9]], easeIn: [[0.25, 1]] },
+  { t: 9, value: 1, easeOut: LIN_OUT, easeIn: [[0.6, 0.05]] },
 ];
 const STEPS = [
   { t: 0, value: false },
@@ -1232,8 +1251,8 @@ console.log('\n== 1c. the camera\'s handles shape when it arrives, not where it 
   // `docs/reference.md` describes, rather than a shape invented for the check. The
   // interior keys stay linear on purpose: easing every key would stop the camera dead
   // at each one, which is a different edit and not the one anybody wants.
-  const SMOOTH_OUT = [0.42, 0];
-  const SMOOTH_IN = [0.58, 1];
+  const SMOOTH_OUT = [[0.42, 0]];
+  const SMOOTH_IN = [[0.58, 1]];
   const RAMPED = PATH.map((k, i) => ({
     ...k,
     easeOut: i === 0 ? [...SMOOTH_OUT] : [...LIN_OUT],
@@ -1492,8 +1511,8 @@ await applyLook(BLACKWALL_LOOK);
 // interesting case - a seek has to compute it at the target rather than once.
 const LOOK_TRACKS = {
   wake: [
-    { t: 0, value: 0, easeOut: [0.6, 0], easeIn: LIN_IN },
-    { t: 8, value: 900, easeOut: LIN_OUT, easeIn: [0.4, 1] },
+    { t: 0, value: 0, easeOut: [[0.6, 0]], easeIn: LIN_IN },
+    { t: 8, value: 900, easeOut: LIN_OUT, easeIn: [[0.4, 1]] },
     { t: 16, value: 200, easeOut: LIN_OUT, easeIn: LIN_IN },
   ],
   bloom: [
@@ -2157,8 +2176,8 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
   // inside single capture brackets, so `mixT` walks backwards within a pair and the
   // reverse renders with nothing refusing it at all.
   const HANDLE_DESCENT = { rate: 1, keys: [
-    { t: 0, value: 0, easeOut: [0.3, 1.6], easeIn: [2 / 3, 2 / 3] },
-    { t: 8, value: 6, easeOut: [1 / 3, 1 / 3], easeIn: [2 / 3, 2 / 3] },
+    { t: 0, value: 0, easeOut: [[0.3, 1.6]], easeIn: [[2 / 3, 2 / 3]] },
+    { t: 8, value: 6, easeOut: [[1 / 3, 1 / 3]], easeIn: [[2 / 3, 2 / 3]] },
   ] };
   const handleRefused = await page.evaluate(`(() => {
     try {
@@ -2199,8 +2218,8 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
   const easedOk = await page.evaluate(`(() => {
     try {
       globalThis.__kinect.keyframes.setRetime({ rate: 1, keys: [
-        { t: 0, value: 0, easeOut: [0.3, 0.95], easeIn: [2 / 3, 2 / 3] },
-        { t: 8, value: 6, easeOut: [1 / 3, 1 / 3], easeIn: [2 / 3, 2 / 3] } ] });
+        { t: 0, value: 0, easeOut: [[0.3, 0.95]], easeIn: [[2 / 3, 2 / 3]] },
+        { t: 8, value: 6, easeOut: [[1 / 3, 1 / 3]], easeIn: [[2 / 3, 2 / 3]] } ] });
       return true;
     } catch { return false; }
   })()`);
@@ -2253,8 +2272,8 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
     // ask for frames nobody has fetched, and playback would sit waiting for them
     // instead of trying to walk backwards - which is a stall, not this claim.
     k.timeline.retime.keys = [
-      { t: 0, value: 8, easeOut: [1 / 3, 1 / 3], easeIn: [2 / 3, 2 / 3] },
-      { t: 12, value: 2, easeOut: [1 / 3, 1 / 3], easeIn: [2 / 3, 2 / 3] },
+      { t: 0, value: 8, easeOut: [[1 / 3, 1 / 3]], easeIn: [[2 / 3, 2 / 3]] },
+      { t: 12, value: 2, easeOut: [[1 / 3, 1 / 3]], easeIn: [[2 / 3, 2 / 3]] },
     ];
     const before = k.timeline.counters.renders;
     await t.play();
@@ -2808,8 +2827,8 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   );
   const moved = worst(curveAfter.map((v, i) => Math.abs(v - curveBefore[i])));
   console.log(`  handle dragged 30px left and 8px down: `
-    + `${JSON.parse(handleBefore).easeOut.map((v) => v.toFixed(3))} -> `
-    + `${JSON.parse(handleAfter).easeOut.map((v) => v.toFixed(3))}`);
+    + `${JSON.stringify(JSON.parse(handleBefore).easeOut)} -> `
+    + `${JSON.stringify(JSON.parse(handleAfter).easeOut)}`);
   // Sampled inside the segment the dragged handle actually shapes. The first handle
   // drawn belongs to the selected key's *outgoing* side, so it bends the segment
   // after it and not the one before - sampling the wrong side reads zero change and

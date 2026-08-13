@@ -20,8 +20,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  EASE_OUT_LINEAR, EASE_IN_LINEAR, easeAt, easeParam, keyBefore,
-  HOLD_ENDS, EXTEND_ENDS, scalarAt, scalarSlopeAt, stepAt, hermite, tangentAt,
+  EASE_OUT_LINEAR, EASE_IN_LINEAR, SEGMENT_POINT_CEILING, easeAt, easeParam, elevate,
+  keyBefore, HOLD_ENDS, EXTEND_ENDS, scalarAt, scalarSlopeAt, stepAt, hermite, tangentAt,
 } from '../web/curve.js';
 
 /** A key as the tracks build one: a time, a value, and the two handles around it. */
@@ -44,8 +44,102 @@ test('a linear ease is the identity, which is what makes it the default handle',
 });
 
 test('easeParam pins both ends exactly, so a segment starts and finishes on its keys', () => {
-  assert.ok(near(easeParam(1 / 3, 2 / 3, 0), 0, 1e-6));
-  assert.ok(near(easeParam(1 / 3, 2 / 3, 1), 1, 1e-6));
+  assert.ok(near(easeParam(EASE_OUT_LINEAR, EASE_IN_LINEAR, 0), 0, 1e-6));
+  assert.ok(near(easeParam(EASE_OUT_LINEAR, EASE_IN_LINEAR, 1), 1, 1e-6));
+});
+
+// ------------------------------------------------- the timing curve at any degree
+//
+// A side holding a list of control points rather than one is what lets a segment be a
+// cubic or a quintic without a second curve family beside this one. The four tests
+// below are the claims that generalisation rests on, and each of them is a claim a
+// rendered frame cannot make: they are about curves being *equal*, which a picture
+// comparison can only ever say two things look alike about.
+
+test('linear is the identity at every degree, so `lin` still means unshaped', () => {
+  // Any control points on the diagonal, however many, lie on the diagonal - which is
+  // why the linear constants did not have to become functions of the point count.
+  const diagonals = [
+    [[[1 / 3, 1 / 3]], [[2 / 3, 2 / 3]]],
+    [[[0.2, 0.2], [0.4, 0.4]], [[0.6, 0.6], [0.8, 0.8]]],
+    [[[0.1, 0.1]], [[0.5, 0.5], [0.7, 0.7], [0.9, 0.9]]],
+  ];
+  for (const [out, inn] of diagonals) {
+    let worst = 0;
+    for (let i = 0; i <= 1000; i++) worst = Math.max(worst, Math.abs(easeAt(out, inn, i / 1000) - i / 1000));
+    assert.ok(worst < 1e-9, `out ${JSON.stringify(out)} in ${JSON.stringify(inn)} drifted ${worst}`);
+  }
+});
+
+test('the quintic glide IS 6u^5-15u^4+10u^3, which is what makes it C2 rather than nearly', () => {
+  // The claim the `glide` preset rests on. A cubic with its ends pinned can bring the
+  // rate to zero at a key but never the acceleration; this shape can, and it can
+  // because it is exactly the quintic smoothstep rather than something shaped like it.
+  const out = [[0.2, 0], [0.4, 0]];
+  const inn = [[0.6, 1], [0.8, 1]];
+  let worst = 0;
+  for (let i = 0; i <= 10000; i++) {
+    const u = i / 10000;
+    worst = Math.max(worst, Math.abs(easeAt(out, inn, u) - u * u * u * (10 - 15 * u + 6 * u * u)));
+  }
+  assert.ok(worst < 1e-12, `glide departs the quintic smoothstep by ${worst}`);
+});
+
+test('the glide brings acceleration to zero at both ends and the cubic smooth does not', () => {
+  // Measured the way a camera feels it: the second difference of the eased fraction
+  // just inside each end. The cubic's is finite and non-zero there - that is the step
+  // in acceleration a `smooth` key still departs with - and the quintic's is not.
+  const accel = (out, inn, x) => {
+    const h = 1e-3;
+    return (easeAt(out, inn, x + h) - 2 * easeAt(out, inn, x) + easeAt(out, inn, x - h)) / (h * h);
+  };
+  const smoothStart = Math.abs(accel([[0.42, 0]], [[0.58, 1]], 2e-3));
+  const glideStart = Math.abs(accel([[0.2, 0], [0.4, 0]], [[0.6, 1], [0.8, 1]], 2e-3));
+  assert.ok(smoothStart > 1, `the cubic smooth should still step in acceleration, got ${smoothStart}`);
+  assert.ok(glideStart < smoothStart / 10,
+    `the glide should arrive far flatter: cubic ${smoothStart}, quintic ${glideStart}`);
+});
+
+test('elevate adds a control point without moving the curve, which is why +pt is safe', () => {
+  // The property the whole `+pt` control rests on. A press that handed you another
+  // handle and also moved the camera would be two edits wearing one button.
+  const shapes = [
+    [EASE_OUT_LINEAR, EASE_IN_LINEAR],
+    [[[0.42, 0]], [[0.58, 1]]],
+    [[[0.2, 0], [0.4, 0]], [[0.6, 1], [0.8, 1]]],
+    [[[0.9, 0.15]], [[0.1, 0.85]]],
+  ];
+  for (const [out, inn] of shapes) {
+    for (const side of ['easeOut', 'easeIn']) {
+      const up = elevate(out, inn, side);
+      assert.equal(up.easeOut.length + up.easeIn.length, out.length + inn.length + 1);
+      assert.equal(up[side].length, (side === 'easeOut' ? out : inn).length + 1,
+        'the side that was pressed is the side that grew');
+      let worst = 0;
+      for (let i = 0; i <= 2000; i++) {
+        const x = i / 2000;
+        worst = Math.max(worst, Math.abs(easeAt(up.easeOut, up.easeIn, x) - easeAt(out, inn, x)));
+      }
+      assert.ok(worst < 1e-9,
+        `elevating ${side} of ${JSON.stringify([out, inn])} moved the curve by ${worst}`);
+    }
+  }
+});
+
+test('elevating repeatedly to the ceiling still does not move the curve', () => {
+  // The ceiling is where the numerics would show up if they were going to, so the
+  // walk up to it is the test rather than one step being.
+  let out = [[0.42, 0]];
+  let inn = [[0.58, 1]];
+  const sample = (o, i2) => Array.from({ length: 501 }, (_, i) => easeAt(o, i2, i / 500));
+  const before = sample(out, inn);
+  while (out.length < SEGMENT_POINT_CEILING) {
+    ({ easeOut: out, easeIn: inn } = elevate(out, inn, 'easeOut'));
+  }
+  const after = sample(out, inn);
+  const worst = Math.max(...before.map((v, i) => Math.abs(v - after[i])));
+  assert.equal(out.length, SEGMENT_POINT_CEILING);
+  assert.ok(worst < 1e-9, `walking to the ceiling moved the curve by ${worst}`);
 });
 
 test('scalarAt returns a key\'s own value at that key\'s time', () => {
@@ -165,7 +259,7 @@ test('an eased u traverses the same points, so shaping the timing cannot move th
   // each point up on the unmapped one is the direct way to say that.
   const keys = [pose(0, 0), pose(1, 3), pose(2, 4)];
   const raw = (u) => hermite(0, 3, tangentAt(keys, 0, 0), tangentAt(keys, 1, 0), 1, u);
-  const eased = (u) => raw(easeAt([0.42, 0], [0.58, 1], u));
+  const eased = (u) => raw(easeAt([[0.42, 0]], [[0.58, 1]], u));
   for (let i = 0; i <= 100; i++) {
     const u = i / 100;
     // Every eased sample is `raw` at some parameter in the unit range, and the ease

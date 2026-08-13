@@ -1,5 +1,21 @@
 #!/usr/bin/env node
-// Version 3 documents, rewritten as version 4 documents on disk.
+// Version 3 and version 4 documents, rewritten as version 5 documents on disk.
+//
+// **Two migrations, chained rather than combined.** A version 3 document takes both
+// steps and a version 4 document takes only the second, which is why the band this
+// accepts is written as the versions themselves in `versionRefusal` rather than as
+// `PROJECT_VERSION - 1`: that spelling was true while there was one step and quietly
+// stopped being when there were two. A combined 3-to-5 rewrite is the third path that
+// would have to stay in step with the two it replaces, which is the duplication this
+// file's own argument below refuses.
+//
+// Version 5 makes an ease handle a list of control points - `[0.42, 0]` becomes
+// `[[0.42, 0]]`, the identical cubic with its degree written down - so that a segment
+// can also be a quintic, which is the one curve family whose acceleration reaches zero
+// at a key rather than only its rate. The step changes no rendered frame. It cannot be
+// a sniff inside the loader for a reason stronger than the house rule: `[0.42, 0]` is a
+// two-element array and so is `[[0.2, 0], [0.4, 0]]`, so a build that guessed would read
+// a quintic's first control point as an entire cubic.
 //
 // Version 4 dissolved the shading mode into five reading weights. A version 3 preset
 // carries `mode: N` beside its values and a version 3 project carries `look.mode`;
@@ -38,7 +54,7 @@ const dirs = argv.filter((a) => !a.startsWith('--'));
 
 if (!dirs.length) {
   console.error('usage: convert-presets.mjs [--dry-run] <dir> [dir...]');
-  console.error('  rewrites version 3 presets and projects as version 4 in place,');
+  console.error('  rewrites version 3 and version 4 presets and projects as version 5 in place,');
   console.error('  including the project snapshot inside a queued render job');
   process.exit(2);
 }
@@ -148,6 +164,90 @@ function refuseReserved(names, what, where) {
   }
 }
 
+/**
+ * Version 4 to version 5: every ease handle becomes a list holding the pair it was.
+ *
+ * `[0.42, 0]` becomes `[[0.42, 0]]`, which is the identical cubic with its degree
+ * written down - so this step changes no rendered frame anywhere, and that is the
+ * property to hold it to rather than the shape of the output. What it buys is a
+ * document that can *also* say `[[0.2, 0], [0.4, 0]]`, a quintic, which is the one
+ * curve family whose acceleration reaches zero at a key.
+ *
+ * **A key with no handles is left with none.** Absent means linear at both loaders -
+ * `restoreKey` defaults it and the probe hooks default it - so writing the linear pair
+ * in here would be this tool inventing a field the document deliberately does not
+ * carry, and the two would then disagree about what a bare key means the first time
+ * that default moved.
+ *
+ * A handle that is not the version 4 shape stops the conversion rather than being
+ * passed through. The rewrite is one-way, so anything this waves past can never be
+ * found by running the tool again - the same argument the reserved-name refusal above
+ * is built on.
+ */
+function toVersion5(body, what) {
+  const handle = (h, where) => {
+    if (h === undefined) return undefined;
+    if (!Array.isArray(h) || h.length !== 2 || !h.every((c) => Number.isFinite(c))) {
+      throw new Error(`${what}: ${where} is ${JSON.stringify(h)}, and a version 4 ease handle is two finite numbers`);
+    }
+    return [[h[0], h[1]]];
+  };
+  const keys = (list, where) => {
+    if (list === undefined) return undefined;
+    if (!Array.isArray(list)) {
+      throw new Error(`${what}: ${where} is ${JSON.stringify(list)}, and a track is an array of keys`);
+    }
+    return list.map((k, i) => {
+      const next = { ...k };
+      const out = handle(k?.easeOut, `${where}[${i}].easeOut`);
+      const inn = handle(k?.easeIn, `${where}[${i}].easeIn`);
+      if (out) next.easeOut = out; else delete next.easeOut;
+      if (inn) next.easeIn = inn; else delete next.easeIn;
+      return next;
+    });
+  };
+  const next = { ...body, version: PROJECT_VERSION };
+  // A preset is `{version, values}` and holds no keys at all, so the version is the
+  // whole of its conversion - see `refusePresetBody`, which refuses any third field.
+  if (body.look && typeof body.look === 'object') {
+    if (body.look.tracks && typeof body.look.tracks === 'object') {
+      next.look = {
+        ...body.look,
+        tracks: Object.fromEntries(Object.entries(body.look.tracks)
+          .map(([name, list]) => [name, keys(list, `look.tracks.${name}`)])),
+      };
+    }
+  }
+  if (body.composition && typeof body.composition === 'object') {
+    const composition = { ...body.composition };
+    if (composition.camera !== undefined) {
+      composition.camera = keys(composition.camera, 'composition.camera');
+    }
+    // The retime is `{rate, keys}` rather than a bare array, and its handles move with
+    // everything else even though the editor will never grow one past a single point -
+    // the *format* is one format, and a retime key that stayed a bare pair would be the
+    // one document shape `restoreKey` could not read.
+    if (composition.retime && typeof composition.retime === 'object') {
+      composition.retime = {
+        ...composition.retime,
+        keys: keys(composition.retime.keys, 'composition.retime.keys'),
+      };
+    }
+    next.composition = composition;
+  }
+  // **And the undo history, which this step reaches on its own rather than relying on
+  // the caller.** A version 3 project passes through `convertHistory` on its way here,
+  // so leaving it out looked harmless; a version *4* project comes straight to this
+  // function and would have had its snapshots left at 4 under a top level claiming 5.
+  // That is the exact failure the version 3 path already carries a paragraph about - a
+  // file that opens perfectly and refuses the first press of undo - reappearing one
+  // migration later through the door that skipped the first step. Snapshots already at
+  // the current version are returned unchanged by `convert`, so the version 3 path
+  // running this a second time costs a walk and changes nothing.
+  if (body.history !== undefined) next.history = convertHistory(body.history, what);
+  return next;
+}
+
 function convert(body, what) {
   // **A queued render job carries a whole project and is versioned separately**, so it
   // has to be recognised before the version gate rather than refused by it. A job
@@ -181,8 +281,14 @@ function convert(body, what) {
     return inner ? { ...body, project: inner } : null;
   }
   if (body?.version === PROJECT_VERSION) return null;
+  // **Two steps now, and a version 3 document takes both.** The readings step and the
+  // handle-list step are separate migrations over the same file, so a 3 goes through 4
+  // on its way to 5 rather than being special-cased into a combined rewrite - the
+  // combined one is a third path that has to stay in step with the two it replaces,
+  // which is the duplication this repo keeps declining. A 4 skips the first step only.
+  if (body?.version === 4) return toVersion5(body, what);
   if (body?.version !== 3) {
-    throw new Error(`${what}: version ${JSON.stringify(body?.version)} is neither 3 nor ${PROJECT_VERSION}`);
+    throw new Error(`${what}: version ${JSON.stringify(body?.version)} is neither 3, 4 nor ${PROJECT_VERSION}`);
   }
   // A preset: `{ version, mode, values }` becomes `{ version, values }` with the
   // reading among the values. The order matters only in that the readings go in ahead
@@ -190,7 +296,7 @@ function convert(body, what) {
   if (body.values && !body.look) {
     const { mode, values, ...rest } = body;
     refuseReserved(Object.keys(values ?? {}), what, 'values');
-    return { ...rest, version: PROJECT_VERSION, values: { ...newInVersion4(mode, what), ...values } };
+    return toVersion5({ ...rest, version: 4, values: { ...newInVersion4(mode, what), ...values } }, what);
   }
   // A project: the same move one level down, inside `look`.
   if (body.look && typeof body.look === 'object') {
@@ -214,7 +320,7 @@ function convert(body, what) {
     }
     const next = {
       ...body,
-      version: PROJECT_VERSION,
+      version: 4,
       look: { ...look, params: { ...newInVersion4(mode, what), ...params } },
     };
     // **And every undo snapshot with it**, which the spread above does not reach.
@@ -226,7 +332,7 @@ function convert(body, what) {
     // thing it meets. The baseline is worse than the stack: it is what the next edit
     // pushes, so an unconverted one goes on failing after the stack has drained.
     if (body.history !== undefined) next.history = convertHistory(body.history, what);
-    return next;
+    return toVersion5(next, what);
   }
   throw new Error(`${what}: neither a preset nor a project - no values and no look`);
 }
@@ -306,22 +412,34 @@ for (const dir of dirs) {
       // Read off whichever body actually carried the mode. A job record carries none of
       // its own and holds the project that does, so the line names what moved rather
       // than throwing on a `look` the outer record never had.
+      //
+      // **And it names the step that was actually taken.** With two migrations chained,
+      // a version 4 document takes only the second one and has no mode at either level -
+      // so the reading half of this line printed "mode undefined -> undefined", which is
+      // a log describing a conversion that did not happen beside one that did. A line
+      // nobody can trust is worse than no line, and this is the only account of the
+      // rewrite there is: the file is replaced in place and the tool is one-way.
       const from = body.project ?? body;
-      const was = from.values ? `mode ${from.mode}` : `look.mode ${from.look?.mode}`;
-      const now = READING_FOR[from.values ? from.mode : from.look.mode];
+      const step = from.version === 3
+        ? (() => {
+          const was = from.values ? `mode ${from.mode}` : `look.mode ${from.look?.mode}`;
+          const reading = READING_FOR[from.values ? from.mode : from.look.mode];
+          return `3 -> ${PROJECT_VERSION}, ${was} -> ${reading} 1`;
+        })()
+        : `4 -> ${PROJECT_VERSION}, ease handles as control point lists`;
       // Named in every line rather than only when there were some, because "0 undo
       // snapshots" on a project that has a history is the tell that this reached the
       // top level and nothing else - which is the bug this count was added for.
       const undo = body.history === undefined ? '' : `, ${snapshotsConverted} undo snapshots`;
       snapshots += snapshotsConverted;
       if (DRY) {
-        console.log(`[convert] would rewrite ${what}: ${was} -> ${now} 1${undo}`);
+        console.log(`[convert] would rewrite ${what}: ${step}${undo}`);
       } else {
         // Written aside and renamed, so a crash cannot leave a half-file that parses.
         const scratch = `${path}.convert.tmp`;
         writeFileSync(scratch, text);
         renameSync(scratch, path);
-        console.log(`[convert] ${what}: ${was} -> ${now} 1${undo}, ${statSync(path).size} bytes`);
+        console.log(`[convert] ${what}: ${step}${undo}, ${statSync(path).size} bytes`);
       }
       rewritten++;
     } catch (err) {

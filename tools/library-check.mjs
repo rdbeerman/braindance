@@ -5356,7 +5356,7 @@ async function runChecks() {
       ['a version that is not a number', 'p.version = "1";'],
       ['a retime curve that falls', 'p.composition.retime.keys = [{t:0,value:0},{t:1,value:2},{t:2,value:0.5}];'],
       ['a retime handle outside the unit box',
-        'p.composition.retime.keys = [{t:0,value:0,easeOut:[0.4,1.9],easeIn:[0.6,0]},{t:2,value:1,easeOut:[0.4,0],easeIn:[0.6,0]}];'],
+        'p.composition.retime.keys = [{t:0,value:0,easeOut: [[0.4, 1.9]],easeIn: [[0.6, 0]]},{t:2,value:1,easeOut: [[0.4, 0]],easeIn: [[0.6, 0]]}];'],
       ['a camera key whose quaternion is not unit length',
         'p.composition.camera = [{t:0,value:{position:[0,0,3],quaternion:[0,0,0,1.4],fov:55}},{t:1,value:{position:[1,0,3],quaternion:[0,0,0,1],fov:55}}];'],
       ['a camera key whose quaternion is all zeros',
@@ -5487,7 +5487,8 @@ async function runChecks() {
 
     const onDisk = readFileSync(join(WORK, 'presets/hand-tuned.json'), 'utf8');
     const doc = JSON.parse(onDisk);
-    check(doc.version === 4, 'a preset carries the format version too');
+    check(doc.version === PROJECT_VERSION, 'a preset carries the format version too',
+      `version ${doc.version}`);
     // The mode used to be a second field beside `values`, because the registry excluded
     // it and `values(names('look'))` would neither capture nor restore it. It is one of
     // those values now, so what this row asserts is that the subset really is the whole
@@ -5544,7 +5545,7 @@ async function runChecks() {
     await page.evaluate(`(async () => {
       await fetch('/presets/hand-tuned', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version: 4, values: { bloom: 0, pointSize: 9 } }),
+        body: JSON.stringify({ version: ${PROJECT_VERSION}, values: { bloom: 0, pointSize: 9 } }),
       });
     })()`);
     const stillTuned = await page.evaluate("globalThis.__kinect.params.get('bloom')");

@@ -1324,17 +1324,26 @@
         </button>
       </div>
       <div class="tchips">
-        <!-- Applies to whichever key is selected in a lane. The five cover what a
-             handle drag is usually reaching for, and a drag is still there for the
-             shape none of them is. -->
+        <!-- Applies to whichever key is selected in a lane, except `ends`, which is
+             about the track's two outer keys however you got here - see EASE_PRESETS.
+             They cover what a handle drag is usually reaching for, and a drag is still
+             there for the shape none of them is. -->
         <span class="tchip tease off" id="tEase">key options
           <button id="tPrevKey" type="button" title="Previous keyframe on this parameter" aria-label="Previous keyframe">&lt;</button>
           <button id="tNextKey" type="button" title="Next keyframe on this parameter" aria-label="Next keyframe">&gt;</button>
           <button data-ease="linear" type="button">lin</button>
           <button data-ease="in" type="button">in</button>
           <button data-ease="out" type="button">out</button>
-          <button data-ease="smooth" type="button">smooth</button>
+          <button data-ease="smooth" type="button" title="Ease this key's segments to a stop and away again">smooth</button>
+          <button data-ease="glide" type="button" title="Like smooth, one degree up: acceleration reaches zero at the key too">glide</button>
+          <button data-ease="ends" type="button" title="Glide the whole move's start and end, leaving the keys between alone">ends</button>
           <button data-ease="hold" type="button">hold</button>
+          <!-- The point count, which is the degree of the segment either side. `+pt` is
+               exact degree elevation, so it hands you another handle without moving the
+               camera a frame; `-pt` drops one and the shape follows it, because a
+               degree-n curve is not generally a degree-(n-1) one. -->
+          <button id="tDropPoint" type="button" title="Remove a control point from this key's handles">&minus;pt</button>
+          <button id="tAddPoint" type="button" title="Add a control point to this key's handles, without changing the curve">+pt</button>
           <button id="tDeleteKey" type="button" title="Delete the selected key (Del)">delete</button></span>
       </div>
       <!-- Camera controls for composition keyframing -->

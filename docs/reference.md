@@ -52,10 +52,14 @@ to frame the trim. The overview underneath is always the whole clip: drag its bo
 edge to zoom, click to go there.
 
 **Easing a move.** Select a key and the `key options` row shapes the segments either side of
-it: `lin`, `in`, `out`, `smooth` and `hold`, or drag the handles in the lane for anything in
-between. `in` writes the incoming side and `out` the outgoing one, so they are two different
-numbers rather than two halves of one, and `hold` reaches into the next key because holding a
-value across a segment means flattening both ends of it.
+it: `lin`, `in`, `out`, `smooth`, `glide` and `hold`, or drag the handles in the lane for
+anything in between. `in` writes the incoming side and `out` the outgoing one, so they are two
+different numbers rather than two halves of one, and `hold` reaches into the next key because
+holding a value across a segment means flattening both ends of it.
+
+`ends` is the odd one and the one you probably want on a camera: it is about the *track*
+rather than about the selected key, shaping the move's departure and its arrival in one press
+and leaving every key between them alone. Press it from anywhere on the track.
 
 This works on the camera track as well as on the look scalars, and what it shapes there is
 *when* the camera arrives rather than where it goes. The route stays the Catmull-Rom through
@@ -67,15 +71,36 @@ diagonal and an eased one visibly is not. Judge the result in the world instead 
 on the path are sampled at equal intervals of program time, so they bunch where the camera is
 slow and spread where it is fast.
 
-**A camera move starts and stops at speed until you ease it**, and this is worth knowing
-because nothing on screen announces it. The spline holds the end pose beyond the outer keys
-while its tangent there is half the first segment's average velocity, so the camera departs
-the first key and arrives at the last with a step in speed rather than a ramp — measured on
-three keys dollying 4m over 4s, 0 to 0.63 m/s across a single 30fps output frame at the
-start, and 0.31 to 0 at the end. Pressing `smooth` on the first key and on the last is the whole fix: the same move then
-departs at 0.0007 m/s and arrives at 0.0005. Leave the keys in between alone unless you want
-the camera to stop at each one, because `smooth` on an interior key brings it to a near halt
-there.
+**A camera move starts and stops at speed until you ease it, and `ends` is the one press that
+fixes it.** The spline holds the end pose beyond the outer keys while its tangent there is
+half the first segment's average velocity, so an unshaped move departs the first key and
+arrives at the last with a step in speed rather than a ramp — measured on three keys dollying
+4m over 4s, 0 to 0.63 m/s across a single 30fps output frame at the start, and 0.31 to 0 at
+the end. After `ends` the same move departs at 0.0007 m/s and arrives at 0.0005, which is two
+hundred times smaller and below anything a frame can show.
+
+This used to be two presses of `smooth`, one on the first key and one on the last, with an
+inviting wrong move in between: `smooth` on an *interior* key brings the camera to a near halt
+as it passes, so easing "the whole move" by pressing every key produced a stutter at each one.
+That still works and is still what you want when a deliberate pause at a key is the intent —
+`ends` exists because the common case should not require knowing any of it.
+
+**`glide` is `smooth` one degree up, and the difference is acceleration rather than speed.** A
+cubic can bring the camera's *rate* to zero at a key but never its acceleration, so a `smooth`
+departure still steps from no acceleration to some. `glide` puts two control points on each
+side of the segment instead of one, which makes the timing curve the quintic
+`6u⁵ − 15u⁴ + 10u³` — the shape whose first *and* second derivatives vanish at both ends. It
+costs a slightly faster midpoint, 1.875× the average rate against the cubic's 1.724×. `ends`
+applies the glide shape, so the one-press fix is already the C2 one.
+
+**`+pt` and `−pt` set how many control points a key's handles carry**, which is the degree of
+the segments either side. `+pt` is exact: the extra handle appears, every other one shifts to
+keep the curve exactly where it was, and not a rendered frame changes — so it is safe to press
+while judging a move. `−pt` cannot be exact, because a curve of one degree is not generally a
+curve of the degree below, so removing a point moves the shape. Four points a side is the
+ceiling. The retime curve is deliberately excluded from both: the argument that a handle
+inside the unit box cannot run source time backwards is an argument about a cubic, and it does
+not survive the extra degree.
 
 **Glitch** tears bands of the feed sideways, and it is seven controls rather than
 one because the interesting looks live off the diagonal. `amount` is the master and the one

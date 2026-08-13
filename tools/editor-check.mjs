@@ -2058,12 +2058,79 @@ const MUTATIONS = {
 
   // The preset buttons stay live, stay enabled and write nothing - the shape of a
   // control that looks like it works.
+  // `+pt` appends a control point instead of elevating the curve, which is the obvious
+  // wrong implementation and the one this control exists to be safe from: the count goes
+  // up, the lane draws the new handle, and the camera moves. Only the sampled-curve row
+  // can see it, which is why that row samples rather than reading handles back.
+  'elevation-moves-the-curve': {
+    file: 'web/curve.js',
+    edits: [[
+      `  const cut = side === 'easeOut' ? a.length + 1 : a.length;
+  return { easeOut: raised.slice(0, cut), easeIn: raised.slice(cut) };`,
+      `  const grown = side === 'easeOut' ? { easeOut: [...a, [0.5, 0.5]], easeIn: b } : { easeOut: a, easeIn: [[0.5, 0.5], ...b] };
+  return raised.length ? grown : grown;`,
+    ]],
+  },
+
+  // `ends` writes the selected key rather than the track's two outer ones - which is
+  // `smooth` wearing another name, and is exactly the edit that halts the camera at an
+  // interior key. The `keepsSelected` half of the preset row is what sees it.
+  'ends-reaches-the-selection': {
+    file: 'web/main.js',
+    edits: [[
+      `  if (spec.firstOut && segmentHasShape(keys, 0, kind)) {
+    keys[0].easeOut = copyHandle(spec.firstOut);
+  }`,
+      `  if (spec.firstOut && segmentHasShape(keys, 0, kind)) {
+    keys[i].easeOut = copyHandle(spec.firstOut);
+  }`,
+    ]],
+  },
+
+  // ... and reaches only the departure, leaving the arrival unshaped. Separable from the
+  // row above on purpose: a build that got the first key right and forgot the last is a
+  // move that eases away and stops dead, which is half the reported defect surviving the
+  // fix for it.
+  'ends-skips-the-arrival': {
+    file: 'web/main.js',
+    edits: [[
+      `  if (spec.lastIn && segmentHasShape(keys, keys.length - 2, kind)) {
+    keys[keys.length - 1].easeIn = copyHandle(spec.lastIn);
+  }`,
+      '  if (false && spec.lastIn) { /* mutated */ }',
+    ]],
+  },
+
+  // The glide dropped to a cubic. Its ordinates still read 0 and 1 so the *rate* still
+  // reaches zero at the key and every velocity row stays green - what goes is the
+  // second control point, and with it the acceleration claim and the degree. The preset
+  // row's list comparison is what catches it, which is why that comparison walks the
+  // whole list rather than element zero.
+  'glide-is-a-cubic': {
+    file: 'web/main.js',
+    edits: [[
+      "  glide: { out: [[0.2, 0], [0.4, 0]], in: [[0.6, 1], [0.8, 1]] },",
+      "  glide: { out: [[0.2, 0]], in: [[0.8, 1]] },",
+    ]],
+  },
+
+  // The point controls offered on the retime, where the unit-box monotonicity proof does
+  // not hold. `assertMonotonic` would refuse the document afterwards, which is the loud
+  // half - this control is about the editor not walking into it in the first place.
+  'points-reach-the-retime': {
+    file: 'web/main.js',
+    edits: [[
+      "  if (!state || selection.owner === 'retime') return [];",
+      '  if (!state) return [];',
+    ]],
+  },
+
   'ease-preset-ignored': {
     file: 'web/main.js',
     edits: [[
-      '  if (spec.out) keys[i].easeOut = [...spec.out];\n'
-      + '  if (spec.in) keys[i].easeIn = [...spec.in];\n'
-      + '  if (spec.nextIn && i < keys.length - 1) keys[i + 1].easeIn = [...spec.nextIn];',
+      '  if (spec.out) keys[i].easeOut = copyHandle(spec.out);\n'
+      + '  if (spec.in) keys[i].easeIn = copyHandle(spec.in);\n'
+      + '  if (spec.nextIn && i < keys.length - 1) keys[i + 1].easeIn = copyHandle(spec.nextIn);',
       '  void spec;',
     ]],
   },
@@ -2422,6 +2489,8 @@ const DRIVER_IDS = {
   tClearRange: 'section 3 - puts the range back to the whole clip',
   tMark: 'library-check writes a mark and reads the sidecar back',
   tDeleteKey: 'section 5 - removes the selected key',
+  tAddPoint: 'section 5 - grows a segment\'s degree and reads the curve back unmoved',
+  tDropPoint: 'section 5 - shrinks it again, and both are read dead on the retime',
   tPrevKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tNextKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tPreset: 'library-check applies a preset and compares the look',
@@ -4742,12 +4811,32 @@ try {
 
   // Ease presets, each pressed and each read back. Five rows rather than one, because
   // a cumulative row cannot say which preset stopped writing.
+  //
+  // **Two of these reach past the selected key and one of those two reaches backwards**,
+  // so what a row reads is part of what it asserts. `nextIn` is `hold` flattening the far
+  // end of the segment it holds across. `firstOut` and `lastIn` are `ends`, which is
+  // about the *track* rather than about the selection - it shapes the move's departure
+  // and its arrival whichever key happens to be selected - so this table names key 0 as
+  // well, and the fixtures below are three keys deep, which makes key 2 the last one.
+  //
+  // `keepsSelected` is the other half of that claim and the half a naive row would miss:
+  // `ends` has to leave the keys between the two ends exactly as it found them, because
+  // a preset that quietly smoothed an interior key would bring the camera to a halt as
+  // it passed - which is the documented trap this preset exists to route around. The
+  // fixtures all start bent, so "unchanged" here is a positive statement about a shape
+  // nothing else in the table writes.
   const EXPECTED = {
-    linear: { out: [1 / 3, 1 / 3], in: [2 / 3, 2 / 3] },
-    in: { in: [0.58, 1] },
-    out: { out: [0.42, 0] },
-    smooth: { out: [0.42, 0], in: [0.58, 1] },
-    hold: { out: [1, 0], nextIn: [1, 0] },
+    linear: { out: [[1 / 3, 1 / 3]], in: [[2 / 3, 2 / 3]] },
+    in: { in: [[0.58, 1]] },
+    out: { out: [[0.42, 0]] },
+    smooth: { out: [[0.42, 0]], in: [[0.58, 1]] },
+    glide: { out: [[0.2, 0], [0.4, 0]], in: [[0.6, 1], [0.8, 1]] },
+    ends: {
+      firstOut: [[0.2, 0], [0.4, 0]],
+      lastIn: [[0.6, 1], [0.8, 1]],
+      keepsSelected: true,
+    },
+    hold: { out: [[1, 0]], nextIn: [[1, 0]] },
   };
   const presetNames = await page.evaluate('__kinect.editor.easePresets()');
   check(presetNames.length === Object.keys(EXPECTED).length,
@@ -4768,7 +4857,7 @@ try {
   // Measured: `--mutate ease-preset-ignored` fired four of the five preset rows and
   // left this one passing. Starting from a shape none of the five produces gives every
   // preset something to undo.
-  const BENT = { easeOut: [0.9, 0.1], easeIn: [0.1, 0.9] };
+  const BENT = { easeOut: [[0.9, 0.1]], easeIn: [[0.1, 0.9]] };
   const KIND_FIXTURES = {
     scalar: {
       owner: 'bloom',
@@ -4842,18 +4931,121 @@ try {
       }
       const got = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 1)`);
       const next = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 2)`);
+      const first = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 0)`);
       const want = EXPECTED[name];
-      const okOut = !want.out || (near(got.easeOut[0], want.out[0], 1e-9) && near(got.easeOut[1], want.out[1], 1e-9));
-      const okIn = !want.in || (near(got.easeIn[0], want.in[0], 1e-9) && near(got.easeIn[1], want.in[1], 1e-9));
-      const okNext = !want.nextIn || (near(next.easeIn[0], want.nextIn[0], 1e-9) && near(next.easeIn[1], want.nextIn[1], 1e-9));
-      check(live && okOut && okIn && okNext,
+      // Compared point by point over the whole list, because a preset names a *degree*
+      // as well as a shape now - `glide` writing only its first control point would
+      // leave a cubic wearing a quintic's first handle, which a comparison of element
+      // zero alone would have called a pass.
+      const sameList = (a, b) => Array.isArray(a) && a.length === b.length
+        && a.every((p, i) => near(p[0], b[i][0], 1e-9) && near(p[1], b[i][1], 1e-9));
+      const okOut = !want.out || sameList(got.easeOut, want.out);
+      const okIn = !want.in || sameList(got.easeIn, want.in);
+      const okNext = !want.nextIn || sameList(next.easeIn, want.nextIn);
+      const okFirst = !want.firstOut || sameList(first.easeOut, want.firstOut);
+      const okLast = !want.lastIn || sameList(next.easeIn, want.lastIn);
+      // The selected key untouched, for the presets that are about the track. Compared
+      // against the bend every fixture key is planted with rather than against a
+      // remembered read, so this cannot be satisfied by the press having done nothing
+      // at all - `okFirst` and `okLast` are what say it did something.
+      const okKept = !want.keepsSelected
+        || (sameList(got.easeOut, BENT.easeOut) && sameList(got.easeIn, BENT.easeIn));
+      check(live && okOut && okIn && okNext && okFirst && okLast && okKept,
         `the "${name}" preset writes the handles it names on a ${kind} key`,
         live
           ? `out ${JSON.stringify(got.easeOut)} in ${JSON.stringify(got.easeIn)}`
             + (want.nextIn ? ` next-in ${JSON.stringify(next.easeIn)}` : '')
+            + (want.firstOut ? ` first-out ${JSON.stringify(first.easeOut)}` : '')
+            + (want.lastIn ? ` last-in ${JSON.stringify(next.easeIn)}` : '')
           : `the preset row is dead for a ${kind} key, so nothing could be pressed`);
     }
   }
+
+  // **The point count, which is the degree of the segments either side of a key.**
+  //
+  // `+pt` is Bezier degree elevation and the claim it makes is unusual for a control:
+  // pressing it changes *nothing* about the picture. That is what makes it safe to
+  // offer - a press that handed over another handle and also moved the camera would be
+  // two edits wearing one button, and the one nobody asked for is the one that ruins a
+  // take. So the row below reads the rendered curve on both sides of the press and
+  // requires it to be the same curve, which is the opposite of what a control is
+  // usually asked to prove and the only thing worth asserting here.
+  //
+  // Sampled through `valueAt` rather than through the handle numbers, because the
+  // handles are *supposed* to move: every control point shifts to the position that
+  // keeps the curve where it was. A row comparing handles would fail against a correct
+  // build and pass against one that appended a point and left the others alone, which
+  // is precisely the wrong implementation this is here to catch.
+  await plant({ bloom: [{ t: 1, value: 0.2, ...BENT }, { t: 5, value: 0.9, ...BENT }] });
+  await page.evaluate(`__kinect.editor.select('bloom', 0)`);
+  await settle();
+  const AT = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5];
+  const sampleBloom = () => page.evaluate(
+    `${JSON.stringify(AT)}.map((t) => globalThis.__kinect.keyframes.valueAt('bloom', t))`,
+  );
+  const pointsOn = (i) => page.evaluate(
+    `(() => { const e = __kinect.editor.easeOf('bloom', ${i}); return [e.easeOut.length, e.easeIn.length]; })()`,
+  );
+  const curveBeforeGrow = await sampleBloom();
+  const countBeforeGrow = await pointsOn(0);
+  await page.locator('#tAddPoint').click();
+  await settle();
+  const countAfterGrow = await pointsOn(0);
+  const curveAfterGrow = await sampleBloom();
+  const grewBy = countAfterGrow[0] - countBeforeGrow[0];
+  check(grewBy === 1, 'the add-point control grows the selected key\'s outgoing side by one',
+    `easeOut went from ${countBeforeGrow[0]} control points to ${countAfterGrow[0]}`);
+  const elevationDrift = Math.max(...curveAfterGrow.map((v, i) => Math.abs(v - curveBeforeGrow[i])));
+  check(elevationDrift < 1e-9,
+    'and the curve it grew is the same curve, which is the whole reason the control can be offered',
+    `worst departure over ${AT.length} samples inside the segment: ${elevationDrift.toExponential(3)}`);
+  // And the handles really did move, so the row above is a statement about elevation
+  // rather than about a press that did nothing at all. Without this, a `+pt` wired to
+  // no-op would satisfy both rows above except the count - and a count is the one thing
+  // a broken implementation finds easiest to get right.
+  const grownHandles = await page.locator('.tlane[data-owner=bloom] .thandle').count();
+  check(grownHandles === countAfterGrow[0] + countAfterGrow[1] - 1,
+    'and the lane draws one handle per control point, so the new one can be reached',
+    `${grownHandles} handles for ${countAfterGrow[0]} out and ${countAfterGrow[1]} in on the first key`);
+
+  await page.locator('#tDropPoint').click();
+  await settle();
+  const countAfterDrop = await pointsOn(0);
+  check(countAfterDrop[0] === countBeforeGrow[0],
+    'and the drop-point control takes it back off again',
+    `easeOut went from ${countAfterGrow[0]} control points to ${countAfterDrop[0]}`);
+  // The floor, pressed into. A segment with no control points is not a cubic with fewer
+  // handles, it is a curve this file's own evaluator has no shape for.
+  for (let i = 0; i < 4; i++) {
+    if (await page.evaluate(`document.getElementById('tDropPoint').disabled`)) break;
+    await page.locator('#tDropPoint').click();
+    await settle();
+  }
+  const floored = await pointsOn(0);
+  check(floored[0] === 1 && await page.evaluate(`document.getElementById('tDropPoint').disabled`),
+    'and it stops at one point a side rather than emptying the handle',
+    `easeOut holds ${floored[0]}, and the control is ${await page.evaluate(`document.getElementById('tDropPoint').disabled`) ? 'dead' : 'still live'}`);
+
+  // **The retime is refused, and the reason is a proof rather than a preference.**
+  // `assertMonotonic` argues that a handle anywhere in the unit box cannot run source
+  // time backwards, and that argument is about a *cubic* - a quintic with ordinates
+  // 0,1,0,1,0,1, every one inside the box, oscillates. So the retime keeps one control
+  // point a side, and the place that is enforced is here, at the control.
+  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [
+    { t: 0, value: 0 }, { t: 6, value: 4 }, { t: 12, value: 11 } ] })`);
+  await page.evaluate(`__kinect.editor.select('retime', 1)`);
+  await settle();
+  const retimePoints = await page.evaluate(`(() => {
+    const add = document.getElementById('tAddPoint').disabled;
+    const drop = document.getElementById('tDropPoint').disabled;
+    const smooth = document.querySelector('#tEase button[data-ease=smooth]').disabled;
+    return { add, drop, smooth };
+  })()`);
+  check(retimePoints.add && retimePoints.drop && !retimePoints.smooth,
+    'both point controls are dead on a retime key while the ordinary presets stay live, '
+    + 'because the monotonicity proof the retime rests on is a proof about a cubic',
+    `add ${retimePoints.add ? 'dead' : 'LIVE'}, drop ${retimePoints.drop ? 'dead' : 'LIVE'}, `
+    + `smooth ${retimePoints.smooth ? 'DEAD' : 'live'}`);
 
   // The flat-segment rule. A segment whose two keys hold the same value renders the
   // same value whatever its handles say - so a handle there is a control that moves
@@ -4970,15 +5162,15 @@ try {
     await settle();
   }
   const dragged = await page.evaluate(`__kinect.editor.easeOf('camera', 1)`);
-  check(poseHandle !== null && dragged.easeOut[1] <= 1 + 1e-9 && dragged.easeOut[1] >= -1e-9,
+  check(poseHandle !== null && dragged.easeOut[0][1] <= 1 + 1e-9 && dragged.easeOut[0][1] >= -1e-9,
     'a pose handle dragged far past the lane stays inside the unit box, so the camera cannot overshoot its own key',
     // The two ways this fails say different things and the detail has to as well. Under
     // `pose-segments-never-shaped` there is no handle to drag, so the y sits at its
     // untouched default - and a bare number here read as "0.3333 is outside the box",
     // which is a row blaming the clamp for a lane that drew nothing.
     poseHandle === null
-      ? `no handle on the pose lane to drag, so the clamp was never exercised (y still ${dragged.easeOut[1].toFixed(4)})`
-      : `easeOut y ${dragged.easeOut[1].toFixed(4)} after a 400px drag`);
+      ? `no handle on the pose lane to drag, so the clamp was never exercised (y still ${dragged.easeOut[0][1].toFixed(4)})`
+      : `easeOut y ${dragged.easeOut[0][1].toFixed(4)} after a 400px drag`);
 
   // **The world half of the ease: the beads on the path.** `pathPoints` samples
   // `poseAt` at equal intervals of program time, so the gaps between consecutive
@@ -5004,8 +5196,8 @@ try {
   // `beads-evenly-spaced` takes away.
   const beads = await page.evaluate(`(() => {
     const P = (x, z) => ({ position: [x, 0.35, z], quaternion: [0, 0, 0, 1], fov: 50 });
-    const LIN_O = [1 / 3, 1 / 3];
-    const LIN_I = [2 / 3, 2 / 3];
+    const LIN_O = [[1 / 3, 1 / 3]];
+    const LIN_I = [[2 / 3, 2 / 3]];
     const mk = (out0, in2) => [
       { t: 2, value: P(-1.4, 1.5), easeOut: out0, easeIn: LIN_I },
       { t: 5, value: P(0.2, 1.0), easeOut: LIN_O, easeIn: LIN_I },
@@ -5021,7 +5213,7 @@ try {
     };
     __kinect.keyframes.setTracks({ camera: mk(LIN_O, LIN_I) });
     const flat = gaps();
-    __kinect.keyframes.setTracks({ camera: mk([0.42, 0], [0.58, 1]) });
+    __kinect.keyframes.setTracks({ camera: mk([[0.42, 0]], [[0.58, 1]]) });
     const eased = gaps();
     const spread = (g) => Math.max(...g) / Math.max(1e-9, Math.min(...g));
     return { count: eased.length + 1, flatSpread: spread(flat), easedSpread: spread(eased) };
@@ -5049,8 +5241,8 @@ try {
   // the lane, and it has to change when the easing does.
   const lane = await page.evaluate(`(() => {
     const P = (x, z) => ({ position: [x, 0.35, z], quaternion: [0, 0, 0, 1], fov: 50 });
-    const LIN_O = [1 / 3, 1 / 3];
-    const LIN_I = [2 / 3, 2 / 3];
+    const LIN_O = [[1 / 3, 1 / 3]];
+    const LIN_I = [[2 / 3, 2 / 3]];
     const mk = (out0, in2) => [
       { t: 2, value: P(-1.4, 1.5), easeOut: out0, easeIn: LIN_I },
       { t: 5, value: P(0.2, 1.0), easeOut: LIN_O, easeIn: LIN_I },
@@ -5060,7 +5252,7 @@ try {
       .getAttribute('points').split(' ').map((p) => Number(p.split(',')[1]));
     __kinect.keyframes.setTracks({ camera: mk(LIN_O, LIN_I) });
     const flat = ys();
-    __kinect.keyframes.setTracks({ camera: mk([0.42, 0], [0.58, 1]) });
+    __kinect.keyframes.setTracks({ camera: mk([[0.42, 0]], [[0.58, 1]]) });
     const eased = ys();
     const span = (a) => Math.max(...a) - Math.min(...a);
     const worstShift = Math.max(...eased.map((y, i) => Math.abs(y - flat[i])));

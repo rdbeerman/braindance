@@ -243,6 +243,24 @@ node tools/editor-check.mjs --mutate aspect-skips-the-letterbox --no-render # ..
                                                                        #     fails here and passes on the attribute
 node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
 node tools/editor-check.mjs --mutate plant-unswept-control --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate ends-reaches-the-selection --no-render # ... `ends` shaping the selected key instead of the
+                                                                       #     move's two ends, which is `smooth` under another
+                                                                       #     name and halts the camera at an interior key
+node tools/editor-check.mjs --mutate ends-skips-the-arrival --no-render # ... and reaching only the departure, which is half the
+                                                                       #     reported defect surviving the fix for it
+node tools/editor-check.mjs --mutate glide-is-a-cubic --no-render      # ... the quintic dropped to a cubic, whose rate still
+                                                                       #     reaches zero at the key - so every velocity row stays
+                                                                       #     green and only the degree is gone with the
+                                                                       #     acceleration claim resting on it
+node tools/editor-check.mjs --mutate elevation-moves-the-curve --no-render # ... `+pt` appending a control point rather than
+                                                                       #     elevating, which is the one wrong implementation
+                                                                       #     that leaves the count right and moves the camera.
+                                                                       #     Only the sampled-curve row can see it, which is why
+                                                                       #     that row samples the render instead of reading the
+                                                                       #     handles back - every handle is meant to move
+node tools/editor-check.mjs --mutate points-reach-the-retime --no-render # ... and the point controls offered on the retime,
+                                                                       #     whose unit-box monotonicity proof is a proof about
+                                                                       #     a cubic and nothing else
 node tools/editor-check.mjs --mutate ease-gate-hardcodes-scalar --no-render # ... the ease gate naming one kind instead of asking
                                                                        #     the table, which is what locked the camera out
 node tools/editor-check.mjs --mutate pose-segments-never-shaped --no-render # ... and a pose segment that never has a shape to
