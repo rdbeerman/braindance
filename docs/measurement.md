@@ -145,7 +145,8 @@ Two things follow, and the second is the one that costs somebody an afternoon. A
 meant to reject jitter cannot be stated in mm/s, because it would need re-tuning per link -
 and it cannot be stated in millimetres either, because then a slow surface registers over a
 slow link and vanishes over a fast one. `duotoneMotion` carries no such threshold for exactly
-that reason, and the comment beside it in `web/main.js` has the numbers. And **the median
+that reason, and the comment beside it in `web/cloud-shader.js` - where the fragment stage
+mixes it - has the numbers. And **the median
 displacement being the same at both spacings is itself the discriminator between jitter and
 motion**: measure at two intervals, and whatever holds its millimetres rather than its
 millimetres per second is the sensor talking to itself.

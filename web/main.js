@@ -1,15 +1,97 @@
 import * as THREE from 'three';
-import { DEPTH_H, DEPTH_W, PROJECT_VERSION, versionRefusal, captureFormatRefusal } from './format.js';
+import { DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, versionRefusal, captureFormatRefusal } from './format.js';
 import { pollRecordState } from './record-poll.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
-import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-
-const POINTS = DEPTH_W * DEPTH_H;
+// The renderer and everything built directly on it. Imported before any other module of
+// this page because its body appends the canvas and constructs the cameras, and the
+// order modules evaluate in is the order they are imported in - a module that read
+// `renderer` while this one was still evaluating would find a binding in its dead zone.
+// Nothing here imports back into this file, which is what keeps that order a fact rather
+// than a convention.
+import {
+  renderer, scene, freeCamera, programCamera, viewCamera, controls, worldTilt, WORLD_UP,
+  DEFAULT_POSE, onNav, setNavigationUp, useViewCamera,
+} from './scene.js';
+// The pure ones: the scalar curve maths the tracks are evaluated through, the levelling
+// pair's composition, the table of output sizes, the geometry of the top-down inset, the
+// window of program time the strip is drawn against, and the trim a deliverable covers.
+// Arithmetic and data, with no DOM, no GL and nothing constructed at import time - which
+// is what makes these the parts of the editor a test can import and call under bare node,
+// and it is why this block can sit anywhere in this list. A module with no top-level side
+// effect cannot be reordered into a different program, and the blocks above and below it
+// do not have that property.
+//
+// The last two are the two that hold state, and they hold it in opposite ways for the same
+// reason - a boundary that cannot be written across. `view-window.js` exports a factory,
+// because a window has to be bound to a transport and a DOM node before it means anything;
+// `clip-range.js` exports the pair itself as two live bindings, because everything in this
+// file reads them and nothing outside `writeClipRange` may write them, and an import is
+// read-only where a comment is a promise.
+import {
+  EASE_OUT_LINEAR, EASE_IN_LINEAR, SEGMENT_POINT_CEILING, copyHandle, easeAt, elevate, keyBefore,
+  HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
+} from './curve.js';
+import { tiltQuaternion } from './world-tilt.js';
+import {
+  EXPORT_SIZES, DEFAULT_EXPORT_SIZE, reduceAspect, exportAspects, sizesForAspect,
+} from './export-sizes.js';
+import {
+  INSET, TOP_CENTRE, PLAN_STRIDE, FRUSTUM_LEN, planScale, planPoint, planWorld, projectThrough,
+} from './plan-geometry.js';
+import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
+import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
+// One number out of the halo, and nothing else. `bloom-pass.js` holds the pass and
+// `post-chain.js` is what constructs it; what this file still needs is the reference the
+// chain is frozen at, because `resize` sizes that chain and `resize` lives here. The two
+// GLSL programs went the same way - `point-cloud.js` imports them from `cloud-shader.js`
+// directly, and both modules stay reachable through the ones that use them rather than
+// through a name carried here.
+//
+// **A name imported and not used is worse than no import**, which is why this line is one
+// binding rather than the three it was. It reads as a dependency to anyone tracing the
+// boot order, and it survives the deletion of the last thing that used it without a word
+// from any tool - which is exactly how the three that were here got here, when the
+// constructions moved out in the two commits after the modules were made.
+import { bloomChainSize } from './bloom-pass.js';
+// The two sensor frames the GPU holds, and the memory of where a ray used to be that is
+// built from them. Imported after `scene.js` because the second of them asks the live
+// context a question - whether it can render to float - and imported in this order
+// because the memory's pass samples the depth texture the first of them owns.
+//
+// Neither builds anything while it evaluates. Each exports a build function that is
+// called at its own banner below, so the order these two come up in is written out in
+// this file rather than inferred from the order these lines happen to be in - which is
+// what stops a sorted import list from quietly becoming a different program.
+import {
+  depthCurr, colorPrev, colorCurr, buildTextures, bindDepth, bindColor, plantColor,
+} from './gpu-textures.js';
+import {
+  statePrev, stateNext, buildSurfaceMemory, stepSurfaceMemory, refuseAgeCeiling,
+} from './surface-memory.js';
+// Which passes the drawn frame goes through on its way to the canvas, and in what order.
+// Imported after the two blocks above because it is built on all of them - the renderer
+// and the scene `scene.js` owns, and the halo `bloom-pass.js` defines - and, like the
+// pair above it, it builds nothing while it evaluates. `buildPostChain` is called at its
+// banner below, so the moment a composer takes a pair of full-size render targets off the
+// GPU is a line in this file rather than a position in this list.
+import {
+  composer, renderPass, afterimage, bloom, grade, buildPostChain,
+} from './post-chain.js';
+// What a point is made of and how it is addressed: the geometry, the uniform table both
+// shaders are driven through, the material and the cloud itself. Last of the render core
+// and imported last, because it is built on every block above it - the scene it joins, the
+// shaders it compiles, the source cells it composes and the ghost target it samples. It
+// allocates nothing while it evaluates either; `buildPointCloud` is called at its banner
+// below, which is what keeps the moment the cloud joins the scene a line in this file.
+//
+// The uniform table crosses this boundary as an object anybody may write into, which is the
+// one channel `tools/module-check.mjs` refuses in general and exempts here by name. A
+// uniform is a cell the GPU reads, so a look parameter's `apply` writing `uniforms.X.value`
+// is not state leaking across a boundary - it is the only way three.js can be told
+// anything, and a setter per term would be the registry below spelled a second time.
+import {
+  geometry, uniforms, material, cloud, buildPointCloud, setAdditive,
+  CLIP_NEAR_DEFAULT, CLIP_FAR_DEFAULT, CROP_LIMIT, cropReach, croppedOut,
+} from './point-cloud.js';
 
 // Which of the two surfaces this page is, decided by the path. One document still
 // serves both, because there is one renderer and one image pipeline and splitting
@@ -81,1439 +163,43 @@ const appStatusEl = document.getElementById('appStatus');
 const timelineEl = document.getElementById('timeline');
 
 // ---------------------------------------------------------------- scene setup
-
-const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
-// Named, because the editor's furniture lives on a second canvas over this one and
-// "the canvas" stopped being an unambiguous thing to ask for. This is the rendered
-// frame; the other one is chrome.
-renderer.domElement.id = 'stage';
-document.body.appendChild(renderer.domElement);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05070a);
-scene.fog = new THREE.FogExp2(0x05070a, 0.11);
-
-// The camera does two unrelated jobs and they cannot share an object. Orbiting to
-// inspect the cloud is navigation - view state, leaving no trace - while a camera
-// key is document state a keyframe writes and an export has to reproduce exactly.
-// So there are two cameras: a free one the controls drive, and a program one the
-// transport poses straight from program time. Damping is why nothing keyframed
-// can go through the controls at all - it is a frame-rate-dependent filter, so the
-// same move would land somewhere else at a different output frame rate.
-const ORBIT_TARGET = new THREE.Vector3(0, 0, -2.2);
-const PROGRAM_FOV = 50;
-
-const freeCamera = new THREE.PerspectiveCamera(PROGRAM_FOV, innerWidth / innerHeight, 0.05, 60);
-freeCamera.position.set(0, 0.1, 1.6);
-
-const programCamera = new THREE.PerspectiveCamera(PROGRAM_FOV, innerWidth / innerHeight, 0.05, 60);
-
-// Which of the two the viewport draws. The free camera is the default, so the live
-// viewer stays exactly what it was. Step 5's top-down view draws the program
-// camera's frustum from outside, which is why these are two objects rather than
-// one object with the controls switched off.
-let viewCamera = freeCamera;
-
-// The room's vertical, which is what +Y means once the levelling below has done its
-// job. Before it, +Y is up in the sensor's bracket and the turntable spins about a
-// pole the footage does not have.
-const WORLD_UP = new THREE.Vector3(0, 1, 0);
-
-// The rotation the levelling parameters put on the cloud, kept as a value because
-// four separate things have to ask what it is: the sensor view, the top-down, the
-// plane fit that writes it, and the proof tool that reads it back.
-const worldTilt = new THREE.Quaternion();
-
-// Not a constant, and that is the one surprising thing about navigation here.
-// OrbitControls resolves its orbit axis from `object.up` **in the constructor** and
-// never looks again - `_quat` in `three/examples/jsm/controls/OrbitControls.js`,
-// applied every `update()` and recomputed by nothing - so writing a new up onto the
-// camera half-applies: `lookAt` picks the roll up immediately while the azimuth axis
-// keeps spinning about the old pole. That reads as damping gone wrong rather than as
-// a wrong axis, which is exactly the kind of bug that survives a review. Rebuilding
-// the object is the honest fix; reaching in and assigning `_quat` is not, because it
-// is a private that can be renamed by a patch release with nothing to catch it.
-let controls;
-
-// Listeners are registered here rather than on the object, because the object does
-// not survive a change of up. Everything the old one carried is copied across, so a
-// rebuild is invisible apart from one frame of damping.
-const navListeners = [];
-
-function buildControls() {
-  const previous = controls;
-  controls = new OrbitControls(freeCamera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.07;
-  controls.autoRotateSpeed = 0.6;
-  if (previous) {
-    controls.target.copy(previous.target);
-    controls.autoRotate = previous.autoRotate;
-    controls.enabled = previous.enabled;
-    previous.dispose();
-  } else {
-    controls.target.copy(ORBIT_TARGET);
-  }
-  for (const [type, listener] of navListeners) controls.addEventListener(type, listener);
-}
-
-function onNav(type, listener) {
-  navListeners.push([type, listener]);
-  controls.addEventListener(type, listener);
-}
-
-/**
- * The pole the turntable spins about. One variable with two writers that want
- * opposite things: levelling wants the room's vertical, and the sensor view wants
- * the sensor's own, because a picture claiming to be exactly what the sensor shot
- * cannot be quietly rolled upright first.
- */
-function setNavigationUp(up) {
-  if (freeCamera.up.equals(up)) return;
-  freeCamera.up.copy(up);
-  buildControls();
-}
-
-buildControls();
-
-// Orienting is done on a camera-shaped scratch object rather than on a bare
-// Object3D, because three points cameras and lights down -Z and everything else
-// down +Z: the same lookAt on the wrong kind of object gives a pose facing the
-// other way, and it would look plausible right up until the frustum was drawn.
-const poseScratch = new THREE.PerspectiveCamera();
-
-// A pose as a value rather than as a camera that has been moved, because the
-// camera is a registry parameter like every other one and everything reaches it
-// through the same door. Step 4 fed this from a placeholder orbit; the camera
-// track feeds it now, and nothing downstream of the registry changed for that.
-function poseLookingAt(position, target = ORBIT_TARGET, fov = PROGRAM_FOV) {
-  poseScratch.position.copy(position);
-  poseScratch.lookAt(target);
-  return {
-    position: poseScratch.position.toArray(),
-    quaternion: poseScratch.quaternion.toArray(),
-    fov,
-  };
-}
-
-// Where the program camera stands when nothing has keyed it: exactly where the
-// free camera starts, looking at the same point. A clip with no camera keys is a
-// locked-off shot rather than a camera at the origin staring into the void.
-const DEFAULT_POSE = poseLookingAt(new THREE.Vector3(0, 0.1, 1.6));
+//
+// Moved to `scene.js`. The renderer, the scene, the two cameras, the world tilt and
+// the orbit controls are built there and imported here.
 
 // ---------------------------------------------------------------- gpu textures
-
-// Depth arrives as raw millimetres. An integer texture keeps it exact, and two
-// of them let the vertex shader interpolate between the last two sensor frames -
-// which is what makes an 8-15fps stream look fluid on a 120Hz display.
-const makeDepthTexture = () => {
-  const tex = new THREE.DataTexture(
-    new Uint16Array(POINTS), DEPTH_W, DEPTH_H, THREE.RedIntegerFormat, THREE.UnsignedShortType,
-  );
-  tex.internalFormat = 'R16UI';
-  tex.minFilter = THREE.NearestFilter;
-  tex.magFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  tex.needsUpdate = true;
-  return tex;
-};
-
-let depthPrev = makeDepthTexture();
-let depthCurr = makeDepthTexture();
-
-const makeColorTexture = () => {
-  const tex = new THREE.Texture();
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
-  return tex;
-};
-
-let colorPrev = makeColorTexture();
-let colorCurr = makeColorTexture();
+//
+// Moved to `gpu-textures.js`. The two depth textures, the two colour textures and the
+// one door a new sensor frame replaces them through are built there. What is here is
+// the moment they are built, which is a decision about this program's boot rather than
+// about the textures - and the five uniform cells handed back, which the point cloud's
+// material composes by reference when it is built at the banner below.
+const sourceCells = buildTextures();
 
 // ------------------------------------------------------------- surface memory
-
-// A ray that lands on a different surface between two frames is a death and a
-// birth. Today the point simply teleports, which is the loudest artifact in the
-// viewer: 3.14% of pixels flip valid/zero every frame pair with no fade at all,
-// 44x more pixels than the snap threshold ever touches.
 //
-// Remembering where the ray used to be turns that into a cross-fade, and the
-// same memory is what a wake needs - so both come from one pass, one per
-// arriving frame rather than one per display frame.
-//
-//   .r  depth the ray had before the swap, mm - where the ghost stays
-//   .g  seconds since that swap
-//   .b  how hard the swap was, 0..1
-//   .a  depth at the previous arrival, mm - the swap detector itself
-const stateType = renderer.getContext().getExtension('EXT_color_buffer_float')
-  ? THREE.FloatType
-  : THREE.HalfFloatType;
-
-const makeStateTarget = () => new THREE.WebGLRenderTarget(DEPTH_W, DEPTH_H, {
-  type: stateType,
-  minFilter: THREE.NearestFilter,
-  magFilter: THREE.NearestFilter,
-  depthBuffer: false,
-  stencilBuffer: false,
-  generateMipmaps: false,
-});
-
-let statePrev = makeStateTarget();
-let stateNext = makeStateTarget();
-
-// How long a ray's age is allowed to keep counting, in seconds of source time.
-// This is not a free number: a ghost is drawn while `age < fadeTime + wakeTime *
-// strength`, so once the clamp sits below the longest life the registry can ask
-// for, a ray that stops swapping pins its age at the ceiling and sheds forever at
-// fixed alpha. At 4.0 that was reachable - fade and wake top out at 1500 and 4000
-// milliseconds - and it showed up as a wake that never expired in the live viewer
-// and as a seek that could not reproduce a playback, because a reset zeroes the
-// ghost and no length of pre-roll puts an immortal one back. The assertion below
-// `PARAMS` is what keeps the two in step; raising a slider's maximum past this
-// fails at boot rather than in the footage.
-const MAX_AGE = 6.0;
-
-const stateUniforms = {
-  depthCurr: { value: depthCurr },
-  statePrev: { value: statePrev.texture },
-  resolution: { value: new THREE.Vector2(DEPTH_W, DEPTH_H) },
-  dt: { value: 1 / 30 },
-  snapDelta: { value: 250 },
-};
-
-const stateQuad = new FullScreenQuad(new THREE.RawShaderMaterial({
-  glslVersion: THREE.GLSL3,
-  uniforms: stateUniforms,
-  vertexShader: /* glsl */ `
-    in vec3 position;
-    void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
-  `,
-  fragmentShader: /* glsl */ `
-    precision highp float;
-    precision highp usampler2D;
-
-    uniform usampler2D depthCurr;
-    uniform sampler2D statePrev;
-    uniform vec2 resolution;
-    uniform float dt, snapDelta;
-
-    out vec4 outState;
-
-    void main() {
-      ivec2 px = ivec2(gl_FragCoord.xy);
-      float cur = float(texelFetch(depthCurr, px, 0).r);
-      vec4 s = texelFetch(statePrev, px, 0);
-      float last = s.a;
-
-      bool wasValid = last > 0.0;
-      bool isValid = cur > 0.0;
-      float jump = (wasValid && isValid) ? abs(cur - last) : 0.0;
-      bool swapped = (wasValid != isValid) || jump > snapDelta;
-
-      if (!swapped) {
-        // Clamped so age cannot grow without bound across a long session, and so
-        // it never reaches the magnitude where a float stops absorbing a 33ms step.
-        outState = vec4(s.r, min(s.g + dt, ${MAX_AGE.toFixed(1)}), s.b, cur);
-        return;
-      }
-
-      // A pixel blinking in the middle of a flat wall is the depth solve's
-      // confidence gate chattering, not motion. Keying strength off the local
-      // depth spread separates the two: noise sits on a smooth surface and gets
-      // only the brief cross-fade, while a silhouette crossing sheds a full wake.
-      float ref = isValid ? cur : last;
-      float edge = 0.0;
-      for (int i = 0; i < 4; i++) {
-        ivec2 o = i == 0 ? ivec2(1, 0) : i == 1 ? ivec2(-1, 0) : i == 2 ? ivec2(0, 1) : ivec2(0, -1);
-        float n = float(texelFetch(depthCurr, clamp(px + o, ivec2(0), ivec2(resolution) - 1), 0).r);
-        if (n > 0.0) edge = max(edge, abs(n - ref));
-      }
-
-      float strength = (wasValid && isValid)
-        ? clamp(jump / (snapDelta * 3.0), 0.0, 1.0)
-        : clamp(edge / snapDelta, 0.0, 1.0);
-
-      outState = vec4(wasValid ? last : 0.0, 0.0, strength, cur);
-    }
-  `,
-}));
+// Moved to `surface-memory.js`. The ping-pong pair the ghost accumulates in, the pass
+// that ages it and the ceiling its age is clamped at are there. Built here, after the
+// textures above, because the pass samples the depth frame they own.
+buildSurfaceMemory();
 
 // ---------------------------------------------------------------- point cloud
-
-// Two vertices per depth pixel: one for the live point, one for the ghost it
-// leaves behind. Shedding needs both on screen at once. The ghost half is left
-// out of the draw range entirely when nothing can be shed, so it costs nothing.
-const geometry = new THREE.BufferGeometry();
-const pixelCoords = new Float32Array(POINTS * 2 * 3);
-const slotAttr = new Float32Array(POINTS * 2);
-for (let slot = 0; slot < 2; slot++) {
-  for (let row = 0, i = 0; row < DEPTH_H; row++) {
-    for (let col = 0; col < DEPTH_W; col++, i++) {
-      const k = slot * POINTS + i;
-      pixelCoords[k * 3] = col;
-      pixelCoords[k * 3 + 1] = row;
-      pixelCoords[k * 3 + 2] = 0;
-      slotAttr[k] = slot;
-    }
-  }
-}
-geometry.setAttribute('position', new THREE.BufferAttribute(pixelCoords, 3));
-geometry.setAttribute('aSlot', new THREE.BufferAttribute(slotAttr, 1));
-geometry.setDrawRange(0, POINTS);
-geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -3), 12);
-
-// The depth pair's defaults, named once because three separate things now have to
-// agree about them: the uniform below, the registry entry that overwrites it at boot,
-// and `DUOTONE_SPAN_DEFAULT` beneath, which is the span the duotone's ramp covers when
-// nothing has asked for another one.
 //
-// **Naming them is a repair rather than tidiness.** The uniforms carried 0.5 and 4.5
-// while the registry carried 0.05 and 6, and the registry won at boot - so the two
-// numbers in this file that looked like the clip range were a range no build has opened
-// at since the registry existed, sitting where anybody reading the shader's neighbours
-// would take them for the answer.
-const CLIP_NEAR_DEFAULT = 0.05;
-const CLIP_FAR_DEFAULT = 6;
-
-const uniforms = {
-  depthPrev: { value: depthPrev },
-  depthCurr: { value: depthCurr },
-  colorPrev: { value: colorPrev },
-  colorCurr: { value: colorCurr },
-  mixT: { value: 1 },
-  // How far apart the two bound frames are, in seconds, which is what turns a depth
-  // difference into a speed. `mixT` says where inside the pair the playhead sits and
-  // `sinceFrameSec` says how far past the older one it has come; neither is the gap,
-  // and reconstructing it as the second over the first is degenerate at the head of
-  // every pair. So the transport hands it over as its own number.
-  //
-  // One second at boot, and it is a placeholder rather than a gap anybody should read
-  // a frame rate into. Nothing divides by it before the transport writes it: both depth
-  // textures are zero-filled until the first bind, so every point leaves at the empty
-  // sample test above the division, and the transport writes this beside `mixT` before
-  // the render that would reach it. Copying the transport's own nominal gap here would
-  // be a second declaration of the frame rate five thousand lines from the first, for a
-  // value that cannot reach a pixel.
-  spanSec: { value: 1 },
-  snapDelta: { value: 250 },
-  interpolate: { value: 1 },
-  focal: { value: new THREE.Vector2(366, 366) },
-  center: { value: new THREE.Vector2(256, 212) },
-  resolution: { value: new THREE.Vector2(DEPTH_W, DEPTH_H) },
-  // The drawing buffer's height, which is what makes every screen-space term
-  // below a fraction of the frame rather than a count of pixels. Written by
-  // `resize` and by nothing else, so the one place the buffer can change is also
-  // the one place this can.
-  bufferHeight: { value: 1080 },
-  pointSize: { value: 9 },
-  opacity: { value: 1 },
-  exposure: { value: 1.15 },
-  nearClip: { value: CLIP_NEAR_DEFAULT },
-  farClip: { value: CLIP_FAR_DEFAULT },
-  // The four lateral faces of the box `nearClip`/`farClip` already close in depth.
-  // Metres in the sensor frame, and absolute plane positions rather than insets from
-  // an edge, because the sensor's frame widens with depth and an inset would have to
-  // name a depth to mean anything. A cuboid names none.
-  //
-  // Wide open by default: `farClip` reaches 9.5m and the sensor sees 256/fx and 212/fy
-  // of that laterally, so +/-6.65m across and +/-5.50m up at the far end of what any
-  // slider can ask for. Seven clears both, which is what keeps a project saved before
-  // these existed from loading with its subject clipped.
-  cropL: { value: -7 },
-  cropR: { value: 7 },
-  cropB: { value: -7 },
-  cropT: { value: 7 },
-  // Whether those six faces actually cut, and what a point on the wrong side of them
-  // looks like while somebody is editing them. The two are deliberately different
-  // kinds of thing and the split is the whole design.
-  //
-  // `cropOn` is the `crop` parameter's landing site: document state, keyed and
-  // exported like every other look value, and it **gates the discard rather than
-  // moving the planes**. That is what lets one switch cover all six faces including
-  // the depth pair, which the fragment stage also normalises its depth ramp against -
-  // a switch that opened `nearClip`/`farClip` instead would re-grade every point still
-  // inside the box, and the A/B would stop being an A/B.
-  //
-  // `cropOutside` is the alpha a cut point draws at instead of vanishing, and it is
-  // viewer-only: derived from the crop box being on screen, never assigned, and zero
-  // in every path that produces a deliverable because those paths already take the
-  // chrome off. Zero also means the discard comes back, which is not a shortcut - a
-  // surviving point at alpha zero still writes depth and would punch invisible holes
-  // in the cloud behind it.
-  cropOn: { value: 1 },
-  cropOutside: { value: 0 },
-  // The turbulence field. Amplitude is metres, scale is cycles per metre and speed is
-  // how fast the field drifts through the scene in program seconds - all three world
-  // units, so none of them owes the 1080p reference every screen-space term here does.
-  noise: { value: 0 },
-  noiseScale: { value: 3 },
-  noiseSpeed: { value: 0.7 },
-  lattice: { value: 0 },
-  latticeCell: { value: 0.05 },
-  // One region, three uses. Centre, half-extents, corner radius and falloff width are
-  // metres in the sensor frame; the three effects below are what read it.
-  regionCentre: { value: new THREE.Vector3(0, 0, -2) },
-  regionHalf: { value: new THREE.Vector3(0, 0, 0) },
-  regionRound: { value: 0.5 },
-  regionSoft: { value: 0.2 },
-  regionPush: { value: 0 },
-  regionNoise: { value: 0 },
-  regionMask: { value: 0 },
-  ripple: { value: 0 },
-  rippleFreq: { value: 4 },
-  rippleSpeed: { value: 1 },
-  // Datastream corruption, and the five numbers one slider used to hide. `glitch` is
-  // the master and the only one of the six that is meant to be keyframed in anger: a
-  // clip brings the corruption in and out on one track, where five absolute values
-  // would have to be animated in step and reach zero together to stop. The rest are
-  // ceilings - what a fully open master means - and every default below is exactly the
-  // literal it replaced, so a document that names none of them draws what it drew.
-  //
-  // The pair that earns its keep is `glitchDensity` against `glitchShove`. Fused into
-  // the master they could only ever travel the diagonal, which made sparse-and-violent
-  // and dense-and-subtle both unaskable - the complaint that started this. Because the
-  // master still multiplies both, perceived intensity ramps as roughly the square of
-  // the fader, which is an ease-in you would otherwise keyframe by hand.
-  glitch: { value: 0 },
-  glitchDensity: { value: 0.45 },
-  glitchShove: { value: 0.45 },
-  glitchTint: { value: 1.8 },
-  glitchBands: { value: 12 },
-  glitchAxis: { value: 0 },
-  // Hertz, and zero is a state rather than an off switch: `floor(time * 0.0)` is a
-  // constant, so the tear pattern freezes where it stands instead of stopping. A held
-  // corruption is a different picture from no corruption, and because the rate
-  // keyframes it can be stopped and started.
-  glitchRate: { value: 7 },
-  time: { value: 0 },
-  // The five readings of the take, as weights rather than as a mode. Each one is a
-  // complete answer to "what colour is this point", and the fragment stage mixes
-  // whichever are non-zero - so colour and range compose instead of excluding one
-  // another, and a reading can move under the playhead like every other look value.
-  // RGB alone is the boot state, which is what the old `mode: 0` meant.
-  readRgb: { value: 1 },
-  readDepth: { value: 0 },
-  readGhost: { value: 0 },
-  readContour: { value: 0 },
-  readBlackwall: { value: 0 },
-  // What each reading is made of, which used to be literals inside its branch. The
-  // values here are the literals they replaced, so a build that somehow reached a
-  // frame before `params.reset()` would draw what the old one drew - and every one of
-  // them is what makes the equality `registry-check` hashes against the pre-reading
-  // revision hold. A default that drifted off its literal is that comparison's red
-  // row rather than something anybody has to eyeball.
-  rgbSaturation: { value: 1 },
-  depthGamma: { value: 1 },
-  ghostRim: { value: 0.7 },
-  ghostFill: { value: 0.35 },
-  contourBands: { value: 12 },
-  // One parameter, two uniforms, and it is a rounding measurement rather than a
-  // preference. The band edges are the width either side of the middle of the band,
-  // and computing `0.5 - contourWidth` in the shader does that arithmetic in float32:
-  // `f32(0.5) - f32(0.08)` is 0.42000001668930054, where the literal `0.42` this
-  // replaces is 0.41999998688697815. Those are different floats, so the shader form
-  // would move every contour frame by a hair and redden the readContour row of the
-  // comparison against the old build for a reason that has nothing to do with the
-  // feature. Done here in double and rounded once on the way to the GPU, both edges
-  // land on exactly the floats the literals did.
-  contourLo: { value: 0.42 },
-  contourHi: { value: 0.58 },
-  blackwallSweep: { value: 0.28 },
-  denoise: { value: 1 },
-  edgeTol: { value: 120 },
-  hasColor: { value: 0 },
-  softEdge: { value: 1 },
-  scanAmount: { value: 0 },
-  rimAmount: { value: 0.55 },
-  // Both apply on top of whichever mode is selected rather than inside one of its
-  // branches, so they compose with every reading of the take instead of being a
-  // sixth and seventh one. Unitless mixes.
-  thermal: { value: 0 },
-  edges: { value: 0 },
-  // The duotone, which sits beside those two for their reason and carries a second one
-  // of its own. It is a tonal transform rather than a palette: the two poles it lands
-  // between hold **luminance as well as hue**, the near one running toward black and the
-  // far one toward hot, so the near-black figure against a burning core comes out of the
-  // same term that decides what colour the room is.
-  //
-  // That pairing is the design rather than an economy, and it was reached by asking what
-  // the obvious shape could not draw. A global toe darkens near and far by the same
-  // amount, so a parameter named for the silhouette would have shipped unable to produce
-  // one - a control that appears to work, arriving at the level of the look instead of at
-  // the level of the wiring, which is the harder place to notice it. Keying the poles on
-  // depth is the whole of what makes a subject go black while the space behind it burns,
-  // and once the poles carry luminance there is nothing left for a second parameter to do.
-  //
-  // The pair itself is baked, following the precedent `heatRamp` and `depthRamp` set:
-  // both are hardcoded ramps and what is parameterised is how you use them. A `colour`
-  // registry kind would be the first new kind since `pose` and would drag a keyframe
-  // interpolation in with it - two saturated hues lerped through sRGB pass through grey
-  // on the way, so the honest version interpolates perceptually and the document format
-  // then carries that choice forever. `duotoneHue` turns both poles together instead,
-  // which is the one degree of freedom a look actually reaches for, and it keyframes.
-  //
-  // Radians here and degrees on the slider, the way the levelling angles are.
-  duotoneDepth: { value: 0 },
-  duotoneHue: { value: 0 },
-  duotoneSplit: { value: 0.5 },
-  // How many metres the ramp between the two poles takes, and it is in metres for the
-  // one reason worth having: without it the ramp's width *was* the clip range, so the
-  // grade was a function of how tightly the crop box happened to be shut.
-  //
-  // That coupling is easy to defend and was wrong in use. `t` is the point's position
-  // inside `nearClip`..`farClip`, and the ramp used to run the whole unit interval, so
-  // opening the box flattened the duotone and closing it steepened one. Measured on
-  // 2026-08-07-take1, whose cloud sits between 0.58m and 3.73m at p5 and p95: against
-  // the default range the visible cloud only reaches `t` 0.62, so the hot pole is
-  // unreachable and the grade sits in the cold third of its own travel. Getting the
-  // toning back meant shutting the far plane onto the subject and throwing the back of
-  // the room away - a framing decision the grade had no business forcing.
-  //
-  // **The split stays a fraction and only the width becomes a distance**, which is a
-  // split down the middle of one parameter rather than an inconsistency. Where the poles
-  // meet is a place in the room, and a place is what the crop box already describes, so
-  // it should move when the box does. How fast the picture crosses between them is a
-  // property of the look, and a look that had to be re-tuned every time a face moved is
-  // the thing being removed.
-  //
-  // The default is the clip range's own width, so a document that names nothing renders
-  // what it rendered before this existed. That identity is a property of these two
-  // literals rather than of the subtraction - `6.0f - 0.05f` and `5.95f` happen to round
-  // to the same float32 - so it is measured rather than argued: see the commit that
-  // introduced this, which carries the five readings' hashes either side of the change.
-  duotoneSpan: { value: CLIP_FAR_DEFAULT - CLIP_NEAR_DEFAULT },
-  duotoneMotion: { value: 0 },
-  stateTex: { value: statePrev.texture },
-  fadeTime: { value: 0.12 },
-  wakeTime: { value: 0 },
-  sinceFrameSec: { value: 0 },
-};
-
-const vertexShader = /* glsl */ `
-precision highp float;
-precision highp usampler2D;
-
-uniform usampler2D depthPrev, depthCurr;
-uniform sampler2D stateTex;
-uniform vec2 focal, center, resolution;
-uniform float bufferHeight;
-uniform float pointSize, nearClip, farClip, time, edgeTol;
-uniform float cropL, cropR, cropB, cropT, cropOn, cropOutside;
-uniform float noise, noiseScale, noiseSpeed;
-uniform float lattice, latticeCell;
-uniform vec3 regionCentre, regionHalf;
-uniform float regionRound, regionSoft, regionPush, regionNoise, regionMask;
-uniform float ripple, rippleFreq, rippleSpeed;
-uniform float mixT, spanSec, snapDelta, glitch;
-uniform float glitchDensity, glitchShove, glitchTint, glitchBands, glitchRate, glitchAxis;
-uniform float fadeTime, wakeTime, sinceFrameSec;
-uniform int denoise, interpolate;
-
-in float aSlot;
-
-out vec2 vUv;
-out float vDepth;
-out float vEdge;
-out float vGlitch;
-out float vSize;
-out float vGhost;
-out float vFade;
-out float vMask;
-out float vSpeed;
-
-float depthAt(usampler2D tex, ivec2 p) {
-  return float(texelFetch(tex, p, 0).r);
-}
-
-float hash(float n) { return fract(sin(n) * 43758.5453123); }
-
-// Three decorrelated hashes of one lattice corner, so a vector of noise costs one
-// trilinear blend rather than three of them.
-vec3 vhash3(vec3 p) {
-  vec3 q = vec3(
-    dot(p, vec3(127.1, 311.7, 74.7)),
-    dot(p, vec3(269.5, 183.3, 246.1)),
-    dot(p, vec3(113.5, 271.9, 124.6))
-  );
-  return fract(sin(q) * 43758.5453123);
-}
-
-// Value noise rather than gradient noise: it is eight hashes against twelve and a
-// dot product, and the difference between the two is a lattice-aligned bias that
-// shows when you colour with it and not when you displace points by it. Returns
-// [-1, 1] per axis.
-vec3 vnoise3(vec3 p) {
-  vec3 i = floor(p), f = fract(p);
-  vec3 u = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(mix(vhash3(i + vec3(0.0, 0.0, 0.0)), vhash3(i + vec3(1.0, 0.0, 0.0)), u.x),
-        mix(vhash3(i + vec3(0.0, 1.0, 0.0)), vhash3(i + vec3(1.0, 1.0, 0.0)), u.x), u.y),
-    mix(mix(vhash3(i + vec3(0.0, 0.0, 1.0)), vhash3(i + vec3(1.0, 0.0, 1.0)), u.x),
-        mix(vhash3(i + vec3(0.0, 1.0, 1.0)), vhash3(i + vec3(1.0, 1.0, 1.0)), u.x), u.y),
-    u.z) * 2.0 - 1.0;
-}
-
-// One rounded box covers every shape the region needs to be. Half-extents at zero
-// with a radius is a sphere, large half-extents with a small radius is a box, two
-// components at zero is a capsule, one large is a slab - and because those are all
-// reached by moving continuous sliders, each keyframes and each morphs into the
-// next, where a shape *enum* could not be a registry parameter at all.
-float sdRoundBox(vec3 p, vec3 b, float r) {
-  vec3 q = abs(p) - b;
-  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
-}
-
-// 1 inside the surface, ramping to 0 at regionSoft beyond it. Deep inside, the
-// falloff width cannot matter, which is why a probe for regionSoft has to sit in
-// the shell rather than anywhere convenient.
-float regionWeight(vec3 p) {
-  float sd = sdRoundBox(p - regionCentre, regionHalf, regionRound);
-  return 1.0 - smoothstep(0.0, max(1e-4, regionSoft), sd);
-}
-
-// libfreenect2's pinhole model, with the single deliberate departure from
-// Registration::getPointXYZ this build makes. Image y grows downward, so it is flipped
-// into the right-handed scene here.
-//
-// **x is negated because the frames arrive mirrored, and upstream's formula does not
-// undo it.** libfreenect2 hands out depth, IR and colour horizontally flipped on
-// purpose, to match the Microsoft SDK's selfie-view convention. Microsoft pairs that
-// mirrored image with a camera space whose x grows to the sensor's *left*, so their
-// cloud comes out chirally correct; getPointXYZ pairs the same mirrored image with an x
-// that grows right, so a faithful port of it renders the room reflected. This was a
-// faithful port of it from the first commit, and the symptom is that a raised right hand
-// appears on the right of the picture where a passport photo would put it on the left.
-// What settled it was not the cloud but the colour camera's own 1920x1080 frame off
-// /camera.mjpg: the branded text on a subject's shirt reads only after one horizontal
-// flip, and that JPEG carries a JFIF APP0 marker and no EXIF segment at all, so there is
-// no orientation tag anything downstream could have been applying.
-//
-// **The correction is one sign, and cx is deliberately not rebased with it.** The true
-// column of a mirrored pixel is W - (col + 0.5) and the true principal point is W - cx,
-// so the difference is (W - col - 0.5) - (W - cx), the grid width cancels, and what is
-// left is exactly -(col + 0.5 - cx). Rebasing cx as well would double-count the flip and
-// translate the whole cloud by the principal point's offset from centre - 1.8px here,
-// which is small enough to read as noise rather than as a bug.
-//
-// **Flipping the texture instead, or as well, would be wrong.** The texel lookup is what
-// pairs a point with its registered colour, and that colour arrives mirrored in exactly
-// the same way the depth does; mirroring the sampling would either re-mirror the picture
-// or peel the colour off the geometry. The geometry moves here and the sampling does not.
-vec3 unproject(vec2 pixel, float z) {
-  return vec3(
-    -(pixel.x + 0.5 - center.x) / focal.x * z,
-    -(pixel.y + 0.5 - center.y) / focal.y * z,
-    -z
-  );
-}
-
-void main() {
-  ivec2 px = ivec2(position.xy);
-
-  // Age advances continuously between arrivals, so a 30fps stream still fades on
-  // a 120Hz display instead of stepping once per frame.
-  vec4 st = texelFetch(stateTex, px, 0);
-  float age = st.g + sinceFrameSec;
-
-  float z;
-  vEdge = 0.0;
-  vGhost = 0.0;
-  vFade = 1.0;
-  // Written before the branch rather than inside it, which is the same rule the three
-  // above follow and which matters more here than it looks. There are three early
-  // returns below this line and a whole branch - the ghost - that never touches either
-  // depth texture, so a varying only written on the live path is undefined everywhere
-  // else, and undefined in a shader is whatever the last invocation left in the
-  // register. A shed point would come out carrying the speed of whichever live point
-  // shared its warp.
-  vSpeed = 0.0;
-
-  if (aSlot > 0.5) {
-    // The ghost: what the ray used to be looking at. A hard swap earns a longer
-    // wake than a soft one, which is what keeps a static scene from shedding.
-    float life = fadeTime + wakeTime * st.b;
-    if (st.r <= 0.0 || life <= 0.0 || age >= life) {
-      gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-      gl_PointSize = 0.0;
-      return;
-    }
-    float k = 1.0 - age / life;
-    vGhost = st.b;
-    vFade = k * k; // eased so it thins out rather than stepping off
-    z = st.r * 0.001;
-    // vEdge stays 0: it drives the rim term, and a shed point burning at full rim
-    // is the white blowout this look already had to be pulled back from once.
-  } else {
-    float mmC = depthAt(depthCurr, px);
-
-    // Early-out before the neighbour fetches: a large share of the frame is empty,
-    // and those pixels are culled regardless of what their neighbours say.
-    if (mmC <= 0.0) {
-      gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-      gl_PointSize = 0.0;
-      return;
-    }
-
-    // The same ray one frame ago, and it is fetched here rather than inside the blend
-    // below because two things read it now and only one of them is optional. It used to
-    // live under the interpolation switch, which is where it belonged while the blend
-    // was its only reader - and leaving it there would have made the speed die silently
-    // the moment anybody turned interpolation off, which is exactly the arrangement
-    // registry-check's scrambled set runs in.
-    float mmP = depthAt(depthPrev, px);
-
-    // **One discontinuity test, read by both.** Lerping across a depth discontinuity
-    // smears a point through empty space for the whole inter-frame interval, and
-    // measuring a speed across one is the same mistake wearing a worse consequence: the
-    // two samples are different surfaces arriving on the same ray, so the difference
-    // between them is the distance from a subject to the wall behind it rather than
-    // anything that moved. A silhouette would burn on every frame.
-    //
-    // That the gate really is finding surfaces rather than fast motion was measured on
-    // the six frames registry-check pins, at the default 250mm: of the samples it
-    // rejects, 28.8% sit at a depth edge - a four-neighbour spread past the shipped
-    // edgeTol - against 0.37% of the ones it keeps, which is a factor of 78. There are
-    // only 52 of them in five pairs, because the fixture is nearly static, and the
-    // ratio rather than the count is the reading.
-    //
-    // A zero sample is the other half of the same test and is not a jump from the
-    // sensor to the origin: it means no prior measurement on this ray, so a point that
-    // has just come into view has no speed rather than an enormous one.
-    bool paired = mmP > 0.0 && abs(mmC - mmP) < snapDelta;
-
-    float mm = mmC;
-    if (interpolate == 1 && paired) mm = mix(mmP, mmC, mixT);
-
-    // Axial speed, in millimetres per second, and **the division by the pair's own gap
-    // is the whole of what makes it a property of the room rather than of the link.**
-    // A build handing the raw per-frame difference on looks completely correct until
-    // the frame rate changes: over a degraded link every speed in the scene reads low
-    // by whatever the link lost, so a look graded at 30fps grades differently at 9, and
-    // no picture comparison taken at one rate can see it.
-    //
-    // What the pair can express is bounded by the gate above it, at snapDelta over the
-    // gap - 7500 mm/s at the default 250mm and a 30fps stream, 1953 mm/s over the
-    // 128ms pairs the pinned fixture is built from. Anything keyed on this has to sit
-    // under the slower of those or the top of its ramp is a place no footage reaches.
-    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;
-
-    z = mm * 0.001;
-
-    // Neighbour spread doubles as a speckle test and an edge signal: isolated
-    // points from dropped USB packets have no depth-consistent neighbours.
-    float maxDiff = 0.0;
-    int valid = 0;
-    for (int i = 0; i < 4; i++) {
-      ivec2 o = i == 0 ? ivec2(1, 0) : i == 1 ? ivec2(-1, 0) : i == 2 ? ivec2(0, 1) : ivec2(0, -1);
-      ivec2 q = clamp(px + o, ivec2(0), ivec2(resolution) - 1);
-      float n = depthAt(depthCurr, q);
-      if (n > 0.0) {
-        valid++;
-        maxDiff = max(maxDiff, abs(n - mmC));
-      }
-    }
-    vEdge = clamp(maxDiff / edgeTol, 0.0, 1.0);
-
-    bool speckle = denoise == 1 && (valid < 3 || maxDiff > edgeTol * 3.0);
-    if (speckle) {
-      gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-      gl_PointSize = 0.0;
-      return;
-    }
-
-    // Born points ramp in over the same window their predecessor fades out.
-    vFade = fadeTime > 0.0 ? clamp(age / fadeTime, 0.0, 1.0) : 1.0;
-  }
-
-  // **One question asked in two places, because half of it needs the unprojection and
-  // half of it cannot wait for it.** The depth pair is a property of the sample and is
-  // known here; the lateral four are positions in the room and are not known until
-  // below. So outsideCrop accumulates rather than being decided once, and everything
-  // downstream reads the accumulated answer instead of re-testing a face.
-  //
-  // The early return survives, and it is what keeps the box free when nobody is looking
-  // at it: with cropOutside at zero this is the same hard cull the shader has always
-  // done, and the far half of a room never reaches the unprojection or the region weight
-  // below it. Only a viewer with the box on screen pays for keeping cut points alive, and
-  // no exported frame ever does.
-  //
-  // **What that viewer pays is large in proportion and small in the budget**, which is
-  // not obvious either way and so was measured rather than argued: 0.285ms per draft
-  // rises to 0.518ms, up 82%, on a box tight enough to cut most of the room. The
-  // proportion is that big because the cull it replaces is the cheapest exit in this
-  // shader - almost every point was leaving at the depth test and now runs the whole
-  // vertex stage - and 0.23ms is still under a hundredth of a 30fps frame. See
-  // docs/performance.md for the method.
-  bool outsideCrop = cropOn == 1.0 && (z < nearClip || z > farClip);
-  if (outsideCrop && cropOutside <= 0.0) {
-    gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-    gl_PointSize = 0.0;
-    return;
-  }
-
-  vec3 pos = unproject(position.xy, z);
-
-  // The other four faces of the same box, and they have to come after the
-  // unprojection because a lateral plane is a position in the room where the depth
-  // clip is a property of the sample. Metres, so a face stays where it was put
-  // whatever the output size is - the crop is a place a subject stood, not a
-  // fraction of a frame, and a wedge that widened with depth would take the wall
-  // behind the subject along with the subject's elbow.
-  //
-  // Tested on the undisplaced position, for the reason the region gives below: a
-  // boundary read after turbulence lets points wander across it, and the edge
-  // crawls along itself as the noise rises rather than holding still.
-  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {
-    if (cropOutside <= 0.0) {
-      gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-      gl_PointSize = 0.0;
-      return;
-    }
-    outsideCrop = true;
-  }
-
-  // The region is read at the *undisplaced* position, and both things below use this
-  // rather than the running pos. A region is a place in the room where the subject
-  // stood, so its boundary has to stay put when turbulence is raised - evaluated on
-  // the displaced position instead, a mask's edge would crawl along itself as the
-  // noise pushed points across it, which reads as the mask being broken rather than
-  // as the cloud moving.
-  vec3 p0 = pos;
-  //
-  // **The gate names every effect that reads it, and a term added without joining this
-  // list is inert rather than broken** - which is the worse failure, because its slider
-  // moves, its uniform lands and its keyframes play back against a weight frozen at zero.
-  // The operators are not uniform on purpose: regionNoise and ripple cannot go negative
-  // and are tested against zero, where regionPush and regionMask run from -1 and would be
-  // switched off across half their travel by the same test.
-  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0 || ripple > 0.0)
-    ? regionWeight(p0)
-    : 0.0;
-
-  // Gated because it is the most expensive thing in this shader: eight hashes of three
-  // sines each, against the six the old sine field cost. A look with no turbulence pays
-  // none of it, which is the same bargain the ghost half of the geometry makes.
-  float amp = noise + regionNoise * rw;
-  if (amp > 0.0) {
-    pos += amp * vnoise3(p0 * noiseScale + time * noiseSpeed * vec3(0.7, 1.13, 0.31));
-  }
-
-  // Radial rather than along the field's gradient. The gradient of a rounded box is
-  // degenerate at the centre - there is no outward direction there - and flattens
-  // against the faces, where a radial push is defined everywhere and reads as a blob
-  // swelling. The guard is for the point that lands exactly on the centre, where
-  // normalize would hand back NaN and take the whole vertex with it.
-  if (regionPush != 0.0 && rw > 0.0) {
-    vec3 away = p0 - regionCentre;
-    float d = length(away);
-    if (d > 1e-4) pos += (away / d) * regionPush * rw;
-  }
-
-  // The region read a fourth way: a wave travelling out along the radius, so the volume
-  // breathes where the push only swells it. It shares the push's radial direction and its
-  // centre guard for the same reasons - the gradient of a rounded box is degenerate at the
-  // centre, and normalize there would hand back NaN and take the vertex with it.
-  //
-  // **The clock is stepped rather than continuous, which is the whole character of it.**
-  // A sine of raw time is a thing breathing; this design wants a thing being rebuilt by a
-  // machine, so the phase advances in eighth-cycles and the surface arrives at each one
-  // rather than sliding between them. Eight steps and not a parameter: the count is what
-  // makes it read as machinery, and a slider that could set it to a thousand would just
-  // be a way to author the smooth version this is deliberately not.
-  //
-  // The step is on the clock alone and not on the radius, so the wave is quantised in
-  // time and smooth in space. Quantising both would put the region on a set of shells,
-  // which is the lattice's job two blocks down and would be a second way to do it.
-  if (ripple > 0.0 && rw > 0.0) {
-    vec3 out0 = p0 - regionCentre;
-    float dist = length(out0);
-    if (dist > 1e-4) {
-      float cycles = dist * rippleFreq - floor(time * rippleSpeed * 8.0) * 0.125;
-      pos += (out0 / dist) * (sin(cycles * 6.2831853) * ripple * rw);
-    }
-  }
-
-  // Positive hides what is inside the region, negative what is outside. Carried to the
-  // fragment stage rather than culled here, because the whole point of the falloff is
-  // that the edge is soft.
-  //
-  // The crop's own dimming rides here rather than on a varying of its own, and it is
-  // the same idea rather than a similar one: both are a boundary the vertex stage knows
-  // about attenuating a fragment it cannot discard. A second varying would be a second
-  // spelling of "how much is this point attenuated", and the two would then have to be
-  // multiplied together somewhere anyway.
-  vMask = (regionMask > 0.0
-    ? 1.0 - regionMask * rw
-    : 1.0 + regionMask * (1.0 - rw))
-    * (outsideCrop ? cropOutside : 1.0);
-
-  // Datastream corruption: horizontal bands tear sideways, the way a failing
-  // feed shears. Bands are picked stochastically so it stutters rather than pulses.
-  //
-  // The shove is sensor-frame X applied before the view matrix, and the bands are
-  // depth-image rows, so the tear belongs to the feed rather than to the display. That
-  // is the point rather than an oversight: orbit around a torn band and it shoves in
-  // depth, which is what says the volume is corrupt, and under a levelled room the
-  // bands run at the angle the bracket was actually at. Screen-locked tearing is a
-  // different effect and would belong at the grade stage beside the scanlines.
-  //
-  // The floor of time times the rate is written twice rather than hoisted into a local,
-  // and the shove's ceiling is parenthesised as twice glitchShove rather than folded
-  // into the chain. Both are here to hold the float arithmetic at the defaults exactly
-  // where the literals left it - this file has already measured that handing a value
-  // through a variable licenses a contraction the inline expression does not get, and
-  // doubling 0.45 is exact in float32 where a re-associated product need not be. At the
-  // defaults the *geometry* of this block is bit-identical to the one-slider version it
-  // replaces, and that is measured rather than reasoned: with the flare taken to zero, the
-  // colour, depth and contour readings come back byte for byte identical to the pinned
-  // build at the shipped glitch of 0.18, over six frames, and the shove is live on both
-  // sides so the equality is not vacuous.
-  //
-  // **The flare is the exception and the claim used to be stated without it.** glitchTint
-  // defaults to 1.8 where the line it replaced baked 3.0, so the picture does move - see
-  // the registry entry for the measurement. The blanket version of this sentence stood for
-  // as long as it did because nothing ever rendered these two builds with the glitch
-  // switched on: the cross-build section renders at parameter defaults, where glitch is 0
-  // and none of this executes.
-  vGlitch = 0.0;
-  if (glitch > 0.0) {
-    // The axis the bands are cut along, and the default path is the old expression itself
-    // rather than one that computes what the old expression computed. That distinction has
-    // already cost this file a measurement twice - the comment above says why, and the
-    // raster's guard two hundred lines into the grade shader says it again - so the zero
-    // case reaches the old division textually, with no local in the way to license a
-    // contraction the inline form does not get.
-    float band = glitchAxis > 0.0
-      ? floor(mix(position.y, position.x, glitchAxis) / glitchBands)
-      : floor(position.y / glitchBands);
-    float roll = hash(band + floor(time * glitchRate) * 31.7);
-    if (roll > 1.0 - glitch * glitchDensity) {
-      float shove = (hash(band * 3.1 + floor(time * glitchRate)) - 0.5) * glitch * (2.0 * glitchShove);
-      pos.x += shove;
-      vGlitch = abs(shove) * glitchTint;
-    }
-  }
-
-  // The volume rebuilt on a grid: every axis quantised to a cell, so surfaces break into
-  // steps and the cloud reads as something a machine is reconstructing rather than
-  // something that was measured. It sits last of the displacements, after the tear, so
-  // what gets snapped is the position the point actually ends at - a lattice applied
-  // before the turbulence would be smoothly pushed back off its own grid and buy nothing.
-  //
-  // **Snapped in the levelled frame and not the sensor's**, which is the whole of why this
-  // is more than a rounding. The grid has to belong to the room: with a canted mount the
-  // sensor frame is tilted, and a lattice cut along its axes would stand at whatever angle
-  // the bracket happened to be at, so the floor would step diagonally. Levelling first
-  // means the cells line up with the room, and a mount corrected afterwards does not
-  // re-cut the grid.
-  //
-  // **The rotation is the model matrix three already hands this shader, not a second copy
-  // of it.** The cloud carries the world tilt as its only transform, so mat3(modelMatrix)
-  // is exactly the sensor-to-levelled rotation and cannot drift from it the way a uniform
-  // derived beside it could. Getting back is the transpose rather than inverse(), which is
-  // both cheaper and exact - but that identity holds only while the matrix stays a pure
-  // rotation, so registry-check asserts the cloud carries no scale and no translation
-  // rather than leaving it as a thing this comment claims.
-  if (lattice > 0.0) {
-    mat3 level = mat3(modelMatrix);
-    vec3 cell = floor((level * pos) / latticeCell + 0.5) * latticeCell;
-    pos = mix(pos, transpose(level) * cell, lattice);
-  }
-
-  vUv = (position.xy + 0.5) / resolution;
-  vDepth = z;
-
-  vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-  gl_Position = projectionMatrix * mv;
-
-  // Every screen-space term in this renderer is defined against a 1080p reference
-  // and scales with the drawing buffer, and this is the dominant one. Set in
-  // framebuffer pixels and scaled by distance but not by buffer height, the same
-  // scene at twice the height kept each point the same pixel size while the frame
-  // gained four times the pixels: coverage per point dropped fourfold, the 217k
-  // points stopped overlapping into a surface, and the sub-pixel RGB split began
-  // fringing individual points instead of edges. That is a different image rather
-  // than the same one at higher fidelity, so pointSize is now pixels at 1080p.
-  //
-  // The clamp stays in framebuffer pixels deliberately. It is a bound on what the
-  // hardware can draw rather than a look value: ALIASED_POINT_SIZE_RANGE is
-  // [1, 511] on this GPU, so a sub-pixel point is not expressible at all and
-  // scaling the lower bound would be a more elaborate way of asking for one. The
-  // residual is confined to the clamped tails - the far cloud below one pixel, and
-  // points closer than about a quarter of a metre - and a check comparing two
-  // output sizes has to keep out of that band rather than pretend it is not there.
-  float k = bufferHeight / 1080.0;
-  gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);
-  // Carried in reference pixels rather than framebuffer ones, because the fragment
-  // shader normalises a splat's additive energy against its area. For the same
-  // image at twice the size each point covers four times the pixels, so it has to
-  // keep the same alpha - normalising against the drawn size instead would make
-  // the identical look sum four times too bright at twice the resolution.
-  vSize = gl_PointSize / k;
-
-  // Cut-away points draw at half the size, and **this has to come after vSize or it
-  // undoes the dimming it is meant to help.** The fragment stage normalises a splat's
-  // additive energy against vSize squared, so a point reported at half size gets four
-  // times the alpha back - which is right for a point that is genuinely small and wrong
-  // for one that has merely been shrunk to get out of the way. vSize therefore keeps
-  // the size a kept point would have had, and only the rasterised sprite shrinks.
-  //
-  // The size is what makes this scaffolding rather than a second cloud. Alpha alone is
-  // not enough: depthWrite is on, so a faint point still occludes at full strength,
-  // and cut-away furniture orbiting in front of the subject would flicker through it
-  // order-dependently. A quarter of the footprint is a quarter of the occlusion, and it
-  // reads as dust instead of as surface.
-  if (outsideCrop) gl_PointSize *= 0.5;
-}
-`;
-
-const fragmentShader = /* glsl */ `
-precision highp float;
-
-uniform sampler2D colorPrev, colorCurr;
-uniform float opacity, exposure, nearClip, farClip, mixT, time;
-uniform float scanAmount, rimAmount, thermal, edges;
-uniform float duotoneDepth, duotoneHue, duotoneSplit, duotoneSpan, duotoneMotion;
-uniform float readRgb, readDepth, readGhost, readContour, readBlackwall;
-uniform float rgbSaturation, depthGamma, ghostRim, ghostFill;
-uniform float contourBands, contourLo, contourHi, blackwallSweep;
-uniform int hasColor, softEdge;
-
-in vec2 vUv;
-in float vDepth;
-in float vEdge;
-in float vGlitch;
-in float vSize;
-in float vGhost;
-in float vFade;
-in float vMask;
-in float vSpeed;
-
-out vec4 fragColor;
-
-// Black through red and orange to white, the palette a thermal camera writes rather
-// than the cool-to-warm one depthRamp uses - the two are deliberately different, so
-// that thermal on top of Depth mode is a second reading and not the same one twice.
-vec3 heatRamp(float t) {
-  vec3 a = vec3(0.02, 0.01, 0.06);
-  vec3 b = vec3(0.55, 0.05, 0.28);
-  vec3 c = vec3(0.98, 0.42, 0.05);
-  vec3 d = vec3(1.00, 0.98, 0.86);
-  return t < 0.33 ? mix(a, b, t / 0.33)
-       : t < 0.66 ? mix(b, c, (t - 0.33) / 0.33)
-                  : mix(c, d, (t - 0.66) / 0.34);
-}
-
-// Smooth cool-to-warm ramp; reads as depth without the banding of a hard palette.
-vec3 depthRamp(float t) {
-  vec3 a = vec3(0.06, 0.10, 0.28);
-  vec3 b = vec3(0.15, 0.72, 0.78);
-  vec3 c = vec3(0.98, 0.78, 0.32);
-  vec3 d = vec3(0.96, 0.29, 0.42);
-  return t < 0.33 ? mix(a, b, t / 0.33)
-       : t < 0.66 ? mix(b, c, (t - 0.33) / 0.33)
-                  : mix(c, d, (t - 0.66) / 0.34);
-}
-
-// Turning both duotone poles by one angle, as a rotation about the grey axis.
-//
-// Rodrigues rather than a trip through HSV, and the axis is what makes it the right
-// arithmetic rather than the cheap one: rotating about the diagonal leaves the
-// component along it alone, so a pole that is nearly black stays nearly black however
-// far the hue is turned. A round trip through HSV would rebuild the value from a
-// maximum and hand the dark pole back lifted, which is precisely the luminance the
-// silhouette is made of.
-//
-// What is deliberately *not* claimed here is that a hue of zero is the exact identity.
-// It collapses to one where the driver returns exact values at zero, and GLSL ES permits
-// a couple of thousandths of absolute error on a trigonometric function, so that would be
-// a premise about this GPU wearing the clothes of a fact about the language - which is the
-// shape this repo has already been bitten by at the power of one. Nothing rests on it: the
-// block below guards on the *amount*, so at the defaults this function is never reached at
-// all, and the bit-exactness the pinned comparison measures is the branch's rather than
-// this arithmetic's.
-vec3 hueSpin(vec3 c, float a) {
-  const vec3 axis = vec3(0.5773502691896258);
-  float ca = cos(a), sa = sin(a);
-  return c * ca + cross(axis, c) * sa + axis * dot(axis, c) * (1.0 - ca);
-}
-
-void main() {
-  vec2 d = gl_PointCoord - 0.5;
-  float r2 = dot(d, d);
-
-  // Additive mode shapes the sprite purely with alpha falloff. Skipping the
-  // discard keeps Apple's tile-based hidden-surface removal working.
-  float falloff;
-  if (softEdge == 1) {
-    falloff = exp(-r2 * 9.0);
-  } else {
-    if (r2 > 0.25) discard;
-    falloff = smoothstep(0.25, 0.02, r2);
-  }
-
-  float t = clamp((vDepth - nearClip) / max(0.001, farClip - nearClip), 0.0, 1.0);
-  vec3 rgb = hasColor == 1
-    ? mix(texture(colorPrev, vUv).rgb, texture(colorCurr, vUv).rgb, mixT)
-    : vec3(0.7);
-
-  // Saturation on the camera image, at the source rather than after the blend. It is
-  // the colour reading's own control - the one reading that had none - so it belongs
-  // where the colour is read, and the treatments that take a luminance off the colour
-  // are unaffected by construction: this rotates the colour about its own luminance,
-  // which is the quantity they read.
-  //
-  // Guarded rather than applied unconditionally, and the guard is what makes the
-  // default exact rather than nearly exact. A mix at 1.0 is x plus one times y minus x
-  // on hardware that contracts it into a multiply-add, and x plus y minus x is not
-  // always bit-identical to y - so an unguarded identity would move the pixels of every
-  // look ever authored by a hair, which is a whole preset library drifting to buy
-  // nothing. The branch is on a uniform, so it is coherent across the draw and a look
-  // that does not saturate pays for no saturation, the same way each reading's own
-  // block is guarded on its weight.
-  if (rgbSaturation != 1.0) {
-    float rgbLum = dot(rgb, vec3(0.299, 0.587, 0.114));
-    rgb = mix(vec3(rgbLum), rgb, rgbSaturation);
-  }
-  // The five readings, summed by weight rather than selected by an integer. Each
-  // block answers "what colour is this point and how solid is it", and the two
-  // answers are accumulated separately because they do not combine the same way:
-  // a colour is a value to average, and an alpha factor is a coefficient on
-  // opacity that the RGB and Depth readings do not write at all.
-  //
-  // Normalise-by-sum rather than a chain of mix(), and that is the whole reason
-  // this rewrite is safe. A single reading at 1.0 comes out of here as
-  // x * 1.0 / 1.0, which IEEE multiplication and division both leave exactly
-  // alone, so every look authored against the old five-way branch renders the
-  // pixels it always did - proven rather than argued, by hashing the framebuffer
-  // of each reading here against the same mode on the commit before this one.
-  // A chain of mix() would be a different arithmetic expression for the same
-  // intent and would drift in the last bits, which is a whole preset library
-  // quietly moving.
-  //
-  // Each block is guarded on its own weight. That is a cost decision and not a
-  // semantic one - adding anything times 0.0 adds nothing - but the branch is
-  // uniform, so it is coherent across the entire draw and a preset using one
-  // reading pays for one reading.
-  vec3 col = vec3(0.0);
-  float alphaFactor = 0.0;
-  float readSum = 0.0;
-
-  if (readRgb > 0.0) {
-    col += rgb * readRgb;
-    alphaFactor += readRgb;
-    readSum += readRgb;
-  }
-
-  if (readDepth > 0.0) {
-    // The gamma bends where the ramp's colours sit inside the clip range rather than
-    // moving its ends: at 1.0 it is the ramp this always drew, under 1 the far end of
-    // the range gets more of the ramp and over 1 the near end does. Which is the
-    // control the depth reading wanted, since where the subject stands inside near/far
-    // decides whether the interesting half of the ramp lands on them at all.
-    //
-    // Two statements for one sum, and the duplication is the measurement rather than an
-    // oversight. Three forms of this line were hashed against the build from before the
-    // readings existed, and they produced three different images of the same reading at
-    // a default that is exactly the literal it replaced:
-    //
-    //   depthRamp(pow(1.0 - t, depthGamma))            frame 0 2cf348152757
-    //   depthRamp(g == 1.0 ? 1.0 - t : pow(...))       frame 0 73d0479d20f9
-    //   depthRamp(1.0 - t), reached by the branch      frame 0 885c07e968a6, which is the
-    //                                                 old build's own hash
-    //
-    // The first is the ordinary trap: raising a number to the power of one is the
-    // mathematical identity and not the arithmetic one, because this GPU evaluates it as
-    // exp2 of the log2 and it comes back a few last-bit values away. The second is the
-    // one worth writing down - handing the ramp a value through a variable is not the
-    // same as handing it the expression, even when the value is bit-identical. The ramp
-    // inlines to a mix by the argument over 0.33, so with the subtraction inside the call
-    // the compiler can contract the two into one multiply-add and with a variable in its
-    // place it does not. So the default path here has to *be* the old line rather than
-    // compute what it computed. Ghost's exponent needed no guard at all, which is the
-    // other half of the measurement: substituting a uniform for a literal exponent is
-    // exact, and it is asking for the power of one that is not.
-    if (depthGamma == 1.0) {
-      col += depthRamp(1.0 - t) * readDepth;
-    } else {
-      col += depthRamp(pow(1.0 - t, depthGamma)) * readDepth;
-    }
-    alphaFactor += readDepth;
-    readSum += readDepth;
-  }
-
-  if (readGhost > 0.0) {
-    float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
-    // Two controls over one shell: the exponent decides how tightly the glow hugs a
-    // depth discontinuity, and the fill is how much of the shell's blue is there before
-    // any luminance arrives - which is what a colourless surface facing the sensor
-    // draws, and at 0 the reading collapses to edges alone.
-    float rim = pow(vEdge, ghostRim);
-    col += mix(vec3(0.20, 0.45, 0.75) * (ghostFill + lum), vec3(0.75, 0.95, 1.0), rim) * readGhost;
-    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * readGhost;
-    readSum += readGhost;
-  }
-
-  if (readContour > 0.0) {
-    // Bands per metre, and how much of each band the line fills. The two edges arrive
-    // as separate uniforms because subtracting the width from a half here would round
-    // differently from the literal it replaces - see the note beside them - so the
-    // width is taken either side of the middle on the CPU.
-    float bands = fract(vDepth * contourBands);
-    float line = smoothstep(contourLo, 0.5, bands) * smoothstep(contourHi, 0.5, bands);
-    col += mix(depthRamp(1.0 - t) * 0.18, vec3(1.0), line) * readContour;
-    alphaFactor += (0.15 + 0.85 * line) * readContour;
-    readSum += readContour;
-  }
-
-  if (readBlackwall > 0.0) {
-    // Blackwall: crimson volume, surfaces reading as containment rather than skin.
-    // Depth discontinuities are where the wall "sees" you, so edges burn hottest.
-    float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
-    vec3 deep = vec3(0.28, 0.010, 0.035);
-    vec3 hot  = vec3(1.00, 0.115, 0.140);
-    vec3 bw = mix(deep, hot, pow(1.0 - t, 1.6));
-
-    float rim = pow(vEdge, 0.55);
-    bw = mix(bw, vec3(0.95, 0.34, 0.22), rim * rimAmount);
-
-    // A scan plane sweeping through depth, the ICE probing outward. Kept narrow
-    // and tinted rather than white - a wide hot band reads as a light leak
-    // dragging across the geometry instead of something scanning it.
-    // The speed is a parameter and the spacing is not, deliberately: a scan plane is
-    // one plane moving through the room, and how fast it travels is the thing that
-    // reads as menace or as machinery. At 0 it stands still, which is a wall that has
-    // stopped looking - and because it keyframes, it can stop and start.
-    float sweep = fract(vDepth * 0.55 - time * blackwallSweep);
-    float scan = smoothstep(0.988, 1.0, sweep);
-    bw += vec3(0.10, 0.62, 0.78) * scan * scanAmount;
-
-    bw *= 0.55 + 0.75 * lum;
-
-    // Shed points run hotter than the surface they left, so a wake reads as the
-    // wall having noticed something rather than as leftover geometry.
-    bw = mix(bw, vec3(1.00, 0.42, 0.20), vGhost * 0.55);
-
-    col += bw * readBlackwall;
-    alphaFactor += (0.30 + 0.70 * rim * rimAmount + 0.45 * scan * scanAmount) * readBlackwall;
-    readSum += readBlackwall;
-  }
-
-  // Every weight at zero draws nothing, and that is the honest answer rather than
-  // a case to clamp away: the panel is showing five zeros and the frame agrees
-  // with it. The guard is on the division alone, so the alpha carries the emptiness
-  // out instead of a NaN doing it.
-  float norm = readSum > 0.0 ? 1.0 / readSum : 0.0;
-  col *= norm;
-  float alpha = opacity * alphaFactor * norm;
-
-  // Both of these sit *after* the blend and modify whatever it produced, rather than
-  // living inside one of the readings. A term written into a reading is inert in
-  // every other one, which is both a worse feature - these are meant to compose with
-  // whatever you are working in - and a hole in the proof: a term reachable only from
-  // one reading is only exercised by a sweep arm that happens to select that reading,
-  // and would otherwise be recorded as a parameter that cannot touch a pixel. That
-  // argument is what the readings above have now been rebuilt around, so the rule it
-  // states applies to the readings themselves: registry-check sweeps each of them.
-  if (thermal > 0.0) {
-    // Luminance where there is a colour camera, depth where there is not. A thermal
-    // picture is a reading of a signal, and with the colour stream off the only signal
-    // left is range - falling back to a flat tint instead would be a slider that
-    // appears to work and is showing nothing.
-    float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
-    float heat = hasColor == 1 ? lum : 1.0 - t;
-    col = mix(col, heatRamp(clamp(heat, 0.0, 1.0)), thermal);
-  }
-
-  if (edges > 0.0) {
-    // vEdge is the neighbour spread the vertex stage already computed for the
-    // speckle test, so an edge-only reading costs a mix rather than a second pass.
-    float e = pow(vEdge, 0.6);
-    col = mix(col, mix(vec3(0.02, 0.03, 0.05), vec3(0.82, 0.94, 1.0), e), edges);
-    alpha *= mix(1.0, 0.05 + 0.95 * e, edges);
-  }
-
-  // The duotone, and it is the governing tonal transform rather than a tint over one:
-  // the near pole runs toward black and the far pole toward hot, so a single term
-  // produces both the depth-keyed palette and the near-black silhouette against a
-  // burning core. The note beside the uniforms has why those are one parameter.
-  //
-  // It sits here, after the blend, for the reason thermal and edges above it do - a term
-  // written into one reading is inert in every other, and is then exercised only by
-  // whichever sweep arm happens to select that reading. And it sits *before* the glitch
-  // flare below rather than after it, which is a decision rather than an ordering
-  // accident: a torn band is emitted light, so it belongs on top of the tonal transform
-  // and not underneath one that would crush it back toward black.
-  //
-  // Read off t, the point's position inside the near/far clip range, so the split is a
-  // place in the room the way the crop faces are and not a fraction of a frame. The split
-  // is where the two poles meet and moving it decides which half of the room the subject
-  // falls in.
-  //
-  // **How wide the ramp is either side of that is a distance rather than a share of the
-  // box**, which is what duotoneSpan buys and why the division below exists. t is already
-  // normalised by the clip range, so a ramp stated in t is a ramp whose metres change
-  // every time a crop face moves - the grade would follow the framing, and shutting the
-  // far plane to steepen the toning would be the only way to steepen it. Dividing the span
-  // by the range converts metres back into t's units at the width the look asked for, and
-  // the long note beside the uniform carries what that was measured to cost.
-  //
-  // Guarded, and the shape was measured rather than chosen. Both shapes are arithmetically
-  // clean here, which is not obvious and is worth writing down: a mix at zero is a plus
-  // zero times b minus a, which is exact whether or not the compiler contracts it, where
-  // the mix at one this file guards elsewhere is the one that is not. So the question was
-  // never the identity but what a branch does to the contractions either side of it, which
-  // the flare below records going the surprising way. Measured here, guarded, against the
-  // pinned pre-registry build: readRgb, readDepth, readContour and readBlackwall all came
-  // back bit-identical over six frames, and readGhost reproduced its own pre-existing
-  // failure unchanged - the same two frames, 2 and 3, and the same pair of hashes
-  // 55d01311394e against 36fb79d8fa45. That last part is the half that matters, because a
-  // row already red is where a new perturbation would hide.
-  if (duotoneDepth > 0.0) {
-    vec3 cold = hueSpin(vec3(0.020, 0.030, 0.075), duotoneHue);
-    vec3 heat = hueSpin(vec3(1.000, 0.380, 0.120), duotoneHue);
-    float w = duotoneSpan / max(0.001, farClip - nearClip);
-    float k = smoothstep(duotoneSplit - w * 0.5, duotoneSplit + w * 0.5, t);
-    // The motion half of the same transform, and it is the same two poles rather than a
-    // second palette laid over them: depth decides where the room falls between cold and
-    // hot, and this pushes whatever is moving through the room toward the hot end of it.
-    // That is the reading the depth key on its own cannot draw - a subject and the wall
-    // behind it are graded by where they stand, so a person walking through a scene is
-    // exactly as cold as the air they walk through until something keys on the walking.
-    //
-    // Toward 1 rather than added to k, so a point at the hot end cannot be pushed past
-    // it and the term has its room where the picture is near-black, which is where a
-    // subject usually is. The far half of the room is already hot and has nothing to
-    // gain, which is right: motion is only news against the pole it is not at.
-    //
-    // **1200 mm/s is the speed at which a point reaches the pole**, and it is baked for
-    // the reason the two poles themselves are - a look parameterises how much of a ramp
-    // it wants, not the ramp. It is about the axial speed of somebody walking straight
-    // at the sensor at an ordinary pace, so the pole belongs to a person crossing the
-    // room rather than to a hand. Measured over the sample capture: the 99th percentile
-    // of a nearly-static stretch is 430 mm/s and the fastest sample in five pairs is
-    // about 1900, while a take with somebody moving through it runs a median of 286 and
-    // a 90th percentile of 1082.
-    //
-    // **The sensor's jitter is a displacement rather than a speed, so what it reads as
-    // here depends on how fast the frames arrive**, and that is worth knowing before
-    // trusting any threshold in these units. Measured on the same capture at two
-    // spacings: the median sample moves about 4mm whichever pair you take, which is 31
-    // mm/s across the 128ms pairs registry-check pins and about 140 mm/s across the
-    // capture's own 32ms ones. Real movement is a fixed speed and reads the same at both,
-    // so this estimator gets noisier as the link gets faster - which is a property of
-    // measuring a rate from two adjacent samples and not something a constant fixes.
-    //
-    // No floor under it, and that is measured rather than assumed. A smoothstep has zero
-    // derivative at the origin, which is most of the suppression on its own: on a wall
-    // planted flat at 1100mm with this amount at 1 and the depth at 1, driven through the
-    // editor at 1280 wide rather than through the check's own stage, mean red over the
-    // frame goes 7.83 still, 7.90 with 4mm of jitter across a 128ms pair, 8.76 with the
-    // same 4mm across a 32ms one, and 22.84 at a real 600 mm/s. So even at the frame rate
-    // where the jitter
-    // reads loudest it costs about one 8-bit step against fifteen for the signal. A floor
-    // would have to be stated in one unit or the other and neither is right at both
-    // spacings - in mm/s it would need re-tuning per link, which is what dividing by the
-    // span exists to stop, and in millimetres it would let a slow surface register over a
-    // slow link and vanish over a fast one.
-    //
-    // A duotoneMotion of 0 is exactly the picture this block drew before the term
-    // existed. mix at zero is x times one plus y times zero, or x plus zero times the
-    // difference, and both are exact whether or not the compiler contracts them - which
-    // is the same arithmetic the guard comment above this block records measuring, and
-    // it is measured again rather than inherited: the comparison is in registry-check's
-    // planted-motion section, where a frame with a fast point in it and a frame with a
-    // still one have to come back bit-identical while this sits at its default.
-    k = mix(k, 1.0, duotoneMotion * smoothstep(0.0, 1200.0, vSpeed));
-    col = mix(col, mix(cold, heat, k), duotoneDepth);
-  }
-
-  // Torn bands flare cyan where the feed shears - and it sits here, after the blend,
-  // for the reason thermal and edges two blocks up sit here. This line used to live
-  // inside the Blackwall branch, which made it inert in the other four readings while
-  // the displacement that earns it kept firing in all five: the geometry tore under
-  // Colour and Depth and nothing lit up, so a slider that plainly worked in one reading
-  // looked broken in the rest. Worse than inert, it was coupled to something nobody
-  // asked it to be - the readings normalise by their weight sum, so a dissolve from
-  // Blackwall into Depth dimmed the corruption on the way past and the flare rode the
-  // colour crossfade.
-  //
-  // Moving it changes what the Blackwall preset draws, because inside the branch the
-  // flare was multiplied by that reading's 0.55 + 0.75 * lum shading before the
-  // normalisation reached it. glitchTint was given a default of 1.8 to absorb that,
-  // rather than carrying 3.0 over, on the grounds that a term reconstructing the old
-  // inside-the-branch arithmetic would be a second implementation of this line.
-  //
-  // **That default is worse than the literal it replaced, measured on the reading the
-  // shipped preset actually uses.** Against the pinned build on readBlackwall at the
-  // shipped glitch of 0.18: 1.8 lands 30 of 255 off at worst with a frame mean of 0.0391,
-  // where 3.0 lands 5 off with a mean of 0.0062, and 0 and 5.0 are worse than either. No
-  // constant can match exactly, because the multiplier it is standing in for varied per
-  // fragment - but the ordering is not close, and the number was chosen without this
-  // comparison being run. Colour only, no alpha term: that is what the
-  // old line did, and an additive splat shows a brighter colour without being asked to
-  // cover more.
-  //
-  // Unconditional, and the missing guard on vGlitch is a measurement rather than an
-  // oversight. Guarded, this line reddened three of registry-check's five reading rows
-  // against the pinned pre-readings build - readDepth and readContour at frame 4 and
-  // readBlackwall at frames 0 and 1 - at parameter defaults, where glitch is 0 and the
-  // guard means the add never runs at all. Nothing mathematical moved: adding zero is
-  // exact, and the branch was never taken. What moved was the code around it, because a
-  // branch dropped into the common path costs the compiler contractions it was making
-  // across the lines either side. Written straight through, all five rows are bit-identical
-  // again and only the pre-existing readGhost failure remains. So the cost of a fragment
-  // being able to skip a multiply-add it does not need is three false regressions in a
-  // check with no tolerance and no way to re-baseline, and the multiply-add is cheaper.
-  col += vec3(0.2, 0.9, 1.0) * vGlitch;
-
-  // Cross-fade. A dying point thins out where it stood instead of blinking off,
-  // and its replacement comes up over the same window.
-  alpha *= vFade;
-  // The region's soft mask, which is a fade rather than a cull precisely so its edge
-  // can be soft - a vertex-stage discard could only ever give a hard boundary.
-  alpha *= vMask;
-  // Ghosts sit under the live cloud so they read as afterglow, never as surface.
-  if (vGhost > 0.0) alpha *= 0.5;
-
-  // Additive contributions sum, and near points get both larger sprites and more
-  // overlap, so a splat's energy is normalised against its area. Without this the
-  // nearest subject saturates to flat white while the background stays correct.
-  // 116.64 is forced by the unit change rather than chosen. The same look now asks
-  // for 1.8 times the point size it used to, so holding alpha fixed at every
-  // distance means C / (1.8 P / d)^2 = 36 / (P / d)^2, and the only C that
-  // satisfies it is 36 * 1.8^2. Leaving it at 36 would have moved the distance at
-  // which the normalisation starts biting from 0.75m out to 1.35m - a look change
-  // wearing a resolution fix's clothes.
-  if (softEdge == 1) alpha *= clamp(116.64 / (vSize * vSize), 0.05, 1.0);
-
-  fragColor = vec4(col * exposure, alpha * falloff);
-}
-`;
-
-const material = new THREE.ShaderMaterial({
-  glslVersion: THREE.GLSL3,
-  uniforms,
-  vertexShader,
-  fragmentShader,
-  transparent: true,
-  depthWrite: true,
-});
-
-const cloud = new THREE.Points(geometry, material);
-scene.add(cloud);
+// Moved to `point-cloud.js`. Two vertices per depth pixel, the uniform table both shaders
+// are driven through, the material and the cloud are there. What is here is the moment
+// they are built and the moment the cloud joins the scene, which are decisions about this
+// program's boot rather than about the cloud - and the cells from the textures above,
+// handed over rather than reached for, so the one place the two are wired together is this
+// line.
+buildPointCloud(sourceCells);
 
 // ------------------------------------------------------------ levelling the world
 
 // A sensor is a thing somebody bolted to something, and nothing measures the angle it
-// ended up at: libfreenect2's device API offers the two sets of camera intrinsics and
-// no accelerometer, so a cloud shot from a dashboard mount arrives canted and there is
-// no gravity vector anywhere to straighten it by. A human has to say which way is up.
+// ended up at, so a human has to say which way is up. What the two angles they give
+// *mean* is in `world-tilt.js` - the pair, the order it composes in because the pair
+// does not commute, and why there are two of them and not three. What is here is where
+// that rotation lands, which is the half that needs a scene.
 //
 // That angle is a fact about the take rather than about whoever is looking at it, so
 // it lives in the document beside the crop and not on the camera - which is also what
@@ -1522,32 +208,21 @@ scene.add(cloud);
 // merely rolled itself would leave the other three canted and give keyed poses a roll
 // to interpolate against defaults that have none.
 //
-// Two angles and not three. `roll` turns the picture in its frame, which is what a
-// sensor rotated in its bracket does, and `tilt` pitches the room, which is what a
-// sensor aimed downward does. The third would be yaw about the room's vertical, and
-// that is not levelling at all - it is what dragging on the picture already does, so a
-// slider for it would be a second way to say one thing.
-//
-// **The order is stated because the pair does not commute.** `Rx(tilt) * Rz(roll)`,
-// which is three's own `XYZ` Euler with the middle angle left at zero. Read the other
-// way round, neither slider does one visible thing any more: each starts moving the
-// room along two axes at once and the panel stops being usable by eye.
-//
 // What deliberately does *not* move with it: the crop faces and the region are tested
 // on the undisplaced sensor-space position in the vertex shader, before the model
 // matrix, so a box shrunk onto a subject stays shrunk onto that subject when the room
 // is levelled underneath it. `level-check` holds that invariant by rotating the world
 // and the camera together and demanding the picture not change at all.
+//
+// The two angles stay on this side of that boundary, and the reason is the write below
+// them: the registry's `tilt` and `roll` apply closures assign into this object. An
+// object an importer writes into is the channel `module-check` rule 3 refuses, and it is
+// refused for the reason that applies exactly here - the module that declares it cannot
+// see the write, so nothing at that end knows what its own state is.
 const worldTiltAngles = { tilt: 0, roll: 0 };
-const tiltEuler = new THREE.Euler(0, 0, 0, 'XYZ');
 
 function applyWorldTilt() {
-  tiltEuler.set(
-    THREE.MathUtils.degToRad(worldTiltAngles.tilt),
-    0,
-    THREE.MathUtils.degToRad(worldTiltAngles.roll),
-  );
-  worldTilt.setFromEuler(tiltEuler);
+  tiltQuaternion(worldTiltAngles.tilt, worldTiltAngles.roll, worldTilt);
   cloud.quaternion.copy(worldTilt);
   // Levelling is the gesture that says "this frame is the room's", so it takes the
   // turntable's pole back off the sensor view. Cheap to call on every write - which
@@ -1556,689 +231,38 @@ function applyWorldTilt() {
   setNavigationUp(WORLD_UP);
 }
 
-function setAdditive(on) {
-  material.blending = on ? THREE.AdditiveBlending : THREE.NormalBlending;
-  material.depthWrite = !on;
-  uniforms.softEdge.value = on ? 1 : 0;
-  material.needsUpdate = true;
-}
-
 // --------------------------------------------------------- binding a source frame
-
-// Every grid a depth block can arrive on, keyed by its own sample count. The
-// divisor is negotiated out of band on the socket, but a frame already in flight
-// when the setting changes arrives under the previous one - so the length is what a
-// frame actually is, where the last grant is only what the next frame will be. Every
-// divisor the socket and the frame API accept lands on a distinct count, so nothing
-// here has to be told which one it is looking at.
-const DEPTH_GRIDS = new Map();
-for (let k = 1; k <= 16; k++) {
-  const w = Math.ceil(DEPTH_W / k);
-  const h = Math.ceil(DEPTH_H / k);
-  DEPTH_GRIDS.set(w * h, { k, w, h });
-}
-
-/**
- * A decimated grid back onto the sensor's own, nearest-neighbour, which is exactly
- * the sampling `decimatePayload` did on the node run backwards.
- *
- * A texel only means anything at the pixel it was measured at: the shader unprojects
- * `-(col + 0.5 - cx) / fx * z` against intrinsics the sensor reported for a 512x424
- * grid, so where a sample sits in the texture *is* the ray it is claimed to lie on.
- * Writing a smaller grid straight into the larger one is therefore not a coarser
- * picture, it is a different scene. At ÷4 the 13,568 samples land in the first 27 of
- * 424 rows and the live cloud collapses into a band about a metre above the optical
- * axis, while the 203,520 texels the frame cannot reach - 93.8% of the grid - keep
- * the last full-rate frame and stand there frozen where the room used to be. That
- * reads as the depth returns having lost their scale, which is what it was reported
- * as, and it is a monitor silently changing its own geometry: the one thing the
- * design says an instrument must never do.
- *
- * Paying it back in compute rather than on the wire is the right side to pay on. The
- * divisor exists because a radio link cannot carry 14.6 MB/s and never because a
- * machine could not keep up, so expanding here costs the client the GPU it already
- * had spare and leaves the saving where it was asked for.
- */
-function expandDepth(src, dst) {
-  const grid = DEPTH_GRIDS.get(src.length);
-  if (!grid) {
-    throw new Error(
-      `a depth block of ${src.length} samples is not the ${DEPTH_W}x${DEPTH_H} grid at any divisor this `
-      + 'build serves: refusing rather than filling the head of the texture with it and '
-      + 'unprojecting whatever was already in the rest as though it were the scene',
-    );
-  }
-  if (grid.k === 1) {
-    dst.set(src);
-    return;
-  }
-  for (let row = 0; row < DEPTH_H; row++) {
-    const from = ((row / grid.k) | 0) * grid.w;
-    const to = row * DEPTH_W;
-    for (let col = 0; col < DEPTH_W; col++) dst[to + col] = src[from + ((col / grid.k) | 0)];
-  }
-}
-
-// The two doors every acquisition path goes through to put a capture frame in
-// front of the shader. There is one of each rather than one per source, because
-// the swap is the part that has to be identical: a socket arrival, a pinned run
-// and an indexed pull all have to leave the textures in the same relationship or
-// the renderer would produce a different image depending on where the bytes came
-// from - which is the drift this whole design is arranged to prevent.
 //
-// The expansion is inside the door for the same reason. A monitor was the only
-// caller handing over a decimated grid, so fixing it where the socket unpacks its
-// bytes would have left the next caller that decimates - the editor over a slow
-// link, which the design already asks for - to find the same hole again.
-function bindDepth(data) {
-  const swap = depthPrev;
-  depthPrev = depthCurr;
-  depthCurr = swap;
-  expandDepth(data, depthCurr.image.data);
-  depthCurr.needsUpdate = true;
-  uniforms.depthPrev.value = depthPrev;
-  uniforms.depthCurr.value = depthCurr;
-}
-
-// Ownership of the bitmap stays with the caller. Live closes its own two swaps
-// later, once it is certainly unbound; the indexed cache holds its own until the
-// frame is evicted. Closing one here would free a bitmap the other still needs.
-function bindColor(bitmap) {
-  const swap = colorPrev;
-  colorPrev = colorCurr;
-  colorCurr = swap;
-  colorCurr.image = bitmap;
-  colorCurr.needsUpdate = true;
-  uniforms.colorPrev.value = colorPrev;
-  uniforms.colorCurr.value = colorCurr;
-  uniforms.hasColor.value = 1;
-}
+// Moved to `gpu-textures.js`, beside the textures it swaps. The two doors, the grid a
+// decimated block is expanded back onto and the refusal for a block on no grid at all
+// are there, because the door and the pair it maintains are one thing: a caller able to
+// reach a texture without going through the door is the second acquisition path this
+// arrangement exists to prevent, and a boundary is a stronger statement of that than a
+// comment was.
 
 // ---------------------------------------------------------------- bloom
-
-/**
- * The glow, as a progressive down-and-up sample chain rather than a Gaussian per mip.
- *
- * **This replaces `UnrealBloomPass`, and the reason is a measurement rather than a
- * preference.** That pass costs what it costs because of how many render targets it
- * visits and not how big they are: measured on this build, shrinking its chain sixty-fold
- * - 533x300 down to 64x36 - moved the frame by 0.026ms, from +0.278 to +0.252 against
- * bloom off. Sixty times fewer texels for two percent of the cost is a pass count
- * talking, so the only lever that does anything is visiting fewer targets. Its shape is
- * a bright pass, five mips each blurred twice because a Gaussian separates, a composite
- * and an additive blend: **thirteen full-screen draws**, each paying a bind.
- *
- * A down/up chain gets its width from the resampling instead. Each downsample halves the
- * buffer through a thirteen-tap filter whose taps sit on texel corners, so the hardware's
- * bilinear unit does half the averaging for free and one pass reaches as far as a much
- * wider Gaussian would; the upsample walks back with a nine-tap tent, adding each finer
- * level onto the coarser one it just expanded. So the octaves accumulate on the way up
- * rather than being composited at the end, and no level is ever blurred twice. That is
- * **five downsamples, four upsamples and one blend, so ten draws against thirteen** - and
- * the last upsample is not folded into the blend even though it could be, because the
- * blend is where `strength` is applied and fusing them would put a look control inside
- * the resampling arithmetic.
- *
- * **The threshold rides in the first downsample**, which is the one place fusing costs
- * nothing: the bright pass and the first halving both read the full-resolution frame, so
- * doing them separately reads it twice to no end. Its soft knee is the one
- * `LuminosityHighPassShader` applies, kept because the shipped looks are graded against
- * where that knee puts the cut rather than against a hard step.
- *
- * **Sized off the 600-tall reference and not the drawing buffer**, exactly as before -
- * `resize` still calls `setSize(refWidth / 2, 300)` and the note there has the full
- * argument. A chain sized off the buffer makes the halo's width a fraction of the frame
- * that halves every time the buffer doubles, which `export-check` is what holds.
- *
- * `needsSwap` is false because this blends additively onto the buffer it was handed, the
- * way the pass it replaces did: bloom is light added to a picture, not a picture built
- * from one.
- */
-const BLOOM_LEVELS = 5;
-
-// Thirteen taps in the pattern Jimenez's filter uses - a centre, four at half a texel and
-// eight on the diagonals a texel out - weighted so the result is a smooth partition of
-// unity. Written as one pass because every tap is bilinear: the four corner groups each
-// average four source texels in hardware, so this reads thirty-six texels' worth of
-// neighbourhood for thirteen fetches, which is what lets a single pass replace a
-// separable pair.
-const bloomDownShader = /* glsl */ `
-  precision highp float;
-  uniform sampler2D tSource;
-  uniform vec2 texel;
-  uniform float threshold, knee, firstLevel;
-  varying vec2 vUv;
-
-  void main() {
-    vec2 t = texel;
-    vec3 a = texture2D(tSource, vUv + vec2(-2.0 * t.x,  2.0 * t.y)).rgb;
-    vec3 b = texture2D(tSource, vUv + vec2( 0.0,        2.0 * t.y)).rgb;
-    vec3 c = texture2D(tSource, vUv + vec2( 2.0 * t.x,  2.0 * t.y)).rgb;
-    vec3 d = texture2D(tSource, vUv + vec2(-2.0 * t.x,  0.0)).rgb;
-    vec3 e = texture2D(tSource, vUv).rgb;
-    vec3 f = texture2D(tSource, vUv + vec2( 2.0 * t.x,  0.0)).rgb;
-    vec3 g = texture2D(tSource, vUv + vec2(-2.0 * t.x, -2.0 * t.y)).rgb;
-    vec3 h = texture2D(tSource, vUv + vec2( 0.0,       -2.0 * t.y)).rgb;
-    vec3 i = texture2D(tSource, vUv + vec2( 2.0 * t.x, -2.0 * t.y)).rgb;
-    vec3 j = texture2D(tSource, vUv + vec2(-t.x,  t.y)).rgb;
-    vec3 k = texture2D(tSource, vUv + vec2( t.x,  t.y)).rgb;
-    vec3 l = texture2D(tSource, vUv + vec2(-t.x, -t.y)).rgb;
-    vec3 m = texture2D(tSource, vUv + vec2( t.x, -t.y)).rgb;
-
-    vec3 sum = e * 0.125;
-    sum += (a + c + g + i) * 0.03125;
-    sum += (b + d + f + h) * 0.0625;
-    sum += (j + k + l + m) * 0.125;
-
-    // Only the level that reads the frame itself cuts the darks out. Applying it again
-    // further down the chain would eat the glow it had already spread, because a halo is
-    // dimmer than the highlight that threw it and would fall back under the knee.
-    if (firstLevel > 0.5) {
-      float lum = dot(sum, vec3(0.299, 0.587, 0.114));
-      sum *= smoothstep(threshold, threshold + knee, lum);
-    }
-    gl_FragColor = vec4(sum, 1.0);
-  }
-`;
-
-// The nine-tap tent that walks back up. Additive onto the level below, so each octave is
-// laid over the wider one under it and the falloff is the sum of the chain rather than a
-// set of weights chosen at the end.
-const bloomUpShader = /* glsl */ `
-  precision highp float;
-  uniform sampler2D tSource;
-  uniform vec2 texel;
-  uniform float radius;
-  varying vec2 vUv;
-
-  void main() {
-    // The sample radius is what the bloom radius moves, and it moves it here rather than
-    // in a composite weight: widening the tent widens every octave together, which is
-    // the same knob the pass this replaces spelled as a lerp between two weight sets.
-    vec2 t = texel * radius;
-    vec3 sum = texture2D(tSource, vUv + vec2(-t.x,  t.y)).rgb * 0.0625;
-    sum += texture2D(tSource, vUv + vec2( 0.0,   t.y)).rgb * 0.125;
-    sum += texture2D(tSource, vUv + vec2( t.x,   t.y)).rgb * 0.0625;
-    sum += texture2D(tSource, vUv + vec2(-t.x,   0.0)).rgb * 0.125;
-    sum += texture2D(tSource, vUv).rgb * 0.25;
-    sum += texture2D(tSource, vUv + vec2( t.x,   0.0)).rgb * 0.125;
-    sum += texture2D(tSource, vUv + vec2(-t.x,  -t.y)).rgb * 0.0625;
-    sum += texture2D(tSource, vUv + vec2( 0.0,  -t.y)).rgb * 0.125;
-    sum += texture2D(tSource, vUv + vec2( t.x,  -t.y)).rgb * 0.0625;
-    gl_FragColor = vec4(sum, 1.0);
-  }
-`;
-
-const bloomVertexShader = /* glsl */ `
-  varying vec2 vUv;
-  void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-`;
-
-class BloomPass extends Pass {
-  constructor(strength = 1, radius = 1, threshold = 0) {
-    super();
-    this.strength = strength;
-    this.radius = radius;
-    this.threshold = threshold;
-    // The last step writes the picture and the glow summed into the other buffer, so the
-    // composer swaps onto it. The pass this replaces blended onto the buffer it was
-    // handed and set this false; doing that here aliased the texture the chain reads
-    // with the target it writes, and the note on `blendMaterial` has what that cost.
-    this.needsSwap = true;
-
-    this.targets = [];
-    for (let i = 0; i < BLOOM_LEVELS; i++) {
-      const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
-      target.texture.name = `bloom.${i}`;
-      target.texture.generateMipmaps = false;
-      this.targets.push(target);
-    }
-
-    this.downMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        tSource: { value: null },
-        texel: { value: new THREE.Vector2() },
-        threshold: { value: threshold },
-        knee: { value: 0.01 },
-        firstLevel: { value: 0 },
-      },
-      vertexShader: bloomVertexShader,
-      fragmentShader: bloomDownShader,
-    });
-
-    this.upMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        tSource: { value: null },
-        texel: { value: new THREE.Vector2() },
-        radius: { value: radius },
-      },
-      vertexShader: bloomVertexShader,
-      fragmentShader: bloomUpShader,
-      // Additive, because an upsample lays its octave over the wider one already in the
-      // target rather than replacing it.
-      blending: THREE.AdditiveBlending,
-      depthTest: false,
-      depthWrite: false,
-      transparent: true,
-    });
-
-    // **The picture and the glow are added in one shader rather than by blending the
-    // glow onto the picture**, and that is a correctness fix rather than a tidy-up. The
-    // additive version reads the frame as a texture at the top of the chain and then
-    // binds that same buffer as the render target at the bottom, which is a feedback
-    // loop: WebGL leaves the result undefined, and here it lost the picture entirely -
-    // with `strength` at zero, where the blend provably adds nothing, the frame came back
-    // 0% lit against 100% with the pass off. Reading both and writing a third target
-    // cannot alias, so the composer swaps to the result instead.
-    this.blendMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        tPicture: { value: null },
-        tBloom: { value: null },
-        strength: { value: strength },
-      },
-      vertexShader: bloomVertexShader,
-      fragmentShader: /* glsl */ `
-        precision highp float;
-        uniform sampler2D tPicture, tBloom;
-        uniform float strength;
-        varying vec2 vUv;
-        void main() {
-          vec4 base = texture2D(tPicture, vUv);
-          gl_FragColor = vec4(base.rgb + texture2D(tBloom, vUv).rgb * strength, base.a);
-        }
-      `,
-      depthTest: false,
-      depthWrite: false,
-    });
-
-    this.quad = new FullScreenQuad(null);
-  }
-
-  setSize(width, height) {
-    let w = Math.max(1, Math.round(width));
-    let h = Math.max(1, Math.round(height));
-    for (const target of this.targets) {
-      // Halved per level and floored at one, so a chain asked for on a very small preview
-      // stops shrinking instead of asking for a zero-sized target.
-      w = Math.max(1, Math.round(w / 2));
-      h = Math.max(1, Math.round(h / 2));
-      target.setSize(w, h);
-    }
-  }
-
-  render(renderer, writeBuffer, readBuffer) {
-    const previousTarget = renderer.getRenderTarget();
-
-    // Down. The first level reads the frame and cuts the darks; the rest read the level
-    // above them, which is what makes this a chain rather than five blurs of one image.
-    this.quad.material = this.downMaterial;
-    for (let i = 0; i < this.targets.length; i++) {
-      const source = i === 0 ? readBuffer : this.targets[i - 1];
-      this.downMaterial.uniforms.tSource.value = source.texture;
-      this.downMaterial.uniforms.threshold.value = this.threshold;
-      this.downMaterial.uniforms.firstLevel.value = i === 0 ? 1 : 0;
-      this.downMaterial.uniforms.texel.value.set(1 / source.width, 1 / source.height);
-      renderer.setRenderTarget(this.targets[i]);
-      renderer.clear();
-      this.quad.render(renderer);
-    }
-
-    // Up, accumulating. Nothing is cleared on the way back: each pass adds its octave to
-    // the level below, which already holds that level's own downsample.
-    this.quad.material = this.upMaterial;
-    for (let i = this.targets.length - 1; i > 0; i--) {
-      const source = this.targets[i];
-      this.upMaterial.uniforms.tSource.value = source.texture;
-      this.upMaterial.uniforms.radius.value = this.radius;
-      this.upMaterial.uniforms.texel.value.set(1 / source.width, 1 / source.height);
-      renderer.setRenderTarget(this.targets[i - 1]);
-      this.quad.render(renderer);
-    }
-
-    // And the two are summed into the buffer the composer will swap to. `strength` is
-    // applied here and only here, so the look control stays outside the resampling.
-    this.quad.material = this.blendMaterial;
-    this.blendMaterial.uniforms.tPicture.value = readBuffer.texture;
-    this.blendMaterial.uniforms.tBloom.value = this.targets[0].texture;
-    this.blendMaterial.uniforms.strength.value = this.strength;
-    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
-    renderer.clear();
-    this.quad.render(renderer);
-
-    renderer.setRenderTarget(previousTarget);
-  }
-
-  dispose() {
-    for (const target of this.targets) target.dispose();
-    this.downMaterial.dispose();
-    this.upMaterial.dispose();
-    this.blendMaterial.dispose();
-    this.quad.dispose();
-  }
-}
+//
+// Moved to `bloom-pass.js`. The progressive down/up chain that replaced
+// `UnrealBloomPass` is there, and so is `bloomChainSize`, the reference height `resize`
+// below sizes it at - each with the measurement that decided it. The one instance is
+// built by `post-chain.js`, which is also where it sits between the other passes, because
+// the order the image is put through them in is a decision about the pipeline rather than
+// about the pass.
 
 // ---------------------------------------------------------------- post chain
-
-// Deliberately ordered: trails accumulate the raw cloud, bloom blows out the hot
-// edges, then the grade tears the whole image the way a failing signal would.
-const composer = new EffectComposer(renderer);
-const renderPass = new RenderPass(scene, viewCamera);
-composer.addPass(renderPass);
-
-const afterimage = new AfterimagePass(0.0);
-afterimage.enabled = false;
-composer.addPass(afterimage);
-
-const bloom = new BloomPass(0.0, 0.7, 0.2);
-bloom.enabled = false;
-composer.addPass(bloom);
-
-const GradeShader = {
-  uniforms: {
-    tDiffuse: { value: null },
-    rgbSplit: { value: 0 },
-    scanlines: { value: 0 },
-    // The three that turn one scanline term into a raster, and they are settings of
-    // `scanlines` rather than terms beside it. A raster is one idea and a sine is its
-    // softest duty cycle, so two terms that both darken the frame in stripes would be the
-    // drifting twin this file keeps refusing - and the hardness is what makes the other
-    // two reach anything, because adding an angle to a sine only ever gets you rotated
-    // softness where the reference frames are hard line grilles with dark gaps.
-    //
-    // The angle arrives as its own axis rather than as an angle, and that is a rounding
-    // measurement rather than a preference - the same shape `contourLo`/`contourHi` are
-    // two uniforms for. Taking `sin` and `cos` in the shader looked obviously right and
-    // was measured wrong: GLSL ES permits a couple of thousandths of absolute error on a
-    // trigonometric function, so `sin(0.0)` is not promised to be exactly zero, and a
-    // whisker of x leaking into a raster that is supposed to run along y moved all six
-    // frames of the comparison against the build this replaces. Done here, `Math.sin(0)`
-    // is exactly 0 and `Math.cos(0)` exactly 1 in double, they survive the cast, and the
-    // dot below collapses to the frame's own y the way the old line's expression did.
-    //
-    // Degrees on the slider, and at zero the raster runs along y - the scanline this has
-    // always drawn. At a right angle it is the dense vertical column grille the reference
-    // frames slice their picture into, and because it keyframes a raster can *rotate*
-    // under the playhead, which is a capability rather than parity with a still frame.
-    //
-    // `scanPitch` was the literal 1.3 baked into the wave, and it defaults to it.
-    scanAxis: { value: new THREE.Vector2(0, 1) },
-    scanPitch: { value: 1.3 },
-    scanHard: { value: 0 },
-    grain: { value: 0 },
-    // The corner falloff, which was the literal 0.55 and applied whenever this pass ran
-    // at all. That made it a hidden function of the three terms above: a look with all
-    // of them at zero switched the pass off and lost its vignette, so the comment below
-    // claiming the frame "always closes down on the subject" was false in exactly the
-    // state the four shipped presets other than Blackwall are in.
-    //
-    // It defaults to 0 rather than to the 0.55 it was, and that is the one place in this
-    // file where a promoted literal does not keep its value. It cannot: the behaviour it
-    // replaces is not a constant but a conditional - 0.55 when something else was on, 0
-    // when nothing was - and no single default reproduces both branches. Zero is the
-    // branch that keeps the parameter defaults drawing what they drew, which is what
-    // registry-check hashes against a build from before any of this existed.
-    // `blackwall.json` names 0.55 explicitly so the one shipped look that had a vignette
-    // keeps it. A project saved before this that raised any grade term is the case that
-    // does change: it loses its corner falloff until it names one.
-    vignette: { value: 0 },
-    // The toe under the Reinhard curve, promoted from the literal 0.018 - and unlike
-    // `vignette` above it this one keeps the value it replaced, because the behaviour it
-    // replaces is a constant rather than a conditional. That difference decides the whole
-    // of how it is wired: a non-zero default cannot gate the pass, so `crush` is a
-    // sub-control inside the grade rather than a fifth term beside the four that gate it.
-    // See its registry entry for what gating it would have cost.
-    //
-    // **It is not the silhouette crush, whatever the name suggests**, and the comment is
-    // here to stop the next reader concluding that it is. This darkens near and far alike,
-    // so it cannot separate a subject from the space behind it; the term that does that is
-    // the duotone in the point shader. What this is for is the thing it always did - keep
-    // the empty background genuinely black after Reinhard lifts it.
-    streak: { value: 0 },
-    // Which way the light runs, as its own axis rather than as an angle, for exactly the
-    // reason `scanAxis` forty lines up carries in full: GLSL ES permits a couple of
-    // thousandths of absolute error on a trigonometric function, so `sin(0.0)` is not
-    // promised to be exactly zero, and a whisker of the wrong axis leaking into a fall
-    // that is meant to run straight down the frame is a defect no picture shows the shape
-    // of. Done here, `Math.sin(0)` is exactly 0 and `Math.cos(0)` exactly 1 in double,
-    // they survive the cast, and the offset in the gather below collapses to the frame's
-    // own y at the default the way the one-direction version's expression did.
-    //
-    // Degrees on the slider, and unlike the glitch's `glitchAxis` that is the honest
-    // spelling rather than the lazy one. The tear's bands are quantised in the sensor's
-    // frame, where 512 columns meet 424 rows and a band is a run of scanlines rather than
-    // a distance, so there is no square in which an angle would mean what an angle means.
-    // This runs in the grade pass, in screen space, against a square reference pixel - so
-    // an angle here means what an angle means, and turning it 90 degrees turns the streak
-    // 90 degrees on the glass.
-    streakAxis: { value: new THREE.Vector2(0, 1) },
-    crush: { value: 0.018 },
-    time: { value: 0 },
-    resolution: { value: new THREE.Vector2(1, 1) },
-  },
-  vertexShader: /* glsl */ `
-    varying vec2 vUv;
-    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-  `,
-  // One combined pass: chaining separate RGBShift/Film/Vignette passes would cost
-  // a full-screen read and write each.
-  fragmentShader: /* glsl */ `
-    uniform sampler2D tDiffuse;
-    uniform float rgbSplit, scanlines, grain, vignette, crush, time;
-    uniform float streak;
-    uniform vec2 streakAxis;
-    uniform vec2 scanAxis;
-    uniform float scanPitch, scanHard;
-    uniform vec2 resolution;
-    varying vec2 vUv;
-
-    float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-
-    void main() {
-      // The same 1080p reference the point pass uses. Every term here is sized in
-      // reference pixels rather than framebuffer ones, so the grade a look was
-      // built at holds at any output size: without it the split narrows, the
-      // scanlines crowd and the grain thins as resolution rises - a look that is
-      // *nearly* resolution-independent, which is the kind you trust and then have
-      // to debug. Bloom needs none of this and gets none: it already runs at half
-      // the drawing buffer, so it is proportional by construction.
-      float k = resolution.y / 1080.0;
-      vec2 ref = resolution / k;
-      vec2 texel = 1.0 / ref;
-      vec3 col;
-
-      if (rgbSplit > 0.0) {
-        // Split grows toward the edges, so the centre stays legible.
-        vec2 dir = (vUv - 0.5);
-        vec2 off = dir * rgbSplit * texel * 8.0;
-        col.r = texture2D(tDiffuse, vUv + off).r;
-        col.g = texture2D(tDiffuse, vUv).g;
-        col.b = texture2D(tDiffuse, vUv - off).b;
-      } else {
-        col = texture2D(tDiffuse, vUv).rgb;
-      }
-
-      // Light bleeds. Each pixel gathers back along the streak's own axis and keeps the
-      // brightest thing it finds, decayed by how far it had to look, so a highlight smears
-      // across the frame the way a sensor smears one down a column of wells. It sits here,
-      // below the raster and the vignette and above the tonemap, because it is a thing that
-      // happened to the light rather than a thing drawn over the picture: a streak applied
-      // after the vignette would glow in the corners the vignette had just put out.
-      //
-      // **A gather and not a feedback buffer**, which is a decision rather than a
-      // simplification. A buffer accumulating across frames smears along whatever the
-      // camera did last, so an orbit would drag every streak sideways, and - the half that
-      // settles it - a seek would arrive carrying the streak the scrub built rather than
-      // the one playback would have built. That is the property the whole transport rests
-      // on, broken by an effect nobody would think to test it against.
-      //
-      // Distances are in reference pixels through texel, for the reason stated at the top
-      // of this shader: a streak whose length grew with the window would be the nearly
-      // resolution-independent look that is worse than an honestly dependent one. The axis
-      // is a *direction* in those same reference pixels rather than in uv, which is the
-      // half that keeps the angle honest: the offset below is d reference pixels along the
-      // axis whatever shape the window is, where a step taken in uv and scaled afterwards
-      // would run at the aspect ratio's angle instead of the one the slider names, and
-      // would swing as somebody dragged the window.
-      //
-      // **The tap schedule is written down because the first one was wrong.** Eight taps at
-      // a geometric ratio of 2.1 put the far samples so far apart that they land as separate
-      // ghosts - a comb rather than a smear. Sixteen at 1.35 overlap enough to read as
-      // continuous and reach about 168 reference pixels.
-      //
-      // **The direction is the measurement and not the derivation, and the cost of getting
-      // that backwards is recorded here because it was paid twice.** When this gather ran
-      // one way only it was written with the plus, doubted against a busy frame that seemed
-      // to show the light climbing, flipped to a minus, and then restored - because a build
-      // cropped down to a single bright band with darkness above and below settles in one
-      // look what a full frame full of structure will support either reading of. Two
-      // separate readings of the *same* sign came out opposite. Nothing in the suite could
-      // have caught the flip: every uniform still landed and every image still changed, so
-      // the drop-one sweep stayed green through all of it.
-      //
-      // That sign is now a whole direction, and the lesson is the same one scaled up: the
-      // arm in the registry check calibrates *both* screen axes off the crop's own faces
-      // and asks where each angle's light actually lands, rather than deriving where it
-      // ought to from which way uv grows - which is the derivation that was wrong the first
-      // time. An angle of 0 keeps the fall this always had, and it keeps it exactly: at the
-      // default axis the offset below renders bit-identical to the plain vertical vec2 it
-      // replaces, measured at four looks and three drawing-buffer sizes, so there is no
-      // guard here of the kind the raster below needs. Multiplying by an axis that is
-      // exactly zero and exactly one introduces no rounding, where the raster's general
-      // form is a dot product against a sum the compiler contracts differently.
-      if (streak > 0.0) {
-        vec3 fall = col;
-        float d = 1.5;
-        for (int i = 0; i < 16; i++) {
-          vec3 tap = texture2D(tDiffuse, vUv + d * texel * streakAxis).rgb;
-          fall = max(fall, tap * exp2(-d * 0.02));
-          d *= 1.35;
-        }
-        col = mix(col, fall, streak);
-      }
-
-      if (scanlines > 0.0) {
-        // **The default path is the old line itself, not an expression that computes what
-        // the old line computed**, and that distinction is a measurement rather than
-        // caution. The shipped Blackwall document names a scanlines of 0.35, so this block
-        // runs in the one shipped look that is a look, and a raster a hair off the one it
-        // replaces is that document quietly re-grading itself.
-        //
-        // Two things were tried before this and both failed, which is worth recording
-        // because each looked like the answer. Taking the sine and cosine of the angle in
-        // the shader leaked a whisker of x into a raster meant to run along y, since GLSL
-        // ES does not promise the sine of zero is zero - that is real and is why the axis
-        // is built on the CPU, but fixing it moved nothing here. What moves the frame is
-        // the substitution docs/measurement.md already records: handing the wave a
-        // coordinate through a local is not the same as handing it the expression, because
-        // the compiler contracts the whole of y times the reference times 1.3 plus the
-        // clock across one line and will not do so through a variable. Measured at the
-        // shipped 0.35, all six frames differed, 054b99215d9f against 44e1ccf8, with every
-        // parameter at its default.
-        //
-        // So the branch goes around the whole statement and the default path *is* the old
-        // one - the same shape, and for the same reason, as the depth reading's gamma. It
-        // is not a legacy path beside a new one: the general form below is the
-        // implementation, and this is the one input for which the arithmetic has to be
-        // reached rather than reproduced.
-        float line;
-        if (scanAxis.x == 0.0 && scanAxis.y == 1.0 && scanPitch == 1.3 && scanHard == 0.0) {
-          line = sin(vUv.y * ref.y * 1.3 + time * 2.0) * 0.5 + 0.5;
-        } else {
-          // The raster's own axis, as a direction in reference pixels, built on the CPU
-          // for the reason beside the uniform.
-          float coord = dot(vUv * ref, scanAxis);
-          float wave = sin(coord * scanPitch + time * 2.0) * 0.5 + 0.5;
-          // Hardness is a duty cycle rather than a second term. It narrows a smoothstep
-          // about the middle of the wave until the sine becomes a grille of hard lines
-          // with dark gaps between them, which is what the reference frames actually
-          // carry and what no amount of rotating a sine will ever reach.
-          float w = mix(0.5, 0.004, scanHard);
-          line = mix(wave, smoothstep(0.5 - w, 0.5 + w, wave), scanHard);
-        }
-        col *= 1.0 - scanlines * 0.35 * line;
-      }
-
-      if (grain > 0.0) {
-        // Weighted by luminance so grain lives in the signal instead of lifting
-        // the empty background into a grey haze.
-        //
-        // Quantised onto the reference grid rather than sampled continuously, so
-        // one grain cell is one 1080p pixel wherever the frame is drawn. Sampling
-        // continuously would give four sub-pixels of a 2x render four unrelated
-        // hash values that average to a quarter of the variance, which is exactly
-        // the "grain grows finer as resolution rises" this reference exists to
-        // stop. At 1080p it is the same one-value-per-pixel noise it always was,
-        // off a different seed.
-        float lum = dot(col, vec3(0.299, 0.587, 0.114));
-        float n = hash(floor(vUv * ref) + fract(time) * 137.0);
-        col += (n - 0.5) * grain * 0.22 * (0.15 + lum);
-      }
-
-      // How far the frame closes down on the subject, which used to be the literal 0.55
-      // and therefore a hidden function of whether any of the three terms above was up.
-      // The extent is still fixed - a vignette this look wants is a corner falloff and
-      // not a shape to author - so the parameter is the depth alone.
-      float vig = smoothstep(1.05, 0.32, length(vUv - 0.5));
-      col *= mix(1.0, vig, vignette);
-
-      // Roll highlights off per channel instead of letting additive accumulation
-      // clip to flat white - hot areas keep their hue this way.
-      col = col / (1.0 + col);
-      // Then crush the toe back down: Reinhard lifts blacks, and this look needs
-      // the empty space to stay genuinely black rather than dark red.
-      //
-      // The gain stays a literal while the toe becomes a parameter, and that asymmetry is
-      // measured rather than lazy. The obvious reading - that 1.12 normalises the toe back
-      // out and so should follow it - is wrong: a toe of 0.018 would normalise at 1.018,
-      // so 1.12 is an independent graded lift that happens to sit near it. Tying the two
-      // together would re-grade every look ever authored the moment anybody moved the toe,
-      // which is a whole preset library drifting to buy a tidier-looking line.
-      col = max(col - crush, 0.0) * 1.12;
-
-      gl_FragColor = vec4(col, 1.0);
-    }
-  `,
-};
-
-const grade = new ShaderPass(GradeShader);
-grade.enabled = false;
-composer.addPass(grade);
-composer.addPass(new OutputPass());
+//
+// Moved to `post-chain.js`. The composer, the trails, the bloom instance and the grade
+// shader are there, and so is the order the image is put through them in, which is that
+// file's whole opinion. What is here is the moment the chain is built, which is a decision
+// about this program's boot rather than about the passes: the render pass is handed the
+// scene it draws, so it is built after the cloud above, and it is built by a call rather
+// than by an import, so the moment reads in the order it happens in.
+buildPostChain();
 
 let renderScale = 1;
 
 // The drawing buffer an export has taken over, or null while the window owns it.
-/**
- * Every size the export menu offers, grouped by the ratio it is.
- *
- * **This is the list, and the menu is built from it.** Step 6 recorded the failure
- * that makes that worth insisting on: `export-check` swept four sizes that were all
- * 1.6 while the menu offered four that were all 16:9, so a build referencing the
- * width instead of the height was bit-identical on every arm the tool had and drew
- * 11.1% too large on every size the product shipped. Two lists, neither aware of the
- * other. There is now one, and the check reads it off the page.
- *
- * **Ratios are exact, and dimensions are even.** `yuv420p` subsamples chroma by two
- * each way, so an odd dimension is not encodable and `server/export.js` refuses it
- * rather than letting ffmpeg fail after the first frame is already written. 65:24
- * only lands on both at once when the height is a multiple of 48, which is why its
- * widths are 2730 and 3900 rather than anything rounder - a menu entry labelled
- * 65:24 that is really 2.7062 would be a number this repo would find later and have
- * to correct.
- *
- * Both 4K flavours are here because they are different shapes: UHD is 3840x2160 and
- * 16:9, DCI is 4096x2160 and 1.896:1, and picking one would silently decide an
- * aspect for anybody who asked for "4K".
- */
-const EXPORT_SIZES = [
-  { ratio: '16:9', sizes: [[960, 540], [1280, 720], [1920, 1080], [3840, 2160]] },
-  { ratio: '1.90:1 DCI', sizes: [[2048, 1080], [4096, 2160]] },
-  { ratio: '4:3', sizes: [[1440, 1080], [2880, 2160]] },
-  { ratio: '1:1', sizes: [[1080, 1080], [2160, 2160]] },
-  { ratio: '65:24', sizes: [[2730, 1008], [3900, 1440]] },
-];
-const DEFAULT_EXPORT_SIZE = '1920x1080';
-
+//
 // An export's output resolution is a setting rather than a property of whatever
 // window it was started from, and the look is resolution-relative precisely so
 // that can be true - but the buffer still has to actually become that size, and
@@ -2268,91 +292,227 @@ let outputSize = null;
  *
  * So a wider ratio shows more to the sides and a squarer one shows less, and neither
  * changes how big anything is.
+ *
+ * **A shape and not a size, and the split is what this refactor is about.** This used to
+ * be a `{w, h}` in pixels that drove the letterbox *and* named what the export would
+ * render, so choosing 1280x720 instead of 1920x1080 was a document edit - and it is not
+ * one. Two sizes of one shape are the same picture, because `pointSize` and every
+ * screen-space term are expressed against 1080p and bloom's chain is frozen at 600
+ * whatever the buffer is, so the smaller of the two needs no re-keying and reopens
+ * identically. A different *shape* is not free, because the camera was keyed against a
+ * frame - which is why the shape is here, on the document, and the pixel count is on the
+ * deliverable where a second one can disagree with the first without either being wrong.
+ *
+ * Stored as the reduced integer pair rather than as a ratio, for `reduceAspect`'s reason:
+ * DCI is 1.8963 and a document carrying that decimal would record a shape 0.2% away from
+ * the one the clip was composed for.
  */
-let targetSize = { w: 1920, h: 1080 };
-const targetAspect = () => targetSize.w / targetSize.h;
+let projectAspect = [16, 9];
+const targetAspect = () => projectAspect[0] / projectAspect[1];
+
+// The shape buttons in the Project settings dialog, null until the boot below builds
+// them. Declared here rather than beside that build because `setProjectAspect` repaints
+// them and runs first - `restoreProject` reaches it, and a `let` read before its own
+// declaration is a ReferenceError rather than an `undefined` the optional chain would
+// forgive.
+let aspectButtons = null;
+
+/**
+ * The resolution each shape was last on, so returning to a shape returns to its size.
+ *
+ * Session state and deliberately not in any document: a deliverable records the one size
+ * it renders at, and this is only the memory that stops a shape change from throwing away
+ * a size the operator picked. Persisting it would be a second place a resolution is
+ * written, which is the shape of drift this whole split exists to remove.
+ */
+const sizeForShape = new Map();
 
 // Where the letterboxed stage sits in the window. Set by `resize`, read by the
 // overlay so both canvases cover the same pixels.
 const stageBox = { left: 0, top: 0 };
 
-/** The menu, filled from `EXPORT_SIZES` and grouped by ratio. One list. */
-function buildExportMenu(select) {
+/**
+ * The rates the output can be, and the only list of them.
+ *
+ * Here rather than as four `<option>`s in the markup because two things read it and only
+ * one of them is a control: `#tFps` is built from it, and `restoreProject` refuses a
+ * document naming a rate this build does not offer. A validator that read the rates off
+ * the select would be a document check standing on a DOM node, and one that spelled them
+ * out again would be the second list this file keeps deleting.
+ */
+const OUTPUT_RATES = [24, 30, 60, 120];
+
+/** The default shape, taken off the default size so there is still one list. */
+const defaultAspect = () => reduceAspect(...DEFAULT_EXPORT_SIZE.split('x').map(Number));
+
+/** A `WIDTHxHEIGHT` string as the shape it is, or `[0, 0]` when it is not a size. */
+function aspectOfSize(text) {
+  const [w, h] = String(text).split('x').map(Number);
+  return w > 0 && h > 0 ? reduceAspect(w, h) : [0, 0];
+}
+
+const sameAspect = (a, b) => a[0] === b[0] && a[1] === b[1];
+
+/**
+ * The size a shape opens on: the default one where the shape offers it, the smallest it
+ * offers otherwise, and null for a shape the table has nothing for.
+ *
+ * Null rather than a manufactured size, because the only way to be here is a project
+ * saved before the shape moved onto the document, whose `outputSize` was free to be
+ * anything a hand had typed. Scaling `[8, 5]` up to something near 1080p would put a
+ * resolution the product does not offer into a deliverable and then into a filename, and
+ * a number this repo would find later and have to correct is exactly what the reduced
+ * pair exists to avoid. The callers carry the null instead - the load hands the legacy
+ * size straight across, and `exportClip` refuses a pair that disagrees.
+ */
+function openingSizeForAspect(aspect) {
+  const sizes = sizesForAspect(aspect).map(([w, h]) => `${w}x${h}`);
+  if (sizes.includes(DEFAULT_EXPORT_SIZE)) return DEFAULT_EXPORT_SIZE;
+  return sizes[0] ?? null;
+}
+
+/**
+ * The resolution menu, which is every size in the table of the project's shape.
+ *
+ * **Rebuilt on every shape change rather than filtered on the way past**, because the
+ * alternative - one menu of everything with the wrong shapes disabled - is a control that
+ * offers a reframe it will not perform, and this dialog no longer has the authority to
+ * reframe anything.
+ *
+ * A size the table does not offer is appended rather than dropped, which is the same rule
+ * the old whole-table menu carried and it survives for the same reason: a project saved
+ * before the shape moved onto the document carried a hand-typed `outputSize`, so `[8, 5]`
+ * is a shape with real pixels behind it and no group here to hold them. The size the clip
+ * was actually framed at is a better answer than the nearest neighbour.
+ */
+function buildResolutionMenu(select, keep) {
   if (!select) return select;
-  for (const group of EXPORT_SIZES) {
-    const optgroup = document.createElement('optgroup');
-    optgroup.label = group.ratio;
-    for (const [w, h] of group.sizes) {
-      const option = document.createElement('option');
-      option.value = `${w}x${h}`;
-      option.textContent = `${w}x${h}`;
-      optgroup.appendChild(option);
-    }
-    select.appendChild(optgroup);
+  const sizes = sizesForAspect(projectAspect).map(([w, h]) => `${w}x${h}`);
+  select.replaceChildren();
+  for (const value of sizes) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
   }
-  select.value = DEFAULT_EXPORT_SIZE;
+  if (keep && !sizes.includes(keep)) {
+    const option = document.createElement('option');
+    option.value = keep;
+    option.textContent = `${keep} (from the project)`;
+    select.appendChild(option);
+  }
   return select;
 }
 
-/** The ratio controls are another view over `EXPORT_SIZES`, never another list. */
-function buildExportRatios(container, select) {
-  if (!container || !select) return [];
-  const buttons = EXPORT_SIZES.map((group) => {
+/** The shape controls are another view over `EXPORT_SIZES`, never another list. */
+function buildAspectSegments(container) {
+  if (!container) return [];
+  const buttons = exportAspects().map(({ ratio, aspect }) => {
     const button = document.createElement('button');
     button.type = 'button';
-    button.dataset.ratio = group.ratio;
-    button.textContent = group.ratio.replace(' DCI', '');
+    button.dataset.ratio = ratio;
+    button.dataset.aspect = aspect.join('x');
+    button.textContent = ratio.replace(' DCI', '');
     button.addEventListener('click', () => {
-      const values = new Set(group.sizes.map(([w, h]) => `${w}x${h}`));
-      if (!values.has(select.value)) {
-        const [w, h] = group.sizes[0];
-        select.value = `${w}x${h}`;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      paintExportRatioSelection(buttons, select);
+      // Through the setter and then straight to the stack, because this is one of the two
+      // controls in the program that edit the document from a dialog. `history.commit`
+      // compares snapshots, so pressing the shape the clip is already on costs nothing.
+      if (setProjectAspect(aspect)) history.commit();
+      paintAspectSelection(buttons);
     });
     container.appendChild(button);
     return button;
   });
-  paintExportRatioSelection(buttons, select);
+  paintAspectSelection(buttons);
   return buttons;
 }
 
-function paintExportRatioSelection(buttons, select) {
-  const selected = select.selectedOptions[0]?.parentElement?.label ?? '';
+/**
+ * Which shape button is lit, read off the document rather than off the last press.
+ *
+ * None of them, when the project's shape is one the table does not offer - which is
+ * honest and is the point. A legacy `outputSize` of 1600x1000 is a real shape this build
+ * will letterbox to and go on exporting, and lighting the nearest button would say the
+ * clip is 16:9 while the stage says otherwise.
+ */
+function paintAspectSelection(buttons) {
   for (const button of buttons) {
-    button.setAttribute('aria-pressed', String(button.dataset.ratio === selected));
+    const aspect = button.dataset.aspect.split('x').map(Number);
+    button.setAttribute('aria-pressed', String(sameAspect(aspect, projectAspect)));
   }
 }
 
 /**
- * Adopt an output size: the editor reframes to it and the project remembers it.
+ * Adopt a shape: the editor reframes to it and the project remembers it.
  *
- * The size is document state rather than a control's position, because a
- * composition and the shape it was composed for are one thing. A 65:24 shot reopened
- * at 1920x1080 would be a different shot with the same keys, which is the class of
- * silent reinterpretation the point-size rebase already taught this repo to refuse.
+ * The shape is document state rather than a control's position, because a composition and
+ * the frame it was composed for are one thing. A 65:24 shot reopened at 16:9 would be a
+ * different shot with the same keys, which is the class of silent reinterpretation the
+ * point-size rebase already taught this repo to refuse.
+ *
+ * **The deliverable comes with it, and it has to.** Every other route into this program
+ * assumes the thing being rendered is the shape the stage is showing - `exportClip`
+ * refuses the pair when they disagree - so a shape change that left a 16:9 resolution
+ * behind would produce an editor that cannot export until somebody notices the menu.
+ * Keeping a size that already matches is what makes the shape change a no-op for the
+ * deliverable when the document simply restated its own shape, which is the ordinary case
+ * on every project load and every undo.
  */
-function setTargetSize(text, { fromDocument = false } = {}) {
-  const [w, h] = String(text).split('x').map(Number);
+function setProjectAspect(aspect, { fromDocument = false } = {}) {
+  const [w, h] = reduceAspect(aspect[0], aspect[1]);
   if (!(w > 0 && h > 0)) return false;
-  targetSize = { w, h };
-  if (ui?.exportSize && ui.exportSize.value !== `${w}x${h}`) {
-    // A size a document names that the menu does not offer is still the size the
-    // clip was framed at, so it is added rather than snapped to a neighbour.
-    if (![...ui.exportSize.options].some((o) => o.value === `${w}x${h}`)) {
-      const option = document.createElement('option');
-      option.value = `${w}x${h}`;
-      option.textContent = `${w}x${h} (from the project)`;
-      ui.exportSize.appendChild(option);
-    }
-    ui.exportSize.value = `${w}x${h}`;
-  }
-  void fromDocument;
+  const leaving = projectAspect.join(':');
+  projectAspect = [w, h];
   ensureActiveDeliverable();
-  activeDeliverable.outputSize = `${w}x${h}`;
+  if (!sameAspect(aspectOfSize(activeDeliverable.outputSize), projectAspect)) {
+    // **The size this shape was last on, before the size this shape opens on.** A shape
+    // change replaces a resolution it cannot keep, and the deliverable is not undoable, so
+    // without a memory the replacement is one-way: pick 3840x2160, change the shape, press
+    // undo, and the stage comes back to where it was while the 4K the operator chose has
+    // become 1920x1080 - the document restored and a per-file setting silently downgraded
+    // by an edit that claims to move nothing but the frame.
+    //
+    // Keyed by shape rather than kept as a single previous value, because the question a
+    // returning shape asks is "what was I last rendered at", and one slot answers that for
+    // one shape and then lies to the next. Recorded on the way out rather than on the way
+    // in, so the size being displaced is the one that gets remembered.
+    sizeForShape.set(leaving, activeDeliverable.outputSize);
+    // A shape the table has nothing for leaves the deliverable where it was, and
+    // `exportClip` is what says so - refusing at the press rather than rendering a file
+    // that is not the shape on screen.
+    const remembered = sizeForShape.get(projectAspect.join(':'));
+    const fits = remembered && sameAspect(aspectOfSize(remembered), projectAspect);
+    activeDeliverable.outputSize = (fits ? remembered : openingSizeForAspect(projectAspect))
+      ?? activeDeliverable.outputSize;
+  }
+  buildResolutionMenu(ui?.exportSize, activeDeliverable.outputSize);
+  if (ui?.exportSize) ui.exportSize.value = activeDeliverable.outputSize;
+  if (aspectButtons) paintAspectSelection(aspectButtons);
+  void fromDocument;
   paintDeliverable();
   resize();
+  return true;
+}
+
+/**
+ * Adopt an output size, which reframes nothing and is the whole point of the split.
+ *
+ * Every size this can be given is of the shape the stage is already letterboxed to, so
+ * there is no `resize()` here and its absence is the behaviour rather than an omission:
+ * a resolution is how many pixels the same picture is delivered at, and the editor has
+ * nothing to redraw when that number moves. The one thing that has to happen is that the
+ * deliverable and the menu agree, because the menu is where the operator reads it back.
+ */
+function setDeliverableSize(text) {
+  const [w, h] = String(text).split('x').map(Number);
+  if (!(w > 0 && h > 0)) return false;
+  ensureActiveDeliverable();
+  activeDeliverable.outputSize = `${w}x${h}`;
+  if (ui?.exportSize && ui.exportSize.value !== `${w}x${h}`) {
+    buildResolutionMenu(ui.exportSize, `${w}x${h}`);
+    ui.exportSize.value = `${w}x${h}`;
+  }
+  paintDeliverable();
   return true;
 }
 
@@ -2360,7 +520,10 @@ function setTargetSize(text, { fromDocument = false } = {}) {
 // camera is on screen, because a drag would otherwise move the free camera
 // somewhere nobody can see and leave it there.
 function setViewCamera(cam) {
-  viewCamera = cam;
+  // Through `scene.js`, because `viewCamera` is that module's binding now and an
+  // importer cannot assign to what it imports. The opinion stays here - which pass
+  // draws and whether navigation is live - and only the assignment moved.
+  useViewCamera(cam);
   renderPass.camera = cam;
   controls.enabled = cam === freeCamera;
 }
@@ -2520,49 +683,14 @@ function resize() {
     renderer.domElement.style.top = `${stageBox.top}px`;
   }
   const buf = renderer.getDrawingBufferSize(new THREE.Vector2());
-  // Bloom is the most expensive pass, so it runs at half resolution - and the
-  // resolution it is half of is the 1080p reference rather than the drawing
-  // buffer, which is what makes its halo a fixed fraction of the frame.
-  //
-  // Running it at half the *buffer* makes bloom's cost proportional and its
-  // appearance anything but: UnrealBloomPass bakes a fixed tap count into its
-  // shaders when it is constructed - [6, 10, 14, 18, 22] across the five mips -
-  // while `setSize` scales the mip chain with what it is given. More texels per
-  // mip and the same number of taps means a halo whose width in frame-fractions
-  // is inversely proportional to buffer height, halving every time the buffer
-  // doubles. Measured at 1920x1200 against 3840x2400 it was the whole of the
-  // remaining residual once every other term was reference-relative: a mean
-  // channel difference of 13.1 against 0.6, and a halo covering the frame at the
-  // smaller size against 80.3% of it at the larger.
-  //
-  // The reference the chain is frozen at is the 600-tall buffer the look was graded
-  // against, and it is the same reference `pointSize` was rebased to. Freezing it at
-  // 1080 instead was tried and is wrong for a reason worth writing down: the halo's
-  // width is a tap count over a texel count, so a chain with 1.8x the texels has a
-  // halo 1.8x tighter - constant at last, but constant at a glow Blackwall was never
-  // tuned for. Measured across the two builds, the whole look at 1080p against the
-  // graded look at 600: 7.16/255 on the worst of forty tile means at a 1080-frozen
-  // chain, 1.10 at this one.
-  //
-  // What holds it constant is measured to 1200 and shipped to 2160, and the gap is
-  // worth naming rather than assuming. The bright pass reads the full-resolution
-  // frame into this frozen chain with one bilinear tap per destination texel, so
-  // it point-samples a 2:1 region of the frame at a 600 buffer, 4:1 at 1200 and
-  // 7.2:1 at 2160 - the undersampling grows with output size while the chain does
-  // not. `export-check` compares 600 against 1200, where it measures 0.781/255 on
-  // the coarse grid; nothing here has been measured at 4K, so a 4K export inherits
-  // the claim by extrapolation. The way to close it is an arm at 3840x2160 against
-  // 1920x1080, not an argument.
-  //
-  // The cost moves with it, in both directions. A 4K export now pays 600-referred
-  // bloom, which is the cheaper half of the trade and the right direction for a
-  // render that is CPU-bound anyway. A capture node previewing at 800x480 pays it
-  // too, which is the expensive half, and the two chains rather than the ratio
-  // between them: the old code called setSize(400, 240) there and got a 200x120
-  // first mip, this one calls setSize(500, 300) and gets 250x150. That is 37,500
-  // texels against 24,000, so 1.56x on the machine with the least to spare.
-  const refWidth = (buf.x / buf.y) * 600;
-  bloom.setSize(Math.max(1, refWidth / 2), 300);
+  // The chain is sized off a fixed reference rather than off this buffer, and
+  // `bloomChainSize` in `bloom-pass.js` carries the measurements that decided which
+  // reference and what a wrong one costs. The argument belongs beside the pass because
+  // what freezes the size is the tap count that pass bakes into its shaders when it is
+  // constructed, and a number without that mechanism beside it reads as a resolution bug
+  // somebody should fix.
+  const chain = bloomChainSize(buf.x, buf.y);
+  bloom.setSize(chain.width, chain.height);
   grade.uniforms.resolution.value.set(buf.x, buf.y);
   uniforms.bufferHeight.value = buf.y;
   // And then ask for the picture back, because everything above reallocates the drawing
@@ -2572,7 +700,7 @@ function resize() {
   // with the chrome overlay floating over it because that is a separate 2D canvas
   // `placeChrome` goes on repainting. Every path that resizes a parked stage had it: the
   // window listener below, the three splitter entries, the render-scale slider, the
-  // export-size menu through `setTargetSize`, and `rebuildLanes` reaching this
+  // shape controls through `setProjectAspect`, and `rebuildLanes` reaching this
   // indirectly - which is the argument for the repaint being here, at the door, rather
   // than at a caller list the seventh path would be added outside of.
   //
@@ -2681,61 +809,6 @@ function gradeNeeded() {
     || grade.uniforms.grain.value > 0
     || grade.uniforms.vignette.value > 0
     || grade.uniforms.streak.value > 0;
-}
-
-/**
- * How far out the four lateral crop planes reach, in metres.
- *
- * It has to clear everything the sensor can see at the furthest depth the near/far
- * sliders allow, or the defaults would crop a project that never asked to be cropped.
- * The widest sample is the frame corner furthest from the principal point, so the
- * half-extent at depth z is `max(c, N - c) / f * z` per axis rather than `c / f * z`
- * - an off-centre principal point makes one side reach further than the other, and
- * this rig's is off centre by 1.8px horizontally and 5.2px vertically.
- *
- * At 9.5m with this Kinect that is 6.69m across and 5.64m up. Seven clears both, and
- * `cropReach()` is exposed so a check can hold the number against the intrinsics of
- * the take actually open rather than against the ones in this comment.
- */
-const CROP_LIMIT = 7;
-const cropReach = (maxDepth = 9.5) => {
-  const { x: fx, y: fy } = uniforms.focal.value;
-  const { x: cx, y: cy } = uniforms.center.value;
-  return {
-    x: (Math.max(cx, DEPTH_W - cx) / fx) * maxDepth,
-    y: (Math.max(cy, DEPTH_H - cy) / fy) * maxDepth,
-    limit: CROP_LIMIT,
-  };
-};
-
-/**
- * Whether a sensor-space sample is on the wrong side of the crop box.
- *
- * **The crop is asked about in two places and this is one of them.** The vertex shader
- * has to keep its own copy because it is in another language, but the plan inset's
- * density map used to spell the six comparisons out for itself - so a switch wired to
- * the shader alone left the top-down drawing a cropped cloud underneath a picture
- * drawing everything, and the top-down is exactly where the depth faces get dragged.
- * A second spelling of one rule is a second place for the next face, or the next
- * switch, to be forgotten, which is why the plan asks here rather than deciding.
- *
- * It had a third caller while the room could be levelled by selecting a floor in the
- * picture, and that gesture is gone; the sharing is what survived it, because the one
- * reader left is the one the switch was originally wired past.
- *
- * Sensor metres and before the levelling rotation, matching the shader: the box is a
- * place in the room, so testing a rotated position would move all six faces every time
- * the room was levelled underneath them.
- *
- * `depth` is positive metres from the sensor, which is what every caller already has in
- * hand from the depth texture - the room's own z is its negation, and asking for the
- * value nobody has to flip is what keeps a sign error out of the callers.
- */
-function croppedOut(x, y, depth) {
-  if (uniforms.cropOn.value !== 1) return false;
-  if (depth < uniforms.nearClip.value || depth > uniforms.farClip.value) return true;
-  return x < uniforms.cropL.value || x > uniforms.cropR.value
-    || y < uniforms.cropB.value || y > uniforms.cropT.value;
 }
 
 // ------------------------------------------------- fitting the box to the footage
@@ -3090,8 +1163,9 @@ const PARAMS = {
   // `CLAUDE.md` rule 5 describes, an object every observation skips behind a justification
   // that stops anybody looking twice. So `blackwall.json`, which names `glitch: 0.18` and
   // no tint, does *not* draw the picture it drew: its tear flares dimmer. The flare's move
-  // out of the Blackwall branch two hundred lines up is a deliberate change on top of
-  // that; this one was not deliberate.
+  // out of the Blackwall branch - which is in `web/cloud-shader.js` now, and was a
+  // thousand-odd lines above this even before it left the file - is a deliberate change on
+  // top of that; this one was not deliberate.
   glitch: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glitch', label: 'amount',
     apply: (v) => { uniforms.glitch.value = v; } },
@@ -3619,8 +1693,9 @@ function missingReadings(values) {
   return READINGS.filter((n) => !Object.hasOwn(values, n));
 }
 
-// Each reading needs a uniform of its own name, and the shader string was built
-// hundreds of lines above this, so a reading declared in the registry with no
+// Each reading needs a uniform of its own name, and the two are now written in different
+// files - the registry here, the shader source in `web/cloud-shader.js` - so nothing about
+// reading one puts the other in front of you. A reading declared in the registry with no
 // uniform behind it would fail as a slider that moves nothing rather than as an
 // error. That is the shape this file keeps rejecting - a control that appears to
 // work - so it is an assertion, on the same reasoning as the age ceiling below.
@@ -3632,19 +1707,11 @@ for (const name of READINGS) {
 
 // The surface memory's age ceiling has to cover the longest persistence the two
 // sliders can ask for, or a ray that stops swapping pins its age below its own
-// life and sheds forever. The check lives here rather than beside `MAX_AGE`
-// because the shader string is built long before `PARAMS` exists, and it is an
-// assertion rather than a clamp because the honest failure is "this look cannot
-// be rendered correctly", which a silently shortened wake would hide.
-{
-  const longestLife = (PARAMS.fade.max + PARAMS.wake.max) / 1000;
-  if (MAX_AGE < longestLife) {
-    throw new Error(
-      `the surface memory clamps age at ${MAX_AGE}s but fade and wake can ask for `
-      + `${longestLife}s: a ghost past the clamp would never expire`,
-    );
-  }
-}
+// life and sheds forever. The ceiling and the refusal about it are the memory's, so
+// what happens here is the registry handing over the one number only it can compute -
+// and it happens here rather than at the memory's own banner because `PARAMS` is
+// declared above this line and not above that one.
+refuseAgeCeiling((PARAMS.fade.max + PARAMS.wake.max) / 1000);
 
 // Range inputs snap to their step grid and clamp to their bounds, and the registry
 // has to do the same arithmetic rather than lean on the DOM for it - otherwise a
@@ -4460,48 +2527,39 @@ function applyPreset(preset) {
   params.apply(preset);
 }
 
-// Clip in/out points are program seconds, not frames, so they survive an output-fps
-// change. `out` is null when the clip runs to the end of the program. The transport
-// and the export read these directly; the UI drags them on the ruler.
-let clipIn = 0;
-let clipOut = null;
-
-// The active deliverable holds the export settings (in/out, output fps, output size,
-// codec). It is separate from the project, so one edit can spawn several deliverables
+// The active deliverable holds the export settings (in/out, output size, codec, output
+// name). It is separate from the project, so one edit can spawn several deliverables
 // without the deliverable state being undoable project state.
+//
+// **Version 2, and the bump is what `outputFps` leaving costs.** The output rate is the
+// project's now, because `trails` is counted in output frames rather than in seconds and
+// the same document at two rates is two different looks. A version 1 document naming
+// 24fps read by this build would simply not be read - the field is nowhere in the reader
+// - and the render would come out at whatever the project says, which is a document that
+// parses perfectly and produces the wrong file. That is what a version gate is for, and
+// `applyDeliverable` is where it stands.
+const DELIVERABLE_VERSION = 2;
+
 let activeDeliverable = null;
 
 function ensureActiveDeliverable() {
   if (activeDeliverable) return;
   activeDeliverable = {
-    version: 1,
+    version: DELIVERABLE_VERSION,
     in: 0,
     out: null,
-    outputFps: timeline ? timeline.outputFps : 30,
-    outputSize: `${targetSize.w}x${targetSize.h}`,
+    outputSize: openingSizeForAspect(projectAspect) ?? DEFAULT_EXPORT_SIZE,
     codec: 'h264',
+    // Empty rather than the take's id, because the field it feeds treats empty as "use
+    // the take's id" and writing that id in would freeze it: a deliverable saved on one
+    // take and opened on another would name the first one's footage in the second one's
+    // file. `exportBaseName` is where the default is answered, once.
+    name: '',
   };
 }
 
 function setActiveDeliverable(deliverable) {
   activeDeliverable = deliverable;
-}
-
-// What a clip bound is allowed to be, asked in one place because two callers need the
-// same answer and a second copy of it is the drift this design keeps refusing.
-//
-// `null` is a statement rather than a time, and it is only ever legal at the out point:
-// there it means "to the end", which has to survive a retime that lengthens the program
-// and so cannot be written down as a number. At the in point, and for anything else that
-// is not a finite number, there is no reading to recover - so it is refused.
-function clipBoundOrThrow(value, which) {
-  if (value === null && which === 'out') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  throw new Error(
-    `the clip's ${which} point is ${JSON.stringify(value) ?? String(value)}, which is not a program `
-    + 'time: a trim carries finite seconds, and holding a value that is not one inside the program '
-    + 'spreads it through both bounds and leaves the transport no range at all',
-  );
 }
 
 function applyDeliverable(deliverable) {
@@ -4513,18 +2571,63 @@ function applyDeliverable(deliverable) {
   // and codec sitting on a clip whose cuts it never got to write. Asking the same
   // predicate here first is a second call site rather than a second rule, which is the
   // distinction that matters: there is still one answer to what a clip bound is.
+  // The version, asked before the bounds and for the harder reason. A version 1
+  // deliverable is the shape this program wrote until the output rate moved onto the
+  // project, and every field this reader looks at is still in it - so it would adopt
+  // cleanly, drop the 24fps it names on the floor, and render at whatever rate the
+  // project happens to hold. A document that parses and produces the wrong file is
+  // precisely what a version gate is for, and there is nothing here to convert: the rate
+  // it names belongs to a project this deliverable does not know the identity of.
+  if (deliverable.version !== DELIVERABLE_VERSION) {
+    // **The rate it named is in the message, because it is the only copy left.** Refusing
+    // a version 1 document without saying what it held sends the operator to Project
+    // settings with nothing to type: the rate lived on the deliverable and nowhere else,
+    // the project it belonged to carries no `outputFps` at all, and this build reads that
+    // absence as 30. So a 24fps edit whose only record of 24 is the document being refused
+    // becomes a 30fps edit silently, and saving the project writes 30 down for good. This
+    // cannot migrate it - a deliverable does not know which project it belongs to - but it
+    // can hand the number back rather than dropping it on the floor.
+    const named = Number.isFinite(deliverable.outputFps)
+      ? ` it was written at ${deliverable.outputFps}fps, which is the only record of that rate,`
+      : '';
+    throw new Error(
+      `this deliverable is version ${JSON.stringify(deliverable.version)} and this build writes `
+      + `${DELIVERABLE_VERSION}: the output rate lives on the project now, so a version 1 document `
+      + `would render at a rate nothing on screen agrees with -${named} so set the rate in Project `
+      + 'settings and save the deliverable again',
+    );
+  }
   clipBoundOrThrow(deliverable.in, 'in');
   clipBoundOrThrow(deliverable.out, 'out');
+  // **And the shape, because a deliverable is not allowed to reframe the clip.** This
+  // used to reach a setter that wrote the document's own framing from a size the
+  // deliverable named - so adopting a stored 1:1 deliverable silently re-composed a
+  // 65:24 edit, keys and all. `setDeliverableSize` is what took its place. The split
+  // makes the size a choice about pixels only, and that is only true while every size
+  // reaching it is of the shape the stage is showing. Refused here rather than corrected,
+  // for the reason this function refuses everything else before touching anything: a
+  // document naming another shape is from another edit, and quietly snapping it to this
+  // one's opening size would lose which size it actually asked for.
+  if (!sameAspect(aspectOfSize(deliverable.outputSize), projectAspect)) {
+    throw new Error(
+      `this deliverable renders ${deliverable.outputSize}, which is not the ${projectAspect.join(':')} `
+      + 'this project is framed at: the shape belongs to the edit, so change it in Project settings '
+      + 'rather than through a deliverable',
+    );
+  }
   // Before anything is written, because what follows replaces the cuts and the output
-  // rate wholesale - see `dropRateGesture` for why this is not `takeTransport`.
+  // size wholesale - see `dropRateGesture` for why this is not `takeTransport`.
   dropRateGesture();
   setActiveDeliverable(deliverable);
   setClipInOut({ in: deliverable.in, out: deliverable.out });
-  setTargetSize(deliverable.outputSize);
-  if (timeline) {
-    timeline.outputFps = deliverable.outputFps;
-    if (ui.fps) ui.fps.value = String(deliverable.outputFps);
-  }
+  setDeliverableSize(deliverable.outputSize);
+  // The output name travels with the deliverable now, which is what stops two of them
+  // writing over each other's file. It has never been persisted anywhere: the field was
+  // bare, falling back to the take's id, so every deliverable of one take proposed the
+  // same filename and the second render replaced the first in everything but the
+  // `<pid>-<seq>` directory. Empty stays empty rather than becoming the take id, because
+  // empty is what `exportBaseName` reads as "use the take's id".
+  if (ui.exportName) ui.exportName.value = deliverable.name ?? '';
   timingChanged();
   paintDeliverable();
   // The format segments, beside the readout that was already repainted here. They read
@@ -4539,61 +2642,27 @@ function applyDeliverable(deliverable) {
   // autosave and this dialog all reach a deliverable, and only one of them is these three
   // buttons.
   paintExportFormats();
+  // And the name chip, for the same rule read once more: the name above came off a
+  // document rather than out of the field's own `input` event, so nothing else in this
+  // program would have asked whether it is a filename.
+  paintExportName();
 }
 
+/**
+ * A trim, written and then told to the rest of the editor: the deliverable it belongs to,
+ * the readout beside it, and the transport if the playhead is now outside it.
+ *
+ * The writing itself is `writeClipRange` in `clip-range.js`, which refuses a bound that is
+ * not a time and holds the pair inside the program that is open. What is here is
+ * everything that write *means*, and that is the split the two callers need: the marker
+ * drags call the module directly while a pointer is down, because a preview must not move
+ * the deliverable or seek the transport once per pointer event, and they come here on the
+ * release. Both reach the same arithmetic, which is the whole point of it being reachable.
+ */
 function setClipInOut(values) {
-  const { in: inn, out } = values;
-  // **Refused before either binding is written, because the clamp below is arithmetic and
-  // arithmetic on something that is not a number does not fail - it spreads.** An `in` of
-  // `"start"` makes `Math.min(clipIn, dur)` NaN, and the `Math.max(clipIn, ...)` that holds
-  // the out point up then carries that NaN into a bound which was perfectly good: both ends
-  // are gone, `clipOutSec` answers NaN, and `frameAt` resolves every position to NaN. The
-  // getter this clamp was put in front of coerced instead - `Number(clipIn) || 0` read a
-  // malformed `in` as zero and left a valid `out` alone - so clamping without refusing first
-  // is strictly worse than what it replaced, on exactly the documents it exists to survive.
-  //
-  // `undefined` is not that case and must not be refused: it is how the two marker drags say
-  // which end they mean, and a drag writes one bound while the other keeps whatever it held.
-  // A document has no such reading, which is why `applyDeliverable` asks the same question
-  // about both of its fields and gets a refusal where this gets a pass.
-  const nextIn = inn === undefined ? undefined : clipBoundOrThrow(inn, 'in');
-  const nextOut = out === undefined ? undefined : clipBoundOrThrow(out, 'out');
-  if (nextIn !== undefined) clipIn = nextIn;
-  if (nextOut !== undefined) clipOut = nextOut;
-  // **Held inside the program that is open, because the two getters the transport reads
-  // this through are not symmetric.** `clipOutSec` is bounded above by the take's
-  // duration and `clipInSec` is bounded below by zero and above by nothing, so an `in`
-  // past the program's end makes `clipInSec` the larger of the two and `frameAt`
-  // composes to a constant: its inner `Math.min` can never exceed the out point, so its
-  // outer `Math.max` always answers the in point. Every position the editor can ask for
-  // then comes back as the same frame - seek, draft, redraw, `goTo`, Home, End, the
-  // arrow steps and the scrubber's release alike - while the readout goes on naming a
-  // range that has nothing in it.
-  //
-  // A deliverable is how that arrives. `applyDeliverable` writes a saved document's
-  // program times as they stand rather than into the rate the clip happens to be in, so
-  // a trim authored at 1x lands past the end of the same take played at 2x, and nothing
-  // upstream of here compares it against the take that is open.
-  //
-  // **Here rather than in the getters, and here rather than at `applyDeliverable`.**
-  // This is the one door every writer already passes - the two marker drags, the rate
-  // rescale in `reparameteriseProgramTime` and the deliverable - so there is no second
-  // clamp to keep in step with this one, and the writer added next year is held by
-  // existing. The markers already clamp themselves this way at their own ends; this is
-  // that same rule said once, where it covers the door a document comes through.
-  //
-  // What it deliberately does not do is make an empty range usable. A trim that lands
-  // wholly past the end has nothing in it, so it collapses to a point at the end - which
-  // is the state the two markers dragged together already reach, and it is explained by
-  // the same picture rather than by a frozen transport nothing on screen accounts for.
-  if (timeline) {
-    const dur = timeline.duration;
-    clipIn = Math.max(0, Math.min(clipIn, dur));
-    // `null` still means "to the end", which is a different statement from a number that
-    // happens to equal the duration: "whole clip" has to survive a retime that lengthens
-    // the program, and a duration written in here would freeze it at today's length.
-    if (clipOut !== null) clipOut = Math.max(clipIn, Math.min(clipOut, dur));
-  }
+  // `null` rather than a duration when nothing is open, because the trim is held inside
+  // the program and there is no program yet - a zero would collapse both bounds to it.
+  writeClipRange(values, timeline ? timeline.duration : null);
   ensureActiveDeliverable();
   activeDeliverable.in = clipIn;
   activeDeliverable.out = clipOut;
@@ -4645,189 +2714,12 @@ function setClipInOut(values) {
 //   pose    position, orientation and field of view moving together. Position
 //           runs a Catmull-Rom through the keys, because a camera cornering on
 //           straight lines reads as a mistake rather than as a move; orientation
-//           slerps, and fov lerps.
+//           slerps, and fov lerps. All three read the same eased fraction the
+//           scalars do, so the handles shape *when* the camera gets where it is
+//           going and never the route it takes - see `poseAt`.
 
-// The handles of a linear segment. Named rather than written out at the four
-// places a key is made, because a key created with anything else silently eases.
-const EASE_OUT_LINEAR = [1 / 3, 1 / 3];
-const EASE_IN_LINEAR = [2 / 3, 2 / 3];
-
-// One coordinate of a unit cubic Bezier with its ends pinned at 0 and 1, which is
-// what lets a handle be two numbers instead of a control point.
-const bez = (a, b, u) => {
-  const v = 1 - u;
-  return 3 * v * v * u * a + 3 * v * u * u * b + u * u * u;
-};
-const bezSlope = (a, b, u) => {
-  const v = 1 - u;
-  return 3 * v * v * a + 6 * v * u * (b - a) + 3 * u * u * (1 - b);
-};
-
-/**
- * The Bezier parameter at which the curve's x reaches `x`. Newton first because it
- * converges in two or three steps over most of the range, then bisection, because
- * Newton stalls exactly where an ease handle is interesting: a hold at the start
- * of a segment is a near-zero derivative, and dividing by it walks off the curve.
- */
-function easeParam(ax, bx, x) {
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
-  let u = x;
-  for (let i = 0; i < 8; i++) {
-    const err = bez(ax, bx, u) - x;
-    if (Math.abs(err) < 1e-9) return u;
-    const d = bezSlope(ax, bx, u);
-    if (d < 1e-6) break;
-    const next = u - err / d;
-    if (!(next > 0 && next < 1)) break;
-    u = next;
-  }
-  let lo = 0;
-  let hi = 1;
-  u = x;
-  for (let i = 0; i < 60; i++) {
-    const err = bez(ax, bx, u) - x;
-    if (Math.abs(err) < 1e-12) break;
-    if (err > 0) hi = u; else lo = u;
-    u = (lo + hi) / 2;
-  }
-  return u;
-}
-
-/** Where in a segment's value range a fraction of the way through it lands. */
-function easeAt(a, b, x) {
-  const u = easeParam(a[0], b[0], x);
-  return bez(a[1], b[1], u);
-}
-
-/** d(value fraction)/d(time fraction), which is what a retime slope is built from. */
-function easeSlopeAt(a, b, x) {
-  const u = easeParam(a[0], b[0], x);
-  const dx = bezSlope(a[0], b[0], u);
-  if (dx > 1e-6) return bezSlope(a[1], b[1], u) / dx;
-  // A vertical tangent is a legitimate handle placement, and the analytic ratio is
-  // infinite there. It used to report zero, which is the opposite of the truth and
-  // the wrong kind of wrong: this is the slope step 6's audio gate reads to decide
-  // whether the take is playing at 1.0, and a zero at the steepest point of a ramp
-  // would unmute exactly where it has to mute. Measured over a small window
-  // instead - large, finite, and in the right direction, which is what every
-  // caller can actually use.
-  const h = 1e-4;
-  const lo = Math.max(0, x - h);
-  const hi = Math.min(1, x + h);
-  return (easeAt(a, b, hi) - easeAt(a, b, lo)) / Math.max(1e-9, hi - lo);
-}
-
-/** The last key at or before `t`, or -1 when `t` sits before every key. */
-function keyBefore(keys, t) {
-  let lo = 0;
-  let hi = keys.length - 1;
-  if (hi < 0 || t < keys[0].t) return -1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (keys[mid].t <= t) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo;
-}
-
-// Outside the keys a look track holds its end values and the retime curve keeps
-// going. That difference is not a preference: a look with one bloom key is a
-// constant bloom, while a retime that flattened past its last key would freeze
-// the program there and make the take's tail unreachable.
-const HOLD_ENDS = 'hold';
-const EXTEND_ENDS = 'extend';
-
-function scalarAt(keys, t, ends) {
-  const n = keys.length;
-  if (n === 0) return 0;
-  if (n === 1) return keys[0].value;
-  const i = keyBefore(keys, t);
-  if (i < 0) {
-    if (ends === HOLD_ENDS) return keys[0].value;
-    return keys[0].value + (t - keys[0].t) * segmentSlope(keys, 0, 0);
-  }
-  if (i >= n - 1) {
-    if (ends === HOLD_ENDS) return keys[n - 1].value;
-    return keys[n - 1].value + (t - keys[n - 1].t) * segmentSlope(keys, n - 2, 1);
-  }
-  const a = keys[i];
-  const b = keys[i + 1];
-  const span = b.t - a.t;
-  // Coincident keys are a legal transient while one is being dragged onto
-  // another, and the later value is what a step would give, so it is what this
-  // gives rather than a division by zero.
-  if (span <= 0) return b.value;
-  return a.value + (b.value - a.value) * easeAt(a.easeOut, b.easeIn, (t - a.t) / span);
-}
-
-/** The slope of segment `i` at one of its ends, in value per program second. */
-function segmentSlope(keys, i, x) {
-  const a = keys[i];
-  const b = keys[i + 1];
-  const span = b.t - a.t;
-  if (span <= 0) return 0;
-  return ((b.value - a.value) / span) * easeSlopeAt(a.easeOut, b.easeIn, x);
-}
-
-function scalarSlopeAt(keys, t) {
-  const n = keys.length;
-  if (n < 2) return 0;
-  const i = keyBefore(keys, t);
-  if (i < 0) return segmentSlope(keys, 0, 0);
-  if (i >= n - 1) return segmentSlope(keys, n - 2, 1);
-  const span = keys[i + 1].t - keys[i].t;
-  if (span <= 0) return 0;
-  return segmentSlope(keys, i, (t - keys[i].t) / span);
-}
-
-function stepAt(keys, t) {
-  const i = keyBefore(keys, t);
-  return keys[i < 0 ? 0 : i].value;
-}
-
-// Catmull-Rom, written in its Hermite form with tangents divided by the *time*
-// between the neighbouring keys rather than by an assumed even spacing. The
-// textbook uniform formula is the same curve when keys are evenly spaced and a
-// different one when they are not: it reads the parameter as an index, so two
-// keys 0.2s apart and two keys 3s apart get the same tangent and the camera
-// lurches out of the tight pair. Keys land wherever the edit wants them, so the
-// non-uniform form is the only one that means what the spec says it means.
-function hermite(p0, p1, m0, m1, span, u) {
-  const u2 = u * u;
-  const u3 = u2 * u;
-  const h00 = 2 * u3 - 3 * u2 + 1;
-  const h10 = u3 - 2 * u2 + u;
-  const h01 = -2 * u3 + 3 * u2;
-  const h11 = u3 - u2;
-  return h00 * p0 + h10 * span * m0 + h01 * p1 + h11 * span * m1;
-}
-
-/**
- * The tangent at key `i`, in metres per program second.
- *
- * At the ends the missing neighbour is the end key mirrored one segment *outside*
- * the path rather than the end key sitting on top of itself. That is what makes
- * this the non-uniform generalisation of the textbook formula rather than a
- * near-miss of it: with the duplicate at the same instant the end tangent comes
- * out twice what the uniform Catmull-Rom gives, so the curve would leave its first
- * key at double speed and the two forms would disagree on evenly spaced keys - the
- * one case where they have to agree exactly.
- */
-function tangentAt(keys, i, axis) {
-  const n = keys.length;
-  const at = (k) => (k < 0
-    ? { t: 2 * keys[0].t - keys[1].t, value: keys[0].value }
-    : (k > n - 1
-      ? { t: 2 * keys[n - 1].t - keys[n - 2].t, value: keys[n - 1].value }
-      : keys[k]));
-  const lo = at(i - 1);
-  const hi = at(i + 1);
-  const span = hi.t - lo.t;
-  if (span <= 0) return 0;
-  return (hi.value.position[axis] - lo.value.position[axis]) / span;
-}
-
+// The scalar curve maths moved to `curve.js`; the pose track below still needs
+// three.js and stays here.
 const slerpA = new THREE.Quaternion();
 const slerpB = new THREE.Quaternion();
 
@@ -4841,7 +2733,27 @@ function poseAt(keys, t) {
   const b = keys[i + 1];
   const span = b.t - a.t;
   if (span <= 0) return b.value;
-  const u = (t - a.t) / span;
+  // The ease handles, and they are what make this a *timing* control rather than a
+  // second path editor. `easeAt` remaps how far through the segment we are and
+  // nothing else, so the Catmull-Rom through the keys is the same curve and only the
+  // rate along it changes. That is the whole reason composition can have this without
+  // getting the graph the design deliberately keeps it off: you still cannot judge a
+  // camera move from a lane, and the lane is no longer being asked to show you one.
+  //
+  // All three channels read the remapped value because `u` is computed once. Easing
+  // position alone would slide the camera along a path it is no longer aimed down,
+  // and it is also the only thing short of squad interpolation that softens the
+  // quaternion's corner at a key - `smooth` handles bring du/dt to zero there, so the
+  // slerp's rate arrives and leaves at nothing instead of stepping.
+  //
+  // Measured, because the default has to be the old behaviour rather than nearly it:
+  // with the linear handles every key is created with, this is the identity to within
+  // one ulp - worst |easeAt(u) - u| over 100,001 samples is 1.665e-16, exact at both
+  // ends, 58,363 of them bit-identical - so a project saved before this existed
+  // renders as it did. There is deliberately no short-circuit for that case. A second
+  // path past this line is a second thing to keep in step, which is the trade this
+  // design keeps refusing, and 1.665e-16 does not buy one.
+  const u = easeAt(a.easeOut, b.easeIn, (t - a.t) / span);
 
   const position = [0, 1, 2].map((axis) => hermite(
     a.value.position[axis], b.value.position[axis],
@@ -4888,7 +2800,7 @@ class Track {
       existing.value = value;
       return existing;
     }
-    const key = { t, value, easeOut: [...EASE_OUT_LINEAR], easeIn: [...EASE_IN_LINEAR] };
+    const key = { t, value, easeOut: copyHandle(EASE_OUT_LINEAR), easeIn: copyHandle(EASE_IN_LINEAR) };
     this.keys.push(key);
     this.sort();
     return key;
@@ -4909,7 +2821,7 @@ class Track {
 
   serialise() {
     return this.keys.map((k) => ({
-      t: k.t, value: k.value, easeOut: [...k.easeOut], easeIn: [...k.easeIn],
+      t: k.t, value: k.value, easeOut: copyHandle(k.easeOut), easeIn: copyHandle(k.easeIn),
     }));
   }
 }
@@ -5370,10 +3282,28 @@ function serialiseProjectBody() {
       retime: retime.serialise(),
       camera: tracks.get('camera')?.serialise() ?? [],
     },
-    // The framing the clip was composed for. Deliverables reference this too, but the
-    // editor size itself is document state because the point-size rebase makes the
-    // look resolution-relative.
-    outputSize: `${targetSize.w}x${targetSize.h}`,
+    // The framing the clip was composed for, as the shape rather than as a size. The
+    // pixel count is the deliverable's, because the point-size rebase makes the look
+    // resolution-relative and two sizes of one shape reopen identically; the shape is
+    // here because the camera was keyed against a frame and a different one is a
+    // different shot with the same keys.
+    //
+    // **No version bump for either of the two fields on these lines**, and that is
+    // deliberate rather than an oversight. `PROJECT_VERSION` is shared with presets, so
+    // bumping it to describe a project field would invalidate every document in
+    // `presets-builtin/` for a change presets have nothing to do with. The convention for
+    // an added field here is "absent is allowed and means X", which is what the
+    // `outputSize` this replaces already said and what `vignette` did before it.
+    aspect: [...projectAspect],
+    // The output rate, moved off the deliverable because it is not free. `trails` is the
+    // one look term whose length is counted in output frames rather than in seconds - at
+    // damp 0.9 a trail is down to 12% after twenty frames, which is 0.83s at 24fps and
+    // 0.33s at 60fps - so a rate chosen per deliverable would mean two files of one edit
+    // carrying two different looks with nothing on screen saying so. `AfterimagePass` is
+    // the only pass in `web/post-chain.js` that carries state between renders, so it is
+    // the only such term; fixing that is a separate decision that would change the look
+    // of every project already saved, and it is not this one.
+    outputFps: timeline ? timeline.outputFps : 30,
     // Provenance, not a reference. The values above are already copied in, so this
     // changes nothing about what renders - it only records which revision of which
     // look this clip was built from, which is what lets a gallery see that three
@@ -5401,17 +3331,31 @@ function serialiseProject() {
  * linear when absent - a key written without them is linear, not handleless - and
  * are checked when present, because a handle outside the unit box bends a curve
  * back on itself inside a segment.
+ *
+ * **A handle is a list of control points and version 5 is what says so.** A version 4
+ * document wrote one pair per side, `[0.42, 0]`, and this reads `[[0.42, 0]]` - the
+ * same cubic with the count made explicit. The two shapes are not distinguishable by
+ * a length check, which is exactly why the conversion is a version gate upstream of
+ * here and a one-shot over files rather than a sniff at this line: `[0.42, 0]` is a
+ * two-element array and so is `[[0.2, 0], [0.4, 0]]`, so a loader that guessed would
+ * read a quintic's first control point as a whole cubic and render a move nobody
+ * authored. The count is checked against the same ceiling the editor's own control
+ * obeys, because a document is a caller like any other.
  */
 function restoreKey(owner, k) {
   if (!Number.isFinite(k?.t)) {
     throw new Error(`${owner} has a key at t=${JSON.stringify(k?.t)}: a key time has to be a finite number`);
   }
-  const handle = (side, xs, fallback) => {
-    if (xs === undefined) return [...fallback];
-    if (!Array.isArray(xs) || xs.length !== 2 || !xs.every(Number.isFinite)) {
-      throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle of ${JSON.stringify(xs)}: it takes two finite numbers`);
+  const handle = (side, points, fallback) => {
+    if (points === undefined) return copyHandle(fallback);
+    const ok = Array.isArray(points)
+      && points.length >= 1 && points.length <= SEGMENT_POINT_CEILING
+      && points.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+    if (!ok) {
+      throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle of ${JSON.stringify(points)}: it takes `
+        + `1 to ${SEGMENT_POINT_CEILING} control points, each two finite numbers`);
     }
-    return [...xs];
+    return copyHandle(points);
   };
   return {
     t: k.t,
@@ -5462,13 +3406,78 @@ function restoreProject(project) {
   // 0..1. One validator for every look value beats a hand-written clause per special
   // case, which is what the special case was.
   //
-  // Checked here rather than shrugged off, because a size that does not parse would
-  // otherwise leave the editor framing at whatever the last clip was and quietly
-  // export a different shape from the one on screen. Absent is allowed and means the
-  // 1920x1080 this field was introduced beside - the version gate above is what makes
-  // that reading safe, since nothing older than it can reach here.
+  // Checked here rather than shrugged off, because a shape that does not parse would
+  // otherwise leave the editor framing at whatever the last clip was and quietly export a
+  // different shape from the one on screen. Absent is allowed and means the shape derived
+  // below - the version gate above is what makes that reading safe, since nothing older
+  // than it can reach here.
+  //
+  // A pair of positive integers, which is the whole of what a shape is. Integers rather
+  // than any two numbers because the pair is a *reduced* ratio and the reduction is what
+  // makes two sizes of one shape compare equal; `[16.0, 9.0]` would compare unequal to
+  // `[16, 9]` under `sameAspect` and light no button while framing identically, which is
+  // the kind of near-miss that reads as a rendering bug.
+  const aspectShape = Array.isArray(project.aspect) && project.aspect.length === 2
+    // `isSafeInteger` rather than `isInteger`, because above 2^53 the integers stop being
+    // distinct: `[9007199254740993, 9007199254740992]` is parsed as two copies of the same
+    // number, passes `isInteger`, reduces to `[1, 1]` and frames the clip square. A shape
+    // nobody can have meant, adopted rather than refused, is the class this validator is
+    // here for - and the pair is a *ratio*, so a value that cannot be told from its
+    // neighbour is not a ratio at all.
+    && project.aspect.every((n) => Number.isSafeInteger(n) && n > 0);
+  if (project.aspect !== undefined && !aspectShape) {
+    throw new Error(`aspect is ${JSON.stringify(project.aspect)}: it reads as [width, height] in whole positive numbers`);
+  }
+  // The legacy field, still checked because it is still read - it is the only thing a
+  // project written before the shape moved onto the document has to say what it was
+  // framed at, and a size that does not parse is a project this build cannot frame.
   if (project.outputSize !== undefined && !/^[1-9][0-9]*x[1-9][0-9]*$/.test(String(project.outputSize))) {
     throw new Error(`outputSize is ${JSON.stringify(project.outputSize)}: it reads as WIDTHxHEIGHT`);
+  }
+  // **A shape this build can offer no resolution for is refused, and refusing it here is
+  // what stops a document becoming a trap.**
+  //
+  // `outputSize` used to carry the shape *and* the pixel count; `aspect` carries only the
+  // shape, and the pixels come off the deliverable by looking the shape up in
+  // `EXPORT_SIZES`. For every shape the table holds that is a lossless split. For one it
+  // does not - a hand-typed 1600x1000 is 8:5, and no group here offers 8:5 - the pixel
+  // count has nowhere to live once `outputSize` stops being written, so the document
+  // reopens framed at 8:5 with a deliverable holding some 16:9 size, a resolution menu
+  // whose only entry is that wrong-shape size, and an export that refuses. A dead end with
+  // no route out of it through the product.
+  //
+  // Refused at the door rather than repaired, because the repair anybody reaches for makes
+  // it worse. Refusing only the saved form leaves the legacy document openable and turns
+  // *saving* into the destructive step: open it, save it, and it can never be opened again.
+  // Manufacturing a size at that ratio would put a resolution the product does not offer
+  // into a deliverable and then into a filename, which is what `web/export-sizes.js` refuses
+  // in as many words. So the rule is one rule, asked of the shape however it arrived - the
+  // field, or derived from a legacy size - and it costs the ability to open a project framed
+  // at a shape this build has no sizes for, which is a project it could not have rendered
+  // either.
+  const framedAt = project.aspect
+    ?? (project.outputSize === undefined ? defaultAspect() : aspectOfSize(String(project.outputSize)));
+  const framedShape = reduceAspect(framedAt[0], framedAt[1]);
+  if (sizesForAspect(framedShape).length === 0) {
+    throw new Error(
+      `this project is framed at ${framedShape.join(':')}, which this build offers no resolution for - `
+      // The labels the shape buttons print, not the reduced pairs. `[256, 135]` is the
+      // honest reduction of the DCI group and is the one thing on screen nobody can match
+      // to a control, because the button beside it says `1.90:1`. A refusal is read by
+      // somebody about to go looking for the thing it names.
+      + `it renders ${exportAspects().map((a) => a.ratio).join(', ')}, so there is no size to `
+      + 'export it at and no menu entry to pick one from',
+    );
+  }
+  // The rate against the list the control is built from, so a document naming 25 is
+  // refused rather than adopted into a `<select>` that cannot show it. Refused rather
+  // than snapped to the nearest offered rate for the reason every other refusal here
+  // exists: `trails` is counted in output frames, so a rate quietly moved from 25 to 24
+  // is a look quietly changed, and the operator would have no way to see which.
+  if (project.outputFps !== undefined && !OUTPUT_RATES.includes(project.outputFps)) {
+    throw new Error(
+      `outputFps is ${JSON.stringify(project.outputFps)}: this build offers ${OUTPUT_RATES.join(', ')}`,
+    );
   }
   if (!project.look.params || typeof project.look.params !== 'object') {
     throw new Error('a project look carries a params object');
@@ -5612,7 +3621,7 @@ function restoreProject(project) {
   // walks the document's own keys, so absent is invisible to it - which was harmless
   // only while every document carried every key. It stops being harmless the moment
   // a parameter is added, and the second project opened in one session is where it
-  // would have shown up. `outputSize` takes this position too, on the line above, for
+  // would have shown up. `aspect` takes this position too, on the lines above, for
   // the same reason read the other way round.
   //
   // **The look tag, not every parameter.** `params.reset()` defaults view state too,
@@ -5620,16 +3629,50 @@ function restoreProject(project) {
   // scale back to 100, which is the one thing the stack is supposed to leave alone.
   // The set reset here is exactly the set `serialiseProjectBody` writes.
   // **The first thing here that changes anything, and it used to be the first thing in
-  // the function.** `setTargetSize` resized the stage and the export target before the
+  // the function.** `setProjectAspect` resizes the stage, and the setter it replaced
+  // resized the export target with it, before the
   // shape of the document had been checked at all, so a project that named a new size
   // and was then refused - for a missing reading, a track the registry does not know,
   // a retime that descends - left the editor framing something the clip on screen was
   // never composed for. `loadProjectNamed` exits on the throw without reapplying the
   // active deliverable, so nothing put it back.
   //
-  // The format of the string is still checked up in the validation phase, where a
+  // The format of both fields is still checked up in the validation phase, where a
   // refusal costs nothing. Only the write waited.
-  setTargetSize(project.outputSize ?? DEFAULT_EXPORT_SIZE, { fromDocument: true });
+  //
+  // **One reader with one documented fallback, not a second code path.** A project this
+  // build wrote carries `aspect` and nothing else; one written before the split carries
+  // an `outputSize`, whose ratio *is* the shape it was framed at, so the shape is derived
+  // from it rather than the project being refused for lacking a field it could not have
+  // known about. A project carrying neither is the shape the default size is.
+  //
+  // The legacy size is handed to the deliverable in the same breath, and that is the half
+  // that would be easy to leave out. `outputSize` was both the shape and the pixel count,
+  // so a hand-typed 1600x1000 reduces to `[8, 5]` - a shape the table offers no size for -
+  // and dropping the pixels would leave the deliverable holding a 16:9 size that
+  // `exportClip` then refuses. Seeding it means such a project renders exactly what it
+  // rendered before, which is the whole promise of an additive field.
+  const legacySize = project.outputSize === undefined ? null : String(project.outputSize);
+  if (legacySize !== null && project.aspect === undefined) {
+    ensureActiveDeliverable();
+    activeDeliverable.outputSize = legacySize;
+  }
+  setProjectAspect(
+    project.aspect ?? (legacySize === null ? defaultAspect() : aspectOfSize(legacySize)),
+    { fromDocument: true },
+  );
+
+  // The output rate, and the playhead held across it. `timeline.frame` counts *output*
+  // frames, so writing a new rate underneath it silently moves the playhead - frame 300
+  // is 10s at 30fps and 5s at 60 - and undo promises in as many words that the playhead
+  // does not move. Held here rather than at each caller because there are three of them
+  // and one is the undo stack itself: a project load, a restored autosave and every undo
+  // that crosses a rate change all arrive through this line.
+  if (timeline) {
+    const held = timeline.programSec;
+    timeline.outputFps = project.outputFps ?? 30;
+    timeline.frame = timeline.frameAt(held);
+  }
 
   params.reset(params.names('look'));
   params.apply(project.look.params);
@@ -6503,11 +4546,29 @@ const retime = {
       // hope: a cubic with ordinates 0, a, b, 1 has derivative
       // `3[a s² + 2(b−a)st + (1−b)t²]` for s = 1−u, t = u, which is non-negative
       // throughout [0,1]² - at worst zero, at a = 1, b = 0, where it is `3(1−2u)²`.
+      //
+      // **That proof is about a cubic, and the segment is only a cubic while each side
+      // holds one control point.** Look and camera tracks can grow a side past that -
+      // see `SEGMENT_POINT_CEILING` and the `+pt` control - and the argument above does
+      // not survive the elevation: a quintic with ordinates 0, 1, 0, 1, 0, 1, every one
+      // of them inside the box, oscillates. So the retime asserts the degree rather
+      // than inheriting a guarantee written for a different curve. It is an assertion
+      // and not a clamp because nothing offers the retime a second point: reaching here
+      // with one means a document or a caller got past the gates that stop it, and the
+      // honest answer to a curve this cannot vouch for is to refuse it by name.
       for (const [side, h] of [['easeOut', key.easeOut], ['easeIn', key.easeIn]]) {
-        if (!h.every((c) => c >= 0 && c <= 1)) {
+        if (h.length !== 1) {
+          throw new Error(
+            `the retime key at program ${key.t}s has a ${side} handle of ${h.length} control `
+            + 'points: the retime curve is a cubic, because the proof that a handle inside the '
+            + 'unit box cannot run source time backwards is a proof about a cubic and about '
+            + 'nothing else',
+          );
+        }
+        if (!h[0].every((c) => c >= 0 && c <= 1)) {
           throw new Error(
             `the retime key at program ${key.t}s has a ${side} handle at `
-            + `[${h.join(', ')}]: a handle outside the unit box bends the curve back on `
+            + `[${h[0].join(', ')}]: a handle outside the unit box bends the curve back on `
             + 'itself inside the segment, and source time cannot run backwards',
           );
         }
@@ -6529,7 +4590,7 @@ const retime = {
     return {
       rate: this.rate,
       keys: this.keys.map((k) => ({
-        t: k.t, value: k.value, easeOut: [...k.easeOut], easeIn: [...k.easeIn],
+        t: k.t, value: k.value, easeOut: copyHandle(k.easeOut), easeIn: copyHandle(k.easeIn),
       })),
     };
   },
@@ -6711,23 +4772,22 @@ let pairSource = livePairs;
 // forward at will, which is impossible while "a frame arrived" is what drives it.
 function advanceSurfaceState(dtSec) {
   counters.stateAdvances++;
-  stateUniforms.depthCurr.value = depthCurr;
-  stateUniforms.statePrev.value = statePrev.texture;
   // The upper bound is the discontinuity gate and nothing tighter. A lower one
   // would undo the gate a layer down: the sample capture's real 1448ms stall
   // would arrive here and be truncated, so wakes born before the stall would
   // survive it with life left over - which is the failure the gate exists to
   // prevent. Anything past the gate never reaches this call.
-  stateUniforms.dt.value = Math.min(DISCONTINUITY_MS / 1000, Math.max(0.001, dtSec));
-  stateUniforms.snapDelta.value = uniforms.snapDelta.value;
-
-  renderer.setRenderTarget(stateNext);
-  stateQuad.render(renderer);
-  renderer.setRenderTarget(null);
-
-  const swap = statePrev;
-  statePrev = stateNext;
-  stateNext = swap;
+  //
+  // Clamped on this side of the boundary because the gate is the transport's number
+  // and the snap threshold is the look's; what the memory is handed is a gap it can
+  // trust, and both of the decisions behind it stay where their reasons are.
+  stepSurfaceMemory(
+    Math.min(DISCONTINUITY_MS / 1000, Math.max(0.001, dtSec)),
+    uniforms.snapDelta.value,
+  );
+  // Read after the step, which has swapped: `statePrev` names the target just rendered
+  // into, and it is a live import rather than a copy, so this is the state this call
+  // produced rather than the one before it.
   uniforms.stateTex.value = statePrev.texture;
 }
 
@@ -8174,10 +6234,48 @@ async function exportClip(options = {}) {
   if (exporting) throw new Error('an export is already running');
   ensureActiveDeliverable();
   const d = activeDeliverable;
-  const deliverableSize = parseSize(options.outputSize ?? d.outputSize ?? `${targetSize.w}x${targetSize.h}`);
+  // **The one place the two halves of the split are checked against each other.** The
+  // stage is letterboxed to the project's shape and the file is rendered at the
+  // deliverable's size, and every route that writes either of them keeps them agreeing -
+  // `setProjectAspect` brings the size along, `applyDeliverable` refuses a stored size of
+  // another shape. This is the backstop under all of them, and it has one case it is the
+  // *only* answer to: a project saved with a shape the size table offers nothing for,
+  // reopened with a deliverable that never held a size of that shape. Refusing at the
+  // press costs a message; rendering would cost a file that is not the picture on screen,
+  // which is the failure this whole letterbox exists to make impossible.
+  const requested = options.outputSize ?? d.outputSize;
+  const deliverableSize = parseSize(requested);
   const width = Math.trunc(options.width ?? deliverableSize.w);
   const height = Math.trunc(options.height ?? deliverableSize.h);
-  const fps = options.fps ?? d.outputFps ?? timeline.outputFps;
+  // **Asked of the size this render will actually use, which is the half the first version
+  // of this check got wrong.** It skipped itself entirely when `options.width` or
+  // `options.height` was supplied, on the reasoning that an explicit size is the caller's
+  // business - and the lines below then write that size into `outputSize` and call
+  // `resize()`, so an explicit pair does not sit beside the letterbox, it *replaces* it.
+  // A job carrying 320x200 against a 16:9 project reframed the camera to 1.6 and rendered
+  // a picture nobody composed, which is precisely the failure the comment below claims to
+  // be the backstop against. `tools/render-worker.mjs` supplies both fields on every job,
+  // so the one path that renders unattended was the one path with no check on it.
+  //
+  // A well-formed job cannot trip this: the worker restores the job's own project first,
+  // so `projectAspect` is that project's shape and the width and height it was queued with
+  // are of that shape. What trips it is a job whose size and whose project disagree, which
+  // is a reframe wearing the shape of a resolution.
+  const effective = reduceAspect(width, height);
+  if (!sameAspect(effective, projectAspect)) {
+    const asked = options.width === undefined && options.height === undefined
+      ? `the deliverable renders ${requested}`
+      : `this render was asked for at ${width}x${height}`;
+    throw new Error(
+      `this clip is framed at ${projectAspect.join(':')} and ${asked}, which is `
+      + `${effective.join(':')}: pick a resolution of the project's shape in Export, or change `
+      + 'the shape in Project settings',
+    );
+  }
+  // The project's rate, since it left the deliverable. `options.fps` is still ahead of it
+  // because a queued job names the rate it was queued at, and re-rendering that job has to
+  // reproduce the file rather than whatever the project has since been set to.
+  const fps = options.fps ?? timeline.outputFps;
   const codec = options.codec ?? d.codec ?? 'h264';
 
   const restore = {
@@ -8235,6 +6333,13 @@ async function exportClip(options = {}) {
       // render machine today so the field constrains nothing - but a job record
       // without it cannot be retrofitted once old jobs exist, and provenance is
       // exactly what is wanted on the day two workers disagree about an image.
+      //
+      // **Serialised inside the try, so `outputFps` is the rate this render is at**
+      // rather than the rate the project was on before `options.fps` overrode it. That is
+      // the direction that makes a job replayable: the body now carries the rate, and a
+      // worker restoring it renders the file that was asked for rather than the one the
+      // project would produce today. It also means `trails`, whose length is counted in
+      // output frames, decays over the same span on the replay as it did here.
       project: serialiseProjectBody(),
       capture: timeline.source.index.hash,
       renderer: rendererClass(),
@@ -8306,8 +6411,11 @@ const ui = {
   // for why the surface rather than the state decides.
   cropFit: document.getElementById('cropFit'),
   cropReset: document.getElementById('cropReset'),
-  exportSize: buildExportMenu(document.getElementById('tExportSize')),
-  exportRatios: document.getElementById('exportRatios'),
+  // Empty in the markup and filled by `setProjectAspect`, which is the only thing that
+  // knows which sizes this project's shape has. The boot call below runs after this
+  // object exists, so the select is briefly empty and nothing reads it in between.
+  exportSize: document.getElementById('tExportSize'),
+  projectAspects: document.getElementById('projectAspects'),
   exportFormats: document.getElementById('exportFormats'),
   exportDialog: document.getElementById('exportDialog'),
   exportGo: document.getElementById('tExport'),
@@ -8315,6 +6423,7 @@ const ui = {
   exportName: document.getElementById('tExportName'),
   exportNameChip: document.getElementById('tExportNameChip'),
   exportSave: document.getElementById('tExportSave'),
+  exportTrim: document.getElementById('tExportTrim'),
   inOut: document.getElementById('tInOut'),
   outOut: document.getElementById('tOutOut'),
   clipLen: document.getElementById('tClipLen'),
@@ -8325,6 +6434,8 @@ const ui = {
   prevKey: document.getElementById('tPrevKey'),
   nextKey: document.getElementById('tNextKey'),
   deleteKey: document.getElementById('tDeleteKey'),
+  addPoint: document.getElementById('tAddPoint'),
+  dropPoint: document.getElementById('tDropPoint'),
   deliverable: document.getElementById('tDeliverable'),
   deliverableNew: document.getElementById('tDeliverableNew'),
   deliverableReadout: document.getElementById('tDeliverableReadout'),
@@ -8355,7 +6466,11 @@ const ui = {
   recRange: document.getElementById('recRange'),
 };
 
-const exportRatioButtons = buildExportRatios(ui.exportRatios, ui.exportSize);
+// The rates, built from `OUTPUT_RATES` rather than written into the markup, so the list
+// the validator refuses against and the list the control offers are one object.
+for (const rate of OUTPUT_RATES) ui.fps?.appendChild(new Option(String(rate), String(rate)));
+
+aspectButtons = buildAspectSegments(ui.projectAspects);
 
 /**
  * The output format, as one segmented control over the deliverable's `codec`.
@@ -8470,187 +6585,51 @@ function showTimelineError(err) {
   console.error('[timeline]', err);
 }
 
-// How little program time the strip will show. A window is bounded below so a wheel
-// cannot zoom into a point, where every position on screen is the same instant and the
-// gesture that got there has no inverse.
-const MIN_VIEW_SEC = 0.25;
+// The window of program time the strip is drawn against, built here because both of its
+// readings belong to this file: the length of the program, and where the ruler's bed is on
+// screen. Suppliers rather than values, because both move under a window that does not.
+//
+// **The length is frozen for the length of a lane drag, and that is not a nicety.** The
+// retime curve *is* the program length: dragging one of its keys down slows the clip, which
+// lengthens the program, which rescales the ruler, which moves the key under a pointer that
+// has not moved horizontally - and the new position is read back as a new program time,
+// which slows it further. Measured before it was fixed: a twelve-pixel vertical drag walked
+// one key from 15.0s to 48.3s in four moves, and the drag got faster the longer it went on.
+// `laneDrag` is null except while that drag is live, and it is declared three thousand
+// lines below this because it belongs to the drag - which is safe only because nothing
+// reads the window before a take is open, and the guard on that is `viewChanged`.
+//
+// The 1 with no clip open is a placeholder the floor inside the window would give it
+// anyway; what it buys is that `pct` divides by something before the first paint.
+const view = makeViewWindow({
+  durationSec: () => (laneDrag ? laneDrag.duration : (timeline ? timeline.duration : 1)),
+  bedRect: () => ui.bed.getBoundingClientRect(),
+});
 
 /**
- * The window of program time the strip is drawn against, and the only thing that turns
- * a program second into a position on it.
+ * What the chosen deliverable is, and what the press will take out of the clip.
  *
- * **It replaced `rulerDuration()` rather than joining it.** Eleven places used to work
- * out a position by dividing by the clip's length, and a twelfth that kept doing so
- * under a zoomed window would not look broken - it would draw its marker *unzoomed*,
- * at a plausible place, silently disagreeing with the eleven around it. Deleting the
- * old name is what makes a missed caller a throw on the first paint instead of a wrong
- * picture nobody can see is wrong.
- *
- * **The window is held as fractions of the program duration, and that is load-bearing
- * rather than a unit preference.** A speed change rescales the duration and every
- * program time in the document by the same factor - see `reparameteriseProgramTime` -
- * so a window in *seconds* would be a twelfth quantity somebody had to remember to
- * scale, and forgetting it would move the visible footage on a gesture whose whole
- * point is that nothing moves. In fractions there is nothing to remember: the ruler
- * and the window rescale together and the same footage stays on screen because the
- * arithmetic cannot express anything else.
- *
- * The one place that reads oddly is the consequence of the same choice, and it is
- * worth stating so it is not filed as this bug returning: a *retime key* changes the
- * program duration non-uniformly, so dragging one shifts the visible window on
- * release. That is a different situation from the speed slider - there the map is
- * uniform and nothing moves at all - and it is accepted rather than overlooked.
+ * The rate is not in it any more and its absence is the change rather than a shortening:
+ * it belongs to the project, so printing it beside the deliverable's own fields would say
+ * it is one of them. The trim is a second element rather than the tail of this string
+ * because the dialog gives it a row of its own - the operator's question there is "what
+ * range is this press going to render", and an answer buried at the end of a summary line
+ * is one they have to parse rather than read.
  */
-const view = {
-  // The visible window, as fractions of `duration`. `0..1` is the whole clip.
-  a: 0,
-  b: 1,
-  // And the window that was *asked* for, which is what the limits are re-derived from -
-  // see `set`. These two are equal except while a clamp is binding.
-  wantA: 0,
-  wantB: 1,
-
-  /**
-   * The program length the ruler is drawn against.
-   *
-   * Frozen for the length of a lane drag, and that is not a nicety. The retime curve
-   * *is* the program length: dragging one of its keys down slows the clip, which
-   * lengthens the program, which rescales the ruler, which moves the key under a
-   * pointer that has not moved horizontally - and the new position is read back as a
-   * new program time, which slows it further. Measured before it was fixed: a
-   * twelve-pixel vertical drag walked one key from 15.0s to 48.3s in four moves, and
-   * the drag got faster the longer it went on.
-   */
-  get duration() {
-    if (laneDrag) return Math.max(1e-6, laneDrag.duration);
-    return Math.max(1e-6, timeline ? timeline.duration : 1);
-  },
-
-  get startSec() { return this.a * this.duration; },
-  get endSec() { return this.b * this.duration; },
-  get spanSec() { return (this.b - this.a) * this.duration; },
-  /** True when the whole clip is on screen, which is what the fit control returns to. */
-  get whole() { return this.a === 0 && this.b === 1; },
-
-  /** Where a program second sits across the bed, in percent. Off-window is out of 0..100. */
-  pct(t) {
-    return ((t / this.duration) - this.a) / Math.max(1e-9, this.b - this.a) * 100;
-  },
-
-  /** Program seconds at a percentage across the bed. The inverse of `pct`. */
-  secAtPct(p) {
-    return (this.a + (p / 100) * (this.b - this.a)) * this.duration;
-  },
-
-  /** Where the pointer is, in program seconds, clamped to the window it is over. */
-  timeAt(clientX) {
-    const r = ui.bed.getBoundingClientRect();
-    const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;
-    return Math.max(0, Math.min(this.duration, (this.a + f * (this.b - this.a)) * this.duration));
-  },
-
-  /**
-   * Whether a marker at `t` is worth drawing. The margin is a whole window because a
-   * curve is sampled across the visible span and a key's node is 11px wide - a marker
-   * just outside still has a corner inside, and hiding it would pop at the edge.
-   */
-  holds(t) {
-    const f = t / this.duration;
-    const margin = (this.b - this.a) * 0.02;
-    return f >= this.a - margin && f <= this.b + margin;
-  },
-
-  /**
-   * The narrowest window allowed here, as a fraction of the clip.
-   *
-   * Named rather than recomputed by each caller, because the edge drag needs the same
-   * number `set` clamps with and a second copy of it would be a second answer.
-   */
-  minSpan() { return Math.min(1, MIN_VIEW_SEC / this.duration); },
-
-  /**
-   * The window, clamped: inside the clip, no narrower than `MIN_VIEW_SEC`, at most all.
-   *
-   * **What was asked for is kept beside what the clamp allowed, and the clamp is
-   * re-derived rather than accumulated.** `minSpan` is a number of seconds expressed as
-   * a fraction, so it moves whenever the clip's length does - and a clamp applied to its
-   * own previous output only ever ratchets outward. Measured: at 0.1x the whole clip is
-   * 480s and the minimum window is a fraction of 0.00052; going to 4x makes that 0.00625s
-   * of a 12s clip, the clamp widens it to 0.0208, and coming back to 0.1x that fraction
-   * is 10s. The document returns exactly, no undo step is committed, and the ruler is
-   * forty times wider than it started - which is the one thing the speed control claims
-   * not to do.
-   *
-   * `userLaneHeight` already had the answer, and its comment says why in the same words:
-   * store the request, apply the limits on the way out, so a window narrowed by a clip
-   * that got shorter opens back up when the clip gets longer again.
-   */
-  set(a, b) {
-    this.wantA = a;
-    this.wantB = b;
-    return this.reclamp();
-  },
-
-  /**
-   * Re-applies the limits to the window that was last asked for.
-   *
-   * Called whenever the duration moves under the window rather than only after a rate
-   * gesture, because a rate gesture is not the only thing that moves it - undo across a
-   * speed change, a project load and an output-rate change all do, and a fix that lived
-   * on the slider would have left three doors open.
-   */
-  reclamp() {
-    const span = Math.min(1, Math.max(this.minSpan(), this.wantB - this.wantA));
-    const start = Math.min(1 - span, Math.max(0, this.wantA));
-    const moved = start !== this.a || start + span !== this.b;
-    this.a = start;
-    this.b = start + span;
-    return moved;
-  },
-
-  /**
-   * Zooms by `factor` (>1 closer) holding the fraction `at` where it is on screen.
-   *
-   * **The clamp is applied here rather than left to `set`, because `set` can only widen
-   * the span and would keep the start that went with the narrower one.** At the minimum
-   * window, another notch inward asked for a span `set` refused and a start computed for
-   * it, so the window kept its width and slid to the right: a gesture that could not zoom
-   * panned instead, and the time under the pointer walked away a notch at a time. Deriving
-   * the start from the span that actually survives makes a further zoom-in a no-op, which
-   * is what a control at the end of its travel should do.
-   */
-  zoomAbout(at, factor) {
-    const span = Math.min(1, Math.max(this.minSpan(), (this.b - this.a) / factor));
-    // Where the anchor sits in the window now, kept where it is in the window after.
-    const held = (at - this.a) / Math.max(1e-9, this.b - this.a);
-    const start = at - held * span;
-    return this.set(start, start + span);
-  },
-
-  /** Pans by a share of the visible window, positive to the right. */
-  panBy(shareOfWindow) {
-    const d = (this.b - this.a) * shareOfWindow;
-    return this.set(this.a + d, this.b + d);
-  },
-
-  fit() { return this.set(0, 1); },
-
-  /** Frames a range with a margin, so the two markers are not on the very edges. */
-  frame(fromSec, toSec) {
-    const pad = Math.max(MIN_VIEW_SEC, (toSec - fromSec) * 0.05);
-    return this.set((fromSec - pad) / this.duration, (toSec + pad) / this.duration);
-  },
-};
-
 function paintDeliverable() {
   if (!ui.deliverableReadout) return;
   if (!activeDeliverable) {
     ui.deliverableReadout.textContent = 'none';
+    if (ui.exportTrim) ui.exportTrim.textContent = '—';
     return;
   }
   const out = activeDeliverable.out ?? view.duration;
   const outStr = activeDeliverable.out === null ? 'end' : timecode(out);
-  ui.deliverableReadout.textContent = `${activeDeliverable.outputSize} @ ${activeDeliverable.outputFps}fps ${activeDeliverable.codec} [${timecode(activeDeliverable.in)} - ${outStr}]`;
+  ui.deliverableReadout.textContent = `${activeDeliverable.outputSize} ${activeDeliverable.codec}`;
+  if (ui.exportTrim) {
+    ui.exportTrim.textContent = `${timecode(activeDeliverable.in)} - ${outStr} · `
+      + `${Math.max(0, out - activeDeliverable.in).toFixed(2)}s at ${timeline ? timeline.outputFps : 30}fps`;
+  }
 }
 
 /**
@@ -8720,23 +6699,6 @@ function paintTimeline(t) {
   // as the render that produced the buffer, which is the only place it can land
   // at all, since the drawing buffer is not preserved across a paint.
   drawChrome();
-}
-
-// The ladder a ruler picks its spacing from, in seconds. Every rung divides the one
-// above it or is half of it, so zooming walks the labels through the ladder instead of
-// re-labelling everything on each notch, and the sub-second rungs are the frame-ish
-// intervals somebody placing a key actually wants.
-const TICK_STEPS = [
-  1 / 30, 1 / 10, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600,
-];
-
-/** A tick's label. Bare seconds under a minute, `m:ss` over it, so it reads as a clock. */
-function tickLabel(sec, step) {
-  const decimals = step < 0.1 ? 2 : step < 1 ? 1 : 0;
-  if (sec < 60) return `${sec.toFixed(decimals)}s`;
-  const m = Math.floor(sec / 60);
-  const s = sec - m * 60;
-  return `${m}:${s.toFixed(decimals).padStart(decimals ? decimals + 3 : 2, '0')}`;
 }
 
 /**
@@ -9146,10 +7108,6 @@ for (const type of ['pointerup', 'pointercancel']) {
 
 // ------------------------------------------------------------------ zoom and pan
 
-// How much one wheel notch zooms. Chosen so a notch is a visible step and a flick is
-// not a jump to the bottom of the range: about eight notches per factor of ten.
-const ZOOM_PER_NOTCH = 1.33;
-
 /**
  * The wheel over the strip. Vertical zooms about the pointer, horizontal pans.
  *
@@ -9326,13 +7284,26 @@ for (const handle of [ui.in, ui.out]) {
     pauseTransport();
     e.stopPropagation();
   });
+  // The drag itself, previewed rather than committed: the pair is written and the strip
+  // repaints, and the deliverable, the undo step and the transport are the release's
+  // business. That distinction is why this calls `writeClipRange` where the release calls
+  // `setClipInOut` - going through `setClipInOut` here would write the deliverable and seek
+  // the transport once per pointer event, which is the seek storm the comment on its own
+  // frame comparison records having been rewritten to avoid.
+  //
+  // **This used to assign the two bindings directly, and the door's comment said no such
+  // writer existed.** Both halves are fixed rather than one: the write is the module's now,
+  // and what the door claims is what the language enforces. The pair's own clamp still runs
+  // here, so a drag can no longer draw a trim its own release would refuse - measured on
+  // the build before this, dragging the out marker left of the in point with no out point
+  // set followed the pointer and then snapped back on release.
   handle.addEventListener('pointermove', (e) => {
     if (handleDrag !== (handle === ui.in ? 'in' : 'out')) return;
     const t = programAtPointer(e);
     if (handle === ui.in) {
-      clipIn = Math.max(0, Math.min(t, clipOut ?? timeline.duration));
+      writeClipRange({ in: Math.max(0, Math.min(t, clipOut ?? timeline.duration)) }, timeline.duration);
     } else {
-      clipOut = clipOut === null ? t : Math.max(clipIn, Math.min(t, timeline.duration));
+      writeClipRange({ out: clipOut === null ? t : Math.max(clipIn, Math.min(t, timeline.duration)) }, timeline.duration);
     }
     timeline.paint();
   });
@@ -9940,13 +7911,17 @@ ui.rate.addEventListener('input', () => {
   pumpDraft();
 });
 
+// The output rate, which is project state now and undoable because of it. It used to
+// write the deliverable as well as the transport, and `serialiseProjectBody` carried
+// neither - so the `history.commit()` at the end of this handler compared two identical
+// snapshots and pushed nothing, and a rate change was the one document edit in the editor
+// that could not be undone. The commit line has not moved; what changed is that there is
+// now something in the snapshot for it to notice.
 ui.fps?.addEventListener('change', () => {
   if (!timeline) return;
   const held = timeline.programSec;
   const fps = Number(ui.fps.value);
   timeline.outputFps = fps;
-  ensureActiveDeliverable();
-  activeDeliverable.outputFps = fps;
   paintDeliverable();
   const gen = takeTransport();
   const wasPlaying = timeline.playing;
@@ -10100,9 +8075,35 @@ function pumpParkedDraft() {
       .finally(() => { draftBusy = false; });
     return;
   }
-  // Nothing armed and nothing in flight, so the controls have stopped moving.
+  // Nothing armed and nothing in flight, so the controls have stopped *raising events*
+  // - which is not the same fact as the controls having stopped moving, and the two
+  // were read as one here.
   if (orbitSettling && !draftBusy) {
     orbitSettling = false;
+    // **The damping is finished before the seek, because these flags cannot see the end
+    // of it.** `orbitRedrawWanted` and `orbitSettling` both come off OrbitControls'
+    // `change` event, which is raised on a displacement threshold; damping is
+    // asymptotic, so below that threshold the camera goes on creeping and nothing says
+    // so. Every `seekNow` then runs `advanceNavigation`, which is another
+    // `controls.update()`, which moves it again - so each seek renders from a slightly
+    // different pose and no two pictures after a release are comparable.
+    //
+    // Measured on the editor with the shipped `dampingFactor` of 0.07: after
+    // `settled()` returns, hand-driving `update(0)` moved the camera 8.376e-4, 7.789e-4
+    // then 7.243e-4 m, a ratio of 0.92993 every step - exactly `1 - dampingFactor` -
+    // and it took 356 to 496 further updates to reach a pose that renders bit-identical
+    // twice. Two consecutive accurate seeks to the *same* program time came back 0.010
+    // to 0.045 of 255 apart on the worst of forty tile means, with program time, frame
+    // index, draft flag and the whole pre-roll plan byte-identical on both. Drain the
+    // residual first and the same pair reads 0.0000 in every cycle.
+    //
+    // `finishOrbitDrift` is the door this file already has for it and five other
+    // gestures already use, and its own comment says the loop's settle branch "now
+    // seeks to a pose that has finished moving instead of one that is still
+    // travelling" - which was true of every caller except this one. Safe after the
+    // flags are down: `onNav('change')` returns early unless one of them is up, so the
+    // movement this applies cannot re-arm the branch it is inside.
+    finishOrbitDrift();
     // The redraws above are already accurate. This last seek closes the race between
     // the final redraw and the last damping step and makes release an explicit
     // accuracy boundary, the same rule the scrubber follows.
@@ -10127,7 +8128,122 @@ function pumpParkedDraft() {
 // shape of this and it spends the strip on rows that say nothing; five that are
 // all animated is the same information in half the height.
 
-const LANE_H = { scalar: 34, step: 22, pose: 22 };
+/**
+ * What a track kind is on the timeline, declared once instead of asked for as
+ * `row.kind !== 'scalar'` at each site that needs to know.
+ *
+ * The camera gaining ease handles is the change that shows why the comparison was
+ * the wrong shape. It appeared at five places - the curve, the handles, a key's
+ * height, the lane's range and the preset row's gate - so opening the pose track
+ * would have been five edits each of which had to be *found*, and a fourth kind
+ * added next year would need all five found again. Reading a table means a kind is
+ * asked about by existing, which is the difference between closing the class and
+ * closing the instance this repo keeps having to relearn.
+ *
+ *   eases      whether the handles mean anything here. `step` is the one that does
+ *              not: a checkbox has nothing between true and false, so there is no
+ *              timing to shape and no shape to draw.
+ *   laneH      the strip's height. An eased kind gets the taller one because the
+ *              handles are dragged in it, so pose grew when it gained them.
+ *   range      the lane's own y-axis. A scalar's is the parameter's registry range,
+ *              in the units the panel types in. A pose has no such number - see
+ *              `ends` for what its axis is instead.
+ *   ends       where a segment's two ends sit on that axis. A scalar's are the key
+ *              values. A pose's are 0 and 1, because its lane draws the fraction of
+ *              *that segment* completed and nothing else: the ease curve in its own
+ *              coordinates, carrying no spatial quantity anybody could misread as a
+ *              camera move. Arc length was the tempting alternative and it lies -
+ *              a camera pivoting in place travels nothing, so the lane would report
+ *              an empty segment for a move you can plainly see.
+ *   at         the value the lane's curve is drawn from, at a program time.
+ *   keyValue   where a key's own diamond sits on the axis, so it lands on the drawn
+ *              curve the way a scalar's does.
+ *   axisIsValue whether that axis *is* the key's own value, which is what decides
+ *              whether dragging a key up and down writes one. Only a scalar's is:
+ *              a pose is placed in the world and a step has nothing between its two
+ *              states, so for both the drag moves the key in time alone.
+ *   overshoots whether a handle may be dragged outside the lane. A scalar's may: a
+ *              value that swings past its key and comes back is an ordinary creative
+ *              choice. A pose's may not, and the reason is the same one the retime
+ *              gives rather than a preference - its axis is a *fraction of a segment*,
+ *              so a handle above the box asks for a fraction past 1, which sends
+ *              `hermite` off the end of the segment's own cubic. That is no longer the
+ *              Catmull-Rom through the keys, and the camera would fly past the very
+ *              pose it was keyed at. Overshoot has no meaning on an axis that is
+ *              already normalised.
+ *   moved      whether two keys differ by enough for a handle to change anything.
+ *              Same arithmetic claim in all three cases - a segment whose ends are
+ *              equal renders identically for every handle position, so offering one
+ *              is offering a control that writes a number nothing reads.
+ */
+const KINDS = {
+  scalar: {
+    eases: true,
+    laneH: 34,
+    range: (spec) => ({ min: spec.min, max: spec.max }),
+    ends: (keys, seg) => ({ lo: keys[seg].value, hi: keys[seg + 1].value }),
+    at: (owner, t) => tracks.get(owner).valueAt(t),
+    keyValue: (keys, i) => keys[i].value,
+    axisIsValue: true,
+    overshoots: true,
+    moved: (a, b) => Math.abs(b.value - a.value) > 1e-9,
+  },
+  step: {
+    eases: false,
+    laneH: 22,
+    range: () => ({ min: 0, max: 1 }),
+    ends: () => ({ lo: 0, hi: 1 }),
+    at: () => 0.5,
+    keyValue: () => 0.5,
+    axisIsValue: false,
+    overshoots: false,
+    moved: () => false,
+  },
+  pose: {
+    eases: true,
+    laneH: 34,
+    range: () => ({ min: 0, max: 1 }),
+    ends: () => ({ lo: 0, hi: 1 }),
+    at: (owner, t) => poseLaneFraction(keysOf(owner), t),
+    // The foot of its own outgoing ramp, and the top of the incoming one for the
+    // last key, so the diamonds sit *on* the curve exactly as a scalar's do. A lone
+    // key has no ramp to sit on and stays mid-lane, which is where it already was.
+    keyValue: (keys, i) => (keys.length < 2 ? 0.5 : (i === keys.length - 1 ? 1 : 0)),
+    axisIsValue: false,
+    overshoots: false,
+    moved: (a, b) => poseMoved(a.value, b.value),
+  },
+};
+
+/** Whether two poses differ at all - in place, in aim, or in field of view. */
+const poseMoved = (a, b) => Math.abs(a.fov - b.fov) > 1e-9
+  || a.position.some((v, i) => Math.abs(v - b.position[i]) > 1e-9)
+  || a.quaternion.some((v, i) => Math.abs(v - b.quaternion[i]) > 1e-9);
+
+/**
+ * How far through its current segment a pose track is, eased - which is the whole
+ * of what a pose lane draws.
+ *
+ * The branches mirror `poseAt`'s deliberately: the lane has to be a picture of the
+ * thing being evaluated, and a second reading of "which segment is t in" is a second
+ * thing to keep in step. What it is *not* is a picture of the path, and the sawtooth
+ * it produces is the point rather than an artefact - every linear segment draws the
+ * same diagonal, so the one segment somebody has eased is the one that looks
+ * different. The cost worth naming: continuity across a key reads as two parallel
+ * slopes at opposite edges of the lane rather than as a smooth join, because each
+ * segment is drawn in its own coordinates.
+ */
+const poseLaneFraction = (keys, t) => {
+  const n = keys.length;
+  if (n < 2) return 0.5;
+  const i = keyBefore(keys, t);
+  if (i < 0) return 0;
+  if (i >= n - 1) return 1;
+  const span = keys[i + 1].t - keys[i].t;
+  if (span <= 0) return 1;
+  return easeAt(keys[i].easeOut, keys[i + 1].easeIn, (t - keys[i].t) / span);
+};
+
 const RETIME_LANE_H = 40;
 // How far a curve is sampled across a lane. The viewBox is resolution-independent,
 // so this is a smoothness choice and not a pixel count.
@@ -10152,7 +8268,7 @@ function laneRange(owner) {
     return { min: 0, max: total };
   }
   const spec = params.spec(owner);
-  return { min: spec.min, max: spec.max };
+  return KINDS[spec.kind].range(spec);
 }
 
 function laneRows() {
@@ -10165,7 +8281,7 @@ function laneRows() {
   for (const name of ['camera', ...params.names('look')]) {
     const track = tracks.get(name);
     if (!track || track.keys.length === 0) continue;
-    rows.push({ owner: name, label: name, kind: track.kind, height: LANE_H[track.kind] });
+    rows.push({ owner: name, label: name, kind: track.kind, height: KINDS[track.kind].laneH });
   }
   return rows;
 }
@@ -10274,8 +8390,13 @@ function repositionLanes() {
       if (i < 0 || seg < 0 || seg >= keys.length - 1) return false;
       // A segment that went flat under the drag has no shape left to edit, so its
       // handle has to go rather than be moved - which is a rebuild, not a move.
-      if (!segmentHasShape(keys, seg)) return false;
-      const point = handlePoint(row, keys, seg, handle.__side);
+      if (!segmentHasShape(keys, seg, row.kind)) return false;
+      // The point count is re-read for the reason the segment is. `+pt` and `-pt`
+      // rebuild, but a preset press changes a side's length without one, and a handle
+      // whose index no longer exists would position itself off `undefined`.
+      const points = handle.__side === 'easeOut' ? keys[seg].easeOut : keys[seg + 1].easeIn;
+      if (handle.__index >= points.length) return false;
+      const point = handlePoint(row, keys, seg, handle.__side, handle.__index);
       handle.__seg = seg;
       handle.style.left = `${view.pct(point.t)}%`;
       handle.style.top = `${point.y}%`;
@@ -10288,10 +8409,16 @@ function repositionLanes() {
 }
 
 /**
- * The curve a scalar lane draws, as a `points` attribute in the 0..1000 by 0..100
+ * The curve a lane draws, as a `points` attribute in the 0..1000 by 0..100
  * viewBox. One function because two callers want the same line: `drawLane` builds
  * the polyline and `repositionLanes` rewrites it during a drag, and a second copy of
  * this arithmetic would be a second thing to keep in step.
+ *
+ * What the curve is *of* comes off `KINDS[kind].at`, and the two answers are
+ * different in kind rather than in units: a scalar lane draws the value being
+ * rendered, and a pose lane draws how far through its segment the camera is. Neither
+ * is a picture of a camera path, which is the property that lets the composition
+ * track have a lane at all.
  *
  * **Known gap, carried deliberately.** The curve is drawn from the raw eased value
  * while the parameter itself is clamped to its range on the way in, so an
@@ -10305,7 +8432,7 @@ function lanePoints(owner) {
   const span = Math.max(1e-9, max - min);
   const at = owner === 'retime'
     ? (t) => retime.sourceSecAt(t)
-    : (t) => tracks.get(owner).valueAt(t);
+    : (t) => KINDS[tracks.get(owner).kind].at(owner, t);
   const points = [];
   // Sampled across the *visible* window rather than the clip, which does two things at
   // once: nothing is drawn outside the lane, so there is no horizontal overflow to clip
@@ -10330,14 +8457,20 @@ function lanePoints(owner) {
  * The old code half-knew this - it guarded the y write against a division by zero
  * and left the handle on screen, so the control moved, wrote a number nothing reads,
  * and looked broken. Not drawing it is the honest answer to the same fact.
+ *
+ * The kind is asked for rather than assumed because the same sentence is true of a
+ * pose and the arithmetic is not: a pose value is an object, so the subtraction this
+ * used to do answered `NaN` for every camera segment, and `NaN > 1e-9` is false -
+ * which read as "the camera never has a shape to edit" and would have been a silent
+ * floor under the whole feature. `KINDS[kind].moved` carries the per-kind test.
  */
-const segmentHasShape = (keys, seg) => Math.abs(keys[seg + 1].value - keys[seg].value) > 1e-9;
+const segmentHasShape = (keys, seg, kind) => KINDS[kind].moved(keys[seg], keys[seg + 1]);
 
 function drawLane(lane, row) {
   const keys = keysOf(row.owner);
   const x = (t) => view.pct(t);
 
-  if (row.kind === 'scalar') {
+  if (KINDS[row.kind].eases) {
     // The curve itself, because a row of diamonds says where the keys are and
     // nothing at all about the shape between them - and the shape is exactly what
     // an ease handle edits. Drawn in a 0..1000 by 0..100 viewBox stretched to the
@@ -10363,49 +8496,93 @@ function drawLane(lane, row) {
     node.__row = row;
   }
 
-  if (row.kind !== 'scalar' || !selection || keys.indexOf(selection.key) < 0) return;
+  if (!KINDS[row.kind].eases || !selection || keys.indexOf(selection.key) < 0) return;
   // Handles only on the selected key, and only where there is a segment for them
   // to shape. Two of them at once on every key is a lane nobody can read.
+  //
+  // One per *control point* rather than one per side, because a side is a list now.
+  // The loop walks the list rather than drawing a fixed pair for the same reason the
+  // curve evaluates a list rather than a formula: a count written down at the drawing
+  // site is a second declaration of the degree, and the two would disagree the first
+  // time `+pt` ran on a key this lane happened not to be showing.
   const i = keys.indexOf(selection.key);
   for (const side of ['easeOut', 'easeIn']) {
     const seg = side === 'easeOut' ? i : i - 1;
     if (seg < 0 || seg >= keys.length - 1) continue;
     // A flat segment gets none, for the reason `segmentHasShape` gives.
-    if (!segmentHasShape(keys, seg)) continue;
-    const handle = document.createElement('div');
-    handle.className = 'thandle';
-    const point = handlePoint(row, keys, seg, side);
-    handle.style.left = `${x(point.t)}%`;
-    handle.style.top = `${point.y}%`;
-    handle.hidden = !view.holds(point.t);
-    handle.dataset.role = 'handle';
-    handle.__key = selection.key;
-    handle.__row = row;
-    handle.__side = side;
-    handle.__seg = seg;
-    lane.appendChild(handle);
+    if (!segmentHasShape(keys, seg, row.kind)) continue;
+    const points = side === 'easeOut' ? keys[seg].easeOut : keys[seg + 1].easeIn;
+    for (let index = 0; index < points.length; index++) {
+      const handle = document.createElement('div');
+      handle.className = 'thandle';
+      const point = handlePoint(row, keys, seg, side, index);
+      handle.style.left = `${x(point.t)}%`;
+      handle.style.top = `${point.y}%`;
+      handle.hidden = !view.holds(point.t);
+      handle.dataset.role = 'handle';
+      handle.__key = selection.key;
+      handle.__row = row;
+      handle.__side = side;
+      handle.__seg = seg;
+      handle.__index = index;
+      lane.appendChild(handle);
+    }
   }
 }
 
 /** A key's vertical place in its lane, as a percentage from the top. */
 function keyY(row, key) {
-  if (row.kind !== 'scalar') return 50;
+  const keys = keysOf(row.owner);
   const { min, max } = laneRange(row.owner);
-  const v = typeof key.value === 'number' ? key.value : min;
+  const v = KINDS[row.kind].keyValue(keys, keys.indexOf(key));
   return Math.max(0, Math.min(100, 100 - ((v - min) / Math.max(1e-9, max - min)) * 100));
 }
 
-/** Where an ease handle sits, in program seconds and lane percentage. */
-function handlePoint(row, keys, seg, side) {
+/** Where one of an ease handle's control points sits, in program seconds and lane percentage. */
+function handlePoint(row, keys, seg, side, index) {
   const a = keys[seg];
   const b = keys[seg + 1];
-  const h = side === 'easeOut' ? a.easeOut : b.easeIn;
+  const h = (side === 'easeOut' ? a.easeOut : b.easeIn)[index];
   const { min, max } = laneRange(row.owner);
-  const value = a.value + (b.value - a.value) * h[1];
+  const { lo, hi } = KINDS[row.kind].ends(keys, seg);
+  const value = lo + (hi - lo) * h[1];
   return {
     t: a.t + (b.t - a.t) * h[0],
     y: Math.max(-15, Math.min(115, 100 - ((value - min) / Math.max(1e-9, max - min)) * 100)),
   };
+}
+
+/**
+ * How far along the segment a control point may be dragged, as the two points either
+ * side of it.
+ *
+ * The timing curve has to stay single-valued in time, and the sufficient condition at
+ * any degree is that the control abscissae do not descend - so a point is held between
+ * its neighbours, with the segment's own pinned ends standing in at the two extremes.
+ * With one point a side that is exactly the `[0, 1]` clamp this replaced, which is why
+ * there is one rule here rather than a rule and an exception: the cubic was never a
+ * different case, it was the case where the neighbours happen to be the ends.
+ *
+ * **The point's own x is a third term, and leaving it out was a bug found by a drag.**
+ * Descending abscissae are only *sufficient* for a fold, never necessary, so a cubic can
+ * cross its own control polygon and still be perfectly single-valued - `easeOut [0.9, y]`
+ * against `easeIn [0.1, y]` is exactly that, its derivative bottoming out at 0.15 and
+ * never reaching zero. Those states are on disk and `elevate` carries them faithfully
+ * across a `+pt`, so a strict two-term span can arrive already inverted, with `lo` above
+ * `hi`; the min-then-max then collapses to `hi` and the first pointer move *teleports* a
+ * handle nobody dragged that far. Including the current position makes the span
+ * well-formed whatever it inherits: a drag can no longer jump, and on any polygon this
+ * editor can itself produce - where the point already lies between its neighbours - the
+ * third term changes nothing and this is the neighbour clamp exactly.
+ */
+function handleSpan(keys, seg, side, index) {
+  const out = keys[seg].easeOut;
+  const inn = keys[seg + 1].easeIn;
+  const at = (k) => (k < 0 ? 0 : (k >= out.length + inn.length ? 1
+    : (k < out.length ? out[k][0] : inn[k - out.length][0])));
+  const k = side === 'easeOut' ? index : out.length + index;
+  const here = at(k);
+  return { lo: Math.min(at(k - 1), at(k + 1), here), hi: Math.max(at(k - 1), at(k + 1), here) };
 }
 
 /**
@@ -11393,7 +9570,30 @@ function choosePicker(picker, name, { close = false } = {}) {
     if (name) {
       withPresetGesture(picker.note ?? ui.note, () => whileWriting(async () => {
         try {
-          applyStoredPreset(await (await fetch(`/presets/${encodeURIComponent(name)}`)).json());
+          const doc = await (await fetch(`/presets/${encodeURIComponent(name)}`)).json();
+          const { stamped, written } = applyStoredPreset(doc);
+          // **Applying a look says so, and this is the surface `applyStoredPreset`'s
+          // comment means when it says two of them report an apply.** The other is the
+          // import. This one had a note until the picker replaced the apply button, and
+          // the note went with the button rather than moving onto the control that took
+          // over the gesture - so the one action on this surface that rewrites every look
+          // value on screen was also the only one that happened in silence.
+          //
+          // Read off what the apply returned rather than off `appliedPreset`, for the
+          // reason that function's comment gives: a partial document leaves the stamp
+          // where it was, so a note printing the stamp's revision would name a document
+          // this press did not apply - and on a clip that never had a stamp it would
+          // throw inside the handler, which the catch below would report as an apply
+          // that failed over one that worked.
+          //
+          // The partial sentence carries a count and no denominator on purpose. It read
+          // "70 of 69 look values" the first time it shipped: the count of what the
+          // document names and the size of a *complete* look are two different questions,
+          // and the second one is not the one a partial apply raises. What is true and
+          // useful is how many values landed and that the stamp was left alone.
+          say(stamped
+            ? `applied ${doc.name} · ${doc.rev.slice(7, 15)}`
+            : `applied ${written} values from ${doc.name}, which names part of a look rather than the whole of one`);
         } catch (err) {
           showTimelineError(err);
         }
@@ -11779,7 +9979,7 @@ ui.beds.addEventListener('pointerdown', (e) => {
   ui.beds.setPointerCapture(e.pointerId);
   const lane = el.closest('.tlane');
   laneDrag = {
-    el, row: el.__row, key: el.__key, side: el.__side, seg: el.__seg,
+    el, row: el.__row, key: el.__key, side: el.__side, seg: el.__seg, index: el.__index,
     role: el.dataset.role, rect: lane.getBoundingClientRect(),
     // Read before anything in the drag can change it - see `view.duration`.
     duration: timeline.duration,
@@ -11800,10 +10000,10 @@ ui.beds.addEventListener('pointermove', (e) => {
 
   if (laneDrag.role === 'key') {
     key.t = Math.max(0, laneProgramAt(e.clientX));
-    if (row.kind === 'scalar') key.value = value;
+    if (KINDS[row.kind].axisIsValue) key.value = value;
     if (row.owner === 'retime') clampRetimeKey(keys, key);
     else {
-      if (row.kind === 'scalar') {
+      if (KINDS[row.kind].axisIsValue) {
         // Through the registry's own snapping without writing the parameter, so a
         // key dragged in a lane and one written from the slider hold the same
         // value. Writing it would also be wrong: the key being dragged is usually
@@ -11824,23 +10024,42 @@ ui.beds.addEventListener('pointermove', (e) => {
     const a = keys[laneDrag.seg];
     const b = keys[laneDrag.seg + 1];
     const dt = Math.max(1e-9, b.t - a.t);
-    const dv = b.value - a.value;
-    const h = laneDrag.side === 'easeOut' ? a.easeOut : b.easeIn;
+    // Off the kind rather than off the key values, because a pose value is an object
+    // and subtracting two of them is `NaN`. A pose lane's ends are 0 and 1 - it draws
+    // the fraction of the segment completed - so `h[1]` stays what it has always been:
+    // a fraction of whatever the lane's own axis spans between these two keys.
+    const { lo, hi } = KINDS[row.kind].ends(keys, laneDrag.seg);
+    const dv = hi - lo;
+    const h = (laneDrag.side === 'easeOut' ? a.easeOut : b.easeIn)[laneDrag.index];
     // x stays inside the segment because the ease is a function of time within it:
     // a handle past either end makes the timing curve fold back on itself and the
-    // value would run backwards through part of the segment.
-    h[0] = Math.min(1, Math.max(0, (laneProgramAt(e.clientX) - a.t) / dt));
+    // value would run backwards through part of the segment. With more than one point
+    // a side, "either end" means the neighbouring control points rather than the
+    // segment's own - see `handleSpan`, where the two readings are one rule.
+    const span = handleSpan(keys, laneDrag.seg, laneDrag.side, laneDrag.index);
+    h[0] = Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt));
     // `dv` is non-zero by construction - a handle only exists where
     // `segmentHasShape` said there was a shape, and a handle drag moves no key
     // value - so this is a backstop against writing NaN into the document rather
     // than the reason y appears not to move. That was the old reading of the same
     // line and it was wrong: on a flat segment y genuinely cannot do anything, and
     // the fix was to stop drawing the handle rather than to force the write.
-    if (segmentHasShape(keys, laneDrag.seg)) h[1] = (value - a.value) / dv;
+    if (segmentHasShape(keys, laneDrag.seg, row.kind)) h[1] = (value - lo) / dv;
     // A look handle may overshoot - a value that swings past its key and comes
     // back is an ordinary creative choice. The retime's may not: y outside the unit
     // range makes the eased source time leave the segment's own bounds and run
     // downhill inside it, which is a reverse authored through the back door.
+    //
+    // **And a pose's may not, for a third reason that reads the same and is not.** Its
+    // lane axis is already a fraction of the segment, so a handle above the box asks
+    // `hermite` for a fraction past 1 and it obliges, continuing the segment's own cubic
+    // past the key rather than following the spline - the camera overshoots the pose it
+    // was keyed at and comes back. That contradicts the one thing easing a camera is
+    // promised not to do, and the promise is in `poseAt`'s comment and in
+    // `docs/reference.md` in as many words. The clamp is where the promise is kept.
+    // It is off `KINDS` rather than named here because `row.owner === 'retime'` beside a
+    // second hardcoded kind is the shape this whole change went to the trouble of
+    // removing.
     //
     // But the overshoot is bounded, and the bound is what makes the control usable
     // rather than a nicety. `h[1]` is a fraction of the *segment's* value span, so a
@@ -11850,7 +10069,7 @@ ui.beds.addEventListener('pointermove', (e) => {
     // range put y at **-5.73**, a curve leaving its lane six times over for a
     // gesture that looked like a nudge. One segment-span of overshoot each way keeps
     // "past the key and back" and drops the part nobody can aim.
-    if (row.owner === 'retime') h[1] = Math.min(1, Math.max(0, h[1]));
+    if (row.owner === 'retime' || !KINDS[row.kind].overshoots) h[1] = Math.min(1, Math.max(0, h[1]));
     else h[1] = Math.min(2, Math.max(-1, h[1]));
   }
   lanesMoved();
@@ -11944,9 +10163,39 @@ function deleteSelectedKey() {
  * The shapes a handle drag is usually reaching for, as one press each.
  *
  * A key's `easeOut` is the first control point of the segment leaving it and its
- * `easeIn` is the second control point of the segment arriving - see `scalarAt`. So
- * "ease in" is about the incoming side and writes `easeIn`, "ease out" is about the
- * outgoing side and writes `easeOut`, and they are not two halves of one number.
+ * `easeIn` is the second control point of the segment arriving - see `scalarAt`, and
+ * `poseAt` for the camera, which reads the identical pair. So "ease in" is about the
+ * incoming side and writes `easeIn`, "ease out" is about the outgoing side and writes
+ * `easeOut`, and they are not two halves of one number.
+ *
+ * These are what the camera track is usually eased with, and what matters there is the
+ * *track's* two outer keys: the spline holds the end pose beyond them while its tangent
+ * there is half the first segment's average velocity, so an unshaped move departs and
+ * arrives with a step in speed. Measured on three keys dollying 4m over 4s - 0 to
+ * 0.6262 m/s in one frame at the start, 0.3125 to 0 at the end, against 0.0007 and
+ * 0.0005 once eased.
+ *
+ * **`ends` is that edit as one press, and it exists because the two-press version was a
+ * trap rather than a chore.** Shaping a move's departure and arrival means selecting the
+ * first key, pressing, finding the last key, pressing again - and the obvious wrong move
+ * in between, pressing on an interior key, brings the camera to a near halt as it passes
+ * that key. `docs/reference.md` documented all of that and admitted "nothing on screen
+ * announces it", which is a design describing a defect rather than closing one. So
+ * `ends` reaches for the first key's outgoing side and the last key's incoming side
+ * whichever key is selected, and leaves everything between them alone. `hold` already
+ * reached past the selection through `nextIn`, so a preset whose reach is named in this
+ * table rather than assumed at the call site is the shape this was already growing.
+ *
+ * **`glide` is the same shape one degree up, and the degree is the whole point.** A
+ * cubic pinned at both ends can bring the *rate* to zero at a key but never the
+ * acceleration - `smooth` steps from 0 to 3.79 in normalised units at the boundary -
+ * because the second derivative there is fixed by three control points and two of them
+ * are the pinned end. Two points a side makes it a quintic, and with ordinates 0,0,1,1
+ * that quintic is exactly `6u^5 - 15u^4 + 10u^3`, whose first and second derivatives
+ * both vanish at each end. It costs 1.875x the average rate at the midpoint against the
+ * cubic's 1.724x, which is the entire price. `test/curve.test.mjs` holds it to being
+ * that polynomial rather than something shaped like it, because "nearly the smoothstep"
+ * is a claim no rendered frame could ever distinguish from the real one.
  *
  * `hold` is the one that reaches past the selected key, and it has to: holding a
  * value across a segment means flattening *both* of that segment's control points,
@@ -11957,10 +10206,12 @@ function deleteSelectedKey() {
  */
 const EASE_PRESETS = {
   linear: { out: EASE_OUT_LINEAR, in: EASE_IN_LINEAR },
-  in: { in: [0.58, 1] },
-  out: { out: [0.42, 0] },
-  smooth: { out: [0.42, 0], in: [0.58, 1] },
-  hold: { out: [1, 0], nextIn: [1, 0] },
+  in: { in: [[0.58, 1]] },
+  out: { out: [[0.42, 0]] },
+  smooth: { out: [[0.42, 0]], in: [[0.58, 1]] },
+  glide: { out: [[0.2, 0], [0.4, 0]], in: [[0.6, 1], [0.8, 1]] },
+  ends: { firstOut: [[0.2, 0], [0.4, 0]], lastIn: [[0.6, 1], [0.8, 1]] },
+  hold: { out: [[1, 0]], nextIn: [[1, 0]] },
 };
 
 /**
@@ -11975,20 +10226,35 @@ function selectionEaseState() {
   const i = keys.indexOf(selection.key);
   if (i < 0) return null;
   const row = laneRows().find((r) => r.owner === selection.owner);
-  if (!row || row.kind !== 'scalar') return null;
-  const before = i > 0 && segmentHasShape(keys, i - 1);
-  const after = i < keys.length - 1 && segmentHasShape(keys, i);
-  return before || after ? { keys, i } : null;
+  if (!row || !KINDS[row.kind].eases) return null;
+  const before = i > 0 && segmentHasShape(keys, i - 1, row.kind);
+  const after = i < keys.length - 1 && segmentHasShape(keys, i, row.kind);
+  // The kind travels with the answer rather than being looked up again by the caller.
+  // `applyEasePreset` needs it for the track-end reaches, and a second walk of
+  // `laneRows` to re-find the row this one already found is the duplicate lookup that
+  // drifts the first time either site learns a condition the other does not.
+  return before || after ? { keys, i, kind: row.kind } : null;
 }
 
 function applyEasePreset(name) {
   const state = selectionEaseState();
   const spec = EASE_PRESETS[name];
   if (!state || !spec) return false;
-  const { keys, i } = state;
-  if (spec.out) keys[i].easeOut = [...spec.out];
-  if (spec.in) keys[i].easeIn = [...spec.in];
-  if (spec.nextIn && i < keys.length - 1) keys[i + 1].easeIn = [...spec.nextIn];
+  const { keys, i, kind } = state;
+  if (spec.out) keys[i].easeOut = copyHandle(spec.out);
+  if (spec.in) keys[i].easeIn = copyHandle(spec.in);
+  if (spec.nextIn && i < keys.length - 1) keys[i + 1].easeIn = copyHandle(spec.nextIn);
+  // The two reaches that are about the track rather than about the selected key. Each
+  // is guarded by its own segment having a shape, for the same reason a flat segment
+  // gets no handle drawn: writing a number onto a segment whose ends are equal is
+  // offering a control that changes nothing, and here it would also be spending the
+  // undo step that press costs on an edit with no picture behind it.
+  if (spec.firstOut && segmentHasShape(keys, 0, kind)) {
+    keys[0].easeOut = copyHandle(spec.firstOut);
+  }
+  if (spec.lastIn && segmentHasShape(keys, keys.length - 2, kind)) {
+    keys[keys.length - 1].easeIn = copyHandle(spec.lastIn);
+  }
   // Cannot fire on the five above - every value is inside the unit box and none of
   // them moves a key value, which is all this refuses. Called anyway because it is
   // the guard that decides what a legal retime curve is, and a sixth preset added
@@ -12007,16 +10273,114 @@ for (const btn of ui.ease.querySelectorAll('button[data-ease]')) {
   });
 }
 
+/**
+ * Whether the selected key's handles may grow or shrink, and by how many sides.
+ *
+ * The retime is excluded, and the reason is `assertMonotonic`'s rather than a
+ * preference: the proof that a handle inside the unit box cannot run source time
+ * backwards is a proof about a cubic, and a retime segment stops being a cubic the
+ * moment a side grows. Excluding it here is what makes that assertion an assertion
+ * about documents from elsewhere rather than something this editor can walk into.
+ *
+ * A side counts only where it has a segment to shape, so the first key offers its
+ * outgoing side alone and the last its incoming - the same rule the handles are drawn
+ * under, because a control that grew a list the lane would not draw is a control whose
+ * effect is invisible until somebody selects a different key.
+ *
+ * The state is handed in rather than looked up, because `paintEase` asks this twice per
+ * repaint and `selectionEaseState` walks `laneRows()` to find the kind. Four walks a
+ * frame to paint two buttons is the panel cost `panel-rederives-per-write` exists about,
+ * arriving through a control row instead of through the panel.
+ */
+function pointSides(delta, state) {
+  if (!state || selection.owner === 'retime') return [];
+  const { keys, i, kind } = state;
+  const sides = [];
+  if (i < keys.length - 1 && segmentHasShape(keys, i, kind)) sides.push('easeOut');
+  if (i > 0 && segmentHasShape(keys, i - 1, kind)) sides.push('easeIn');
+  // Only the sides the change is actually available on. Growth stops at the ceiling and
+  // shrink at one point, and a press that could move one side but not the other moves
+  // the one it can rather than refusing both - the alternative is a button that goes
+  // dead because the *other* side of a key you were not thinking about is full.
+  return sides.filter((side) => {
+    // The selected key's own handle either way - `easeOut` shapes the segment after it
+    // and `easeIn` the one before, but both lists hang off this key.
+    const n = keys[i][side].length;
+    return delta > 0 ? n < SEGMENT_POINT_CEILING : n > 1;
+  });
+}
+
+/**
+ * Adds or removes a control point on every shapeable side of the selected key.
+ *
+ * Growth is `elevate`, which is exact: the curve after the press is the curve before
+ * it, so this hands over another handle and changes no rendered frame. That is what
+ * lets it be an ordinary undoable edit rather than something that needs a warning -
+ * see `elevate` in `web/curve.js`, and `test/curve.test.mjs`, which holds it to being
+ * exact rather than nearly.
+ *
+ * Shrink drops the control point nearest the far end of the run, which is the one whose
+ * removal disturbs the segment's own end least: the points closest to a key are the ones
+ * holding the departure and arrival rates that the presets exist to set.
+ */
+function changePointCount(delta) {
+  const state = selectionEaseState();
+  const sides = pointSides(delta, state);
+  if (sides.length === 0) return false;
+  const { keys, i } = state;
+  for (const side of sides) {
+    const seg = side === 'easeOut' ? i : i - 1;
+    const a = keys[seg];
+    const b = keys[seg + 1];
+    if (delta > 0) {
+      const up = elevate(a.easeOut, b.easeIn, side);
+      a.easeOut = up.easeOut;
+      b.easeIn = up.easeIn;
+    } else if (side === 'easeOut') {
+      a.easeOut = a.easeOut.slice(0, -1);
+    } else {
+      b.easeIn = b.easeIn.slice(1);
+    }
+  }
+  lanesChanged();
+  requestRepaint();
+  history.commit();
+  return true;
+}
+
+for (const [button, delta] of [[ui.addPoint, 1], [ui.dropPoint, -1]]) {
+  button.addEventListener('click', () => {
+    const owner = selection?.owner ?? '';
+    if (!changePointCount(delta)) return;
+    // Re-read after the edit rather than before it, because the counts in the readout
+    // are the ones the press produced.
+    const { keys, i } = selectionEaseState();
+    say(`${delta > 0 ? 'added' : 'removed'} an ease control point on ${owner}: `
+      + `${keys[i].easeOut.length} out, ${keys[i].easeIn.length} in`);
+  });
+}
+
 // Only meaningful while a key is selected, so the row goes quiet rather than staying
 // live and writing into nothing. The two halves have different conditions on purpose:
 // anything selected can be deleted, and only a key with a shapeable neighbour can be
 // eased - a lone key, or one between two flat segments, has nothing for a curve to say.
 function paintEase() {
   const selected = Boolean(selection && keysOf(selection.owner).includes(selection.key));
-  const shapeable = Boolean(selectionEaseState());
+  // Once per paint, and read four times below. This runs on every repaint.
+  const easeState = selectionEaseState();
+  const shapeable = Boolean(easeState);
   ui.ease.classList.toggle('off', !selected);
   for (const btn of ui.ease.querySelectorAll('button[data-ease]')) btn.disabled = !shapeable;
   ui.deleteKey.disabled = !selected;
+  // The point controls have a condition of their own and it is narrower than
+  // `shapeable` in two directions at once: the retime is refused whatever is selected,
+  // and a key already at the ceiling or already down to a single point offers nothing
+  // in that direction. Asking `pointSides` rather than restating either rule, because a
+  // button whose enabled state is computed from a second reading of the condition it
+  // fires under is the pair that drifts - and the drift shows up as a live control that
+  // does nothing, which is the exact defect this whole row is being extended to close.
+  ui.addPoint.disabled = pointSides(1, easeState).length === 0;
+  ui.dropPoint.disabled = pointSides(-1, easeState).length === 0;
   // A third condition, and deliberately not `selected`: walking to the next key is
   // meaningful the moment the track has one to walk to, and it is how you *reach* a key
   // in order to select it. Tying it to a selection would make the control that finds a
@@ -12117,12 +10481,12 @@ ui.rateKey?.addEventListener('click', () => {
     if (retime.keys.length === 0 && t > 0) {
       retime.keys.push({
         t: 0, value: retime.sourceSecAt(0),
-        easeOut: [...EASE_OUT_LINEAR], easeIn: [...EASE_IN_LINEAR],
+        easeOut: copyHandle(EASE_OUT_LINEAR), easeIn: copyHandle(EASE_IN_LINEAR),
       });
     }
     retime.keys.push({
       t, value: retime.sourceSecAt(t),
-      easeOut: [...EASE_OUT_LINEAR], easeIn: [...EASE_IN_LINEAR],
+      easeOut: copyHandle(EASE_OUT_LINEAR), easeIn: copyHandle(EASE_IN_LINEAR),
     });
     retime.keys.sort((x, y) => x.t - y.t);
   }
@@ -12195,19 +10559,6 @@ chromeCanvas.hidden = true;
 document.body.appendChild(chromeCanvas);
 const chromeCtx = chromeCanvas.getContext('2d');
 
-const INSET = { w: 176, h: 118, margin: 8 };
-// Metres across the plan view's shorter axis.
-const TOP_SPAN = 7;
-// Centred a little deeper than the orbit target, so the sensor at the origin sits
-// inside the frame rather than on its edge - the plan is unreadable without it,
-// because everything in it is a distance from there.
-const TOP_CENTRE = { x: 0, z: -2.6 };
-// Every fourth pixel each way, so the plan is thirteen thousand points rather than
-// two hundred and seventeen thousand. At a hundred and eighteen pixels tall the
-// rest would land on top of each other anyway, and this runs on the main thread on
-// every paint.
-const PLAN_STRIDE = 4;
-const FRUSTUM_LEN = 0.55;
 // Reused across the plan's inner loop, which runs on the main thread on every paint.
 const planVec = new THREE.Vector3();
 
@@ -12353,6 +10704,11 @@ function syncCropOutside() {
   uniforms.cropOutside.value = chromeOn && showCropBox ? CROP_FAINT : 0;
 }
 
+// The drawing side's own scratch. `plan-geometry.js` keeps a second one for the
+// projection it took with it, which is two vectors rather than one shared object for the
+// reason that module states: a `Vector3` exported for both to write into is state
+// crossing a boundary, and there is no state in either - each is fully written before it
+// is read on every call.
 const scratchVec = new THREE.Vector3();
 
 function stageSize() {
@@ -12368,39 +10724,6 @@ function insetRect() {
 function cameraKeys() {
   const track = tracks.get('camera');
   return track ? track.keys : [];
-}
-
-/** World x/z to a point in the plan view, and back. Screen up is deeper into the room. */
-function planScale(rect) { return rect.h / TOP_SPAN; }
-
-function planPoint(rect, x, z) {
-  const s = planScale(rect);
-  return {
-    x: rect.x + rect.w / 2 + (x - TOP_CENTRE.x) * s,
-    y: rect.y + rect.h / 2 + (z - TOP_CENTRE.z) * s,
-  };
-}
-
-function planWorld(rect, px, py) {
-  const s = planScale(rect);
-  return {
-    x: TOP_CENTRE.x + (px - rect.x - rect.w / 2) / s,
-    z: TOP_CENTRE.z + (py - rect.y - rect.h / 2) / s,
-  };
-}
-
-/** A point projected through a perspective camera into stage pixels, or null behind it. */
-function projectThrough(position, camera, rect) {
-  scratchVec.fromArray(position).project(camera);
-  // `project` divides by w, and w is negative behind the camera - which flips the
-  // sign and puts a point that is behind you on screen in front of you. z outside
-  // the unit cube is the readable form of that test.
-  if (scratchVec.z < -1 || scratchVec.z > 1) return null;
-  return {
-    x: rect.x + ((scratchVec.x + 1) / 2) * rect.w,
-    y: rect.y + ((1 - scratchVec.y) / 2) * rect.h,
-    z: scratchVec.z,
-  };
 }
 
 /** The sampled camera path, in world space. Empty below two keys - a point is not a path. */
@@ -12461,6 +10784,61 @@ function drawNodes(project) {
     chromeCtx.lineWidth = 1.4;
     chromeCtx.stroke();
   });
+}
+
+// One bead every fourth sample rather than all 120 of them. The count is a legibility
+// choice and not a resolution: 120 dots on a short on-screen path close back up into
+// the line they exist to break, and every fourth is still exactly proportional to the
+// speed because the samples it thins were evenly spaced in time to begin with.
+const BEAD_EVERY = 4;
+
+/**
+ * The camera's timing, drawn on its own path.
+ *
+ * `pathPoints` already samples `poseAt` at equal intervals of program time, so the
+ * gaps between consecutive samples *are* how fast the camera is going - and
+ * `strokePolyline` throws exactly that away by joining them into one continuous line.
+ * Drawing the samples puts it back: beads bunch where the camera is slow and spread
+ * where it is fast, so an ease is visible as spacing without anything being measured
+ * or labelled. Nothing is sampled here that was not already computed.
+ *
+ * This is the half of the ease that lives in the world, and it is deliberately not a
+ * second place to edit one. The timing law is shaped in the lane, where a cubic is a
+ * picture of itself and carries no spatial quantity to misread; what that law *did* is
+ * judged out here, which is where this design has always said a camera move gets
+ * judged. Neither surface can answer the other's question, which is why there are two.
+ */
+/**
+ * Which of the path's samples get a bead, in world space.
+ *
+ * Separate from the drawing because it is the half that carries the claim, and a proof
+ * tool cannot ask a canvas what it drew. `editor.pathBeads` hands this straight out, so
+ * the check reads the same function the overlay does rather than a second opinion about
+ * it - which is what stops the tool agreeing with a build that draws something else.
+ *
+ * The thinning is by index into a series that is already uniform in program time, so
+ * what comes back is still uniform in time. Resampling it evenly along the path would
+ * be the plausible wrong version and is the mutation this is controlled by: beads at
+ * equal *distances* are a picture of the route, which the line already gives, and say
+ * nothing at all about when the camera is anywhere.
+ */
+function beadPoints(points) {
+  const out = [];
+  for (let i = 0; i < points.length; i += BEAD_EVERY) out.push(points[i]);
+  return out;
+}
+
+function drawBeads(points, project) {
+  chromeCtx.fillStyle = 'rgba(90, 209, 196, 0.55)';
+  for (const point of beadPoints(points)) {
+    const p = project(point);
+    // Behind the eye, so it has no place on screen at all - the same answer
+    // `drawNodes` gives, and for the same reason.
+    if (!p) continue;
+    chromeCtx.beginPath();
+    chromeCtx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
+    chromeCtx.fill();
+  }
 }
 
 /** The point cloud from above, straight off the depth texture's own array. */
@@ -12937,11 +11315,13 @@ function drawChrome() {
     chromeCtx.lineWidth = 1.4;
     chromeCtx.strokeStyle = 'rgba(90, 209, 196, 0.85)';
     strokePolyline(path.map((p) => projectThrough(p, viewCamera, stage)));
+    drawBeads(path, (p) => projectThrough(p, viewCamera, stage));
     chromeCtx.strokeStyle = 'rgba(255, 157, 90, 0.9)';
     chromeCtx.lineWidth = 1;
     for (const [a, b] of frustumSegments()) {
       strokePolyline([projectThrough(a, viewCamera, stage), projectThrough(b, viewCamera, stage)]);
     }
+    // After the beads, so a key's own node reads over the timing rather than under it.
     drawNodes((p) => projectThrough(p, viewCamera, stage));
   }
 
@@ -12990,6 +11370,7 @@ function drawChrome() {
   chromeCtx.strokeStyle = 'rgba(90, 209, 196, 0.9)';
   chromeCtx.lineWidth = 1.4;
   strokePolyline(path.map((p) => planPoint(rect, p[0], p[2])));
+  drawBeads(path, (p) => planPoint(rect, p[0], p[2]));
   chromeCtx.strokeStyle = 'rgba(255, 157, 90, 0.9)';
   chromeCtx.lineWidth = 1;
   for (const [a, b] of frustumSegments()) {
@@ -13088,7 +11469,10 @@ function drawChrome() {
     chromeCtx.fillStyle = '#6d7683';
     chromeCtx.fillText('output', col1, y);
     chromeCtx.fillStyle = '#e8ecf1';
-    chromeCtx.fillText(`${targetSize.w}x${targetSize.h}`, col2, y); y += lineH;
+    // The deliverable's size rather than the project's shape, because this row is headed
+    // "output" and the output is a count of pixels. The shape is on screen already - it is
+    // the letterbox around this readout.
+    chromeCtx.fillText(`${activeDeliverable?.outputSize ?? '—'}`, col2, y); y += lineH;
     chromeCtx.fillStyle = '#6d7683';
     chromeCtx.fillText('buffer', col1, y);
     chromeCtx.fillStyle = '#e8ecf1';
@@ -13622,7 +12006,45 @@ function paintExportName() {
   return ok;
 }
 
-ui.exportName.addEventListener('input', paintExportName);
+/**
+ * The typed name, into the document that is supposed to remember it.
+ *
+ * **Without this the field was read and never written, so the deliverable it belongs to
+ * always saved an empty one.** `applyDeliverable` copies `deliverable.name` into this box
+ * on adoption and `ensureActiveDeliverable` seeds it empty, and that was the whole of the
+ * wiring - nothing carried the other direction, so typing a name and pressing `new` stored
+ * `""`, and reopening that deliverable put the box back to the take's id. The comment on
+ * `applyDeliverable` says this field is "what stops two of them writing over each other's
+ * file", and until this listener existed it stopped nothing: every deliverable of one take
+ * proposed the same filename, which is the exact defect that comment describes fixing.
+ *
+ * Written on every keystroke rather than on blur or on save, because a deliverable is not
+ * undoable state - there is no stack to flood - and because the two places that persist one
+ * (`new`, and the autosave behind the picker) both read `activeDeliverable` directly. A
+ * write at save time would be a second place that knows this field exists.
+ *
+ * An invalid name is written too, and that is deliberate: the box shows what was typed, so
+ * the document should hold what the box shows. `paintExportName` disables the export button
+ * for one, and `applyDeliverable` calls it after adopting, so a stored bad name arrives
+ * refused rather than silently renamed.
+ *
+ * **Stored exactly as typed, including the spaces, because the line above is a promise.**
+ * It was stored trimmed, which made that promise false in the one case anybody would
+ * notice: type `" foo "`, save the deliverable, reopen it, and the box comes back holding
+ * something different from what it held when you saved - a document quietly editing the
+ * operator's text. Trimming belongs where the name becomes a filename, and `exportBaseName`
+ * already does it there, so nothing downstream needed the trim to be here.
+ */
+function takeExportName() {
+  ensureActiveDeliverable();
+  activeDeliverable.name = ui.exportName.value;
+  paintDeliverable();
+}
+
+ui.exportName.addEventListener('input', () => {
+  takeExportName();
+  paintExportName();
+});
 
 // The last render, and where to read it back from. `output` is an absolute path on
 // the server and the page cannot fetch it; `href` is the same file under the prefix
@@ -13726,14 +12148,18 @@ paintExportSave();
 
 // ------------------------------------------------- the library controls in the editor
 
-// Changing the export size reframes the editor, because the point of letterboxing
-// the stage is that the two are never allowed to disagree.
+// Changing the resolution reframes nothing, and there is no `history.commit()` under it
+// any more. Both absences are the split: every size this menu offers is of the shape the
+// stage is already letterboxed to, and the pixel count is the deliverable's rather than
+// the document's - `serialiseProjectBody` does not write it, so a commit here would
+// compare two identical snapshots and push nothing, which is a stack entry an operator
+// would press undo for and not get. The shape is what commits, in `buildAspectSegments`.
 ui.exportSize.addEventListener('change', () => {
-  setTargetSize(ui.exportSize.value);
-  paintExportRatioSelection(exportRatioButtons, ui.exportSize);
-  history.commit();
+  setDeliverableSize(ui.exportSize.value);
 });
-setTargetSize(DEFAULT_EXPORT_SIZE, { fromDocument: true });
+// The opening shape, through the same door a document arrives by, which is what fills
+// the resolution menu for the first time - it is empty in the markup until this runs.
+setProjectAspect(defaultAspect(), { fromDocument: true });
 
 ui.mark.addEventListener('click', () => { markHere().catch(showTimelineError); });
 
@@ -14041,7 +12467,14 @@ ui.deliverable?.addEventListener('change', async () => {
     const doc = await (await fetch(`/deliverables/${encodeURIComponent(name)}`)).json();
     if (doc.error) throw new Error(doc.error);
     applyDeliverable(doc.body);
-    history.commit();
+    // **No `history.commit()` here, and its absence is the split rather than an
+    // oversight.** There was one, and it had become dead: everything `applyDeliverable`
+    // writes - the trim, the resolution, the codec, the output name - is the deliverable's,
+    // and `serialiseProjectBody` writes none of it, so the commit compared two identical
+    // snapshots and pushed nothing on every adoption. A call that cannot ever add an entry
+    // reads as "choosing a deliverable is undoable" to anybody maintaining this, which is
+    // the opposite of what the design decided. Choosing a deliverable is not an edit to the
+    // clip; it is choosing which file to make from it.
     showAdoptedDeliverable(name);
     say(`deliverable ${name}`);
   } catch (err) {
@@ -14128,7 +12561,7 @@ function shellElements(ids) {
 const shell = shellElements({
   surfaceName: 'surfaceName',
   saveProject: 'menuSaveProject',
-  render: 'menuRender',
+  projectSettings: 'menuProjectSettings',
   export: 'menuExport',
   obs: 'menuObs',
   cameraReset: 'menuCameraReset',
@@ -14142,6 +12575,9 @@ const shell = shellElements({
   lookExport: 'menuLookExport',
   state: 'menuState',
   exportClose: 'exportClose',
+  projectDialog: 'projectDialog',
+  projectClose: 'projectClose',
+  projectDone: 'projectDone',
   obsDialog: 'obsDialog',
   obsClose: 'obsClose',
   obsDone: 'obsDone',
@@ -14164,7 +12600,9 @@ const shell = shellElements({
 shell.menus = [...document.querySelectorAll('.appmenu')];
 
 shell.surfaceName.textContent = EDITING ? 'Editor' : 'Record';
-for (const control of [shell.saveProject, shell.render, shell.export, shell.lookImport, shell.lookExport]) {
+for (const control of [
+  shell.saveProject, shell.projectSettings, shell.export, shell.lookImport, shell.lookExport,
+]) {
   control.disabled = !EDITING;
 }
 
@@ -14215,21 +12653,31 @@ function openDialog(dialog) {
   }
 }
 
-function openExportDialog() {
-  paintExportRatioSelection(exportRatioButtons, ui.exportSize);
-  openDialog(ui.exportDialog);
-}
-
-shell.render.addEventListener('click', openExportDialog);
-shell.export.addEventListener('click', () => {
-  closeApplicationMenus();
-  // Straight into the save, and only when the same predicate the button reads says a
-  // copy can be handed over. A sequence render cannot, so this falls through to the
-  // dialog - which is the useful answer anyway: the frames are already on the server
-  // and what is left to do with them is render something else.
-  if (canSaveExportCopy()) saveExportCopy();
-  else openExportDialog();
-});
+// **Neither of these repaints on the way open, and the absence is checked rather than
+// assumed.** Everything the two dialogs show already has a writer that paints it where it
+// is written, which is where this file puts a repaint everywhere else - `paintExportFormats`
+// sits in `applyDeliverable` for exactly that reason. The shape buttons and the resolution
+// menu are painted by `setProjectAspect`, the only thing that writes `projectAspect`; the
+// deliverable's summary and its trim by `paintDeliverable`, which `setClipInOut`,
+// `setDeliverableSize` and `applyDeliverable` all reach; and `#tFps` by `timingChanged`,
+// which the comment above it calls the place undo, a project load and an output-rate change
+// all pass through.
+//
+// Measured with both dialogs shut rather than reasoned about, because that is the only way
+// to tell a writer that covers a path from one that looks like it does: a speed change from
+// 1.00x to 4.00x moved the trim readout from 75.62s to 18.90s, and an undo of a rate change
+// put the select back from 60 to 30. A repaint here would be a second reader of state that
+// is already current - it would cost nothing today and would hide the day one of those
+// writers stops, which is the wrong direction for something only ever seen inside a modal.
+shell.projectSettings.addEventListener('click', () => openDialog(shell.projectDialog));
+// One command for the deliverable, where there were two. `Render` opened this dialog and
+// `Export` jumped past it into `saveExportCopy` when there was something to hand over,
+// which meant one menu item did two unrelated things according to state nothing in the menu
+// showed. Handing a finished file over is a button *inside* the dialog - it is about an
+// artifact rather than about starting one - so the menu opens the dialog and the button
+// beside the note is where the copy is taken, enabled by the predicate that always decided
+// it. `openDialog` shuts the menus itself, so there is no `closeApplicationMenus` here.
+shell.export.addEventListener('click', () => openDialog(ui.exportDialog));
 shell.saveProject.addEventListener('click', () => {
   closeApplicationMenus();
   saveProjectAs();
@@ -14517,6 +12965,8 @@ shell.state.addEventListener('click', () => {
 });
 
 shell.exportClose.addEventListener('click', () => ui.exportDialog.close());
+shell.projectClose.addEventListener('click', () => shell.projectDialog.close());
+shell.projectDone.addEventListener('click', () => shell.projectDialog.close());
 shell.obsClose.addEventListener('click', () => shell.obsDialog.close());
 shell.obsDone.addEventListener('click', () => shell.obsDialog.close());
 
@@ -14546,13 +12996,17 @@ addEventListener('keydown', (event) => {
   } else if (key === 's' && event.shiftKey && EDITING) {
     event.preventDefault();
     saveProjectAs();
-  } else if (key === 'r' && EDITING) {
-    event.preventDefault();
-    openExportDialog();
   } else if (key === 'e' && EDITING) {
     event.preventDefault();
     shell.export.click();
   }
+  // **There is no Command-R here any more, and its absence is the merge rather than a
+  // dropped binding.** It opened this dialog while Command-E jumped into the save, and
+  // the two menu items behind them are now one. A shortcut that outlived the command it
+  // belonged to is worse than no shortcut: every key this program binds is printed in a
+  // `<kbd>` beside the item that runs it, so a live Command-R would be a gesture with
+  // nothing on screen declaring it - and in a browser it is the reload the operator
+  // meant, silently swallowed by a `preventDefault` for a command that no longer exists.
 });
 
 /**
@@ -15246,12 +13700,51 @@ globalThis.__kinect = {
   // every size a user could pick. A tool reading this cannot drift from the menu,
   // because it is the menu.
   //
-  // `setTargetSize` is here for the same reason the editor letterboxes: the stage's
+  // `setOutputSize` is here for the same reason the editor letterboxes: the stage's
   // shape is the export's shape now, so a tool asking for a stage of some size has to
   // say which shape it means rather than assuming the window decides.
+  //
+  // **Both gestures, because an operator making that happen performs both.** The shape
+  // moved onto the project and the pixel count stayed on the deliverable, so putting the
+  // product on 2048x1080 is Project settings then Export - and a hook that did only the
+  // first would leave the deliverable on whichever size the new shape opens with, which
+  // is not the size the tool asked for. Sweeping every size in `exportSizes` is exactly
+  // what `export-check` does, and a sweep whose arms silently render a neighbour is the
+  // four-arms-all-16:9 hole this hook was added to close, back under a different name.
+  //
+  // A size of a shape the table has nothing for - `640x400` is `[8, 5]`, and four tools
+  // use it to keep the stage cheap - lands the same way a legacy project's does: the
+  // shape is adopted, the size is appended to the menu as its own, and the two agree, so
+  // `exportClip` has nothing to refuse.
+  //
+  // **This can put the editor in a framing `restoreProject` will refuse, and no user
+  // gesture can.** The shape buttons only offer what `EXPORT_SIZES` holds; this takes any
+  // size, so `setOutputSize('640x400')` frames at 8:5 - a shape the table has no resolution
+  // for - and a document written out of that framing is refused on the way back in. Four
+  // tools asked for exactly that as a cheap small stage, and the one of them that undoes
+  // died mid-run on its own snapshot. All four are 640x360 now: `keyframe-check` because it
+  // died, and `registry-check`, `timeline-check` and `export-check` because passing on a
+  // framing no document could hold is a fact about those files rather than a state worth
+  // keeping. A tool wanting a small stage asks for a shape the product offers.
+  //
+  // Not refused here, because the refusal that matters is on the document: this hook exists
+  // so a tool can frame the stage at a *size* the product does not list, which is how
+  // `export-check` sweeps sizes the menu never offers. Narrowing it to the table would take
+  // that away. What it may not do is pick a *shape* the table cannot serve, and the
+  // difference between those two is the whole reason `restoreProject` refuses shapes rather
+  // than sizes.
+  //
+  // It renames `setTargetSize`, which was named for a `targetSize` that no longer exists.
+  // Five of its six callers reached it as `setTargetSize?.(...)`, so the old name left
+  // behind would not have thrown anywhere - it would have quietly stopped resizing while
+  // every arm went on reporting, which is the failure mode this repo keeps finding.
   exportSizes: () => EXPORT_SIZES.flatMap((g) => g.sizes.map(([w, h]) => ({ ratio: g.ratio, w, h }))),
-  setTargetSize: (text) => setTargetSize(text, { fromDocument: true }),
-  targetSize: () => ({ ...targetSize }),
+  setOutputSize: (text) => setProjectAspect(aspectOfSize(text), { fromDocument: true })
+    && setDeliverableSize(text),
+  outputSize: () => ({
+    aspect: [...projectAspect],
+    size: activeDeliverable?.outputSize ?? null,
+  }),
 
   // The registry and the one bulk write a user gesture performs. Both refuse while a
   // frame is being evaluated, which means exactly what it says: the evaluator runs
@@ -15292,6 +13785,28 @@ globalThis.__kinect = {
    * pass on a page that drew the right diamonds over the wrong curve.
    */
   keyframes: {
+    /**
+     * A handle as a tool hands one over, refused rather than repaired.
+     *
+     * Version 5 made a handle a list of control points, and the shape it replaced -
+     * a bare `[0.42, 0]` - survives `copyHandle` without complaint: mapping a pair of
+     * numbers gives `[[undefined, undefined], [undefined, undefined]]`, which evaluates
+     * to `NaN` and renders as a track that has silently stopped existing. Every tool in
+     * this tree was moved across with the format, so this guards nobody who exists today
+     * and exists for the one who writes the next one against a five-year-old example.
+     * A door that turns a stale fixture into a blank picture is the failure this whole
+     * version gate is about, arriving through the hook the checks come in by.
+     */
+    handleFrom(points, side, name) {
+      const list = points ?? EASE_OUT_LINEAR;
+      const ok = Array.isArray(list) && list.length >= 1
+        && list.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+      if (!ok) {
+        throw new Error(`${name}'s ${side} is ${JSON.stringify(points)}: since version 5 a handle is a `
+          + 'list of control points, so a bare pair means a fixture written against version 4');
+      }
+      return copyHandle(list);
+    },
     /** Writes a whole set of tracks at once. The keys are the tool's, not the page's. */
     setTracks(spec) {
       tracks.clear();
@@ -15301,8 +13816,8 @@ globalThis.__kinect = {
         track.keys = keys.map((k) => ({
           t: k.t,
           value: k.value,
-          easeOut: [...(k.easeOut ?? EASE_OUT_LINEAR)],
-          easeIn: [...(k.easeIn ?? EASE_IN_LINEAR)],
+          easeOut: this.handleFrom(k.easeOut ?? EASE_OUT_LINEAR, 'easeOut', name),
+          easeIn: this.handleFrom(k.easeIn ?? EASE_IN_LINEAR, 'easeIn', name),
         }));
         track.sort();
       }
@@ -15317,8 +13832,8 @@ globalThis.__kinect = {
       const built = keys.map((k) => ({
         t: k.t,
         value: k.value,
-        easeOut: [...(k.easeOut ?? EASE_OUT_LINEAR)],
-        easeIn: [...(k.easeIn ?? EASE_IN_LINEAR)],
+        easeOut: this.handleFrom(k.easeOut ?? EASE_OUT_LINEAR, 'easeOut', 'the retime'),
+        easeIn: this.handleFrom(k.easeIn ?? EASE_IN_LINEAR, 'easeIn', 'the retime'),
       }));
       retime.assertMonotonic(built);
       retime.keys = built;
@@ -15411,9 +13926,16 @@ globalThis.__kinect = {
     },
     easeOf: (owner, i) => {
       const k = keysOf(owner)[i];
-      return k ? { easeOut: [...k.easeOut], easeIn: [...k.easeIn] } : null;
+      return k ? { easeOut: copyHandle(k.easeOut), easeIn: copyHandle(k.easeIn) } : null;
     },
     easePresets: () => Object.keys(EASE_PRESETS),
+    // Read off `KINDS` rather than written down again, so a proof tool asks which
+    // kinds claim to be easable instead of asserting against the two that happen to
+    // exist today. A kind added later arrives in the sweep by existing.
+    easedKinds: () => Object.keys(KINDS).filter((k) => KINDS[k].eases),
+    // The beads the path overlay draws, in world space. A canvas cannot be asked what
+    // it drew, so the check reads the function the drawing reads - see `beadPoints`.
+    pathBeads: () => beadPoints(pathPoints()),
     shortcuts: () => SHORTCUTS,
     exportName: () => ({ base: exportBaseName(), valid: EXPORT_NAME_OK.source, canSaveAs: CAN_SAVE_AS }),
     lastExport: () => (lastExport ? { ...lastExport } : null),
@@ -15516,6 +14038,12 @@ globalThis.__kinect = {
     // would throw away the document the section under it is standing on.
     refreshPresets,
     setActiveDeliverable,
+    // The door beside the bare assignment above, and both are here on purpose. A check
+    // that wants a deliverable *placed* uses the setter; anything adopting one the way a
+    // surface does has to use this, because the version gate and the shape refusal live in
+    // it. `tools/render-worker.mjs` used the setter and so rendered documents the editor
+    // refuses - one take, one set of rules, whichever surface asks.
+    applyDeliverable,
     activeDeliverable: () => activeDeliverable,
     appliedPreset: () => appliedPreset,
     /**
@@ -15601,25 +14129,14 @@ globalThis.__kinect = {
      * failure this repo keeps finding, and the answer is to move the probe rather than
      * to write down an exception for it.
      *
-     * Bytes rather than a picture generated here, and both samplers pointed at the same
-     * texture, so nothing about what the arm renders depends on decode timing or on
-     * which side of the pair `mixT` happens to favour.
+     * The colour pair is `gpu-textures.js`'s, so this is that module's own third writer
+     * exposed rather than a second one written here: an assignment to an imported
+     * binding is a TypeError, and it would be thrown while this object literal is being
+     * built - publishing no `__kinect` at all and leaving every tool in the suite with
+     * no assertion behind its exit code. `injectDepth` below has always had the right
+     * shape for the same reason.
      */
-    plantColor(rgba, width, height) {
-      const tex = new THREE.DataTexture(
-        new Uint8Array(rgba), width, height, THREE.RGBAFormat, THREE.UnsignedByteType,
-      );
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.minFilter = THREE.LinearFilter;
-      tex.magFilter = THREE.LinearFilter;
-      tex.generateMipmaps = false;
-      tex.needsUpdate = true;
-      colorPrev = tex;
-      colorCurr = tex;
-      uniforms.colorPrev.value = tex;
-      uniforms.colorCurr.value = tex;
-      uniforms.hasColor.value = 1;
-    },
+    plantColor,
     times() { return pinnedPairs.times.slice(); },
     /**
      * One frame's depth straight into the current texture, bypassing every pair

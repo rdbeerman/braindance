@@ -185,7 +185,7 @@ const MUTATIONS = {
   // writes the block it was handed into the head of the full grid and leaves the rest
   // holding the last frame that filled it, which is what the viewer did until this
   // merge. Both of section 5's exact rows go red and so does the live pair.
-  'bind-ignores-grid': { file: 'web/main.js', edits: [[
+  'bind-ignores-grid': { file: 'web/gpu-textures.js', edits: [[
     '  expandDepth(data, depthCurr.image.data);',
     '  depthCurr.image.data.set(data);',
   ]] },
@@ -194,7 +194,7 @@ const MUTATIONS = {
   // on. Kept separate from the mutation above precisely because that one fails
   // everything: a control that reddens every row cannot say which row is carrying the
   // claim, and the claim here is that a sample lands where it was measured.
-  'expand-shifts-by-a-block': { file: 'web/main.js', edits: [[
+  'expand-shifts-by-a-block': { file: 'web/gpu-textures.js', edits: [[
     'for (let col = 0; col < DEPTH_W; col++) dst[to + col] = src[from + ((col / grid.k) | 0)];',
     'for (let col = 0; col < DEPTH_W; col++) dst[to + col] = src[from + Math.min(grid.w - 1, (((col / grid.k) | 0) + 1))];',
   ]] },
@@ -849,7 +849,7 @@ try {
             if (mm <= 0 || mm === 65535) continue;
             const z = mm * 0.001;
             const col = i % DW, row = (i / DW) | 0;
-            // x negated: the mirror correction unproject in web/main.js carries the
+            // x negated: the mirror correction unproject in web/cloud-shader.js carries the
           // reasoning for. Width and height are invariant under it and the centroid is
           // not, so an oracle left un-negated would agree with the page on the rows that
           // happen to measure extents and disagree on the one that measures a position.
@@ -962,7 +962,7 @@ try {
           const z = mm * 0.001;
           if (z < k.uniforms.nearClip.value || z > k.uniforms.farClip.value) continue;
           const col = i % DW, row = (i / DW) | 0;
-          // x negated: the mirror correction unproject in web/main.js carries the
+          // x negated: the mirror correction unproject in web/cloud-shader.js carries the
           // reasoning for. Width and height are invariant under it and the centroid is
           // not, so an oracle left un-negated would agree with the page on the rows that
           // happen to measure extents and disagree on the one that measures a position.

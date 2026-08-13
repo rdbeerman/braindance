@@ -58,8 +58,31 @@
  * that fails to open. `tools/convert-presets.mjs` is the way across, and it is a
  * one-shot over files on disk rather than a path inside the program, because a loader
  * that could read both shapes is the second implementation this design keeps refusing.
+ *
+ * **Version 5 makes an ease handle a list of control points.** A version 4 key carried
+ * one pair per side - `easeOut: [0.42, 0]` - and a version 5 key carries a list of them,
+ * `easeOut: [[0.42, 0]]`, which is the same cubic with its degree written down. What the
+ * list buys is a segment that can be a quintic: two control points a side with ordinates
+ * 0, 0, 1, 1 is exactly `6u^5 - 15u^4 + 10u^3`, the one shape whose *acceleration*
+ * reaches zero at a key and not merely its rate, which is what a camera departing a
+ * keyed pose needs and what no cubic pinned at both ends can express.
+ *
+ * This one has to be a refusal for the reason version 4 did and one more besides. The
+ * two shapes are not distinguishable by inspection - `[0.42, 0]` is a two-element array
+ * and so is `[[0.2, 0], [0.4, 0]]` - so a build that guessed would read a quintic's
+ * first control point as an entire cubic and render a move nobody authored, silently and
+ * at every key at once. There is no sniff that separates them and deliberately none is
+ * attempted: `tools/convert-presets.mjs` is the way across, as it was from 3.
+ *
+ * **Only a project changes shape here, and a preset is bumped without being rewritten.**
+ * A preset is `{version, values}` and holds no keys at all - see `refusePresetBody` -
+ * so its handles are not anywhere to convert. The version is shared between the two
+ * document kinds, so it moves for both regardless, which is the same cost the comment
+ * above `aspect` in `serialiseProjectBody` declines to pay for a field presets have
+ * nothing to do with. It is paid here because the thing that moved is the *format* of
+ * something both kinds could carry, rather than a field only one of them has.
  */
-export const PROJECT_VERSION = 4;
+export const PROJECT_VERSION = 5;
 
 /**
  * The sentence a document from the wrong version gets, in one place because the two
@@ -75,23 +98,46 @@ export const PROJECT_VERSION = 4;
  * four versions. A refusal that diagnoses the wrong thing is worse than one that says
  * only "no", because it is followed.
  *
- * Three bands, which is what the shipped conversion actually distinguishes.
+ * Four bands, which is what the shipped conversion actually distinguishes - two of them
+ * convertible, because there are two migration steps and a document is told about the
+ * ones between it and this build rather than about all of them.
  * `convert-presets.mjs` is the only migration this repo has and it starts at 3, so 1
  * and 2 are honestly "known, and there is no path from here" rather than either
  * "convertible" or "unreadable units". Everything else - a later version, a version
  * field that is absent or is not a number - collapses into one sentence because the
  * true statement about all of them is the same: nothing here knows what the document
  * means, and guessing is the failure the version field exists to prevent.
+ *
+ * **The convertible band is every version the converter can chain from, not the one
+ * immediately below.** It was `PROJECT_VERSION - 1` while there was a single step to
+ * take, and that spelling quietly stopped being true the moment a second one existed:
+ * with the handle-list bump, `PROJECT_VERSION - 1` is 4, so a version 3 document - which
+ * the converter still carries all the way across, through 4 and on to 5 - would have
+ * been told that nothing in this build knows what it means. The band is written as the
+ * versions themselves so that adding a step means adding the number here, in the
+ * sentence that sends somebody to the tool that gained it.
+ *
+ * **And it is two sentences rather than one, because a convertible document is told what
+ * moved under *it*.** The first draft of this band said both things to both versions, so
+ * a version 4 file was told about the shading mode that version 4 already has - true of
+ * the conversion as a whole and not true of that file, which is the shape the paragraph
+ * above spent four sentences removing the first time. A reader with a version 4 document
+ * needs one fact, that handles became lists; a version 3 reader needs both, because both
+ * steps really are between them and this build.
  */
 export function versionRefusal(what, version) {
-  const across = version === PROJECT_VERSION - 1
-    ? `version ${PROJECT_VERSION} carries the five reading weights where 3 carried a shading mode, `
-      + 'so run tools/convert-presets.mjs over the directory it is in to bring it across'
-    : version === 1 || version === 2
-      ? 'versions 1 and 2 predate the split into look and composition and the deliverable store, '
-        + `and the conversion this repo ships starts at 3, so there is no path from here to ${PROJECT_VERSION}`
-      : `nothing in this build knows what a version ${JSON.stringify(version)} document means - it is `
-        + 'either from a later build or was never one of these - so it is refused rather than guessed at';
+  const across = version === 4
+    ? `version ${PROJECT_VERSION} carries ease handles as lists of control points where 4 carried `
+      + 'one pair a side, so run tools/convert-presets.mjs over the directory it is in to bring it across'
+    : version === 3
+      ? `version ${PROJECT_VERSION} carries ease handles as lists of control points and version 4 `
+        + 'carries five reading weights where 3 carried a shading mode, so run '
+        + 'tools/convert-presets.mjs over the directory it is in to take it across both'
+      : version === 1 || version === 2
+        ? 'versions 1 and 2 predate the split into look and composition and the deliverable store, '
+          + `and the conversion this repo ships starts at 3, so there is no path from here to ${PROJECT_VERSION}`
+        : `nothing in this build knows what a version ${JSON.stringify(version)} document means - it is `
+          + 'either from a later build or was never one of these - so it is refused rather than guessed at';
   return `${what} is version ${JSON.stringify(version)} and this build reads version ${PROJECT_VERSION}: ${across}`;
 }
 
@@ -243,3 +289,23 @@ export const VALID_ID = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
  */
 export const DEPTH_W = 512;
 export const DEPTH_H = 424;
+
+/**
+ * How many cells that grid has, which is here because its two readers have nothing else
+ * in common.
+ *
+ * `web/main.js` measures an arriving frame's depth block against it and refuses one that
+ * is not that many samples, and divides by it to turn a count of returns into a share of
+ * the sensor; `web/point-cloud.js` allocates two vertices per cell and addresses every
+ * point by it. The first is a statement about the wire and the second is a statement about
+ * the renderer, so filing it under either one would have the other importing a module it
+ * has no other business with - which is the same delivery argument the grid above it is
+ * filed here on, one derivation further along.
+ *
+ * It is a declaration rather than `DEPTH_W * DEPTH_H` written at each site for the reason
+ * that pair is one: a second spelling of a derived constant is the same drift as a second
+ * spelling of what it derives from, and it takes a multiplication rather than a glance to
+ * see. `server/capture.js` still writes the product out where it refuses a depth block,
+ * and that is a third spelling this could absorb rather than a claim that it has.
+ */
+export const POINTS = DEPTH_W * DEPTH_H;

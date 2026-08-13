@@ -79,6 +79,24 @@ evaluate the tracks, `sourceMs = retime(programTime)`, binary-search the index.
 - **`fade` and `wake` stay in source time**, because they drive surface memory, which
   advances per source frame. Dividing by the local retime slope would divide by zero at a
   hold, snapping every trail off exactly where a freeze should hold it.
+- **`outputFps` is the project's, not the deliverable's**, and the line above is why: it is
+  the denominator of the edit's own coordinate, so two deliverables at two rates would be
+  two different edits rather than one edit written out twice. `trails` makes it visible —
+  it is the one look term whose length is counted in output frames rather than in seconds,
+  because `AfterimagePass` multiplies the picture it holds once per rendered frame with
+  nothing in the expression about how long a frame lasted. At damp 0.9 a trail is down to
+  12% after twenty frames, which is 0.83s at 24fps and 0.33s at 60.
+
+The shape the stage is letterboxed to is document state for the same reason and the pixel
+count is not. A project carries `aspect` as a reduced integer pair — `[16, 9]`, `[256, 135]`
+— because the camera was keyed against a frame, so reopening a 65:24 edit at 16:9 would be a
+different shot with the same keys. A deliverable carries the resolution, because every
+screen-space term is expressed against 1080p and bloom's chain is frozen at 600 whatever the
+buffer is, so two sizes of one shape reopen identically. Both fields are additive and neither
+bumps `PROJECT_VERSION`, which presets share: absent `aspect` means the shape of the legacy
+`outputSize` beside it, and absent `outputFps` means 30. Deliverables have their own version
+and it is 2 — a version 1 document names a rate this build ignores, so it would parse
+perfectly and render the wrong file, which is what a version gate is for.
 
 Frame index was rejected as a coordinate because capture frames are not evenly spaced in
 time, so constant motion through index space is visibly variable motion through real time.

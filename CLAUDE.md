@@ -34,10 +34,25 @@ belongs beside its neighbours in the relevant document, with this file gaining a
 if an agent would get the *next* task wrong without it. The version of this file that
 absorbed everything reached 704 lines and stopped being read.
 
-That chain is enforced rather than trusted: `syntax-check` walks every `docs/*.md` path
-cited here or under `tools/` and fails on one that does not exist, because a pointer that
+That chain is enforced rather than trusted: `syntax-check` walks every `docs/*.md` path this
+repo's prose and source cite and fails on one that does not exist, because a pointer that
 outlives its target teaches a document nobody can read. Its control is moving one of the
-three away and running it.
+three away and running it. **The same walk resolves every `web/….js` a comment or a page
+cites**, and a `file:line` form fails when the file has fewer lines than the citation names —
+which is what the browser bundle's split into modules needed, because fourteen citations were
+left naming that bundle for code that had moved out of it. Cite a function by name rather
+than by a line: a path is checked for resolving and never for being *right*, so a line that
+has drifted into the middle of something else passes here.
+
+**Both walks read every file this repo ships, which they did not at first.** The citing set
+was a list — root markdown, `docs/**.md`, and the code under four directories — so a citation
+written anywhere else was never looked at while the row went on printing that every cited
+module resolves. Three were outside it and all three name a module: `native/grabber.cpp`,
+`presets-builtin/README.md` and the CI workflow. The set is now a walk of the whole tree
+minus what `.gitignore` declares this repo does not ship, so a source tree added next year is
+read by existing rather than by somebody remembering to add it. `--mutate
+citation-outside-the-prose` is the control, and it is a control the old walk could not fail:
+with the mutation declared and the old citing set in place the run came back 0 failed.
 
 ## Measurement culture
 
@@ -135,12 +150,22 @@ node tools/timeline-check.mjs --url http://localhost:8080 # step 4: seek equals 
 node tools/timeline-check.mjs --mutate preroll-constant   # ... and must FAIL mutated
 node tools/timeline-check.mjs --mutate draft-always-resets # ... and must FAIL mutated
 node tools/timeline-check.mjs --mutate reading-write-skips-repaint # ... and must FAIL mutated
-node tools/keyframe-check.mjs --url http://localhost:8080 # step 5: tracks, retime curve, undo
+node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, retime curve, undo
 node tools/keyframe-check.mjs --mutate pose-linear        # ... and must FAIL mutated
+node tools/keyframe-check.mjs --mutate pose-ignores-ease  # ... the camera's handles, which shape when it arrives and never
+                                                          #     where it goes. Separable from `pose-linear` on purpose and the
+                                                          #     counts are how you tell: 4 rows here against that one's 6, and
+                                                          #     every route row stays green, because a camera ignoring its
+                                                          #     handles still travels the same curve at the wrong times
 node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, export, the file
 node tools/export-check.mjs --mutate pointsize-absolute   # ... and must FAIL mutated
 node tools/export-check.mjs --mutate cropoutside-reaches-the-export # ... the crop box's faint pass, one edit from being in a deliverable
 node tools/export-check.mjs --mutate faint-survives-at-zero # ... and a cut point kept at alpha zero, invisible and still occluding
+node tools/export-check.mjs --mutate bloom-buffer-sized   # ... the glow's chain following the buffer, which is the only live catcher
+                                                          #     in this suite for the reference the chain is frozen at. Its sibling
+                                                          #     `bloom-reference-1080` is NOT caught by anything here and is not a
+                                                          #     regression - `test/bloom-chain.test.mjs` is what holds that half,
+                                                          #     and docs/instruments.md has the measurement
 node tools/library-check.mjs                              # step 7: library, recorder, routes
 node tools/library-check.mjs --mutate plant-open-take     # ... and must FAIL
 node tools/library-check.mjs --mutate open-decides-its-own-reason  # ... one take, one refusal, whichever surface asks
@@ -202,13 +227,61 @@ node tools/library-check.mjs --mutate one-refusal-for-older-versions # ... and m
 node tools/library-check.mjs --mutate open-ignores-format          # ... the capture's generation, at all four doors at once
 node tools/library-check.mjs --mutate shipped-look-drops-a-value   # ... a shipped look with a hole in it, which is the last look staying under the next one
 node tools/library-check.mjs --mutate complete-look-drops-a-group  # ... and the definition those documents are written against, which is code where they are data
-node tools/editor-check.mjs --url http://localhost:8080   # the editor's controls: that they exist, that pressing them changes something
+node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g # the editor's controls: that they exist, that pressing them changes something
+node tools/editor-check.mjs --mutate export-name-not-taken --no-render # ... the output name read out of a deliverable
+                                                                       #     and never written into one, which is the
+                                                                       #     defect this branch shipped: the row walks it
+                                                                       #     out to the server and back through an
+                                                                       #     adoption, because a field read straight back
+                                                                       #     proves only that an input holds text
+node tools/editor-check.mjs --mutate aspect-skips-the-letterbox --no-render # ... the shape written into the document
+                                                                       #     and the stage not framed to it, which is the
+                                                                       #     one thing putting the shape on the document
+                                                                       #     was for. Reads the stage's own box rather than
+                                                                       #     the button that was just pressed, so a build
+                                                                       #     that lights the control and reframes nothing
+                                                                       #     fails here and passes on the attribute
 node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
 node tools/editor-check.mjs --mutate plant-unswept-control --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate ends-reaches-the-selection --no-render # ... `ends` shaping the selected key instead of the
+                                                                       #     move's two ends, which is `smooth` under another
+                                                                       #     name and halts the camera at an interior key
+node tools/editor-check.mjs --mutate ends-skips-the-arrival --no-render # ... and reaching only the departure, which is half the
+                                                                       #     reported defect surviving the fix for it
+node tools/editor-check.mjs --mutate glide-is-a-cubic --no-render      # ... the quintic dropped to a cubic, whose rate still
+                                                                       #     reaches zero at the key - so every velocity row stays
+                                                                       #     green and only the degree is gone with the
+                                                                       #     acceleration claim resting on it
+node tools/editor-check.mjs --mutate elevation-moves-the-curve --no-render # ... `+pt` appending a control point rather than
+                                                                       #     elevating, which is the one wrong implementation
+                                                                       #     that leaves the count right and moves the camera.
+                                                                       #     Only the sampled-curve row can see it, which is why
+                                                                       #     that row samples the render instead of reading the
+                                                                       #     handles back - every handle is meant to move
+node tools/editor-check.mjs --mutate handle-clamped-to-the-segment --no-render # ... a control point clamped to the segment's ends
+                                                                       #     rather than to its own neighbours, which was
+                                                                       #     complete while a side held one point - then the
+                                                                       #     neighbours *were* the ends - and lets two cross
+                                                                       #     once a side holds more. Only a drag of a point
+                                                                       #     that is not index 0 can see it
+node tools/editor-check.mjs --mutate points-reach-the-retime --no-render # ... and the point controls offered on the retime,
+                                                                       #     whose unit-box monotonicity proof is a proof about
+                                                                       #     a cubic and nothing else
+node tools/editor-check.mjs --mutate ease-gate-hardcodes-scalar --no-render # ... the ease gate naming one kind instead of asking
+                                                                       #     the table, which is what locked the camera out
+node tools/editor-check.mjs --mutate pose-segments-never-shaped --no-render # ... and a pose segment that never has a shape to
+                                                                       #     edit, which is the NaN the old subtraction returned
+node tools/editor-check.mjs --mutate pose-lane-draws-flat --no-render  # ... the lane's drawn curve, which every other pose row
+                                                                       #     reads past on its way to the evaluator
+node tools/editor-check.mjs --mutate pose-handle-overshoots --no-render # ... a pose handle leaving the unit box, which sends the
+                                                                       #     camera past the pose it was keyed at
+node tools/editor-check.mjs --mutate beads-evenly-spaced --no-render   # ... and the path's beads marking distance rather than
+                                                                       #     time, which is an overlay that redraws the route
 node tools/editor-check.mjs --mutate import-skips-normalise --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate import-saves-before-validating --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate picker-ignores-the-boxes --no-render # ... the subset a preset is written with
 node tools/editor-check.mjs --mutate readings-tick-alone --no-render   # ... and the five weights that move as one
+node tools/editor-check.mjs --mutate apply-says-nothing --no-render    # ... and that applying one says so, on the control that inherited the gesture
 node tools/editor-check.mjs --mutate group-never-reveals --no-render      # ... a panel group is open because the clip says so
 node tools/editor-check.mjs --mutate reveal-ignores-tracks --no-render    # ... and a keyframe counts where the value does not
 node tools/editor-check.mjs --mutate override-prunes-only-on-toggle --no-render # ... and the override the document, not the toggle, has caught up with
@@ -316,8 +389,39 @@ node tools/vcam-check.mjs --mutate refusal-ignores-webcam # ... what the take is
 node tools/guard-check.mjs                                # the socket's origin rule, the bind, and the rebinding rule
 node tools/guard-check.mjs --mutate upgrade-skips-origin  # ... and must FAIL mutated
 node tools/guard-check.mjs --mutate host-accepts-a-name   # ... and must FAIL mutated
-node tools/jobs-check.mjs                                 # step 8: the queue, the pin, and a real render
+node tools/jobs-check.mjs                                 # step 8: the queue, the pin, a real render, and a job
+                                                          #   whose deliverable this build cannot read, which has to
+                                                          #   come back failed rather than rendered - the batch path
+                                                          #   adopted past the version gate until it did
 node tools/jobs-check.mjs --mutate claim-ignores-renderer # ... and must FAIL mutated
+node tools/module-check.mjs                               # the boundaries in web/: the import graph, what an import names, what crosses it
+node tools/module-check.mjs --mutate cycle-planted        # ... the import web/scene.js's own header says does not exist
+node tools/module-check.mjs --mutate cycle-through-a-second-spelling # ... and the same ring written the way the other page writes its imports
+node tools/module-check.mjs --mutate import-of-a-missing-file # ... a specifier this server answers 404 for, which is a module that never evaluates
+node tools/module-check.mjs --mutate import-names-a-missing-export # ... and a name the other side does not export, which fails before anything evaluates
+node tools/module-check.mjs --mutate one-spelling-for-every-module # ... the fold onto one node, which only two spellings of one file exercise
+node tools/module-check.mjs --mutate exported-mutable-object # ... a state object handed across a boundary with nothing saying why
+node tools/module-check.mjs --mutate state-crosses-as-a-live-let # ... the same object under the one keyword that used to excuse it
+node tools/module-check.mjs --mutate state-crosses-as-a-default # ... and in the export form that used to contribute nothing at all
+node tools/module-check.mjs --mutate export-form-nothing-claims # ... an export spelling nobody thought of, named rather than dropped
+node tools/module-check.mjs --mutate a-barrel-re-export        # ... and the barrel the one-implementation rule already refuses
+node tools/module-check.mjs --mutate imported-object-written-across-the-boundary # ... and the write itself, into a binding this module does not own
+node tools/module-check.mjs --mutate write-through-a-namespace # ... the same write where the far-side name is a property rather than a binding
+node tools/module-check.mjs --mutate write-through-a-rename    # ... and under the rename a name collision is ordinarily resolved with
+node tools/module-check.mjs --mutate write-from-a-page         # ... and from a page's inline module, which is a module like any other
+node tools/module-check.mjs --mutate exemption-outlives-its-export # ... and the exemption table's own rot, which is what a list has instead of a bug
+node tools/module-check.mjs --mutate exemption-covers-nothing  # ... its other half, which is the only thing standing over both rule 3 classifiers
+node tools/module-check.mjs --mutate import-nothing-uses       # ... a name brought across a boundary that no line on this side reads, which is the defect this tool shipped
+node tools/module-check.mjs --mutate import-used-under-its-far-side-name # ... asked of the binding an import makes rather than the name it asks for, which a rename separates
+node tools/module-check.mjs --mutate export-nothing-imports    # ... and the other direction, a name let out that nothing anywhere asks for
+node tools/module-check.mjs --mutate consumer-outside-web-drops-the-name # ... where the only reader is outside web/, and the join is per name rather than per module
+node tools/module-check.mjs --mutate dead-import-is-not-a-consumer # ... and the two halves joined, so a dead import stops holding up the export on the far side of it
+node tools/module-check.mjs --mutate outside-consumer-imports-a-name-it-never-reads # ... the use question asked of the importers outside web/, which used to enter the join unasked
+node tools/module-check.mjs --mutate dead-bare-import          # ... and asked of a package name, the half of that row nothing controlled
+node tools/module-check.mjs --mutate import-used-only-in-a-string # ... a use read at a code position rather than anywhere in the text
+node tools/module-check.mjs --mutate import-used-only-as-an-object-key # ... and not in the one position this file is full of, a property key
+node tools/module-check.mjs --mutate namespace-hides-a-dead-export # ... a namespace import asking for the names it reaches rather than for all of them
+node tools/module-check.mjs --mutate namespace-reach-cannot-be-named # ... and a reach that names none of them, which costs an assertion rather than a blind module
 ```
 
 `jobs-check` needs a GPU browser and ffprobe and renders one real job through
@@ -334,6 +438,22 @@ first and refuses, so everywhere else the `pgrep` below is the check. `export-ch
 ffmpeg and ffprobe.
 `level-check` needs neither a sensor nor a capture — it plants analytic planes straight into
 the depth texture, which is what lets it grade the plane fit against a normal it chose.
+**`module-check` needs nothing at all** — no port, no browser, no install — because every
+failure it is about is a failure to *boot*, and an instrument that needs the page running
+cannot see one. It reads `web/` off disk and refuses a tree with an import cycle in it, an
+import naming a file or an exported name that is not there, state crossing a boundary as an
+object anybody can write into, or a name crossing one that only one end wanted - a dead
+import, or an export nothing imports. That last pair reads **every JavaScript file in the
+checkout** rather than only `web/`, because seven of this tree's exports have their only
+reader in `server/`, `tools/` or `test/` and a row scoped to `web/` reddens all seven on a
+healthy tree — and it asks its use question of those outside importers too, because the two
+halves are one question and **a dead import is not a consumer**, which is the shape that let
+`web/curve.js::easeSlopeAt` sit exported to nothing while the tool printed the export row
+green. **What it does not test is the intra-module dead zone**,
+which is the fault `web/main.js` has actually shipped twice: that reach runs through property
+dispatch and is not statically decidable, so it belongs to a post-boot state diff rather than
+to a source scan, and the tool says so in its own output rather than leaving it to be
+assumed.
 
 **`library-check` binds a span of fixed ports** — `--node-port`, and `--mac-port` through
 `--mac-port + 16`, which default to 8210 and 8211..8227. It checks the whole span before it
@@ -353,9 +473,18 @@ node tools/registration-check.mjs                    # our registration == upstr
 node tools/registration-check.mjs --mutate one-lsb   # ... and must FAIL mutated
 ```
 
-The two below are what CI runs. `syntax-check` needs nothing at all; `release-gate-check` needs the
-registry and exits 2 when it cannot reach it, because it proves the gate by npm's refusal
-rather than by reading a config key:
+The two below are two of CI's three jobs. `syntax-check` needs nothing at all;
+`release-gate-check` needs the registry and exits 2 when it cannot reach it, because it proves
+the gate by npm's refusal rather than by reading a config key. The third is `npm run test:unit`,
+which is `test/` rather than `tools/` and so is not in the arithmetic below — it needs no server,
+no sensor and no browser, but it **does need `npm ci`**, and that changed with the extraction
+rather than being true all along. Four of the modules taken out of `web/main.js` return
+three.js types they exist to build — `world-tilt` a Quaternion, `plan-geometry` a Vector3,
+`gpu-textures` a DataTexture, `bloom-pass` a Pass — so a node test of them cannot resolve
+`three` out of a tree holding only source. Measured on the first push after the extraction:
+`ERR_MODULE_NOT_FOUND: Cannot find package 'three'`, 47 tests, 4 failed, on all four CI arms
+while the same suite ran 68 green locally against an installed tree. `test/runner-control.test.mjs`
+is its control:
 
 ```
 node tools/syntax-check.mjs                          # every JS file this repo ships parses, and the two
@@ -363,6 +492,9 @@ node tools/syntax-check.mjs                          # every JS file this repo s
 node tools/syntax-check.mjs --mutate spec-drifts     # ... and the .knct decoder specification must FAIL when a constant moves under it
 node tools/syntax-check.mjs --mutate shell-id-renamed # ... and a surface whose shell drives an id the markup stopped declaring
 node tools/syntax-check.mjs --mutate shell-key-undeclared # ... and the other direction, which is the one a merge produces
+node tools/syntax-check.mjs --mutate web-citation-outlives-its-module # ... and a module this repo's own prose names, renamed to something the tree does not hold
+node tools/syntax-check.mjs --mutate line-citation-past-the-end # ... and the line half of that, which rots without the path rotting
+node tools/syntax-check.mjs --mutate citation-outside-the-prose # ... and one written in the C++, which is the half of the tree the walk used to skip
 node tools/release-gate-check.mjs                    # the .npmrc supply-chain gate is actually armed
 node tools/release-gate-check.mjs --mutate wrong-unit # ... and must FAIL (also: no-gate, absent)
 ```
@@ -371,7 +503,7 @@ And the ones that are not proof tools, listed because a tool nobody documented i
 nobody runs. **`syntax-check` enforces that list**: anything in `tools/` this file does not
 mention fails it, so a tool added next year is asked by existing. The arithmetic, written
 down because a count nobody adds up is how this list rotted the first time: `tools/` holds
-**28** files, of which **18** are `*-check` proof tools and **10** are the block below.
+**29** files, of which **19** are `*-check` proof tools and **10** are the block below.
 
 ```
 node tools/convert-presets.mjs presets projects jobs # version 3 documents -> version 4, in place
@@ -388,7 +520,17 @@ tools/pi-registration-ab.sh        # the threading A/B runbook for a capture nod
 
 `captures/` is gitignored; `make-fixture` regenerates what the suite needs, and **the sample it
 loops was shot on a degraded link at about 9.3fps**, so size fixtures by frame count rather
-than by duration. See `docs/proof-tools.md`.
+than by duration. **`editor-check` and `keyframe-check` need a take of at least 32s and 24s and
+exit 2 naming the shortfall**, because on the short sample they redden ten rows and four about
+a build with nothing wrong with it, and green two more against a gesture that never happened.
+Their control is `--take sample`. The `--take fixture-1g` those two command lines name is not in
+a checkout either — make it first, and the two of them are the only reason it is 8 loops:
+
+```
+node tools/make-fixture.js captures/sample.knct captures/fixture-1g.knct --loops 8
+```
+
+See `docs/proof-tools.md`.
 
 ## Three things that are easy to get backwards
 
@@ -426,18 +568,19 @@ thing that should be touching capture bytes.
   `registry-check` asserts the 1080/600 rebase factor rather than skipping the value, so a
   preset re-tuned by hand to something near it fails.
 - **1080p is the unit; 600 is bloom's frozen chain; both are correct and do not reconcile
-  them.** Every screen-space term is *expressed* against 1080p, which is why `main.js` reads
-  `bufferHeight / 1080.0` in the shaders. Bloom has no parameter to express, because
-  `UnrealBloomPass` bakes its tap count in at construction, so its mip chain is instead frozen
-  at the 600-tall buffer the look was graded on: `resize` computes
-  `refWidth = (buf.x / buf.y) * 600` and then sets the chain at half of it,
+  them.** Every screen-space term is *expressed* against 1080p, which is why the cloud's
+  shaders in `web/cloud-shader.js` read `bufferHeight / 1080.0`. Bloom has no parameter to
+  express, because `UnrealBloomPass` bakes its tap count in at construction, so its mip chain
+  is instead frozen at the 600-tall buffer the look was graded on: `bloomChainSize` computes
+  `refWidth = (bufferWidth / bufferHeight) * 600` and then sets the chain at half of it,
   `setSize(aspect * 300, 300)`. Neither reference is a typo for the other, and the mechanism
   is the reason - the halo's width is a tap count over a texel count, so a chain with 1.8x
   the texels has a halo 1.8x tighter, constant at last and constant at a glow nobody tuned.
   Measured: a 1080-frozen chain lands 7.16/255 off the graded look on the worst of forty
-  tile means where the 600-frozen one lands 1.10. The comment above `bloom.setSize` in
-  `web/main.js` carries the rest, including the undersampling gap above 1200 that nothing
-  has measured.
+  tile means where the 600-frozen one lands 1.10. The comment above `bloomChainSize` in
+  `web/bloom-pass.js` carries the rest, including the undersampling gap above 1200 that
+  nothing has measured, and `test/bloom-chain.test.mjs` holds the arithmetic to it under
+  bare node.
 
 ## Process hygiene
 

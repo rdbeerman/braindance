@@ -51,6 +51,57 @@ zoom about the pointer, `+`/`-` about the playhead, `,`/`.` to pan, `F` to fit t
 to frame the trim. The overview underneath is always the whole clip: drag its box to pan, an
 edge to zoom, click to go there.
 
+**Easing a move.** Select a key and the `key options` row shapes the segments either side of
+it: `lin`, `in`, `out`, `smooth`, `glide` and `hold`, or drag the handles in the lane for
+anything in between. `in` writes the incoming side and `out` the outgoing one, so they are two
+different numbers rather than two halves of one, and `hold` reaches into the next key because
+holding a value across a segment means flattening both ends of it.
+
+`ends` is the odd one and the one you probably want on a camera: it is about the *track*
+rather than about the selected key, shaping the move's departure and its arrival in one press
+and leaving every key between them alone. Press it from anywhere on the track.
+
+This works on the camera track as well as on the look scalars, and what it shapes there is
+*when* the camera arrives rather than where it goes. The route stays the Catmull-Rom through
+your keys whatever the handles say — easing remaps the traversal and moves no key — which is
+why the composition track can have a lane at all without contradicting the rule that a camera
+move cannot be judged from a graph. The camera lane draws that remap directly: one ramp per
+segment, rising from the key it leaves to the key it reaches, so a linear segment is a plain
+diagonal and an eased one visibly is not. Judge the result in the world instead — the beads
+on the path are sampled at equal intervals of program time, so they bunch where the camera is
+slow and spread where it is fast.
+
+**A camera move starts and stops at speed until you ease it, and `ends` is the one press that
+fixes it.** The spline holds the end pose beyond the outer keys while its tangent there is
+half the first segment's average velocity, so an unshaped move departs the first key and
+arrives at the last with a step in speed rather than a ramp — measured on three keys dollying
+4m over 4s, 0 to 0.63 m/s across a single 30fps output frame at the start, and 0.31 to 0 at
+the end. After `ends` the same move departs at 0.0007 m/s and arrives at 0.0005, which is two
+hundred times smaller and below anything a frame can show.
+
+This used to be two presses of `smooth`, one on the first key and one on the last, with an
+inviting wrong move in between: `smooth` on an *interior* key brings the camera to a near halt
+as it passes, so easing "the whole move" by pressing every key produced a stutter at each one.
+That still works and is still what you want when a deliberate pause at a key is the intent —
+`ends` exists because the common case should not require knowing any of it.
+
+**`glide` is `smooth` one degree up, and the difference is acceleration rather than speed.** A
+cubic can bring the camera's *rate* to zero at a key but never its acceleration, so a `smooth`
+departure still steps from no acceleration to some. `glide` puts two control points on each
+side of the segment instead of one, which makes the timing curve the quintic
+`6u⁵ − 15u⁴ + 10u³` — the shape whose first *and* second derivatives vanish at both ends. It
+costs a slightly faster midpoint, 1.875× the average rate against the cubic's 1.724×. `ends`
+applies the glide shape, so the one-press fix is already the C2 one.
+
+**`+pt` and `−pt` set how many control points a key's handles carry**, which is the degree of
+the segments either side. `+pt` is exact: the extra handle appears, every other one shifts to
+keep the curve exactly where it was, and not a rendered frame changes — so it is safe to press
+while judging a move. `−pt` cannot be exact, because a curve of one degree is not generally a
+curve of the degree below, so removing a point moves the shape. Four points a side is the
+ceiling. The retime curve is deliberately excluded from both: the argument that a handle
+inside the unit box cannot run source time backwards is an argument about a cubic, and it does
+not survive the extra degree.
+
 **Glitch** tears bands of the feed sideways, and it is seven controls rather than
 one because the interesting looks live off the diagonal. `amount` is the master and the one
 worth keyframing — it scales density and shove together, so corruption fades in and out on a
@@ -132,6 +183,55 @@ sensor's own frame and has no square to mean it in. It is a gather over the curr
 than a buffer that accumulates across frames: a buffer would smear along whatever the camera did
 last, so an orbit would drag every streak sideways and a seek would arrive carrying the streak
 the scrub built rather than the one playback would have.
+
+**`trails`** is the buffer that paragraph rules out, and the one look term whose length is
+counted in frames rather than in seconds. It hands its value straight to the afterimage pass's
+damp, and that pass multiplies the picture it is holding once per rendered frame with nothing
+in the expression about how long a frame lasted, so what the control sets is a number of
+frames and not a duration: at 0.9 the trail is down to 12% after twenty of them, which is
+0.83s of a 24fps deliverable and 0.33s of a 60fps one. `fade` and `wake` are in milliseconds
+for the reason [surface memory](architecture.md#surface-memory) gives, and this term is the
+exception to that rather than a second expression of it — so a look graded at one output rate
+does not keep its trail at another. It is the only term this applies to, because
+`AfterimagePass` in `web/post-chain.js` is the only pass in the chain that carries anything
+from one render to the next.
+
+## The edit, and what comes out of it
+
+Two menus, because there are two questions and one of them used to answer both. **File >
+Project settings** holds the shape the stage is letterboxed to and the rate the frames come
+out at, and both are undoable document state. **Output > Export** holds the resolution, the
+format, the output name and a readout of the trim the press will take, and all of those
+belong to a deliverable — one of several files you might make from the edit.
+
+**The shape is the edit's because the camera was keyed against a frame.** A 65:24 shot
+reopened at 16:9 is a different shot with the same keys, which is the class of silent
+reinterpretation the point-size rebase already taught this repo to refuse. The resolution is
+*not* the edit's, and that is the same argument read the other way: every screen-space term
+is expressed against 1080p and bloom's chain is frozen at 600 whatever the buffer is, so
+1920x1080 and 1280x720 of one edit are the same picture and neither needs re-keying. So the
+resolution menu offers only sizes of the project's shape — a size of another shape would be
+a reframe, and reframing is what Project settings is for.
+
+A project stores the shape as the reduced integer pair rather than as a ratio, and the two
+are not interchangeable: the "1.90:1 DCI" the menu prints is really 1.8963, so a document
+carrying that decimal would record a shape 0.2% away from the one the clip was composed
+for and the editor would reframe it on the next open. `2048x1080` reduces to `[256, 135]`
+exactly, and every other group in the table reduces exactly too.
+
+**The rate is the edit's because `trails` is counted in output frames**, for the reason the
+paragraph above gives — the same document at two rates is two different looks, so a rate
+chosen per deliverable would mean two files of one edit carrying two grades with nothing on
+screen saying so. Moving it also made a rate change undoable, which it had never been: the
+handler committed to the stack, and the snapshot it compared held nothing for it to notice.
+
+A deliverable saved by an older build names an output rate this build would ignore, so it is
+refused at the picker rather than read — set the rate in Project settings and save it again.
+A *project* saved by an older build carries an `outputSize` instead of a shape, and that one
+is read rather than refused: its ratio is the shape it was framed at, and its pixels are
+handed to the deliverable, so it renders exactly what it rendered before. A hand-typed size
+of a shape the table has nothing for keeps its own size and lights no shape button, which is
+honest rather than tidy — the stage really is that shape.
 
 ## Levelling a canted mount
 

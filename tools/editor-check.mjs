@@ -53,6 +53,11 @@
 //   node tools/editor-check.mjs --mutate delete-ignores-selection --no-render  # must FAIL
 //   node tools/editor-check.mjs --mutate ease-handles-on-flat  --no-render  # must FAIL
 //   node tools/editor-check.mjs --mutate ease-preset-ignored   --no-render  # must FAIL
+//   node tools/editor-check.mjs --mutate ease-gate-hardcodes-scalar --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate pose-segments-never-shaped --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate pose-handle-overshoots --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate beads-evenly-spaced --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate pose-lane-draws-flat --no-render # must FAIL
 //   node tools/editor-check.mjs --mutate scroller-cannot-shrink --no-render # must FAIL
 //   node tools/editor-check.mjs --mutate camera-motion-keeps-history --no-render # must FAIL
 //   node tools/editor-check.mjs --mutate orbit-uses-scrub-draft --no-render # must FAIL
@@ -84,7 +89,8 @@
 // runs are seconds instead of a minute.
 //
 // Exit 1 means a claim failed. Exit **2** means the harness did not run - no server,
-// a mutation whose anchor no longer matches, a crash. That split is not decoration:
+// a mutation whose anchor no longer matches, a mutation the page never asked for, a
+// crash. That split is not decoration:
 // a stale anchor exiting 1 reads identically to a mutation caught, and this repo has
 // already recorded a tool exiting non-zero with zero failed assertions being written
 // down as a bug found. **Count the failed assertions and read which ones fired.**
@@ -343,6 +349,27 @@ const MUTATIONS = {
     edits: [[
       '      goTo(at);',
       '      goTo(mark.sourceMs / 1000);',
+    ]],
+  },
+
+  // Applying a look from the picker goes back to saying nothing at all, which is how it
+  // shipped for the whole life of the picker: the note lived on the apply button the
+  // picker replaced, and it went with the button rather than moving onto the control that
+  // inherited the gesture. The one action on this surface that rewrites every look value
+  // on screen was also the only one that happened in silence, and no row here had looked,
+  // because the row that would have was written against the button.
+  //
+  // Must redden: **one row** - section 17's "and the note for it says what was applied
+  // rather than naming a revision this gesture did not apply". Nothing else, and that is
+  // the shape worth having: the values still land, so every row about what a partial
+  // apply *writes* stays green and this one is about the sentence alone.
+  'apply-says-nothing': {
+    file: 'web/main.js',
+    edits: [[
+      '          say(stamped\n'
+      + '            ? `applied ${doc.name} · ${doc.rev.slice(7, 15)}`\n'
+      + '            : `applied ${written} values from ${doc.name}, which names part of a look rather than the whole of one`);',
+      '          void stamped; void written;',
     ]],
   },
 
@@ -824,6 +851,53 @@ const MUTATIONS = {
         + '  history.commit();'],
     ],
   },
+  // **The shape is written and the stage is not letterboxed to it.** `setProjectAspect`
+  // adopts the pair, brings the deliverable's size along and repaints the buttons - and
+  // then does not `resize()`, so the document says 4:3 and the picture is still the 16:9
+  // it was. That is the exact failure the split has to make impossible, because the whole
+  // argument for putting the shape on the document is that a composition and the frame it
+  // was composed for are one thing.
+  //
+  // It is here rather than as a picture comparison because a letterbox is geometry, not
+  // pixels: the stage's own box is what changes, and reading it is a stronger question
+  // than a render diff would ask - a build that reframed to *some* other shape would pass
+  // a "did the picture change" test and fail this one.
+  //
+  // **Separable from the read rows on purpose, and the counts are how you tell.** The
+  // three rows that read the dialog stay green under this, because the buttons really are
+  // painted and the document really does hold the new shape; the resolution menu really is
+  // rebuilt, so that row stays green too. What reddens is the press row, which asks the
+  // stage. One failed assertion, and if this ever catches with two the second one is
+  // telling you the mutation did something else as well.
+  // **The output name is read out of the deliverable and never written back into it.**
+  // This is the shipped defect, not a hypothetical: `applyDeliverable` copied
+  // `deliverable.name` into the field and `ensureActiveDeliverable` seeded it empty, and
+  // nothing carried the other direction - so typing a name and pressing `new` stored the
+  // empty string, and every deliverable of one take went on proposing the same filename.
+  // The comment on `applyDeliverable` claims that field is what stops two of them writing
+  // over each other's file, which is a claim a check has to be able to falsify.
+  //
+  // Aimed at the listener rather than at the assignment, because the assignment is what a
+  // reader would fix and the listener is what was missing. It leaves `paintExportName`
+  // alone, so the field still validates and the export button still disables on a bad
+  // name - a build under this mutation looks completely healthy until a document is saved
+  // and read back, which is the whole reason the row walks a round trip.
+  'export-name-not-taken': {
+    file: 'web/main.js',
+    edits: [[
+      'ui.exportName.addEventListener(\'input\', () => {\n  takeExportName();\n  paintExportName();\n});',
+      'ui.exportName.addEventListener(\'input\', () => {\n  paintExportName();\n});',
+    ]],
+  },
+
+  'aspect-skips-the-letterbox': {
+    file: 'web/main.js',
+    edits: [[
+      '  void fromDocument;\n  paintDeliverable();\n  resize();\n  return true;',
+      '  void fromDocument;\n  paintDeliverable();\n  return true;',
+    ]],
+  },
+
   'plant-unswept-control': {
     file: 'web/index.html',
     edits: [[
@@ -1402,17 +1476,23 @@ const MUTATIONS = {
   // conversion missed would have: everything draws through the window and one place
   // still divides by the duration, so the strip looks right and the pointer is wrong by
   // a whole window.
+  // Re-anchored when the window moved into `web/view-window.js`. Two things about its text
+  // changed and neither is this control: the object literal is inside a factory now, so
+  // every line in it carries two more spaces, and the bed's box arrives as the `bedRect`
+  // supplier the factory was given rather than being read off `ui` from inside. The
+  // mutation itself is the same one - the pointer's fraction is taken against the clip and
+  // not against the window.
   'pointer-ignores-view': {
-    file: 'web/main.js',
+    file: 'web/view-window.js',
     edits: [[
-      '  timeAt(clientX) {\n'
-      + '    const r = ui.bed.getBoundingClientRect();\n'
-      + '    const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;\n'
-      + '    return Math.max(0, Math.min(this.duration, (this.a + f * (this.b - this.a)) * this.duration));',
-      '  timeAt(clientX) {\n'
-      + '    const r = ui.bed.getBoundingClientRect();\n'
-      + '    const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;\n'
-      + '    return f * this.duration;',
+      '    timeAt(clientX) {\n'
+      + '      const r = bedRect();\n'
+      + '      const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;\n'
+      + '      return Math.max(0, Math.min(this.duration, (this.a + f * (this.b - this.a)) * this.duration));',
+      '    timeAt(clientX) {\n'
+      + '      const r = bedRect();\n'
+      + '      const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;\n'
+      + '      return f * this.duration;',
     ]],
   },
 
@@ -1587,11 +1667,15 @@ const MUTATIONS = {
   // them too would be naming a different defect. Rows further down the file can go red
   // behind it - a frozen `frameAt` is frozen for whatever seeks next - which is why the
   // rows are read rather than counted.
+  // Re-anchored when the pair moved into `web/clip-range.js`. The clamp is handed the
+  // program's length rather than reading a transport it can no longer see, so the block's
+  // opening line is a test on that argument and the `const dur` that read it is gone. The
+  // three lines the mutation is actually about are unchanged, and so is what removing them
+  // does.
   'clip-range-unclamped': {
-    file: 'web/main.js',
+    file: 'web/clip-range.js',
     edits: [[
-      '  if (timeline) {\n'
-      + '    const dur = timeline.duration;\n'
+      '  if (dur !== null) {\n'
       + '    clipIn = Math.max(0, Math.min(clipIn, dur));\n'
       + '    // `null` still means "to the end", which is a different statement from a number that\n'
       + '    // happens to equal the duration: "whole clip" has to survive a retime that lengthens\n'
@@ -1610,24 +1694,25 @@ const MUTATIONS = {
   // page-error sweep because a build that does not refuse says nothing to the console.
   // The three `editor-check-past` rows above them stay green on purpose,
   // and that is the separation this control exists to make: the clamp itself still works,
-  // and what is missing is the refusal in front of it. Both edits are needed for the defect
-  // to come back at all - either question on its own still catches the document - which is
-  // why this is one mutation rather than two.
+  // and what is missing is the refusal in front of it.
+  //
+  // **Re-anchored onto the predicate itself when `clip-range.js` was extracted, and that is
+  // a change of shape rather than of position.** It used to be two edits - the pair of
+  // questions `applyDeliverable` asks, and the pair `setClipInOut` asks - and one of those
+  // two call sites is in `web/main.js` while the other is now in `web/clip-range.js`. A
+  // spec names one file, so two edits across two files cannot be written down here at all;
+  // and mutating the answer instead of the two questions is the stronger mutation anyway,
+  // because it takes the refusal away from every caller at once rather than from the two
+  // that existed when this was written. The mutated build is the same one: both askers get
+  // whatever they were handed back, unchecked, and the clamp then spreads it.
   'clip-bound-coerces-nonnumeric': {
-    file: 'web/main.js',
+    file: 'web/clip-range.js',
     edits: [
       [
-        "  clipBoundOrThrow(deliverable.in, 'in');\n"
-        + "  clipBoundOrThrow(deliverable.out, 'out');\n",
-        '',
-      ],
-      [
-        "  const nextIn = inn === undefined ? undefined : clipBoundOrThrow(inn, 'in');\n"
-        + "  const nextOut = out === undefined ? undefined : clipBoundOrThrow(out, 'out');\n"
-        + '  if (nextIn !== undefined) clipIn = nextIn;\n'
-        + '  if (nextOut !== undefined) clipOut = nextOut;\n',
-        '  if (inn !== undefined) clipIn = inn;\n'
-        + '  if (out !== undefined) clipOut = out;\n',
+        "  if (value === null && which === 'out') return null;\n"
+        + '  if (typeof value === \'number\' && Number.isFinite(value)) return value;\n',
+        "  if (value === null && which === 'out') return null;\n"
+        + '  return value;\n',
       ],
     ],
   },
@@ -1729,15 +1814,19 @@ const MUTATIONS = {
   // The zoom goes back to deriving its start from a span the clamp then refuses, so a
   // notch at the minimum window pans instead of doing nothing. Reddens the two clamp rows
   // and leaves every other zoom row green - they all start from a window with room.
+  // Re-anchored when the window moved into `web/view-window.js`. The only thing that
+  // changed in the text is the indent - the object literal is inside a factory now, so
+  // every line in it carries two more spaces - and the mutation is the pre-fix zoom exactly
+  // as it was.
   'zoom-pans-at-the-clamp': {
-    file: 'web/main.js',
+    file: 'web/view-window.js',
     edits: [[
-      '    const span = Math.min(1, Math.max(this.minSpan(), (this.b - this.a) / factor));\n'
-      + '    // Where the anchor sits in the window now, kept where it is in the window after.\n'
-      + '    const held = (at - this.a) / Math.max(1e-9, this.b - this.a);\n'
-      + '    const start = at - held * span;',
-      '    const span = (this.b - this.a) / factor;\n'
-      + '    const start = at - (at - this.a) / factor;',
+      '      const span = Math.min(1, Math.max(this.minSpan(), (this.b - this.a) / factor));\n'
+      + '      // Where the anchor sits in the window now, kept where it is in the window after.\n'
+      + '      const held = (at - this.a) / Math.max(1e-9, this.b - this.a);\n'
+      + '      const start = at - held * span;',
+      '      const span = (this.b - this.a) / factor;\n'
+      + '      const start = at - (at - this.a) / factor;',
     ]],
   },
 
@@ -1848,26 +1937,215 @@ const MUTATIONS = {
     edits: [
       [
         '    // A flat segment gets none, for the reason `segmentHasShape` gives.\n'
-        + '    if (!segmentHasShape(keys, seg)) continue;\n',
+        + '    if (!segmentHasShape(keys, seg, row.kind)) continue;\n',
         '',
       ],
       [
         '      // A segment that went flat under the drag has no shape left to edit, so its\n'
         + '      // handle has to go rather than be moved - which is a rebuild, not a move.\n'
-        + '      if (!segmentHasShape(keys, seg)) return false;\n',
+        + '      if (!segmentHasShape(keys, seg, row.kind)) return false;\n',
         '',
       ],
     ],
   },
 
+  // The gate goes back to naming one kind instead of asking the table - the shape the
+  // camera track was locked out by, and the reason `KINDS` exists at all.
+  //
+  // **Aimed at one site rather than at the table**, so that what reddens is exactly the
+  // pose preset rows and the scalar ones beside them stay green as the control. It
+  // leaves the handles drawing and the lane drawn, and takes away only the preset row's
+  // permission.
+  //
+  // An earlier version of this comment justified that by claiming a table edit "would
+  // redden every kind-dependent row at once". For the `eases` flag the truth is the
+  // exact opposite and worth stating, because it is the trap: flipping `eases` to false
+  // reddens **zero** rows, since both sweeps in section 5 read their coverage domain out
+  // of `easedKinds()`. That is what the reverse-inclusion row up there is for, and it is
+  // the assertion that makes this mutation's scoping a choice rather than a hole.
+  //
+  // Measured: 5 assertions, all five `... on a pose key`. Its neighbour below fires 8
+  // - the same five plus the three handle rows - and the difference is the point: two
+  // mutations that both "break the camera's ease" have to be tellable apart, or the
+  // table cannot say which term broke.
+  'ease-gate-hardcodes-scalar': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (!row || !KINDS[row.kind].eases) return null;',
+      "  if (!row || row.kind !== 'scalar') return null;",
+    ]],
+  },
+
+  // A pose handle gets the scalar overshoot band back, which is what it inherited
+  // before anybody asked what overshoot means on an axis that is already a fraction.
+  // The handle leaves the unit box, the eased fraction goes past 1, and `hermite`
+  // continues the segment's own cubic past the key - so the camera sails through the
+  // pose it was keyed at and swings back to it.
+  'pose-handle-overshoots': {
+    file: 'web/main.js',
+    edits: [[
+      "    if (row.owner === 'retime' || !KINDS[row.kind].overshoots) h[1] = Math.min(1, Math.max(0, h[1]));",
+      "    if (row.owner === 'retime') h[1] = Math.min(1, Math.max(0, h[1]));",
+    ]],
+  },
+
+  // The pose lane draws a flat line through the middle of the strip - a lane that is
+  // there, is the right height, holds its diamonds and says nothing. Every other pose
+  // row in section 5 reads the evaluator, the handle geometry or the presets, so this
+  // is the only mutation any of them can see the drawn curve through.
+  'pose-lane-draws-flat': {
+    file: 'web/main.js',
+    edits: [[
+      '    at: (owner, t) => poseLaneFraction(keysOf(owner), t),',
+      '    at: () => 0.5,',
+    ]],
+  },
+
+  // The beads stop being drawn, so the path says where the camera goes and nothing
+  // about when it gets there. Kept as a named mutation after the row that was supposed
+  // to catch it was measured NOT CAUGHT and replaced - see section 5's comment for what
+  // a pixel diff of this canvas actually measures.
+  // The beads mark equal *distances* along the path instead of equal times - the
+  // plausible wrong version, and a much more convincing one than drawing none at all,
+  // because the overlay still looks like an overlay. What it loses is the only thing
+  // it was for: evenly spaced dots are a second drawing of the route, which the line
+  // already gives, and they say nothing about when the camera is anywhere. Their
+  // spacing stops responding to the handles, so section 5's spread ratio collapses
+  // towards 1 on both arms.
+  'beads-evenly-spaced': {
+    file: 'web/main.js',
+    edits: [[
+      '  const out = [];\n'
+      + '  for (let i = 0; i < points.length; i += BEAD_EVERY) out.push(points[i]);\n'
+      + '  return out;',
+      '  const seg = [];\n'
+      + '  let total = 0;\n'
+      + '  for (let i = 1; i < points.length; i++) {\n'
+      + '    const d = Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1],\n'
+      + '      points[i][2] - points[i - 1][2]);\n'
+      + '    total += d;\n'
+      + '    seg.push(total);\n'
+      + '  }\n'
+      + '  const want = Math.ceil(points.length / BEAD_EVERY);\n'
+      + '  const out = [];\n'
+      + '  for (let n = 0; n < want; n++) {\n'
+      + '    const target = (total * n) / Math.max(1, want - 1);\n'
+      + '    let i = seg.findIndex((s) => s >= target);\n'
+      + '    if (i < 0) i = points.length - 2;\n'
+      + '    out.push(points[i]);\n'
+      + '  }\n'
+      + '  return out;',
+    ]],
+  },
+
+  // The NaN that a pose value's subtraction used to produce, restored as its honest
+  // consequence: `segmentHasShape` answers false for every camera segment, so a pose
+  // lane draws no handle and the preset row goes dead beside keys that plainly differ.
+  // This is the defect the kind-aware `segmentHasShape` was written for, and it is
+  // worth its own mutation because it fails *quietly* - a lane with no handles reads
+  // as a lane with nothing to edit.
+  //
+  // Measured: 8 assertions - the five pose preset rows, and the three handle rows that
+  // report `no handle drawn on the pose lane at all` and a drag that moved the value
+  // from 0.8313 to 0.8313. Every scalar row stays green.
+  'pose-segments-never-shaped': {
+    file: 'web/main.js',
+    edits: [[
+      '    moved: (a, b) => poseMoved(a.value, b.value),',
+      '    moved: () => false,',
+    ]],
+  },
+
   // The preset buttons stay live, stay enabled and write nothing - the shape of a
   // control that looks like it works.
+  // The x clamp written against the segment's ends rather than against the dragged
+  // point's neighbours - which is exactly the clamp that shipped, and was complete while
+  // a side held one control point, because then the neighbours *were* the ends. With two
+  // a side it lets them cross, and a crossed pair folds the timing curve back on itself
+  // so the segment holds two values at one instant. Only a drag of a point that is not
+  // index 0 can see it.
+  'handle-clamped-to-the-segment': {
+    file: 'web/main.js',
+    edits: [[
+      `    const span = handleSpan(keys, laneDrag.seg, laneDrag.side, laneDrag.index);
+    h[0] = Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt));`,
+      '    h[0] = Math.min(1, Math.max(0, (laneProgramAt(e.clientX) - a.t) / dt));',
+    ]],
+  },
+
+  // `+pt` appends a control point instead of elevating the curve, which is the obvious
+  // wrong implementation and the one this control exists to be safe from: the count goes
+  // up, the lane draws the new handle, and the camera moves. Only the sampled-curve row
+  // can see it, which is why that row samples rather than reading handles back.
+  'elevation-moves-the-curve': {
+    file: 'web/curve.js',
+    edits: [[
+      `  const cut = side === 'easeOut' ? a.length + 1 : a.length;
+  return { easeOut: raised.slice(0, cut), easeIn: raised.slice(cut) };`,
+      `  const grown = side === 'easeOut' ? { easeOut: [...a, [0.5, 0.5]], easeIn: b } : { easeOut: a, easeIn: [[0.5, 0.5], ...b] };
+  return raised.length ? grown : grown;`,
+    ]],
+  },
+
+  // `ends` writes the selected key rather than the track's two outer ones - which is
+  // `smooth` wearing another name, and is exactly the edit that halts the camera at an
+  // interior key. The `keepsSelected` half of the preset row is what sees it.
+  'ends-reaches-the-selection': {
+    file: 'web/main.js',
+    edits: [[
+      `  if (spec.firstOut && segmentHasShape(keys, 0, kind)) {
+    keys[0].easeOut = copyHandle(spec.firstOut);
+  }`,
+      `  if (spec.firstOut && segmentHasShape(keys, 0, kind)) {
+    keys[i].easeOut = copyHandle(spec.firstOut);
+  }`,
+    ]],
+  },
+
+  // ... and reaches only the departure, leaving the arrival unshaped. Separable from the
+  // row above on purpose: a build that got the first key right and forgot the last is a
+  // move that eases away and stops dead, which is half the reported defect surviving the
+  // fix for it.
+  'ends-skips-the-arrival': {
+    file: 'web/main.js',
+    edits: [[
+      `  if (spec.lastIn && segmentHasShape(keys, keys.length - 2, kind)) {
+    keys[keys.length - 1].easeIn = copyHandle(spec.lastIn);
+  }`,
+      '  if (false && spec.lastIn) { /* mutated */ }',
+    ]],
+  },
+
+  // The glide dropped to a cubic. Its ordinates still read 0 and 1 so the *rate* still
+  // reaches zero at the key and every velocity row stays green - what goes is the
+  // second control point, and with it the acceleration claim and the degree. The preset
+  // row's list comparison is what catches it, which is why that comparison walks the
+  // whole list rather than element zero.
+  'glide-is-a-cubic': {
+    file: 'web/main.js',
+    edits: [[
+      "  glide: { out: [[0.2, 0], [0.4, 0]], in: [[0.6, 1], [0.8, 1]] },",
+      "  glide: { out: [[0.2, 0]], in: [[0.8, 1]] },",
+    ]],
+  },
+
+  // The point controls offered on the retime, where the unit-box monotonicity proof does
+  // not hold. `assertMonotonic` would refuse the document afterwards, which is the loud
+  // half - this control is about the editor not walking into it in the first place.
+  'points-reach-the-retime': {
+    file: 'web/main.js',
+    edits: [[
+      "  if (!state || selection.owner === 'retime') return [];",
+      '  if (!state) return [];',
+    ]],
+  },
+
   'ease-preset-ignored': {
     file: 'web/main.js',
     edits: [[
-      '  if (spec.out) keys[i].easeOut = [...spec.out];\n'
-      + '  if (spec.in) keys[i].easeIn = [...spec.in];\n'
-      + '  if (spec.nextIn && i < keys.length - 1) keys[i + 1].easeIn = [...spec.nextIn];',
+      '  if (spec.out) keys[i].easeOut = copyHandle(spec.out);\n'
+      + '  if (spec.in) keys[i].easeIn = copyHandle(spec.in);\n'
+      + '  if (spec.nextIn && i < keys.length - 1) keys[i + 1].easeIn = copyHandle(spec.nextIn);',
       '  void spec;',
     ]],
   },
@@ -1908,7 +2186,7 @@ const MUTATIONS = {
   // points still disappear, and the four sliders are wired to the wrong sides - which
   // is invisible to any row that only counts what was removed.
   'crop-axes-swapped': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {',
       '  if (cropOn == 1.0 && (pos.y < cropL || pos.y > cropR || pos.x < cropB || pos.x > cropT)) {',
@@ -1921,7 +2199,7 @@ const MUTATIONS = {
   // caught by rows that are not about this, and the claim under test is specifically
   // that a plane stays where it was put as the subject walks away from the sensor.
   'crop-in-image-space': {
-    file: 'web/main.js',
+    file: 'web/cloud-shader.js',
     edits: [[
       '  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {',
       '  float wedge = 2.0 / max(0.001, z);\n'
@@ -2068,10 +2346,10 @@ const DRIVER_RULES = [
   },
   {
     key: 'shelldialogs',
-    what: 'a control in the Export, OBS, or state dialog',
+    what: 'a control in the Project settings, Export, OBS, or state dialog',
     by: 'section 1 opens each application dialog, drives every enabled control, and '
       + 'asserts every format the export dialog offers is one the server encodes',
-    match: (row) => inGroup(row, '#exportDialog', '#obsDialog'),
+    match: (row) => inGroup(row, '#projectDialog', '#exportDialog', '#obsDialog'),
   },
   {
     key: 'paneltabs',
@@ -2173,8 +2451,12 @@ const DRIVER_RULES = [
     //
     // A menu is now what the rule may claim: a trigger or a command inside an `.appmenu`
     // wrapper, plus the links, which is precisely what section 1 opens and drives. A
-    // bare button dropped in the row beside them is uncovered until something drives it,
-    // and `panelToggle` is in `DRIVER_IDS` because section 22 is what drives it.
+    // bare button dropped in the row beside them is uncovered until something drives it.
+    //
+    // The collapse control has since moved off the row and into the View menu as
+    // `menuShowSidebar` (fb03887), so it is inside `.appmenu` and this rule would now
+    // claim it. It stays in `DRIVER_IDS` anyway, for the reason given there: it is the
+    // one command in that popover whose press moves the layout every later section reads.
     match: (row) => inGroup(row, '#navRow') && (inGroup(row, '.appmenu') || row.tag === 'A'),
   },
   {
@@ -2211,12 +2493,19 @@ const DRIVER_IDS = {
   tRate: 'section 4 - the anchor rows and the seek-storm row',
   tCamView: 'section 1 - looks through the program camera and reads the orbit back',
   tRateKey: 'section 5 - plants and removes a retime key',
-  tFps: 'timeline-check and export-check change the output rate and count frames',
+  // `tFps` is deliberately not here. It moved into Project settings with the rate itself,
+  // so the `shelldialogs` rule covers it and section 1 drives it - which is a credit that
+  // names a press. The entry it replaces read "timeline-check and export-check change the
+  // output rate and count frames", and both of those write `transport().outputFps`
+  // directly: true of the model, false of the control, and this file exists because the
+  // suite once tested the first and never the second.
   tSetIn: 'section 3 - sets the range from the playhead',
   tSetOut: 'section 3 - sets the range from the playhead',
   tClearRange: 'section 3 - puts the range back to the whole clip',
   tMark: 'library-check writes a mark and reads the sidecar back',
   tDeleteKey: 'section 5 - removes the selected key',
+  tAddPoint: 'section 5 - grows a segment\'s degree and reads the curve back unmoved',
+  tDropPoint: 'section 5 - shrinks it again, and both are read dead on the retime',
   tPrevKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tNextKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tPreset: 'library-check applies a preset and compares the look',
@@ -2248,8 +2537,14 @@ const DRIVER_IDS = {
   // library link's rather than following it, which is the assertion that matters for a
   // control whose whole behaviour is where it points.
   toMenu: 'section 1 - reads the href it navigates to, beside the library link',
-  tDeliverable: 'library-check, and section 6 here plants a long name in it',
-  tDeliverableNew: 'library-check',
+  // **Both of these were credited to `library-check`, and it presses neither.** It writes
+  // deliverable *directories* on the server and reads `#tNote`; it has never referenced
+  // either control. The picker's other half was true - section 6 does plant a name in it
+  // and read the refusal back - so that half is what is left. The `new` button had nothing
+  // true said about it at all, which is the shape the two project entries above record,
+  // arriving a third time. Section 1 presses it now, so the credit names a press.
+  tDeliverable: 'section 6 - plants a long name in it and reads back which one the picker is left on',
+  tDeliverableNew: 'section 1 - presses it and reads the prompt it opens, the way Save as is driven',
   tExportName: 'section 7 - names the file and refuses a path',
   tExportSize: 'export-check sweeps every size the menu offers',
   tExport: 'section 6 asserts it is reachable, section 7 renders with it',
@@ -2264,7 +2559,13 @@ const DRIVER_IDS = {
   // given a rule over `#panelDock`, and the difference matters: a rule would cover a
   // fifth dock button the day somebody added one, and the dock is four buttons because
   // four is what a thumb can find without looking. A new one should arrive here red.
-  panelToggle: 'section 21 - collapses the panel from the bar and restores it from the key, '
+  // Named here rather than left to the `.appmenu` rule above, even though the control
+  // now sits inside that wrapper and the rule would claim it. The rule's claim is that
+  // section 1 opens a menu and drives its commands, and this is the one command in the
+  // popover whose press changes the page's layout - crediting it to a sweep that presses
+  // every entry it finds would have section 1 collapsing the panel underneath the twenty
+  // sections after it. Section 21 drives it deliberately, and says so.
+  menuShowSidebar: 'section 21 - collapses the panel from the View menu and restores it from the key, '
     + 'and reads the class, the control and the buffer back across the round trip',
   dockCentre: 'section 21 - presses it and reads the pose against the one the View menu\'s own reset lands',
   dockSensor: 'section 21 - presses it and reads the pose against the one Framing\'s own sensor view lands',
@@ -2285,16 +2586,95 @@ const DRIVER_IDS = {
 
 const { chromium } = await loadPlaywright();
 
+/**
+ * Which file each surface this tool opens is served from.
+ *
+ * The two entries `server/index.js`'s `PAGES` map holds for the two surfaces below, and
+ * an identity test rather than a rule about a suffix. The question a mutation's file has
+ * to answer is "are you the document this page is", not "do you look like markup": a
+ * suffix rule would take a spec naming `web/menu.html` - a real file this server really
+ * serves, at `/` - and hand its bytes over as the editor's document, at which point the
+ * interception fires, the delivery counter counts it and the guard below is satisfied by
+ * a page nobody wrote. `registry-check` records that shape at its own boundary. Here a
+ * file no page requests stays unserved and is refused, which is the honest failure.
+ */
+const SURFACE_DOCUMENTS = {
+  '/edit': 'web/index.html',
+  '/record': 'web/index.html',
+};
+
+/**
+ * Where the file a mutation names is asked for by a page opened at `documentPath`, and
+ * what it is handed back as.
+ *
+ * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob on
+ * the basename is a claim about a filename where the server's rule is about a path - two
+ * modules could end in the same name and the wrong one would be served without anything
+ * failing. `export-check`, `keyframe-check`, `timeline-check` and `sensor-view-check`
+ * carry the same function for the same reason. This copy also has a document to place,
+ * because `web/index.html` is not served at `/index.html` - it is what `/edit` and
+ * `/record` are.
+ */
+function servedAt(file, documentPath) {
+  if (file === SURFACE_DOCUMENTS[documentPath]) {
+    return { path: documentPath, contentType: 'text/html; charset=utf-8' };
+  }
+  const TYPES = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+  const ext = file.slice(file.lastIndexOf('.'));
+  if (file.startsWith('web/') && TYPES[ext]) {
+    return { path: `/${file.slice('web/'.length)}`, contentType: TYPES[ext] };
+  }
+  throw new Error(`${file} is neither a module or stylesheet under web/ nor the document `
+    + `${documentPath} is served from, so no page this tool opens would ever request it`);
+}
+
 let mutation = null;
 try {
   mutation = MUTATE ? mutatedSource(MUTATE) : null;
+  // Resolved before a browser is launched rather than at the first route, so a file no
+  // page could request is refused the way an anchor that stopped matching is refused two
+  // lines above - and by the same branch, which is why it is inside this `try`.
+  if (mutation) servedAt(mutation.file, EDITOR_PATH);
 } catch (err) {
   console.log(`[editor] DID NOT RUN - ${err.message}`);
   process.exit(2);
 }
-if (MUTATE) console.log(`[editor] MUTATED BUILD: ${MUTATE} in ${mutation.file} - this run is expected to FAIL`);
-const mutatedJs = mutation?.file === 'web/main.js' ? mutation.body : null;
-const mutatedHtml = mutation?.file === 'web/index.html' ? mutation.body : null;
+if (MUTATE) {
+  console.log(`[editor] MUTATED BUILD: ${MUTATE} in ${mutation.file} at `
+    + `${servedAt(mutation.file, EDITOR_PATH).path} - this run is expected to FAIL`);
+}
+
+/**
+ * Install the active mutation on one page, and hand back the count of times that page
+ * actually asked for it.
+ *
+ * **Keyed on the file the spec names, rather than filtered against the list of files this
+ * tool used to know.** What this replaces was a pair of bodies selected by
+ * `mutation.file === 'web/main.js'` and `=== 'web/index.html'` - true of every spec here
+ * by coincidence, and true right up until the module began splitting. A spec naming a
+ * third file matched neither, so neither route was installed, and the two delivery guards
+ * were written against those same two names, so they could not fire either. The run then
+ * completed against the tree's own source with every row green and printed NOT CAUGHT,
+ * which is the verdict this suite reserves for a check that is blind to a real bug rather
+ * than for a harness that never tried. Measured on a spec pointed at `web/scene.js`, a
+ * module `main.js` imports: 461 assertions, 0 failed, which is the unmutated baseline to
+ * the assertion.
+ *
+ * One helper for both surfaces rather than the routes written out at each of them,
+ * because `page.route` is installed per page: a page that missed one runs the tree's own
+ * build beside a page running the mutated one, and the two arms of one comparison are
+ * then measuring two programs.
+ */
+async function serveMutation(page, documentPath) {
+  if (!mutation) return { path: null, served: () => 0 };
+  const { path, contentType } = servedAt(mutation.file, documentPath);
+  let served = 0;
+  await page.route((url) => url.pathname === path, (route) => {
+    served++;
+    route.fulfill({ contentType, body: mutation.body });
+  });
+  return { path, served: () => served };
+}
 
 // The picker stub, installed before the module evaluates rather than after.
 //
@@ -2349,24 +2729,10 @@ async function openEditor() {
   page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
   await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
-  // Both interceptions are proved below rather than assumed. A route that was
-  // declared and never installed ran the tree's own source and came back NOT CAUGHT
-  // with every row green - a mutation that did nothing, reported as a check that
-  // found nothing.
-  let servedModule = false;
-  if (mutatedJs) {
-    await page.route('**/main.js', (route) => {
-      servedModule = true;
-      route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: mutatedJs });
-    });
-  }
-  let servedHtml = false;
-  if (mutatedHtml) {
-    await page.route((url) => url.pathname === EDITOR_PATH, (route) => {
-      servedHtml = true;
-      route.fulfill({ contentType: 'text/html; charset=utf-8', body: mutatedHtml });
-    });
-  }
+  // The interception is proved below rather than assumed. A route that was declared
+  // and never installed ran the tree's own source and came back NOT CAUGHT with every
+  // row green - a mutation that did nothing, reported as a check that found nothing.
+  const mutant = await serveMutation(page, EDITOR_PATH);
 
   await page.goto(`${URL_BASE}${EDITOR_PATH}?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
   const waitFor = async (expr, what, timeout = 30000) => {
@@ -2386,8 +2752,13 @@ async function openEditor() {
   // not been fitted yet and reporting the planes at their bounds, a finding about the
   // check rather than about the build.
   await waitFor('globalThis.__kinect.takeOpened()', 'the take opened but never finished opening');
-  if (mutatedJs && !servedModule) throw new Error("the mutated module was never served - this page ran the tree's own build");
-  if (mutatedHtml && !servedHtml) throw new Error("the mutated markup was never served - this page ran the tree's own panel");
+  // Gated on a mutation having been asked for rather than on a body this file recognised,
+  // which is the other half of the same hole: a guard whose condition is the same file
+  // name the route was selected by cannot fire for the file that selected no route.
+  if (MUTATE && mutant.served() === 0) {
+    throw new Error(`${MUTATE} was staged for ${mutation.file} at ${mutant.path} and the page never `
+      + "requested it, so every row below would have measured the tree's own build");
+  }
   return { page, errors, close: () => browser.close() };
 }
 
@@ -2402,6 +2773,52 @@ try {
   ({ page, errors, close } = opened);
 } catch (err) {
   console.log(`[editor] DID NOT RUN - ${err.message}`);
+  process.exit(2);
+}
+
+/**
+ * How much footage this file's own rows need under them, and the refusal when the take
+ * handed to `--take` does not hold it.
+ *
+ * **This is a precondition on the fixture, not a claim about the build, and the direction
+ * is the whole point.** A take shorter than the moments these rows reach does not make
+ * them fail honestly - the transport clamps the seek into the clip, every row downstream
+ * reads a playhead somewhere it did not ask for, and the run comes back with red rows
+ * that name real features and mean nothing. Measured on exactly that: against the 9.42s
+ * `sample` this tree ships, ten rows redden, and pointing the same build at a 75.6s
+ * fixture takes seven of them green with no code changed. Four more sit in
+ * `keyframe-check` for the same reason, and two of *its* rows pass against a drag that
+ * never happened - which is the worse half, because a fixture gap that reddens a row gets
+ * investigated and one that greens it does not. So the run declines rather than asserts,
+ * the way it already declines a mutation that was staged and never served: a red row on a
+ * suite reads as a catch, and a fixture that cannot hold the gesture is not a catch.
+ *
+ * The number is **checked rather than trusted**, which is what stops it becoming a second
+ * spelling of the rows that drifts away from them. The scan below reads this file's own
+ * literal seek targets - the same text the run executes - and refuses if any of them is
+ * deeper than what is declared here, so a row added later that seeks to 45s cannot
+ * quietly reintroduce the clamp. It cannot see a seek computed from a variable, and that
+ * is why the declared number is a little above the deepest literal rather than equal to
+ * it. The control for the whole mechanism is to run with `--take sample`: it must exit 2
+ * naming the shortfall, where before it ran to the end and reported ten failures.
+ */
+const NEEDS_TAKE_SEC = 32;
+const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+const literalSeeks = [...ownSource.matchAll(/\.seek\(\s*(\d+(?:\.\d+)?)\s*\)/g)].map((m) => Number(m[1]));
+const deepestSeek = Math.max(...literalSeeks);
+if (deepestSeek > NEEDS_TAKE_SEC) {
+  console.log(`[editor] DID NOT RUN - a row seeks to ${deepestSeek}s while NEEDS_TAKE_SEC is ${NEEDS_TAKE_SEC}`
+    + ' - raise it and point --take at a fixture that holds it, or the clamp will redden rows about the build');
+  await close();
+  process.exit(2);
+}
+const takeSec = await page.evaluate('__kinect.timeline.transport().duration');
+if (!(takeSec >= NEEDS_TAKE_SEC)) {
+  console.log(`[editor] DID NOT RUN - the take "${TAKE}" holds ${takeSec.toFixed(2)}s and these rows reach `
+    + `${deepestSeek}s, so ${NEEDS_TAKE_SEC}s is the shortest take they can be asked about. `
+    + 'Every seek past the end clamps, and the rows downstream would redden about the fixture rather than '
+    + 'about the build. Point --take at a longer capture (tools/make-fixture.js loops a short one).');
+  await close();
   process.exit(2);
 }
 
@@ -2500,10 +2917,15 @@ try {
       // wrapper per menu - so the container is the class, and a rule that could only
       // name ids had to fall back to "anywhere in the row", which is exactly how it came
       // to cover a control nothing drives.
+      // `#projectDialog` is here because the shape and the rate moved onto the document
+      // and out of the deliverable, taking their two controls into a third modal. A
+      // container this list does not name gives every control inside it an empty
+      // `groups`, so nothing in the rule table can match one and they arrive as unknown -
+      // which is the honest direction, and is how the two the split created were noticed.
       groups: ['#appBar', '#panel', '#panelTabs', '#lookPresetGroup', '#cameraGroup', '#navRow',
         '#recordGroup', '#recLookGroup', '#sensorGroup', '#monitorGroup',
-        '#programOutGroup', '#presetPick', '#exportDialog', '#obsDialog', '#panelDock',
-        '.appmenu']
+        '#programOutGroup', '#presetPick', '#projectDialog', '#exportDialog', '#obsDialog',
+        '#panelDock', '.appmenu']
         .filter((g) => el.closest(g)),
       kf: el.classList.contains('kf'),
       mark: el.classList.contains('tmk'),
@@ -2513,7 +2935,7 @@ try {
 
   const covered = (row) => {
     if (row.id && DRIVER_IDS[row.id]) return `named: ${DRIVER_IDS[row.id]}`;
-    if (row.ease) return 'rule: an ease preset, section 5 presses all five';
+    if (row.ease) return 'rule: an ease preset, section 5 presses all five on every easable kind';
     return DRIVER_RULES.find((rule) => rule.match(row))?.by ?? null;
   };
 
@@ -2717,21 +3139,36 @@ try {
     open: !document.getElementById('fileMenu').hidden,
     items: [...document.querySelectorAll('#fileMenu [role=menuitem]')].map((el) => el.textContent.trim()),
   }))()`);
-  check(fileMenu.open && fileMenu.items.length === 2,
-    'File opens from the fixed bar and offers the two designed commands', fileMenu.items.join(' | '));
+  // Three, since the shape and the rate became the edit's rather than a deliverable's and
+  // needed a door. Counted rather than listed, and the count is the assertion: this row
+  // went red on the commit that added Project settings, which is the number doing its job
+  // - a menu that grows an entry nobody decided to add is a surface drifting from its
+  // design, and that is what a literal here catches that a `>= 2` would not.
+  check(fileMenu.open && fileMenu.items.length === 3,
+    'File opens from the fixed bar and offers the three designed commands', fileMenu.items.join(' | '));
   let savePrompt = '';
   page.once('dialog', async (dialog) => { savePrompt = dialog.message(); await dialog.dismiss(); });
   await page.locator('#menuSaveProject').click();
   await new Promise((r) => setTimeout(r, 100));
   check(savePrompt.startsWith('save this edit as'), 'Save as reaches the existing project writer', savePrompt || 'no prompt');
 
+  // `Output > Export`, which is the whole of that menu's editing half now. It was two
+  // commands - `Render` opened this dialog and `Export` jumped past it into the save when
+  // there was a file to hand over - and one menu item doing two unrelated things according
+  // to state the menu did not show is what the merge removed. There is no `#menuRender` to
+  // click any more, and clicking the one that is left has to reach the dialog directly.
   await page.locator('#outputMenuButton').click();
-  await page.locator('#menuRender').click();
+  await page.locator('#menuExport').click();
   const exportDialog = await page.evaluate(`(() => ({
     open: document.getElementById('exportDialog').open,
-    ratios: [...document.querySelectorAll('#exportRatios button')].map((button) => ({
-      label: button.textContent, selected: button.getAttribute('aria-pressed'),
-    })),
+    // The resolutions this dialog offers, where the ratio segments used to be read. The
+    // segments moved to Project settings with the shape itself, and what is left here is
+    // the pixel count - so this reads the menu that is now the deliverable's own choice,
+    // and the row below asserts every entry in it is the shape the stage is letterboxed
+    // to. That is the claim the split rests on: a resolution is not a reframe.
+    resolutions: [...(document.getElementById('tExportSize')?.options ?? [])].map((o) => o.value),
+    chosenSize: document.getElementById('tExportSize')?.value ?? '',
+    aspect: globalThis.__kinect.outputSize().aspect,
     // The format segments, read as a set rather than by id. This row used to name
     // exportFormatMov and exportFormatPng and assert both were disabled, which encoded
     // a claim that has since stopped being true - the server grew prores and an image
@@ -2778,10 +3215,28 @@ try {
       return `${codec || '(unnamed)'}: ${err.message}`;
     }
   }).filter(Boolean);
-  check(exportDialog.open && exportDialog.ratios.some((ratio) => ratio.selected === 'true'),
-    'Render opens the designed Export dialog from the authoritative size table',
-    `${exportDialog.ratios.length} ratios, selected `
-    + `${exportDialog.ratios.filter((r) => r.selected === 'true').map((r) => r.label).join(', ') || 'none'}`);
+  // **The resolution menu is every size of the project's shape, and only those.** Read as
+  // two claims rather than one, because they fail for different reasons and the fix is
+  // different: a menu that is empty is a shape the table has nothing for, and a menu
+  // holding a size of another shape is the reframe-through-a-deliverable this split
+  // exists to make impossible - `exportClip` refuses that pair at the press, so an option
+  // offering it is a control that leads to a refusal.
+  const offShape = exportDialog.resolutions.filter((value) => {
+    const [w, h] = value.split('x').map(Number);
+    if (!(w > 0 && h > 0)) return true;
+    const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+    const d = gcd(w, h);
+    return w / d !== exportDialog.aspect[0] || h / d !== exportDialog.aspect[1];
+  });
+  check(exportDialog.open && exportDialog.resolutions.length > 0,
+    'Export opens the designed dialog with a resolution menu built from the authoritative size table',
+    `${exportDialog.resolutions.length} sizes: ${exportDialog.resolutions.join(', ') || 'none'}`);
+  check(offShape.length === 0,
+    `  and every size it offers is the ${exportDialog.aspect.join(':')} the stage is framed at, so choosing one cannot reframe the clip`,
+    offShape.length ? `off-shape: ${offShape.join(', ')}` : `all of ${exportDialog.resolutions.join(', ')}`);
+  check(exportDialog.resolutions.includes(exportDialog.chosenSize),
+    '  and the size it shows as chosen is one of them, rather than a value the menu cannot display',
+    `chosen ${JSON.stringify(exportDialog.chosenSize)} of ${exportDialog.resolutions.join(', ')}`);
   check(offered.length >= 2 && exportDialog.formats.every((format) => !format.disabled),
     'and it offers a format per codec with every one of them enabled, rather than showing a refusal the encoder no longer makes',
     exportDialog.formats.map((f) => `${f.codec}${f.disabled ? ' DISABLED' : ''}`).join(', ') || 'no format segments');
@@ -2915,12 +3370,364 @@ try {
     check(codecCleanup, 'and the deliverable this block planted was removed again',
       codecCleanup ? `${codecDoor} deleted` : `DELETE refused for ${codecDoor}`);
   }
+  // **The output name, round-tripped through a document rather than read off the field it
+  // was typed into.** Typing a name and reading it straight back proves only that an input
+  // holds text. What the deliverable claims is that the name *travels with it* - that is
+  // the whole reason the field exists on the document - so the only assertion worth making
+  // walks it out to the server and back through an adoption.
+  //
+  // It shipped broken in exactly the gap a field-only row would have missed: the name was
+  // read out of a document on adoption and never written into one, so a saved deliverable
+  // carried the empty string and every deliverable of one take proposed the same filename.
+  // `export-name-not-taken` is the control.
+  //
+  // Restored to what it found afterwards, because section 7 renders with this field and a
+  // name left here would name that file.
+  const nameBefore = await page.evaluate('document.getElementById("tExportName").value');
+  const nameDoc = `ec${process.pid}-name`;
+  const nameTrip = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const el = document.getElementById('tExportName');
+    el.value = 'round-trip-probe';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    const inDocument = k.library.activeDeliverable()?.name ?? null;
+    const put = await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(k.library.activeDeliverable()),
+    });
+    if (!put.ok) return { failed: 'PUT ' + put.status };
+    const stored = (await (await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}))).json()).body?.name ?? null;
+    // Typed over before the adoption, so what comes back cannot be what is already there.
+    el.value = 'a-different-name';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    const sel = document.getElementById('tDeliverable');
+    if (![...sel.options].some((o) => o.value === ${JSON.stringify(nameDoc)})) {
+      sel.append(new Option(${JSON.stringify(nameDoc)}, ${JSON.stringify(nameDoc)}));
+    }
+    sel.value = ${JSON.stringify(nameDoc)};
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 400));
+    return { inDocument, stored, afterAdoption: el.value };
+  })()`);
+  check(nameTrip.inDocument === 'round-trip-probe',
+    'the name typed for the output reaches the deliverable that is supposed to remember it',
+    nameTrip.failed ?? `the document reads ${JSON.stringify(nameTrip.inDocument)}`);
+  check(nameTrip.stored === 'round-trip-probe',
+    '  and the deliverable written to the server carries it, rather than the empty one it was seeded with',
+    `stored ${JSON.stringify(nameTrip.stored)}`);
+  check(nameTrip.afterAdoption === 'round-trip-probe',
+    '  and adopting that deliverable puts it back, which is what makes two of them name two files',
+    `the field reads ${JSON.stringify(nameTrip.afterAdoption)} after adopting over ${JSON.stringify('a-different-name')}`);
+  await page.evaluate(`(async () => {
+    const el = document.getElementById('tExportName');
+    el.value = ${JSON.stringify(nameBefore)};
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('tDeliverable').value = '';
+    // The header is not decoration on a DELETE here - this server answers 415 without it,
+    // and a rejected cleanup leaves the document behind and reddens the page-errors row.
+    await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}), {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    });
+  })()`);
+
+  // **The deliverable's `new` button, driven the way Save as is driven.** It came into
+  // this dialog with the picker and was credited to `library-check`, which has never
+  // referenced it - so nothing pressed it, and the `shelldialogs` rule's claim to drive
+  // every enabled control in this dialog was false for one of them.
+  //
+  // Dismissed rather than accepted, and that is the whole assertion rather than a
+  // shortcut: what this control does first is ask for a name, so a build that had lost
+  // the handler opens no prompt and this row is red. Accepting would write a document to
+  // the server in the middle of section 1 and leave the picker on it, which is the class
+  // of side effect two comments in this file already record. Save as is driven exactly
+  // this way twenty lines above.
+  let newPrompt = null;
+  page.once('dialog', async (dialog) => { newPrompt = dialog.message(); await dialog.dismiss(); });
+  await page.locator('#tDeliverableNew').click();
+  await new Promise((r) => setTimeout(r, 150));
+  check(typeof newPrompt === 'string' && /deliverable/i.test(newPrompt),
+    'the deliverable\'s new button reaches the writer that names one, rather than being markup in the dialog',
+    newPrompt === null ? 'no prompt opened' : `prompt: ${JSON.stringify(newPrompt)}`);
+
   await page.locator('#exportClose').click();
-  await page.locator('#outputMenuButton').click();
-  await page.locator('#menuExport').click();
-  check(await page.evaluate('document.getElementById("exportDialog").open'),
-    'Export opens the same dialog before a render exists, rather than inventing a second path');
-  await page.locator('#exportClose').click();
+
+  // **File > Project settings, which is the third application dialog and the one the
+  // shape moved into.** The row this replaces asserted that `Output > Export` opened the
+  // same dialog `Render` did before a render existed - a claim about two commands that
+  // were two doors onto one thing, and there is one command now, so the row had become
+  // the click above repeated. What is worth asserting in its place is the dialog that did
+  // not exist: the shape and the rate are the edit's, and the controls that write them
+  // have to be reachable and have to work.
+  await page.locator('#fileMenuButton').click();
+  await page.locator('#menuProjectSettings').click();
+  const projectDialog = await page.evaluate(`(() => ({
+    open: document.getElementById('projectDialog').open,
+    aspects: [...document.querySelectorAll('#projectAspects button')].map((button) => ({
+      label: button.textContent, aspect: button.dataset.aspect,
+      selected: button.getAttribute('aria-pressed'),
+    })),
+    // Read off the control rather than off a list written here, for the reason the markup
+    // gives for leaving it empty: restoreProject refuses a rate this build does not
+    // offer, and a tool spelling the rates out again would be a third statement of a list
+    // that is supposed to have one.
+    // No backticks in this comment on purpose - it lives inside a template literal, and
+    // one here ends the literal. That is the sixth time in this repo, and the fifth is
+    // noted twenty lines up in this same section.
+    rates: [...(document.getElementById('tFps')?.options ?? [])].map((o) => o.value),
+    rate: document.getElementById('tFps')?.value ?? '',
+  }))()`);
+  check(projectDialog.open && projectDialog.aspects.length >= 5,
+    'Project settings opens the designed dialog with a shape per group in the authoritative size table',
+    `${projectDialog.aspects.length} shapes: ${projectDialog.aspects.map((a) => a.label).join(', ') || 'none'}`);
+  check(projectDialog.aspects.filter((a) => a.selected === 'true').length === 1,
+    '  and exactly one of them is lit, because the clip is framed at one shape rather than at a set of them',
+    `lit: ${projectDialog.aspects.filter((a) => a.selected === 'true').map((a) => a.label).join(', ') || 'none'}`);
+  check(projectDialog.rates.length >= 2 && projectDialog.rates.includes(projectDialog.rate),
+    '  and the rate it shows is one the control offers, so the list the document is validated against is the list on screen',
+    `${projectDialog.rate} of ${projectDialog.rates.join(', ') || 'none'}`);
+
+  // **Pressed, and put back.** Reading five buttons says nothing about whether any of them
+  // is wired - the argument the format segments above are driven for - so one that is not
+  // already lit is pressed and the stage is asked whether it followed. It is pressed back
+  // immediately afterwards, because the shape is the letterbox: every section from 8
+  // onward reads the stage at pointer coordinates, and this file already carries two scars
+  // from a probe in section 1 leaving a later section measuring something else.
+  //
+  // The stage's own aspect is the discriminator rather than the button's `aria-pressed`,
+  // which is the press describing itself. A build that lit the button and reframed nothing
+  // would pass on the attribute and fail here.
+  const stageAspect = () => page.evaluate(`(() => {
+    const r = document.getElementById('stage').getBoundingClientRect();
+    return r.height > 0 ? r.width / r.height : 0;
+  })()`);
+  const wasLit = projectDialog.aspects.find((a) => a.selected === 'true');
+  const toPress = projectDialog.aspects.find((a) => a.selected !== 'true');
+  if (!wasLit || !toPress) {
+    check(false, 'pressing a shape reframes the stage and rebuilds the resolution menu under it',
+      `nothing to press: lit ${wasLit?.label ?? 'none'}, unlit ${toPress?.label ?? 'none'}`);
+  } else {
+    const before = await stageAspect();
+    // The resolution the deliverable is on before the shape moves, because a shape change
+    // has to replace a size it cannot keep and must not lose the one it displaced. Without
+    // a memory that replacement is one-way: pick a size, change the shape, come back, and
+    // the size the operator chose has become whatever the shape opens on - a per-file
+    // setting silently downgraded by an edit that claims to move only the frame. Undo is
+    // the sharpest way in, because it advertises that it puts things back.
+    // **Moved off the size this shape opens on first, or the row below cannot fail.** The
+    // opening size for 16:9 is the table's default, so a round trip that starts there ends
+    // there whether the displaced size is remembered or recomputed - the first version of
+    // this row read `1920x1080 -> replaced -> 1920x1080` and would have passed against a
+    // build with no memory at all. Picking any other size of the same shape is what makes
+    // the two answers different.
+    const otherSize = await page.evaluate(`(() => {
+      const sel = document.getElementById('tExportSize');
+      const other = [...sel.options].map((o) => o.value).find((v) => v !== sel.value);
+      if (!other) return null;
+      sel.value = other;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return other;
+    })()`);
+    const sizeBefore = await page.evaluate('__kinect.outputSize().size');
+    check(otherSize !== null && sizeBefore === otherSize,
+      '  and this shape offers a second size to sit on, or the round trip below proves nothing',
+      `moved to ${JSON.stringify(otherSize)}, the deliverable reads ${JSON.stringify(sizeBefore)}`);
+    await page.locator(`#projectAspects button[data-aspect="${toPress.aspect}"]`).click();
+    await settle();
+    const pressed = await page.evaluate(`(() => ({
+      aspect: globalThis.__kinect.outputSize().aspect.join('x'),
+      sizes: [...document.getElementById('tExportSize').options].map((o) => o.value),
+    }))()`);
+    const after = await stageAspect();
+    const wanted = toPress.aspect.split('x').map(Number);
+    check(pressed.aspect === toPress.aspect
+      && Math.abs(after - wanted[0] / wanted[1]) / (wanted[0] / wanted[1]) < 0.02,
+      'pressing a shape writes it into the document and the stage is letterboxed to it',
+      `pressed ${toPress.label}: the document reads ${pressed.aspect}, the stage is `
+      + `${after.toFixed(4)} where ${(wanted[0] / wanted[1]).toFixed(4)} was asked for `
+      + `(it was ${before.toFixed(4)})`);
+    check(pressed.sizes.length > 0 && pressed.sizes.join(',') !== exportDialog.resolutions.join(','),
+      '  and the resolution menu was rebuilt under it, rather than going on offering the old shape\'s sizes',
+      `${pressed.sizes.join(', ') || 'none'} where the old shape offered ${exportDialog.resolutions.join(', ')}`);
+    await page.locator(`#projectAspects button[data-aspect="${wasLit.aspect}"]`).click();
+    await settle();
+    const restored = await stageAspect();
+    check(Math.abs(restored - before) < 1e-6,
+      '  and pressing the shape it came in on puts the stage back, so no later section reads a frame this block moved',
+      `${before.toFixed(6)} -> ${after.toFixed(6)} -> ${restored.toFixed(6)}`);
+    const sizeRestored = await page.evaluate('__kinect.outputSize().size');
+    const opens = await page.evaluate('__kinect.outputSize().size');
+    check(sizeRestored === sizeBefore,
+      '  and the resolution that shape was on comes back with it, rather than the one it opens on',
+      `${sizeBefore} -> ${pressed.sizes[0]} -> ${sizeRestored}`
+      + (sizeRestored === opens && sizeRestored !== sizeBefore ? ' (the opening size, so the displaced one was lost)' : ''));
+    // Put the deliverable back on the size this section found it on, for the reason the
+    // shape is put back: section 7 renders with it.
+    await page.evaluate(`(() => {
+      const sel = document.getElementById('tExportSize');
+      if (sel.value !== ${JSON.stringify(exportDialog.chosenSize)}) {
+        sel.value = ${JSON.stringify(exportDialog.chosenSize)};
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    })()`);
+  }
+  // **The rate, driven through the control rather than through the transport.** It was
+  // credited in `DRIVER_IDS` to `timeline-check` and `export-check`, and neither of them
+  // has ever touched it: both write `transport().outputFps` directly, which is the model
+  // this file exists to stop standing in for the control. That credit was true of nothing
+  // and would have gone on reading as coverage, so the entry is gone and the dialog rule
+  // covers it - which obliges section 1 to drive it, and this is that.
+  //
+  // Restored to the rate it came in on for the reason the shape above is: `timeline.frame`
+  // counts output frames, so a rate left changed here moves the playhead under every
+  // section after it.
+  const rateBack = projectDialog.rate;
+  const rateOther = projectDialog.rates.find((r) => r !== rateBack);
+  if (!rateOther) {
+    check(false, 'setting the output rate writes it into the transport the playhead is counted in',
+      `only one rate offered: ${projectDialog.rates.join(', ') || 'none'}`);
+  } else {
+    const heldSec = await page.evaluate('__kinect.timeline.transport().programSec');
+    await page.selectOption('#tFps', rateOther);
+    await settle();
+    const moved = await page.evaluate(`(() => ({
+      fps: globalThis.__kinect.timeline.transport().outputFps,
+      sec: globalThis.__kinect.timeline.transport().programSec,
+    }))()`);
+    check(moved.fps === Number(rateOther),
+      'setting the output rate writes it into the transport the playhead is counted in',
+      `asked ${rateOther}, the transport reads ${moved.fps}`);
+    // The playhead is held across the change, which is the half a rate control gets wrong.
+    // A frame index reinterpreted at a new rate lands somewhere else in the clip - frame
+    // 300 is 10s at 30 and 5s at 60 - so the assertion is about the second, not the frame.
+    check(Math.abs(moved.sec - heldSec) < 1 / Math.min(...projectDialog.rates.map(Number)),
+      '  and the playhead is held in seconds across it, rather than being reinterpreted at the new rate',
+      `${heldSec.toFixed(4)}s -> ${moved.sec.toFixed(4)}s across ${rateBack} -> ${rateOther}fps`);
+    await page.selectOption('#tFps', rateBack);
+    await settle();
+    const restoredRate = await page.evaluate('__kinect.timeline.transport().outputFps');
+    check(restoredRate === Number(rateBack),
+      '  and the rate it came in on goes back, so no later section counts frames at another one',
+      `${rateBack} -> ${rateOther} -> ${restoredRate}`);
+  }
+  // **Both ways out, because the rule claims both.** `shelldialogs` says section 1 drives
+  // every enabled control in this dialog, and `done` and the `x` are two controls with one
+  // job - so shutting it with only one of them would leave the other claimed by a rule and
+  // pressed by nothing, which is the attribution failure three entries in `DRIVER_IDS`
+  // were just corrected for. Asked as two rows rather than one because they fail
+  // separately: a `done` that does not close is a different build from an `x` that does
+  // not.
+  await page.locator('#projectDone').click();
+  check(await page.evaluate('!document.getElementById("projectDialog").open'),
+    '  and done shuts it, rather than being a button that only looks like the way out');
+  await page.locator('#fileMenuButton').click();
+  await page.locator('#menuProjectSettings').click();
+  await page.locator('#projectClose').click();
+  check(await page.evaluate('!document.getElementById("projectDialog").open'),
+    '  and so does the close corner, so the dialog has two ways out and both of them work');
+
+  // **The two refusals the whole split rests on, and nothing in this suite reached either
+  // of them.** `applyDeliverable` throws when a stored size belongs to another shape, and
+  // `exportClip` throws when the size a render will actually use does - and every document
+  // and every job any tool here builds is internally consistent, so both `if` blocks could
+  // be deleted and the suite would stay green. A completeness pass found that, and it is
+  // the shape `docs/instruments.md` names: the rows above prove the menu cannot *offer* an
+  // off-shape size, which is a different claim from the backstop firing when something
+  // arrives past the menu. The job queue is exactly that something.
+  //
+  // Driven through the hooks rather than through the UI, deliberately and for the reason
+  // `restoreProject` is exposed raw: no gesture can build these documents, so a check that
+  // could only reach them by clicking could never hand them over at all.
+  //
+  // The whole block restores the document it found, because everything after section 1
+  // reads it.
+  const liveProject = await page.evaluate('__kinect.keyframes.project()');
+  const liveSize = await page.evaluate('__kinect.outputSize().size');
+  const refusals = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const out = {};
+    const shape = k.outputSize().aspect.join(':');
+    // A deliverable this build *can* read - version 2, everything else valid - whose only
+    // fault is a size of another shape. Version 1 would be refused a line earlier by the
+    // version gate, which is why the row that queues one cannot reach this.
+    const wrongShape = shape === '16:9' ? '1080x1080' : '1920x1080';
+    try {
+      k.library.applyDeliverable({
+        version: 2, in: 0, out: null, outputSize: wrongShape, codec: 'h264', name: '',
+      });
+      out.deliverable = 'adopted';
+    } catch (err) { out.deliverable = err.message; }
+    // And the size a render will use, handed over the way a queued job hands it over.
+    // exportClip reads width and height ahead of the deliverable's own size, so this is the
+    // only door that can be asked this question. No backticks in this comment on purpose -
+    // it lives inside a template literal, and one here ends the literal. Eighth time.
+    const [w, h] = wrongShape.split('x').map(Number);
+    try {
+      await k.export.run({ from: 0, to: 0, width: w, height: h, name: 'ec-shape-probe' });
+      out.render = 'rendered';
+    } catch (err) { out.render = err.message; }
+    out.shape = shape;
+    out.asked = wrongShape;
+    return out;
+  })()`);
+  check(/framed at/.test(refusals.deliverable) && /not the/.test(refusals.deliverable),
+    'a stored deliverable whose size is another shape is refused, which is the reframe a deliverable is not allowed to perform',
+    `${refusals.shape} clip, ${refusals.asked} deliverable: ${String(refusals.deliverable).slice(0, 90)}`);
+  check(/framed at/.test(refusals.render),
+    'and a render handed a size of another shape is refused at the press, which is the backstop the job queue arrives through',
+    `${refusals.shape} clip, asked for ${refusals.asked}: ${String(refusals.render).slice(0, 90)}`);
+
+  // **The path every project saved before this branch takes on its next open, and nothing
+  // drove it.** A legacy document carries `outputSize` and no `aspect`, so the shape is
+  // derived from it and the size is handed to the deliverable in the same breath - which is
+  // new logic rather than a refactor, and the completeness pass found it reached by no row
+  // at all. Both halves are asked: the shape came out right, and the pixels survived.
+  //
+  // `1600x900` rather than a size the table lists, because the interesting case is a
+  // hand-typed size the menu never offered - that is what a pre-branch document could hold,
+  // and keeping its exact pixels is the whole promise of reading the legacy field.
+  const legacy = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const doc = JSON.parse(JSON.stringify(${JSON.stringify(liveProject)}));
+    delete doc.aspect;
+    delete doc.outputFps;
+    doc.outputSize = '1600x900';
+    try {
+      k.library.restoreProject(doc);
+      return {
+        ok: true, aspect: k.outputSize().aspect.join(':'), size: k.outputSize().size,
+        fps: k.timeline.transport().outputFps,
+      };
+    } catch (err) { return { ok: false, error: err.message }; }
+  })()`);
+  check(legacy.ok && legacy.aspect === '16:9',
+    'a project carrying only the legacy outputSize is framed at the shape that size is',
+    legacy.ok ? `1600x900 gives ${legacy.aspect}` : `refused: ${String(legacy.error).slice(0, 80)}`);
+  check(legacy.size === '1600x900',
+    '  and the pixels it named survive onto the deliverable, so it renders what it rendered before',
+    `the deliverable reads ${legacy.size}`);
+  check(legacy.fps === 30,
+    '  and a document with no rate reads as 30, which is what absent has to mean for every project written before the rate moved',
+    `${legacy.fps}fps`);
+
+  // And the other half of the same rule: a legacy size whose *shape* the table cannot serve
+  // is refused rather than opened into a state with no resolution to render at.
+  const legacyOff = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const doc = JSON.parse(JSON.stringify(${JSON.stringify(liveProject)}));
+    delete doc.aspect;
+    doc.outputSize = '1600x1000';
+    try { k.library.restoreProject(doc); return { ok: true }; } catch (err) { return { ok: false, error: err.message }; }
+  })()`);
+  check(!legacyOff.ok && /offers no resolution for/.test(String(legacyOff.error)),
+    '  while one whose shape this build has no size for is refused, rather than opened onto an export that cannot run',
+    legacyOff.ok ? 'adopted 8:5' : String(legacyOff.error).slice(0, 100));
+
+  await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    k.library.restoreProject(${JSON.stringify(liveProject)});
+    k.setOutputSize(${JSON.stringify(liveSize)});
+  })()`);
+  await settle();
 
   const cameraBefore = await page.evaluate('__kinect.freeCamera.position.toArray()');
   await page.evaluate('__kinect.freeCamera.position.x += 2; __kinect.controls.update()');
@@ -3140,7 +3947,7 @@ try {
   // in a filename, so a shortcut handler with no guard makes the one text field in
   // the export dialog unusable while quietly editing the clip.
   await page.locator('#outputMenuButton').click();
-  await page.locator('#menuRender').click();
+  await page.locator('#menuExport').click();
   await page.evaluate(`(() => { const el = document.getElementById('tExportName'); el.value = ''; el.focus(); })()`);
   const beforeTyping = await range();
   const keysBeforeTyping = await lanes();
@@ -4019,44 +4826,339 @@ try {
 
   // Ease presets, each pressed and each read back. Five rows rather than one, because
   // a cumulative row cannot say which preset stopped writing.
+  //
+  // **Two of these reach past the selected key and one of those two reaches backwards**,
+  // so what a row reads is part of what it asserts. `nextIn` is `hold` flattening the far
+  // end of the segment it holds across. `firstOut` and `lastIn` are `ends`, which is
+  // about the *track* rather than about the selection - it shapes the move's departure
+  // and its arrival whichever key happens to be selected - so this table names key 0 as
+  // well, and the fixtures below are three keys deep, which makes key 2 the last one.
+  //
+  // `keepsSelected` is the other half of that claim and the half a naive row would miss:
+  // `ends` has to leave the keys between the two ends exactly as it found them, because
+  // a preset that quietly smoothed an interior key would bring the camera to a halt as
+  // it passed - which is the documented trap this preset exists to route around. The
+  // fixtures all start bent, so "unchanged" here is a positive statement about a shape
+  // nothing else in the table writes.
   const EXPECTED = {
-    linear: { out: [1 / 3, 1 / 3], in: [2 / 3, 2 / 3] },
-    in: { in: [0.58, 1] },
-    out: { out: [0.42, 0] },
-    smooth: { out: [0.42, 0], in: [0.58, 1] },
-    hold: { out: [1, 0], nextIn: [1, 0] },
+    linear: { out: [[1 / 3, 1 / 3]], in: [[2 / 3, 2 / 3]] },
+    in: { in: [[0.58, 1]] },
+    out: { out: [[0.42, 0]] },
+    smooth: { out: [[0.42, 0]], in: [[0.58, 1]] },
+    glide: { out: [[0.2, 0], [0.4, 0]], in: [[0.6, 1], [0.8, 1]] },
+    ends: {
+      firstOut: [[0.2, 0], [0.4, 0]],
+      lastIn: [[0.6, 1], [0.8, 1]],
+      keepsSelected: true,
+    },
+    hold: { out: [[1, 0]], nextIn: [[1, 0]] },
   };
   const presetNames = await page.evaluate('__kinect.editor.easePresets()');
   check(presetNames.length === Object.keys(EXPECTED).length,
     'the preset row offers exactly the presets this file knows', presetNames.join(', '));
-  for (const name of presetNames) {
-    // Every key starts bent, and `linear` is why. A key created plain already carries
-    // the linear handles, so pressing `linear` on it agrees with a build that writes
-    // nothing at all - the row would be green against a preset row that had been
-    // disconnected. Measured: `--mutate ease-preset-ignored` fired four of the five
-    // preset rows and left this one passing. Starting from a shape none of the five
-    // produces gives every preset something to undo.
-    await plant({
-      bloom: [
-        { t: 1, value: 0.2, easeOut: [0.9, 0.1], easeIn: [0.1, 0.9] },
-        { t: 5, value: 0.9, easeOut: [0.9, 0.1], easeIn: [0.1, 0.9] },
-        { t: 9, value: 0.3, easeOut: [0.9, 0.1], easeIn: [0.1, 0.9] },
+
+  // **One fixture per kind that claims to be easable, enumerated off the page's own
+  // table.** This used to press the five presets on `bloom` and nothing else, while
+  // `covered()` credited every `data-ease` button with "section 5 presses all five" -
+  // true of scalars and, the day the camera track gained handles, a coverage claim
+  // nothing satisfied for the new kind. Asking `easedKinds()` means the claim is true
+  // by construction, and a fourth kind added next year fails the row below until
+  // somebody gives it a fixture, which is the right answer rather than a nuisance:
+  // an untested kind should be loud, not absent.
+  //
+  // Every key starts bent, and `linear` is why. A key created plain already carries the
+  // linear handles, so pressing `linear` on it agrees with a build that writes nothing
+  // at all - the row would be green against a preset row that had been disconnected.
+  // Measured: `--mutate ease-preset-ignored` fired four of the five preset rows and
+  // left this one passing. Starting from a shape none of the five produces gives every
+  // preset something to undo.
+  const BENT = { easeOut: [[0.9, 0.1]], easeIn: [[0.1, 0.9]] };
+  const KIND_FIXTURES = {
+    scalar: {
+      owner: 'bloom',
+      keys: [
+        { t: 1, value: 0.2, ...BENT },
+        { t: 5, value: 0.9, ...BENT },
+        { t: 9, value: 0.3, ...BENT },
       ],
-    });
-    await page.evaluate(`__kinect.editor.select('bloom', 1)`);
-    await settle();
-    await page.locator(`#tEase button[data-ease=${name}]`).click();
-    await settle();
-    const got = await page.evaluate(`__kinect.editor.easeOf('bloom', 1)`);
-    const next = await page.evaluate(`__kinect.editor.easeOf('bloom', 2)`);
-    const want = EXPECTED[name];
-    const okOut = !want.out || (near(got.easeOut[0], want.out[0], 1e-9) && near(got.easeOut[1], want.out[1], 1e-9));
-    const okIn = !want.in || (near(got.easeIn[0], want.in[0], 1e-9) && near(got.easeIn[1], want.in[1], 1e-9));
-    const okNext = !want.nextIn || (near(next.easeIn[0], want.nextIn[0], 1e-9) && near(next.easeIn[1], want.nextIn[1], 1e-9));
-    check(okOut && okIn && okNext, `the "${name}" preset writes the handles it names`,
-      `out ${JSON.stringify(got.easeOut)} in ${JSON.stringify(got.easeIn)}`
-      + (want.nextIn ? ` next-in ${JSON.stringify(next.easeIn)}` : ''));
+      // Inside the segment the selected key's `easeOut` shapes, and inside the one it
+      // does not - see the drag rows below for why the pair matters.
+      inside: 7,
+      outside: 3,
+      read: (v) => v,
+    },
+    pose: {
+      owner: 'camera',
+      // Three poses that differ in every channel, so `segmentHasShape` has something to
+      // find whichever term a broken build drops. Unevenly spaced for the same reason
+      // `keyframe-check`'s own path is.
+      keys: [[-1.1, 0.9, 50], [0.2, 1.15, 44], [1.3, 0.8, 58]].map(([x, z, fov], i) => ({
+        t: 1 + i * 4,
+        value: { position: [x, 0.35, z], quaternion: [0, 0, 0, 1], fov },
+        ...BENT,
+      })),
+      inside: 7,
+      outside: 3,
+      read: (v) => v.position[0],
+    },
+  };
+  const easedKinds = await page.evaluate('__kinect.editor.easedKinds()');
+  const unfixtured = easedKinds.filter((k) => !KIND_FIXTURES[k]);
+  check(unfixtured.length === 0,
+    'every kind the page declares easable has a fixture here, so a kind added later is asked about by existing',
+    unfixtured.length ? `nothing drives ${unfixtured.join(', ')}` : `${easedKinds.join(', ')} all driven`);
+  // **And the reverse inclusion, which is the half that stops this section being
+  // circular.** The row above enumerates the page's own declaration and then loops over
+  // it, so both loops take their coverage from the thing under test: flipping `eases`
+  // to false on `pose` shrinks `easedKinds()` to `['scalar']`, every pose row below
+  // silently stops existing, that row passes because nothing is unfixtured, and
+  // `keyframe-check` stays green too because `poseAt` never consults the table. One
+  // token would have put the reported bug back - preset buttons dead on a camera key -
+  // with the whole suite green. This table is the independent statement of which kinds
+  // must ease, and it is in a file the page cannot edit.
+  const undeclared = Object.keys(KIND_FIXTURES).filter((k) => !easedKinds.includes(k));
+  check(undeclared.length === 0,
+    'and every kind this file has a fixture for is still declared easable, so the page cannot shrink its own coverage',
+    undeclared.length ? `the page no longer eases ${undeclared.join(', ')}` : `${Object.keys(KIND_FIXTURES).join(', ')} all declared`);
+
+  for (const kind of easedKinds.filter((k) => KIND_FIXTURES[k])) {
+    const fx = KIND_FIXTURES[kind];
+    for (const name of presetNames) {
+      await plant({ [fx.owner]: fx.keys });
+      await page.evaluate(`__kinect.editor.select('${fx.owner}', 1)`);
+      await settle();
+      // **Asked before it is pressed, and this is not defensive coding.** Playwright's
+      // `click` waits for a control to become actionable, so pressing a *disabled*
+      // button does not fail - it hangs for the full 30s timeout and takes the whole
+      // run down with it. Measured: `--mutate ease-gate-hardcodes-scalar` shuts the
+      // preset row for pose keys, and the first version of this loop reported
+      // `DID NOT RUN` with **zero** failed assertions, which is a crash wearing the
+      // shape of a catch - and by this file's own verdict block, exit 2 rather than
+      // exit 1. A check has to survive the fault it checks for, or a caught mutation
+      // reads as an untested one; the dead row is the finding, so it is read rather
+      // than walked into.
+      const live = await page.evaluate(
+        `document.querySelector('#tEase button[data-ease=${name}]').disabled`,
+      ) === false;
+      if (live) {
+        await page.locator(`#tEase button[data-ease=${name}]`).click();
+        await settle();
+      }
+      const got = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 1)`);
+      const next = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 2)`);
+      const first = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 0)`);
+      const want = EXPECTED[name];
+      // Compared point by point over the whole list, because a preset names a *degree*
+      // as well as a shape now - `glide` writing only its first control point would
+      // leave a cubic wearing a quintic's first handle, which a comparison of element
+      // zero alone would have called a pass.
+      const sameList = (a, b) => Array.isArray(a) && a.length === b.length
+        && a.every((p, i) => near(p[0], b[i][0], 1e-9) && near(p[1], b[i][1], 1e-9));
+      const okOut = !want.out || sameList(got.easeOut, want.out);
+      const okIn = !want.in || sameList(got.easeIn, want.in);
+      const okNext = !want.nextIn || sameList(next.easeIn, want.nextIn);
+      const okFirst = !want.firstOut || sameList(first.easeOut, want.firstOut);
+      const okLast = !want.lastIn || sameList(next.easeIn, want.lastIn);
+      // The selected key untouched, for the presets that are about the track. Compared
+      // against the bend every fixture key is planted with rather than against a
+      // remembered read, so this cannot be satisfied by the press having done nothing
+      // at all - `okFirst` and `okLast` are what say it did something.
+      const okKept = !want.keepsSelected
+        || (sameList(got.easeOut, BENT.easeOut) && sameList(got.easeIn, BENT.easeIn));
+      check(live && okOut && okIn && okNext && okFirst && okLast && okKept,
+        `the "${name}" preset writes the handles it names on a ${kind} key`,
+        live
+          ? `out ${JSON.stringify(got.easeOut)} in ${JSON.stringify(got.easeIn)}`
+            + (want.nextIn ? ` next-in ${JSON.stringify(next.easeIn)}` : '')
+            + (want.firstOut ? ` first-out ${JSON.stringify(first.easeOut)}` : '')
+            + (want.lastIn ? ` last-in ${JSON.stringify(next.easeIn)}` : '')
+          : `the preset row is dead for a ${kind} key, so nothing could be pressed`);
+    }
   }
+
+  // **The point count, which is the degree of the segments either side of a key.**
+  //
+  // `+pt` is Bezier degree elevation and the claim it makes is unusual for a control:
+  // pressing it changes *nothing* about the picture. That is what makes it safe to
+  // offer - a press that handed over another handle and also moved the camera would be
+  // two edits wearing one button, and the one nobody asked for is the one that ruins a
+  // take. So the row below reads the rendered curve on both sides of the press and
+  // requires it to be the same curve, which is the opposite of what a control is
+  // usually asked to prove and the only thing worth asserting here.
+  //
+  // Sampled through `valueAt` rather than through the handle numbers, because the
+  // handles are *supposed* to move: every control point shifts to the position that
+  // keeps the curve where it was. A row comparing handles would fail against a correct
+  // build and pass against one that appended a point and left the others alone, which
+  // is precisely the wrong implementation this is here to catch.
+  await plant({ bloom: [{ t: 1, value: 0.2, ...BENT }, { t: 5, value: 0.9, ...BENT }] });
+  await page.evaluate(`__kinect.editor.select('bloom', 0)`);
+  await settle();
+  const AT = [1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5];
+  const sampleBloom = () => page.evaluate(
+    `${JSON.stringify(AT)}.map((t) => globalThis.__kinect.keyframes.valueAt('bloom', t))`,
+  );
+  const pointsOn = (i) => page.evaluate(
+    `(() => { const e = __kinect.editor.easeOf('bloom', ${i}); return [e.easeOut.length, e.easeIn.length]; })()`,
+  );
+  const curveBeforeGrow = await sampleBloom();
+  const countBeforeGrow = await pointsOn(0);
+  await page.locator('#tAddPoint').click();
+  await settle();
+  const countAfterGrow = await pointsOn(0);
+  const curveAfterGrow = await sampleBloom();
+  const grewBy = countAfterGrow[0] - countBeforeGrow[0];
+  check(grewBy === 1, 'the add-point control grows the selected key\'s outgoing side by one',
+    `easeOut went from ${countBeforeGrow[0]} control points to ${countAfterGrow[0]}`);
+  const elevationDrift = Math.max(...curveAfterGrow.map((v, i) => Math.abs(v - curveBeforeGrow[i])));
+  check(elevationDrift < 1e-9,
+    'and the curve it grew is the same curve, which is the whole reason the control can be offered',
+    `worst departure over ${AT.length} samples inside the segment: ${elevationDrift.toExponential(3)}`);
+  // And the handles really did move, so the row above is a statement about elevation
+  // rather than about a press that did nothing at all. Without this, a `+pt` wired to
+  // no-op would satisfy both rows above except the count - and a count is the one thing
+  // a broken implementation finds easiest to get right.
+  const grownHandles = await page.locator('.tlane[data-owner=bloom] .thandle').count();
+  check(grownHandles === countAfterGrow[0] + countAfterGrow[1] - 1,
+    'and the lane draws one handle per control point, so the new one can be reached',
+    `${grownHandles} handles for ${countAfterGrow[0]} out and ${countAfterGrow[1]} in on the first key`);
+
+  await page.locator('#tDropPoint').click();
+  await settle();
+  const countAfterDrop = await pointsOn(0);
+  check(countAfterDrop[0] === countBeforeGrow[0],
+    'and the drop-point control takes it back off again',
+    `easeOut went from ${countAfterGrow[0]} control points to ${countAfterDrop[0]}`);
+  // The floor, pressed into. A segment with no control points is not a cubic with fewer
+  // handles, it is a curve this file's own evaluator has no shape for.
+  for (let i = 0; i < 4; i++) {
+    if (await page.evaluate(`document.getElementById('tDropPoint').disabled`)) break;
+    await page.locator('#tDropPoint').click();
+    await settle();
+  }
+  const floored = await pointsOn(0);
+  check(floored[0] === 1 && await page.evaluate(`document.getElementById('tDropPoint').disabled`),
+    'and it stops at one point a side rather than emptying the handle',
+    `easeOut holds ${floored[0]}, and the control is ${await page.evaluate(`document.getElementById('tDropPoint').disabled`) ? 'dead' : 'still live'}`);
+
+  // **The second control point, dragged.** Every other handle gesture in this file grabs
+  // the first `.thandle` in DOM order, which is `easeOut[0]` - index 0, the case that
+  // shipped before a handle was a list. So the indexed drag and `handleSpan` had nothing
+  // asking about them: a `handleSpan` that ignored its index entirely, or a clamp still
+  // written against the unit range, would pass every row above. What makes index 1
+  // different is that its neighbours are not the segment's ends, so the clamp has a
+  // narrower box to hold it in and that box is the thing under test.
+  //
+  // Planted through `ends` first, and that is the finding rather than tidiness. `BENT` is
+  // `easeOut [0.9, ...]` against `easeIn [0.1, ...]`, whose control abscissae already
+  // descend - a legal cubic, because descending control x is sufficient for a fold and
+  // never necessary, and that one bottoms out at a derivative of 0.15. `elevate` carries
+  // the crossing across faithfully, so a span asserted from an inherited crossing is a
+  // row about the fixture rather than about the clamp.
+  //
+  // **`ends` rather than `glide`, because a segment's polygon is owned by two keys.**
+  // `glide` writes the selected key only, so pressing it on key 0 leaves key 1's `easeIn`
+  // at BENT and the segment reads 0, 0.2, 0.4, 0.1, 1 - still crossed, and crossed in a
+  // way that looks fixed. `ends` writes the departure and the arrival, which is the whole
+  // polygon: 0, 0.2, 0.4, 0.6, 0.8, 1.
+  // **Planted mid-clip, and that is not arbitrary either.** Section 3 leaves the clip's
+  // in-marker parked over the head of the strip, and a `.tcut` is a full-height element
+  // that takes the press before a handle sitting under it ever sees one - so the same
+  // gesture that works on a fresh page silently lands on the marker here. The first
+  // version of this row put its keys at 1s and 5s and read a handle that had never been
+  // touched, which is a clamp row greened by a press that hit something else entirely.
+  // `document.elementFromPoint` at the press coordinate is how that was found and is the
+  // thing to reach for when a synthetic drag does nothing.
+  await plant({ bloom: [{ t: 30, value: 0.2, ...BENT }, { t: 38, value: 0.9, ...BENT }] });
+  await page.evaluate(`__kinect.editor.select('bloom', 0)`);
+  await settle();
+  await page.locator('#tEase button[data-ease=ends]').click();
+  await page.locator('#tAddPoint').click();
+  await settle();
+  const twoPoints = await page.evaluate(`__kinect.editor.easeOf('bloom', 0)`);
+  // The handles are drawn `easeOut` first and in index order, so the lane's second
+  // `.thandle` is `easeOut[1]` - the one whose x is fenced by its two neighbours rather
+  // than by 0 and 1.
+  const handles = page.locator('.tlane[data-owner=bloom] .thandle');
+  const first = await handles.nth(0).boundingBox();
+  const second = await handles.nth(1).boundingBox();
+  const dragY = second.y + second.height / 2;
+  await page.mouse.move(second.x + second.width / 2, dragY);
+  await page.mouse.down();
+  // **Nothing is awaited between the press and the throw, and that is load-bearing.** The
+  // press captures the pointer on the handle element, and `settle()` lets a lane rebuild
+  // run - which replaces that element, so every later move is delivered to a node no
+  // longer in the document and the handle sits exactly where it started. A row reading
+  // the handle back then reports a clamp holding when nothing was ever dragged. Measured:
+  // with a settle here the point stayed at 0.3333 against a neighbour at 0.1667; without
+  // one it lands on the neighbour.
+  //
+  // Aimed past the point before it rather than at a fixed pixel offset. The segment is
+  // four seconds of a seventy-five second clip, so it is a few dozen pixels wide and a
+  // round "drag 600px left" lands at a negative page coordinate that goes undelivered -
+  // the same failure wearing the other hat.
+  await page.mouse.move(first.x - 24, dragY, { steps: 8 });
+  await page.mouse.up();
+  await settle();
+  const afterPointDrag = await page.evaluate(`__kinect.editor.easeOf('bloom', 0)`);
+  check(afterPointDrag.easeOut.length === twoPoints.easeOut.length
+    && afterPointDrag.easeOut[0][0] === twoPoints.easeOut[0][0],
+    'dragging the second control point leaves the first one where it was, so the drag found its own index',
+    `first ${JSON.stringify(afterPointDrag.easeOut[0])}, second ${JSON.stringify(afterPointDrag.easeOut[1])}`);
+  // **Asserted on where the handle landed rather than on how far the curve moved**, and
+  // that is the fixture rather than a preference. Both of these control points sit at an
+  // ordinate of 0, so sliding one along x while its neighbour holds the same y is a
+  // change the *value* curve barely registers - a "the curve moved" row would be asking
+  // this drag for evidence it cannot produce. Landing exactly on the neighbour says both
+  // things at once: the gesture was delivered, and the thing that stopped it was the
+  // point before it rather than the segment start, which is 0 and is where the clamp
+  // this replaced would have put it.
+  const landed = afterPointDrag.easeOut[1][0];
+  const neighbour = afterPointDrag.easeOut[0][0];
+  check(landed !== twoPoints.easeOut[1][0] && Math.abs(landed - neighbour) < 1e-9,
+    'and it stops on the point before it rather than at the segment start, because the timing '
+    + 'curve has to stay single-valued in time and a crossed pair folds it',
+    `dragged from ${twoPoints.easeOut[1][0].toFixed(4)} to ${landed.toFixed(4)}, `
+    + `against a neighbour at ${neighbour.toFixed(4)}`);
+
+  // **The two-key move, which is the shape the reported defect arrived as.** Every ease
+  // fixture above is three keys deep, and on a two-key track `ends` writes both of its
+  // handles onto the *same* segment - `keys.length - 2` is 0, so the departure and the
+  // arrival are the two ends of one span. That is the arithmetic most likely to be got
+  // wrong by an off-by-one and the one case no other row here visits.
+  await plant({ bloom: [{ t: 1, value: 0.2, ...BENT }, { t: 6, value: 1.4, ...BENT }] });
+  await page.evaluate(`__kinect.editor.select('bloom', 0)`);
+  await settle();
+  await page.locator('#tEase button[data-ease=ends]').click();
+  await settle();
+  const pairFirst = await page.evaluate(`__kinect.editor.easeOf('bloom', 0)`);
+  const pairLast = await page.evaluate(`__kinect.editor.easeOf('bloom', 1)`);
+  const glideOut = JSON.stringify([[0.2, 0], [0.4, 0]]);
+  const glideIn = JSON.stringify([[0.6, 1], [0.8, 1]]);
+  check(JSON.stringify(pairFirst.easeOut) === glideOut && JSON.stringify(pairLast.easeIn) === glideIn,
+    'on a two-key move `ends` shapes both ends of the one segment there is',
+    `first-out ${JSON.stringify(pairFirst.easeOut)}, last-in ${JSON.stringify(pairLast.easeIn)}`);
+
+  // **The retime is refused, and the reason is a proof rather than a preference.**
+  // `assertMonotonic` argues that a handle anywhere in the unit box cannot run source
+  // time backwards, and that argument is about a *cubic* - a quintic with ordinates
+  // 0,1,0,1,0,1, every one inside the box, oscillates. So the retime keeps one control
+  // point a side, and the place that is enforced is here, at the control.
+  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [
+    { t: 0, value: 0 }, { t: 6, value: 4 }, { t: 12, value: 11 } ] })`);
+  await page.evaluate(`__kinect.editor.select('retime', 1)`);
+  await settle();
+  const retimePoints = await page.evaluate(`(() => {
+    const add = document.getElementById('tAddPoint').disabled;
+    const drop = document.getElementById('tDropPoint').disabled;
+    const smooth = document.querySelector('#tEase button[data-ease=smooth]').disabled;
+    return { add, drop, smooth };
+  })()`);
+  check(retimePoints.add && retimePoints.drop && !retimePoints.smooth,
+    'both point controls are dead on a retime key while the ordinary presets stay live, '
+    + 'because the monotonicity proof the retime rests on is a proof about a cubic',
+    `add ${retimePoints.add ? 'dead' : 'LIVE'}, drop ${retimePoints.drop ? 'dead' : 'LIVE'}, `
+    + `smooth ${retimePoints.smooth ? 'DEAD' : 'live'}`);
 
   // The flat-segment rule. A segment whose two keys hold the same value renders the
   // same value whatever its handles say - so a handle there is a control that moves
@@ -4079,42 +5181,202 @@ try {
   check(await page.evaluate(`document.querySelector('#tEase button[data-ease=linear]').disabled`) === true,
     'and goes dead for the key that has nothing to shape, rather than writing into nothing');
 
-  // And a handle that does exist still moves the curve.
-  await plant({ bloom: [{ t: 1, value: 0.2 }, { t: 5, value: 0.9 }, { t: 9, value: 0.3 }] });
-  await page.evaluate(`__kinect.editor.select('bloom', 1)`);
-  await settle();
-  // **The first handle drawn on a key is its `easeOut`**, which shapes the segment
-  // *after* it - `drawLane` walks `['easeOut', 'easeIn']` in that order. So the curve
-  // is sampled at 7s, inside 5s..9s, and not at 3s. Sampling at 3s is what this row
-  // did first and it failed against a working build: the handle had moved, the curve
-  // it shapes had moved, and the probe was sitting in the neighbouring segment where
-  // the answer is the same either way. That is `docs/instruments.md`'s "place a probe
-  // where its answer would be different" arriving one more time.
+  // And a handle that does exist still moves the curve - asked of every easable kind,
+  // for the reason the preset loop above is. The pose arm is the one that would have
+  // caught the shape this repo already shipped once on scalars: a handle that draws,
+  // drags and writes a number nothing reads. `segmentHasShape` answered `NaN > 1e-9`
+  // for every camera segment before it took the kind, which is `false` - so a pose
+  // lane would have drawn no handle at all and the whole feature would have been a
+  // preset row with nothing under it.
+  for (const kind of easedKinds.filter((k) => KIND_FIXTURES[k])) {
+    const fx = KIND_FIXTURES[kind];
+    await plant({ [fx.owner]: fx.keys.map(({ easeOut, easeIn, ...rest }) => rest) });
+    await page.evaluate(`__kinect.editor.select('${fx.owner}', 1)`);
+    await settle();
+    // **The first handle drawn on a key is its `easeOut`**, which shapes the segment
+    // *after* it - `drawLane` walks `['easeOut', 'easeIn']` in that order. So the curve
+    // is sampled at 7s, inside 5s..9s, and not at 3s. Sampling at 3s is what this row
+    // did first and it failed against a working build: the handle had moved, the curve
+    // it shapes had moved, and the probe was sitting in the neighbouring segment where
+    // the answer is the same either way. That is `docs/instruments.md`'s "place a probe
+    // where its answer would be different" arriving one more time.
+    //
+    // Both samples are kept, which makes the row say more than it used to: the handle
+    // shapes its own segment *and leaves its neighbour alone*, which is two claims a
+    // single sample cannot separate.
+    // Counted before it is reached for, for the reason the preset loop above states: a
+    // build with no handle to drag has to redden these rows rather than throw out of the
+    // run. `--mutate pose-segments-never-shaped` is exactly that build - it puts back the
+    // `NaN` the old subtraction returned for a pose, so the lane draws nothing - and a
+    // `boundingBox()` of null dereferenced is a crash, which this file reports as
+    // DID NOT RUN and exit 2 rather than as the catch it actually is.
+    const drawn = await page.locator(`.tlane[data-owner=${fx.owner}] .thandle`).count();
+    const hb = drawn > 0
+      ? await page.locator(`.tlane[data-owner=${fx.owner}] .thandle`).first().boundingBox()
+      : null;
+    check(hb !== null && hb.width >= 10 && hb.height >= 10, `a ${kind} ease handle is big enough to hit`,
+      hb ? `${hb.width}x${hb.height}px` : `no handle drawn on the ${kind} lane at all`);
+    const at = (t) => page.evaluate(`__kinect.keyframes.valueAt('${fx.owner}', ${t})`).then(fx.read);
+    const easeBefore = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 1)`);
+    const ownBefore = await at(fx.inside);
+    const neighbourBefore = await at(fx.outside);
+    if (hb) {
+      await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(hb.x + hb.width / 2 - 40, hb.y + hb.height / 2 - 20, { steps: 5 });
+      await page.mouse.up();
+      await settle();
+    }
+    const easeAfter = await page.evaluate(`__kinect.editor.easeOf('${fx.owner}', 1)`);
+    const ownAfter = await at(fx.inside);
+    const neighbourAfter = await at(fx.outside);
+    check(JSON.stringify(easeBefore.easeOut) !== JSON.stringify(easeAfter.easeOut),
+      `dragging a ${kind} handle rewrites it`,
+      `easeOut ${JSON.stringify(easeBefore.easeOut)} -> ${JSON.stringify(easeAfter.easeOut)}`);
+    check(Math.abs(ownAfter - ownBefore) > 1e-4,
+      `  and the ${kind} value inside the segment it shapes follows, which is the only thing a handle is for`,
+      `${ownBefore.toFixed(4)} -> ${ownAfter.toFixed(4)} at ${fx.inside}s`);
+    check(Math.abs(neighbourAfter - neighbourBefore) < 1e-9,
+      '  and the segment on the other side of the key does not move',
+      `${neighbourBefore.toFixed(4)} -> ${neighbourAfter.toFixed(4)} at ${fx.outside}s`);
+  }
+
+  // **A pose handle stays inside the box, however hard it is dragged.** A scalar's may
+  // leave it - a value that swings past its key and comes back is an ordinary creative
+  // choice - and the pose lane inherited that band without anybody noticing what it
+  // meant there. Its axis is already a fraction of the segment, so a handle above the
+  // box asks `hermite` for a fraction past 1, and `hermite` obliges by continuing the
+  // segment's own cubic past the key: the camera overshoots the pose it was keyed at
+  // and swings back. That is precisely the thing easing a camera is promised not to do,
+  // in `poseAt`'s comment and in `docs/reference.md` in as many words, so the promise
+  // needs a row rather than a sentence.
   //
-  // Both samples are kept, which makes the row say more than it used to: the handle
-  // shapes its own segment *and leaves its neighbour alone*, which is two claims a
-  // single sample cannot separate.
-  const hb = await page.locator('.tlane[data-owner=bloom] .thandle').first().boundingBox();
-  check(hb.width >= 10 && hb.height >= 10, 'an ease handle is big enough to hit', `${hb.width}x${hb.height}px`);
-  const easeBefore = await page.evaluate(`__kinect.editor.easeOf('bloom', 1)`);
-  const ownBefore = await page.evaluate(`__kinect.keyframes.valueAt('bloom', 7)`);
-  const neighbourBefore = await page.evaluate(`__kinect.keyframes.valueAt('bloom', 3)`);
-  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(hb.x + hb.width / 2 - 40, hb.y + hb.height / 2 - 20, { steps: 5 });
-  await page.mouse.up();
+  // Dragged well past the lane's own height, because the clamp is only interesting at
+  // the extreme - a gentle drag lands inside the box whether or not anything clamps.
+  await plant({ camera: KIND_FIXTURES.pose.keys.map(({ easeOut, easeIn, ...rest }) => rest) });
+  await page.evaluate(`__kinect.editor.select('camera', 1)`);
   await settle();
-  const easeAfter = await page.evaluate(`__kinect.editor.easeOf('bloom', 1)`);
-  const ownAfter = await page.evaluate(`__kinect.keyframes.valueAt('bloom', 7)`);
-  const neighbourAfter = await page.evaluate(`__kinect.keyframes.valueAt('bloom', 3)`);
-  check(JSON.stringify(easeBefore.easeOut) !== JSON.stringify(easeAfter.easeOut), 'dragging it rewrites the handle',
-    `easeOut ${JSON.stringify(easeBefore.easeOut)} -> ${JSON.stringify(easeAfter.easeOut)}`);
-  check(Math.abs(ownAfter - ownBefore) > 1e-4,
-    'and the value inside the segment it shapes follows, which is the only thing a handle is for',
-    `${ownBefore.toFixed(4)} -> ${ownAfter.toFixed(4)} at 7s`);
-  check(Math.abs(neighbourAfter - neighbourBefore) < 1e-9,
-    '  and the segment on the other side of the key does not move',
-    `${neighbourBefore.toFixed(4)} -> ${neighbourAfter.toFixed(4)} at 3s`);
+  // Counted before it is reached for. `.first().boundingBox()` on a lane with no handle
+  // does not fail, it waits the full 30s and takes the run down with it - which this
+  // row did against `--mutate pose-segments-never-shaped`, reporting DID NOT RUN and
+  // exit 2 where eight clean reds were owed. That is the same trap the preset loop and
+  // the drag rows above already carry a guard for, walked into once more by a row added
+  // after them, which is the argument for the guard being the house pattern rather than
+  // a note in one place.
+  const poseHandles = await page.locator('.tlane[data-owner=camera] .thandle').count();
+  const poseHandle = poseHandles > 0
+    ? await page.locator('.tlane[data-owner=camera] .thandle').first().boundingBox()
+    : null;
+  if (poseHandle) {
+    await page.mouse.move(poseHandle.x + poseHandle.width / 2, poseHandle.y + poseHandle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(poseHandle.x + poseHandle.width / 2, poseHandle.y - 400, { steps: 6 });
+    await page.mouse.up();
+    await settle();
+  }
+  const dragged = await page.evaluate(`__kinect.editor.easeOf('camera', 1)`);
+  check(poseHandle !== null && dragged.easeOut[0][1] <= 1 + 1e-9 && dragged.easeOut[0][1] >= -1e-9,
+    'a pose handle dragged far past the lane stays inside the unit box, so the camera cannot overshoot its own key',
+    // The two ways this fails say different things and the detail has to as well. Under
+    // `pose-segments-never-shaped` there is no handle to drag, so the y sits at its
+    // untouched default - and a bare number here read as "0.3333 is outside the box",
+    // which is a row blaming the clamp for a lane that drew nothing.
+    poseHandle === null
+      ? `no handle on the pose lane to drag, so the clamp was never exercised (y still ${dragged.easeOut[0][1].toFixed(4)})`
+      : `easeOut y ${dragged.easeOut[0][1].toFixed(4)} after a 400px drag`);
+
+  // **The world half of the ease: the beads on the path.** `pathPoints` samples
+  // `poseAt` at equal intervals of program time, so the gaps between consecutive
+  // samples *are* the camera's speed, and drawing them puts back what the stroke that
+  // joins them throws away - the timing, visible as spacing, where a camera move has
+  // always been judged.
+  //
+  // **The first version of this row measured pixels and was NOT CAUGHT**, which is
+  // worth recording because it looked like the stronger test. It diffed the chrome
+  // canvas between a linear and an eased build of one path, on the reasoning that the
+  // route is unchanged so the stroke is unchanged and every moved pixel is a bead.
+  // The reasoning is wrong: `strokePolyline` joins the samples, easing moves where the
+  // samples fall along the curve, so the chord distribution changes and the line
+  // redraws by itself. Against a build whose bead loop drew nothing at all the row
+  // still read 312 moved pixels and still passed - it was measuring the stroke. A count
+  // of ink cannot be narrowed to rescue it either: 21,000 pixels of this canvas sit
+  // above alpha 225 before the path contributes anything, because the point cloud and
+  // the range rings are drawn on it too.
+  //
+  // So the claim is asked of the geometry instead, through the same function the
+  // drawing walks. What the beads have to be is uniform in *time* and therefore
+  // non-uniform in *space* whenever the camera changes speed - which is exactly what
+  // `beads-evenly-spaced` takes away.
+  const beads = await page.evaluate(`(() => {
+    const P = (x, z) => ({ position: [x, 0.35, z], quaternion: [0, 0, 0, 1], fov: 50 });
+    const LIN_O = [[1 / 3, 1 / 3]];
+    const LIN_I = [[2 / 3, 2 / 3]];
+    const mk = (out0, in2) => [
+      { t: 2, value: P(-1.4, 1.5), easeOut: out0, easeIn: LIN_I },
+      { t: 5, value: P(0.2, 1.0), easeOut: LIN_O, easeIn: LIN_I },
+      { t: 8, value: P(1.6, 1.4), easeOut: LIN_O, easeIn: in2 },
+    ];
+    const gaps = () => {
+      const pts = __kinect.editor.pathBeads();
+      const out = [];
+      for (let i = 1; i < pts.length; i++) {
+        out.push(Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2]));
+      }
+      return out;
+    };
+    __kinect.keyframes.setTracks({ camera: mk(LIN_O, LIN_I) });
+    const flat = gaps();
+    __kinect.keyframes.setTracks({ camera: mk([[0.42, 0]], [[0.58, 1]]) });
+    const eased = gaps();
+    const spread = (g) => Math.max(...g) / Math.max(1e-9, Math.min(...g));
+    return { count: eased.length + 1, flatSpread: spread(flat), easedSpread: spread(eased) };
+  })()`);
+  // The count comes off the same two constants the drawing uses, so a thinning that
+  // changed would be caught here rather than silently drawing more or fewer dots.
+  check(beads.count === 30, 'the path overlay beads every fourth of its 120 samples',
+    `${beads.count} beads`);
+  // The eased path has to spread much wider than the unshaped one, because `smooth` on
+  // the outer keys is precisely a demand that the camera crawl at both ends. The
+  // unshaped arm is the control and is not itself uniform - a Catmull-Rom through
+  // unevenly spaced keys varies in speed on its own - so the claim is the ratio between
+  // them rather than flatness.
+  check(beads.easedSpread > beads.flatSpread * 3,
+    'and their spacing follows the easing, which is what makes the overlay a picture of the timing',
+    `widest-to-narrowest gap ${beads.easedSpread.toFixed(1)}x when eased against ${beads.flatSpread.toFixed(1)}x unshaped`);
+
+  // **The lane's own drawn curve**, which nothing else in this file looks at. Every
+  // other pose row reads the evaluator through `valueAt`, the handle geometry through
+  // `ends` or the presets through `easeOf` - so a build whose pose lane drew a flat
+  // line through the middle of the strip would pass all of them, and the lane is
+  // exactly what `docs/reference.md` promises draws the remap directly.
+  //
+  // Two claims, because a curve that merely exists is not the claim: it has to cross
+  // the lane, and it has to change when the easing does.
+  const lane = await page.evaluate(`(() => {
+    const P = (x, z) => ({ position: [x, 0.35, z], quaternion: [0, 0, 0, 1], fov: 50 });
+    const LIN_O = [[1 / 3, 1 / 3]];
+    const LIN_I = [[2 / 3, 2 / 3]];
+    const mk = (out0, in2) => [
+      { t: 2, value: P(-1.4, 1.5), easeOut: out0, easeIn: LIN_I },
+      { t: 5, value: P(0.2, 1.0), easeOut: LIN_O, easeIn: LIN_I },
+      { t: 8, value: P(1.6, 1.4), easeOut: LIN_O, easeIn: in2 },
+    ];
+    const ys = () => document.querySelector('.tlane[data-owner=camera] polyline')
+      .getAttribute('points').split(' ').map((p) => Number(p.split(',')[1]));
+    __kinect.keyframes.setTracks({ camera: mk(LIN_O, LIN_I) });
+    const flat = ys();
+    __kinect.keyframes.setTracks({ camera: mk([[0.42, 0]], [[0.58, 1]]) });
+    const eased = ys();
+    const span = (a) => Math.max(...a) - Math.min(...a);
+    const worstShift = Math.max(...eased.map((y, i) => Math.abs(y - flat[i])));
+    return { span: span(flat), worstShift };
+  })()`);
+  check(lane.span > 80,
+    'the camera lane draws a curve that crosses it, rather than a line through the middle',
+    `the drawn points span ${lane.span.toFixed(1)} of the lane's 100`);
+  check(lane.worstShift > 5,
+    '  and that curve is redrawn when the easing changes, which is the whole of what it is for',
+    `worst ${lane.worstShift.toFixed(1)} of 100 between the unshaped and eased curves`);
 
   // =====================================================================
   console.log('\n[6] the strip stays a fixed height and the render dialog stays reachable');
@@ -4143,7 +5405,7 @@ try {
   note('a long option planted in every select the scroller holds',
     `${await page.evaluate('globalThis.__planted.length')} selects`);
   await page.locator('#outputMenuButton').click();
-  await page.locator('#menuRender').click();
+  await page.locator('#menuExport').click();
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: VIEWPORT.height });
     await new Promise((r) => setTimeout(r, 250));
@@ -4223,7 +5485,7 @@ try {
     // that asserted the button existed would pass on a build that saved nothing.
     const sizes = await page.evaluate('__kinect.exportSizes()');
     const smallest = sizes.slice().sort((a, b) => (a.w * a.h) - (b.w * b.h))[0];
-    await page.evaluate(`__kinect.setTargetSize(${JSON.stringify(`${smallest.w}x${smallest.h}`)})`);
+    await page.evaluate(`__kinect.setOutputSize(${JSON.stringify(`${smallest.w}x${smallest.h}`)})`);
     await settle();
     // **The trim is set with the dialog shut, because that is the only order the
     // surface allows.** The export is a modal now, so while it is open the browser
@@ -4245,7 +5507,7 @@ try {
     await page.locator('#tSetOut').click();
     await settle();
     await page.locator('#outputMenuButton').click();
-    await page.locator('#menuRender').click();
+    await page.locator('#menuExport').click();
     await page.waitForFunction('document.getElementById("exportDialog").open');
     await setName('editor-check-copy');
     await new Promise((r) => setTimeout(r, 150));
@@ -4633,7 +5895,7 @@ try {
   // it, which is the worst version of this - a row that passes in the fast mode and
   // fails in the full one.
   await page.locator('#tClearRange').click();
-  await page.evaluate('__kinect.setTargetSize("1920x1080")');
+  await page.evaluate('__kinect.setOutputSize("1920x1080")');
   await page.evaluate('__kinect.keyframes.setTracks({})');
   await page.evaluate('__kinect.keyframes.setRetime({ rate: 1, keys: [] })');
   await page.evaluate("__kinect.params.reset(__kinect.params.names('look'))");
@@ -5167,6 +6429,12 @@ try {
     const poseBefore = await poseOf();
     const before = await page.evaluate(
       '({ redraws: __kinect.timeline.counters.navigationRedraws, frames: globalThis.__orbitFrames })');
+    // Where the playhead is parked before the hand touches anything, read rather than
+    // written down. The rows about the released picture compare against this, and a
+    // second spelling of the seek at the head of this block is a number that drifts
+    // away from the seek the moment either one is edited.
+    const releaseTarget = await read();
+    const RELEASE_AT = releaseTarget.programSec;
     await page.mouse.move(stage.x, stage.y);
     await page.mouse.down();
     const MOVES = 24;
@@ -5321,47 +6589,100 @@ try {
     check(released.drafted === false, 'and the release leaves no draft standing on the stage',
       `drafted ${released.drafted}, playhead ${released.programSec.toFixed(3)}s`);
 
+    // **The moment is asserted as a number and the picture as a picture, and splitting
+    // them is what took this block off the footage.**
+    //
+    // It used to ask both through pixels: find some other moment in the capture whose
+    // picture differs, then require the released picture to be four times closer to an
+    // accurate seek than that other moment is. The control for it demanded the two
+    // moments read more than 2/255 apart on the worst of forty tile means - and that
+    // number is a property of *what happened in the room*, not of the build. It had
+    // already gone red once for that reason and been patched by walking outwards
+    // through candidate moments; it went red again at 0.32.
+    //
+    // Measured on a 75.6s fixture: no pair among 4, 5, 6, 8, 12, 20, 32, 2 and 0.5
+    // seconds reads further than 0.32 apart, and the widest pair anywhere in the take
+    // is 0.19. The seeks all landed - program time exact, every frame index distinct,
+    // the render and frame-fetch counters climbing each time - and the pictures do
+    // differ: up to 76/255 on individual pixels, with 0.18-0.26% of pixels more than
+    // 8/255 apart. The subject moved; a mean over a fortieth of the region is a
+    // low-pass filter and averaged it away. Every fixture this repo can build is that
+    // capture looped, so no walk outwards can ever answer it, and a band re-derived to
+    // suit today's footage would be the same defect with a newer number in it.
+    //
+    // So the moment comes off the transport, which knows it exactly, and the picture
+    // question becomes equality: the release must leave *the same picture* an accurate
+    // seek to the same moment leaves. That is enforceable because the renderer is
+    // bit-deterministic at a settled program time - the claim `determinism-check`
+    // exists for - and measured here rather than assumed: `sameMomentTwice` seeks away
+    // and back and reads 0.0000. The falsification control is a scrub draft at that
+    // same moment, which is a property of the renderer instead of the room and reads
+    // ~30/255 on any footage.
     await page.evaluate('__kinect.timeline.transport().seek(4.0)');
     await settle();
     const intendedSig = await signature();
-    // **Somewhere else in the capture, and how far away is asked of the capture.** This
-    // was a fixed second, and a second is only a different picture if the room moved
-    // in it. The sample this repo ships is nearly static - `docs/architecture.md`
-    // records 0.06% of pixels crossing the snap threshold between frames - so one
-    // second away came back 0.07/255 apart against a control demanding more than 2,
-    // and the row that exists to prove the instrument can see anything reddened
-    // because the *subject* had not moved. Walking outwards until the picture is
-    // genuinely different asks the same question of a capture that holds the answer
-    // further along.
-    let elsewhereSig = null;
-    let elsewhereAt = null;
-    for (const at of [5.0, 6.0, 8.0, 12.0, 20.0, 32.0, 2.0, 0.5]) {
-      if (at > (await page.evaluate('__kinect.timeline.transport().duration'))) continue;
-      await page.evaluate(`__kinect.timeline.transport().seek(${at})`);
-      await settle();
-      const sig = await signature();
-      if (elsewhereSig === null || apart(intendedSig, sig) > apart(intendedSig, elsewhereSig)) {
-        elsewhereSig = sig;
-        elsewhereAt = at;
-      }
-      if (apart(intendedSig, elsewhereSig) > 2) break;
-    }
+    await page.evaluate('__kinect.timeline.transport().seek(20.0)');
+    await settle();
+    await page.evaluate('__kinect.timeline.transport().seek(4.0)');
+    await settle();
+    const sameMomentTwice = apart(intendedSig, await signature());
+    // The wrong picture at the *right* moment, which is the failure this block is
+    // actually about: a release that leaves the degraded scrub preview standing.
+    //
+    // **Under a look with temporal content in it, and that is the control rather than
+    // dressing.** A scrub draft differs from an accurate render by skipping the
+    // accumulation pre-roll, so with `fade`, `wake` and `trails` all at zero there is
+    // nothing for it to skip and the two are the same picture: measured at the shipped
+    // defaults, a draft of this moment sits 0.07/255 from an accurate seek to it, which
+    // is a control that would have passed nothing. The neighbouring block applies the
+    // same three for the same reason. They are applied here and put straight back, so
+    // the equality rows above are measured at the look the release happened under and
+    // this one is measured where the difference it is about can exist at all.
+    const temporalBefore = await page.evaluate("__kinect.params.values(['fade', 'wake', 'trails'])");
+    await page.evaluate('__kinect.params.apply({ fade: 400, wake: 900, trails: 0.5 })');
+    await settle();
+    await page.evaluate('__kinect.timeline.transport().seek(4.0)');
+    await settle();
+    const accurateUnderTemporal = await signature();
+    await page.evaluate('__kinect.timeline.transport().draft(4.0)');
+    await settle();
+    const draftSig = await signature();
+    await page.evaluate(`__kinect.params.apply(${JSON.stringify(temporalBefore)})`);
+    await settle();
     await page.evaluate('__kinect.timeline.transport().seek(4.0)');
     await settle();
 
-    const canSee = apart(intendedSig, elsewhereSig);
+    const draftCosts = apart(draftSig, accurateUnderTemporal);
     const landed = apart(releasedSig, intendedSig);
     note('the released picture against an accurate seek to the same moment',
-      `worst tile ${landed.toFixed(2)}/255, where a seek to ${elsewhereAt}s differs by ${canSee.toFixed(2)}`);
+      `worst tile ${landed.toFixed(4)}/255, where the same moment read twice differs by `
+      + `${sameMomentTwice.toFixed(4)} and a scrub draft of it by ${draftCosts.toFixed(2)}`);
+    // Where the release actually parked, asked of the transport rather than of the
+    // pixels. `release-seeks-past-target` is the build this refuses: it seeks
+    // accurately to the wrong moment, which clears `drafted` and leaves the row above
+    // green while the viewport sits somewhere else.
+    check(near(released.programSec, RELEASE_AT, 1e-6) && released.frame === releaseTarget.frame,
+      'and it parked on the moment the hand let go of, read off the transport rather than guessed from pixels',
+      `playhead ${released.programSec.toFixed(6)}s against ${RELEASE_AT.toFixed(6)}s before the drag, `
+      + `frame ${released.frame} against ${releaseTarget.frame}`);
     // The control for the row below, and it has to come first for the same reason the
-    // drafts row's does: a signature that could not tell two moments apart would make
-    // the comparison below pass on every build there is, including one that released
-    // to the wrong second.
-    check(canSee > 2, 'the renderer signature can tell this moment from another one in the capture',
-      `worst tile ${canSee.toFixed(2)}/255 apart, at 4.0s against ${elsewhereAt}s`);
-    check(landed < canSee / 4,
+    // drafts row's does: a signature blind to the difference between a draft and the
+    // real image would make the comparison below pass on every build there is.
+    check(draftCosts > 1,
+      'the renderer signature can tell a scrub draft of this moment from the accurate picture of it',
+      `worst tile ${draftCosts.toFixed(2)}/255, against ${sameMomentTwice.toFixed(4)} for the same picture twice`);
+    // The floor is a row rather than a term inside the band below, because it is a claim
+    // and not a tolerance: the renderer is bit-deterministic at a settled program time,
+    // so a moment read twice has to come back *identical*, and a build where it does not
+    // has broken the property the equality below rests on. It reads 0.0000 - which is why
+    // the band below is the panel control's 0.01 and that number binds, every time.
+    check(sameMomentTwice < 0.01,
+      'the same moment renders the same picture twice, which is what makes the row below an equality',
+      `worst tile ${sameMomentTwice.toFixed(4)}/255 over a seek away to 20.0s and back`);
+    check(landed < 0.01,
       'and the release lands the picture an accurate seek to that moment gives, not merely an accurate seek',
-      `worst tile ${landed.toFixed(2)}/255 against the ${canSee.toFixed(2)} a wrong moment would cost`);
+      `worst tile ${landed.toFixed(4)}/255 against a ${sameMomentTwice.toFixed(4)} floor and the `
+      + `${draftCosts.toFixed(2)} a draft would cost`);
 
     // The renderer-level half of the bug, separated from the editor transport. A
     // camera change is rendered once through the live seam with trails enabled, then
@@ -5825,10 +7146,25 @@ try {
   // The keys. `SHORTCUTS` is what `?` prints and it now names four of them, so each is
   // pressed rather than trusted - a string telling the user about a feature is the
   // cheap version of the bug this whole file exists for.
+  // **The playhead is put inside the window rather than at a second written down here.**
+  // This was `seek(15)` against a window set at 0.2..0.8 of the clip, and the two numbers
+  // are only compatible for a take between about 19s and 75s long: on the 9.4s sample the
+  // seek clamps to the end and on the 75.6s fixture 0.2 of the clip is 15.12s, so the
+  // playhead sat 0.12s to the *left* of the window before the zoom ever ran. `zoomAbout`
+  // holds its anchor where it is in the window, so an anchor outside stays outside, and
+  // the row below reddened reporting a build that had done exactly what it should. A
+  // constant second and a fractional window are two spellings of one position and only
+  // agree on the take somebody happened to have open; taking the position off the window
+  // that was just set asks the question this row means on any take long enough to hold it.
   await page.evaluate('__kinect.editor.view.set(0.2, 0.8)');
-  await page.evaluate('__kinect.timeline.transport().seek(15)');
+  const zoomWindow = await page.evaluate('__kinect.editor.view.window()');
+  await page.evaluate(`__kinect.timeline.transport().seek(${(zoomWindow.startSec + zoomWindow.endSec) / 2})`);
   await settle();
   const beforeKeyZoom = await page.evaluate('__kinect.editor.view.window()');
+  const parkedFor = await page.evaluate('__kinect.timeline.transport().programSec');
+  check(parkedFor > beforeKeyZoom.startSec && parkedFor < beforeKeyZoom.endSec,
+    'the playhead is inside the window before the zoom, which is what the row below is about',
+    `playhead ${parkedFor.toFixed(2)}s in ${beforeKeyZoom.startSec.toFixed(2)}s..${beforeKeyZoom.endSec.toFixed(2)}s`);
   await focusStage();
   await page.keyboard.press('=');
   await settle();
@@ -7078,9 +8414,22 @@ try {
     // the take. `differ` changes one field away from the value a fresh open gives, and
     // the row below asserts that it did - the offer is deliberately silent when the two
     // agree, so a document that accidentally matched would test the wrong branch.
+    // **The field these rows tell two documents apart by, which used to be `outputSize`.**
+    // The shape moved onto the document as `aspect` and the pixel count moved onto the
+    // deliverable, so `outputSize` is no longer written by `serialiseProjectBody` - and
+    // every row below read `undefined` on the restored side the moment it went. They
+    // failed rather than passing, which is the arrangement working: the comment further
+    // down records that the first draft of one of these moved a field the project does
+    // not carry, both sides read `undefined`, and the row passed on every build.
+    //
+    // Compared joined rather than with `===`, and that is not a detail: `aspect` is an
+    // array, so two documents holding the same shape are two objects and `===` is false
+    // for every pair. A row that is always red is better than one that is always green
+    // and worse than one that asks the question, which is what the join makes it ask.
+    const shapeOf = (doc) => (doc?.aspect ?? []).join(':') || 'none';
     const workingBody = (stamp, differ = true) => {
       const body = JSON.parse(JSON.stringify(fresh));
-      if (differ) body.outputSize = fresh.outputSize === '1280x720' ? '1920x1080' : '1280x720';
+      if (differ) body.aspect = shapeOf(fresh) === '4:3' ? [16, 9] : [4, 3];
       return { ...body, take: stamp };
     };
     // Long enough that it cannot be read off a chip, and different footage besides.
@@ -7088,9 +8437,9 @@ try {
 
     // ---- reload one: the offer is made, and then the note has to carry a refusal
     const differing = workingBody({ id: openId, hash: openHash });
-    check(differing.outputSize !== fresh.outputSize,
+    check(shapeOf(differing) !== shapeOf(fresh),
       'the document about to be planted differs from what a fresh open puts on screen, or there is nothing for the offer to be about',
-      `${differing.outputSize} against ${fresh.outputSize}`);
+      `${shapeOf(differing)} against ${shapeOf(fresh)}`);
     await putDoc(WORKING, differing);
     await putDoc(OTHER, { ...JSON.parse(JSON.stringify(fresh)), take: { id: 'some-other-take', hash: foreignHash } });
     await reopen();
@@ -7120,9 +8469,9 @@ try {
     await page.click('#tResumeOpen');
     await settle();
     const restored = await page.evaluate('__kinect.keyframes.project()');
-    check(restored.outputSize === differing.outputSize,
+    check(shapeOf(restored) === shapeOf(differing),
       'and pressing it restores the autosaved document onto the open take, without leaving the page for a URL that would drop the take',
-      `${restored.outputSize} against the autosave's ${differing.outputSize} and the fresh clip's ${fresh.outputSize}`);
+      `${shapeOf(restored)} against the autosave's ${shapeOf(differing)} and the fresh clip's ${shapeOf(fresh)}`);
     // **And the offer survives the store moving under it.** `__working__` is the one
     // name in this library that rewrites itself: `history.commit()` autosaves over it on
     // every edit, so between the chip appearing and somebody pressing it the document it
@@ -7145,15 +8494,15 @@ try {
     // reported NOT CAUGHT - which is the honest reading of a row testing nothing.
     const moved = workingBody({ id: openId, hash: openHash }, false);
     await putDoc(WORKING, moved);
-    check(offeredBeforeMove.shown && moved.outputSize !== differing.outputSize,
+    check(offeredBeforeMove.shown && shapeOf(moved) !== shapeOf(differing),
       'the offer is on screen and then the document behind its name is replaced by a different one, which is what an edit made while the chip is up does to it',
-      `chip ${offeredBeforeMove.shown ? 'shown' : 'hidden'}, offered ${differing.outputSize} against the store's new ${moved.outputSize}`);
+      `chip ${offeredBeforeMove.shown ? 'shown' : 'hidden'}, offered ${shapeOf(differing)} against the store's new ${shapeOf(moved)}`);
     await page.click('#tResumeOpen');
     await settle();
     const restoredAfterMove = await page.evaluate('__kinect.keyframes.project()');
-    check(restoredAfterMove.outputSize === differing.outputSize,
+    check(shapeOf(restoredAfterMove) === shapeOf(differing),
       'and pressing it restores the document that was offered rather than whatever the name holds by then, since the work it was advertising is the work being recovered',
-      `${restoredAfterMove.outputSize} against the offered ${differing.outputSize} and the store's ${moved.outputSize}`);
+      `${shapeOf(restoredAfterMove)} against the offered ${shapeOf(differing)} and the store's ${shapeOf(moved)}`);
 
     // **And the store holds it afterwards, or the recovery lasted only as long as the
     // tab.** Holding the offered body fixed which document the press restores; it did
@@ -7163,11 +8512,11 @@ try {
     // "restored the autosaved edit" loaded the overwriting edit straight back.
     const storedAfterRestore = await page.evaluate(`(async () => {
       const doc = await (await fetch('/projects/${WORKING}')).json();
-      return doc.body?.outputSize ?? null;
+      return doc.body?.aspect ?? null;
     })()`);
-    check(storedAfterRestore === differing.outputSize,
+    check(shapeOf({ aspect: storedAfterRestore }) === shapeOf(differing),
       'and the auto-save is rewritten with what was restored, so a reload after the recovery loads the recovered work rather than the edit that had overwritten it',
-      `stored ${storedAfterRestore} against the restored ${differing.outputSize} and the ${moved.outputSize} it had been overwritten with`);
+      `stored ${shapeOf({ aspect: storedAfterRestore })} against the restored ${shapeOf(differing)} and the ${shapeOf(moved)} it had been overwritten with`);
 
     const afterRestore = await offerState();
     check(!afterRestore.shown,
@@ -7242,11 +8591,11 @@ try {
     await page.unroute('**/projects/__working__');
     const storedAfterRace = await page.evaluate(`(async () => {
       const doc = await (await fetch('/projects/${WORKING}')).json();
-      return doc.body?.outputSize ?? null;
+      return doc.body?.aspect ?? null;
     })()`);
-    check(storedAfterRace === differing.outputSize,
+    check(shapeOf({ aspect: storedAfterRace }) === shapeOf(differing),
       'and the recovery is written after the auto-saves already in flight, so an edit still on the wire cannot land behind it and put back the document the operator just recovered from',
-      `stored ${storedAfterRace} against the restored ${differing.outputSize}`);
+      `stored ${shapeOf({ aspect: storedAfterRace })} against the restored ${shapeOf(differing)}`);
 
     // **A neighbour that will not list must not take the recovery with it.** Opening a
     // take refreshes three libraries and lets all three fail softly, and the offer used
@@ -7495,12 +8844,28 @@ try {
     // liveness row below failed against a correct build. The boundaries are computed
     // from the curve the page is actually holding.
     const trim = await page.evaluate(`(() => {
-      const total = __kinect.editor.view.window().duration;
+      const window0 = __kinect.editor.view.window();
+      const total = window0.duration;
       const at = (s) => Math.max(0, Math.min(total, __kinect.timeline.retime.programSecAt(s)));
       const outside = at(2);
       const inside = at(8);
       const inAt = (outside + inside) / 2;
-      return { total, outside, inside, inAt, park: (inAt + inside) / 2, outAt: Math.min(total, inside + 1) };
+      // **The out point goes a distance on screen past the kept mark rather than a fixed
+      // second past it.** The out cut's grab zone reaches 12px to the left of its line and
+      // sits two stacking levels above the marks, so a second is far enough only while a
+      // second is wide. On a 75s take at rate 0.5 the program is 151s across the bed and
+      // one second is about six pixels, which put the out handle on top of the very tick
+      // the rows below have to press: the click retried for thirty seconds and took the
+      // run down as DID NOT RUN at 347 assertions, against a build with nothing wrong
+      // with it. Thirty-two pixels is twice the handle's reach, computed from the window
+      // actually on screen rather than assumed from the take.
+      const perPx = window0.spanSec / Math.max(1, document.getElementById('tBed').getBoundingClientRect().width);
+      const clearOfTheHandle = Math.max(1, 32 * perPx);
+      return {
+        total, outside, inside, inAt, clearOfTheHandle,
+        park: (inAt + inside) / 2,
+        outAt: Math.min(total, inside + clearOfTheHandle),
+      };
     })()`);
     // Set through the buttons the operator uses rather than through a hook, because a
     // hook that set the trim directly would be a second road to a value the keys have to
@@ -7519,6 +8884,30 @@ try {
       'the clip is trimmed with one mark outside it and one inside, and the playhead parks between the in point and the mark it keeps - which is the arrangement the clamp can be seen through',
       `outside ${trim.outside.toFixed(2)}s | in ${trimmed.in?.toFixed(2)}s | park ${trim.park.toFixed(2)}s`
       + ` | inside ${trim.inside.toFixed(2)}s | out ${trimmed.out?.toFixed(2)}s, ${marksNow} ticks`);
+    // **Both ticks are reachable by a pointer, hit-tested rather than assumed, before
+    // anything below aims at one.** The rows below press ticks, and a tick with another
+    // control drawn over it does not fail those rows - `locator.click` waits for the
+    // element to become clickable, retries for thirty seconds and then takes the whole
+    // run down as `DID NOT RUN`, which reports nothing about the build and loses every
+    // section after it. That is the failure this row converts into a sentence naming what
+    // is on top, and it is the one the trim's own geometry above was arranged to avoid.
+    const tickCover = await page.evaluate(`(() => {
+      return [...document.querySelectorAll('#tMarks .tmk')].map((tick) => {
+        const r = tick.getBoundingClientRect();
+        const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return {
+          title: tick.title,
+          clear: at === tick || tick.contains(at),
+          over: at ? (at.id ? '#' + at.id : at.tagName.toLowerCase() + '.' + at.className) : 'nothing',
+        };
+      });
+    })()`);
+    const covered = tickCover.filter((t) => !t.clear);
+    check(tickCover.length === 2 && covered.length === 0,
+      'and a pointer reaches both of them, so a tick with the out handle drawn over it is a red row rather than a timeout that ends the run',
+      covered.length
+        ? covered.map((t) => `"${t.title}" is under ${t.over}`).join('; ')
+        : `${tickCover.length} ticks, ${trim.clearOfTheHandle.toFixed(2)}s of program between the kept mark and the out point`);
     await page.evaluate(`__kinect.timeline.transport().seek(${trim.park})`);
     await settle();
     await focusStage();
@@ -9336,26 +10725,43 @@ try {
   }
 
   // =====================================================================
-  console.log('\n[21] the panel collapses to a dock, and the dock presses the panel\'s own controls');
+  console.log('\n[21] the panel collapses, and what it collapses to is a fact about the surface');
   // =====================================================================
   //
   // **The enumeration was never the hole here, and that is worth stating because it was
-  // predicted to be one.** The dock's buttons exist only while the panel is collapsed,
-  // which has exactly the shape of the object every observation skips - so the warning
-  // was that section 1's sweep would have to visit the collapsed state to see them. It
-  // does not: the sweep is a `querySelectorAll` over `#panel` and friends with no
-  // visibility filter, so a `display: none` button is enumerated like any other, and the
-  // four uncovered rows this feature produced on its first run are the proof that they
-  // were seen. The first row below pins that down rather than trusting it, because the
-  // property it depends on is that the dock lives *inside* `#panel` - move it out to a
-  // bar of its own and the sweep stops seeing it while every other row here still
-  // passes, which is the "passes by disappearing" shape section 1 exists to refuse.
+  // predicted to be one.** The dock's buttons are drawn only while the panel is
+  // collapsed, which has exactly the shape of the object every observation skips - so
+  // the warning was that section 1's sweep would have to visit the collapsed state to
+  // see them. It does not: the sweep is a `querySelectorAll` over `#panel` and friends
+  // with no visibility filter, so a `display: none` button is enumerated like any other,
+  // and the four uncovered rows this feature produced on its first run are the proof
+  // that they were seen. The first row below pins that down rather than trusting it,
+  // because the property it depends on is that the dock lives *inside* `#panel` - move
+  // it out to a bar of its own and the sweep stops seeing it while every other row here
+  // still passes, which is the "passes by disappearing" shape section 1 exists to refuse.
   //
-  // What does need the collapsed state is the *driving*. A `display: none` button cannot
-  // be pressed the way a thumb presses it, so the rows that press one collapse first and
-  // use a real click rather than `el.click()` - the second would fire the handler on a
-  // button no operator could have reached, and a control that works only when driven by
-  // something no hand can do is the row passing for the wrong reason.
+  // **What the dock is has since become a question with two answers, and this section is
+  // built on the difference.** The dock is the panel's collapsed form rather than a
+  // second set of controls, so a surface with no panel has no dock: 2727dfb takes the
+  // whole bar off the editor in one rule and gives the picture back the 72px it was
+  // occupying, where the recorder - whose panel is most of what is on screen - goes on
+  // collapsing to the bar it was designed as. Every row about the bar therefore has to
+  // say which surface it is asking about, and the two are driven here as two pages of
+  // one build.
+  //
+  // **The recorder arm is not a convenience, and that is the load-bearing part.** The
+  // editor's rows here are *absences*, and an absence measured on one surface alone is
+  // satisfied by a build with no dock in the markup at all - the row goes on printing
+  // green straight through the deletion of the feature it is watching. Asked of the same
+  // five ids, in the same build, under the same collapse, the recorder answers with five
+  // controls drawn. So the editor's five withheld ones are a difference between the two
+  // surfaces rather than a dock that nothing anywhere has.
+  //
+  // What still needs the collapsed state is the *driving*. A `display: none` button
+  // cannot be pressed the way a thumb presses it, so the rows that press one collapse
+  // first and use a real click rather than `el.click()` - the second would fire the
+  // handler on a button no operator could have reached, and a control that works only
+  // when driven by something no hand can do is the row passing for the wrong reason.
   //
   // The two view buttons are read as outcomes and the two recorder buttons are not, and
   // the asymmetry is about what is reachable rather than about what is worth asking.
@@ -9365,13 +10771,18 @@ try {
   // reach without either writing a take into `captures/` or driving the server into a
   // refusal, and the note at the end of the section says what that costs.
   {
-    const DOCK_IDS = ['panelToggle', 'dockCentre', 'dockSensor', 'dockMark', 'dockRec'];
+    const DOCK_IDS = ['menuShowSidebar', 'dockCentre', 'dockSensor', 'dockMark', 'dockRec'];
     const swept = DOCK_IDS.filter((id) => sweep.some((row) => row.id === id));
     check(swept.length === DOCK_IDS.length,
       'the collapse and its dock are inside the enumeration section 1 sweeps',
       `${swept.length} of ${DOCK_IDS.length}: ${swept.join(', ') || 'none'}`);
 
-    const geometry = () => page.evaluate(`(() => {
+    // One reader for both pages. The recorder arm at the foot of the section asks the
+    // same questions of the same ids, and a second copy of this evaluate is a second
+    // thing to keep in step - which is how two arms of one comparison end up measuring
+    // two different quantities and agreeing about it.
+    const BAR_IDS = ['panelDock', 'dockCentre', 'dockSensor', 'dockRec', 'dockMark'];
+    const GEOMETRY = `(() => {
       const box = (id) => {
         const el = document.getElementById(id);
         if (!el) return null;
@@ -9379,148 +10790,77 @@ try {
         return { top: Math.round(r.top), bottom: Math.round(r.bottom),
                  w: Math.round(r.width), h: Math.round(r.height) };
       };
+      // Whether a control is drawn, and separately what its own cascade says about it.
+      // Those are two questions and this section needs both, because everything inside a
+      // hidden bar is undrawn whatever its own rules say - so a row asking only the first
+      // cannot tell a control the surface withholds from one the bar took away with it.
+      // The take-pair row below is that distinction and nothing else.
+      const isDrawn = (id) => {
+        const el = document.getElementById(id);
+        return Boolean(el) && el.checkVisibility({ checkVisibilityCSS: true });
+      };
+      const displayOf = (id) => {
+        const el = document.getElementById(id);
+        return el ? getComputedStyle(el).display : 'absent';
+      };
+      const ids = ${JSON.stringify(BAR_IDS)};
       const canvas = document.querySelector('canvas');
       const r = canvas.getBoundingClientRect();
+      const panel = document.getElementById('panel');
       return {
         collapsed: document.body.classList.contains('panelcollapsed'),
-        pressed: document.getElementById('panelToggle').getAttribute('aria-pressed'),
+        // aria-checked on the View menu's entry, and it reads the opposite way round to
+        // the aria-pressed this used to ask for. The control moved off the app bar into
+        // the menu in fb03887 and became a checkbox item saying whether the sidebar is
+        // shown, where the button it replaced said whether the panel was shut - main.js
+        // sets it as String(!collapsed). Reading the old id here threw on null and took
+        // the rest of this file down with it, so the two states are named apart rather
+        // than left to a reader to invert. No backticks anywhere in this evaluate: it is
+        // a template literal and one would end the string early.
+        shown: document.getElementById('menuShowSidebar').getAttribute('aria-checked'),
+        drawn: Object.fromEntries(ids.map((id) => [id, isDrawn(id)])),
+        display: Object.fromEntries(ids.map((id) => [id, displayOf(id)])),
         panel: box('panel'), dock: box('panelDock'), timeline: box('timeline'),
+        // What a collapsed editor's panel is allowed to be and no more, read off the
+        // panel rather than written down as a 1 - a border drawn a pixel wider would
+        // otherwise fail a row about the inspector's tab rail for a reason that is
+        // about the border.
+        panelBorder: Math.round(parseFloat(getComputedStyle(panel).borderTopWidth) || 0),
         canvasBottom: Math.round(r.bottom), buffer: canvas.height,
       };
-    })()`);
+    })()`;
+    const geometry = () => page.evaluate(GEOMETRY);
 
     const open = await geometry();
-    check(open.collapsed === false && open.pressed === 'false' && open.dock.h === 0,
+    check(open.collapsed === false && open.shown === 'true' && open.dock.h === 0,
       'the panel opens as the column it has always been, with no dock drawn',
-      `panel ${open.panel.w}x${open.panel.h}, dock ${open.dock.h}px, aria-pressed ${open.pressed}`);
+      `panel ${open.panel.w}x${open.panel.h}, dock ${open.dock.h}px, aria-checked ${open.shown}`);
 
-    await page.locator('#panelToggle').click();
+    // Through the menu it now lives in, which is two presses rather than one. Driven the
+    // way section 1 drives every other entry in this popover rather than with a synthetic
+    // click on a hidden item: a command inside a closed menu is one no operator can reach,
+    // and pressing it anyway is the row passing for a reason that is not the feature.
+    await page.locator('#viewMenuButton').click();
+    await page.locator('#menuShowSidebar').click();
     await settle();
     const shut = await geometry();
-    check(shut.collapsed === true && shut.pressed === 'true' && shut.dock.h > 0,
-      'the bar\'s toggle shuts it, and the control says which way it is',
-      `aria-pressed ${shut.pressed}, dock ${shut.dock.h}px`);
-    // The row the dock subtraction in `resize()` is for. Rendered full height under a
-    // bar drawn over it, the bottom of every frame is behind the buttons - and the
-    // bottom of the frame is where a subject's feet are, which is the occlusion the
-    // timeline's own comment refuses for the same reason.
-    check(shut.canvasBottom === shut.dock.top,
-      'the picture ends exactly where the dock begins, rather than continuing behind it',
-      `canvas bottom ${shut.canvasBottom}, dock top ${shut.dock.top}`);
-    // And the editor's own strip, which the collapsed panel has to stop above rather
-    // than land on top of. Both are `position: fixed` at the foot of the window at the
-    // same `z-index`, so the one that wins is the one written later - this asserts the
-    // box instead of the rule, which is the only version that survives either moving.
-    check(shut.dock.bottom <= shut.timeline.top,
-      'and it clears the timeline strip rather than sitting over it',
-      `dock bottom ${shut.dock.bottom}, timeline top ${shut.timeline.top}`);
-    check(shut.panel.h - shut.dock.h <= 1,
-      'with nothing but the dock left in the collapsed panel',
-      `panel ${shut.panel.h}px against the dock's ${shut.dock.h}px, `
-      + `slack ${shut.panel.h - shut.dock.h}px`);
+    check(shut.collapsed === true && shut.shown === 'false',
+      'the menu\'s entry shuts it, and the control says which way it is',
+      `aria-checked ${shut.shown}, body reads ${shut.collapsed ? 'collapsed' : 'expanded'}`);
 
-    // The round trip, and the reason the collapse is a class rather than an inline
-    // `display`. The version that shipped set `#panel.style.display` from the key
-    // handler alone: nothing else could read which way it was, and on a touchscreen -
-    // where there is no key to press a second time - it was a panel that did not come
-    // back at all.
-    await focusStage();
-    await page.keyboard.press('h');
-    await settle();
-    const back = await geometry();
-    check(back.collapsed === false && back.pressed === 'false',
-      'the H key drives the same state, and the toggle it never touched agrees about it',
-      `aria-pressed ${back.pressed}`);
-    check(back.panel.w === open.panel.w && back.panel.h === open.panel.h
-      && back.buffer === open.buffer,
-      'and the panel and the buffer come back to exactly what they were',
-      `panel ${back.panel.w}x${back.panel.h} buffer ${back.buffer}, `
-      + `against ${open.panel.w}x${open.panel.h} and ${open.buffer}`);
-
-    await page.keyboard.press('h');
-    await settle();
-    const shutAgain = await geometry();
-    check(shutAgain.collapsed === true && shutAgain.pressed === 'true',
-      'and the key shuts it as well as opens it, so the two controls are one state',
-      `aria-pressed ${shutAgain.pressed}`);
-
-    // Pressable, and asked at the point a finger actually lands rather than inferred
-    // from the boxes above. The collapsed panel and the timeline strip are both
-    // `position: fixed` at the foot of the window at the same `z-index`, so which of
-    // them takes a press is settled by which is written later in the markup - and a dock
-    // underneath the ruler measures as exactly the right size in exactly the right place
-    // while answering no thumb at all. `elementFromPoint` is the only reading that can
-    // tell those apart.
+    // ---- what the editor collapses to, which is nothing ----
     //
-    // It also keeps the rows below from discovering the same thing as a timeout. They
-    // press with a real click, on purpose: `el.click()` fires the handler on a button no
-    // operator could have reached, which is a row passing for a reason that has nothing
-    // to do with the feature. So an occluded dock has to be a red row here and a skip
-    // below, rather than a click that retries for thirty seconds and takes the rest of
-    // the file down with it as a crash.
-    const onTop = await page.evaluate(`(() => {
-      const el = document.getElementById('dockCentre');
-      const r = el.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-      return { what: hit ? (hit.id || hit.className || hit.tagName) : null,
-               own: hit === el || el.contains(hit) };
-    })()`);
-    check(onTop.own,
-      'and a press at the middle of a dock button reaches that button',
-      `the point belongs to ${onTop.what}`);
+    // `body.editing.panelcollapsed #panelDock { display: none }`, and the sentence
+    // 2727dfb wrote above it: the dock is the panel's collapsed form, so an editor with
+    // no panel has no dock either. This row is the whole of that rule, and it is an
+    // absence - what stops it being satisfied by a build with no dock at all is the
+    // recorder arm at the foot of the section, which asks these same ids and gets five
+    // controls back.
+    check(shut.display.panelDock === 'none',
+      'the collapsed editor draws no dock at all, because the dock is the panel collapsed and this surface has no panel',
+      `#panelDock computes to ${shut.display.panelDock}, box ${shut.dock.h}px`);
 
-    // ---- the dock presses the panel's own controls, read as the pose each lands ----
-    const pose = `(() => { const c = __kinect.freeCamera;
-      return [+c.position.x.toFixed(4), +c.position.y.toFixed(4), +c.position.z.toFixed(4)]; })()`;
-    const flick = async () => {
-      const stage = await page.evaluate(`(() => {
-        const r = document.getElementById('stage').getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-      })()`);
-      await page.mouse.move(stage.x, stage.y);
-      await page.mouse.down();
-      await page.mouse.move(stage.x + 60, stage.y + 30);
-      await page.mouse.up();
-      await settle();
-    };
-
-    if (!onTop.own) {
-      // Skipped rather than attempted, and said out loud. A `click()` on a covered
-      // element retries for thirty seconds and then throws, which ends the file as a
-      // crash - `monitor-check` counting its own timeout as a catch is the case
-      // `docs/instruments.md` keeps for exactly this, and the row above has already
-      // said the true thing about this build.
-      note('the two pose rows did not run',
-        'nothing can press a dock that the strip above it is taking the presses for');
-    } else {
-      await page.evaluate("document.getElementById('menuCameraReset').click()");
-      await settle();
-      const centreByMenu = await page.evaluate(pose);
-      await flick();
-      await page.locator('#dockCentre').click();
-      await settle();
-      const centreByDock = await page.evaluate(pose);
-      check(JSON.stringify(centreByDock) === JSON.stringify(centreByMenu),
-        'the dock\'s centre lands the pose the View menu\'s own reset lands',
-        `dock ${centreByDock.join(', ')} against menu ${centreByMenu.join(', ')}`);
-
-      await page.evaluate("document.getElementById('camSensor').click()");
-      await settle();
-      const sensorByPanel = await page.evaluate(pose);
-      check(JSON.stringify(sensorByPanel) !== JSON.stringify(centreByMenu),
-        'and the sensor\'s pose is a different place from the centred one, so the row below can tell them apart',
-        `sensor ${sensorByPanel.join(', ')} against centre ${centreByMenu.join(', ')}`);
-      await page.evaluate("document.getElementById('menuCameraReset').click()");
-      await settle();
-      await page.locator('#dockSensor').click();
-      await settle();
-      const sensorByDock = await page.evaluate(pose);
-      check(JSON.stringify(sensorByDock) === JSON.stringify(sensorByPanel),
-        'and the dock\'s sensor lands the pose Framing\'s own sensor view lands',
-        `dock ${sensorByDock.join(', ')} against panel ${sensorByPanel.join(', ')}`);
-    }
-
-    // ---- the two that act on the take, which this surface must not be offering ----
+    // ---- the two that act on the take, withheld by a rule of their own ----
     //
     // **This row replaced three that passed by comparing nothing.** They read `#dockRec`
     // against `#recGo` - disabled, title, text, pressed - on the theory that a dock
@@ -9532,38 +10872,282 @@ try {
     // two defaults and finds them equal is a row that would survive the paint being
     // deleted, which is the whole of what it claimed to be watching.
     //
-    // What is true on this surface is that the take pair should not be here at all. The
-    // editor hides the entire Record tab, so its panel offers neither control, and the
-    // dock is that panel collapsed rather than a second set of controls - it shipped
-    // offering both, over a `recordState` that is never once updated here, with the
-    // click still reaching `/record/start`. Asserting the absence is the claim this
-    // surface can hold, and it holds it against the bug that was actually in the tree.
-    const offered = await page.evaluate(`(() => {
-      const vis = (id) => {
-        const el = document.getElementById(id);
-        return Boolean(el) && el.checkVisibility({ checkVisibilityCSS: true });
-      };
-      return { centre: vis('dockCentre'), sensor: vis('dockSensor'),
-               rec: vis('dockRec'), mark: vis('dockMark') };
-    })()`);
-    check(offered.centre && offered.sensor,
-      'the collapsed editor offers the two controls that only move the eye',
-      `centre ${offered.centre}, sensor ${offered.sensor}`);
-    check(!offered.rec && !offered.mark,
-      'and offers neither of the two that act on the take, which this surface has no recorder for',
-      `record ${offered.rec}, mark ${offered.mark}`);
+    // **What replaced it then died the day the whole bar came off, and in the quiet
+    // direction.** It asked whether the editor *draws* the pair. Everything inside a
+    // hidden container is undrawn, so from 2727dfb the row was measuring the container
+    // and reporting the pair, printing green over a question nothing was asking -
+    // and `--mutate dock-offers-the-take-on-the-editor`, which deletes the rule that
+    // withholds them, had nothing left it could move. A row that cannot fail, sitting
+    // under a comment about rows that cannot fail.
+    //
+    // The rule is still there and still doing work of its own, and computed style is
+    // where that work can be seen: `display` is not inherited, so an element inside a
+    // `display: none` subtree still computes the value its own cascade gives it. The
+    // take pair compute to `none` on this surface and the two view buttons do not, which
+    // is exactly the difference between a control the editor withholds and a control the
+    // bar took away with it. Both halves are asserted because both can move, measured
+    // across three builds at 1512x900: this one reads none/none against
+    // inline-block/inline-block, the mutation reads inline-block on all four, and a
+    // build with `body.editing.panelcollapsed #panelDock` deleted reads none/none
+    // against block/block - so neither half can answer for the other.
+    const withheld = ['dockRec', 'dockMark'].every((id) => shut.display[id] === 'none');
+    const kept = ['dockCentre', 'dockSensor'].every((id) => shut.display[id] !== 'none'
+      && shut.display[id] !== 'absent');
+    check(withheld && kept,
+      'and the two that act on the take are withheld by a rule of their own rather than by the bar being gone',
+      `record ${shut.display.dockRec} and mark ${shut.display.dockMark}, against `
+      + `centre ${shut.display.dockCentre} and sensor ${shut.display.dockSensor}`);
+
+    // ---- and the picture takes the height back ----
+    //
+    // The other half of 2727dfb, and the half a rule about `display` does not state.
+    // `resize()` subtracts `#panelDock`'s `offsetHeight` from the height available to
+    // the stage while the body is collapsed, which is what stops a frame being rendered
+    // full height under a bar drawn over its last 72px - the bottom of the frame is
+    // where a subject's feet are, and it is the occlusion the timeline's own comment
+    // refuses for the same reason. A bar that is not drawn measures 0, so on this
+    // surface the subtraction is a no-op and the picture runs the whole way down to the
+    // strip. Asserted as the box rather than as that zero: a build that put the bar back
+    // takes those pixels off the frame again, and this is the row that says so.
+    check(shut.canvasBottom === shut.timeline.top,
+      'and the picture runs down to the timeline strip, taking back the height a dock would have occupied',
+      `canvas bottom ${shut.canvasBottom}, strip top ${shut.timeline.top}`);
+    // The collapsed panel's own box, which is the cascade rather than the arithmetic.
+    // The panel and the strip are both `position: fixed` at the foot of the window at
+    // the same `z-index`, so the one that wins is the one written later, and
+    // `body.editing.panelcollapsed #panel` is what lifts the panel clear of the strip.
+    // Exact rather than "at most", because a panel that had gone entirely also sits
+    // above the strip - the "passes by disappearing" reading this file refuses
+    // everywhere else, and it would arrive here as a green row.
+    check(shut.panel.bottom === shut.timeline.top,
+      'the collapsed panel stops exactly where the timeline strip starts rather than over it',
+      `panel bottom ${shut.panel.bottom}, strip top ${shut.timeline.top}`);
+    // And there is nothing left inside it. Collapsed, `#panel` hides its head, its body,
+    // its inspector tab rail and its dock, so what remains is the line along its top
+    // edge - which is why this compares against the border rather than against a 1, and
+    // why it is an equality: 31px is the tab rail surviving the collapse and 0px is the
+    // panel itself having gone.
+    check(shut.panel.h === shut.panelBorder,
+      'with nothing left in the collapsed editor panel but the line along the top of it',
+      `panel ${shut.panel.h}px against a ${shut.panelBorder}px border`);
+
+    // The round trip, and the reason the collapse is a class rather than an inline
+    // `display`. The version that shipped set `#panel.style.display` from the key
+    // handler alone: nothing else could read which way it was, and on a touchscreen -
+    // where there is no key to press a second time - it was a panel that did not come
+    // back at all.
+    await focusStage();
+    await page.keyboard.press('h');
+    await settle();
+    const back = await geometry();
+    check(back.collapsed === false && back.shown === 'true',
+      'the H key drives the same state, and the entry it never touched agrees about it',
+      `aria-checked ${back.shown}`);
+    check(back.panel.w === open.panel.w && back.panel.h === open.panel.h
+      && back.buffer === open.buffer,
+      'and the panel and the buffer come back to exactly what they were',
+      `panel ${back.panel.w}x${back.panel.h} buffer ${back.buffer}, `
+      + `against ${open.panel.w}x${open.panel.h} and ${open.buffer}`);
+
+    await page.keyboard.press('h');
+    await settle();
+    const shutAgain = await geometry();
+    check(shutAgain.collapsed === true && shutAgain.shown === 'false',
+      'and the key shuts it as well as opens it, so the two controls are one state',
+      `aria-checked ${shutAgain.shown}`);
+
+    // ---- the same collapse on the surface the dock was built for ----
+    //
+    // A second page rather than a navigation, because the editor page has to survive
+    // into section 22 with its take open and its transport where the rows above left it.
+    // A second *context* rather than a second page in this one, so nothing the recorder
+    // writes to storage lands under the editor's origin halfway through a file that
+    // spends section 15 reading exactly that.
+    //
+    // **The page carries the mutation's route of its own, and that is the part to get
+    // right rather than the part that is bookkeeping.** `page.route` is installed per
+    // page, so a recorder opened without it runs the tree's own build while the editor
+    // beside it runs the mutated one - two arms of one comparison measuring two
+    // programs, and a mutation of the markup silently reaching only half of the section
+    // it was written for. `web/index.html` serves both surfaces, which is why the path
+    // the document is placed at is what `serveMutation` takes its second argument for.
+    // Delivery is verified rather than assumed, for the reason `openEditor` verifies it:
+    // a route that was declared and never installed ran the tree's own source and came
+    // back NOT CAUGHT with every row green. So a file this surface never asks for takes
+    // the whole run to UNTESTED and exit 2 even when the editor arm caught the mutation -
+    // honest while the two surfaces are one page in two modes, and the line to revisit on
+    // the day a module reaches only one of them.
+    //
+    // `?panel=collapsed` rather than the menu, because it is a shipped path - the Pi's
+    // kiosk unit opens the recorder exactly this way - and because the gesture that
+    // collapses is already driven twice above, on the surface whose rows are about it.
+    // What this arm is for is the bar, not the switch.
+    const RECORDER_PATH = '/record';
+    const recErrors = [];
+    let recorder = null;
+    let recWhy = '';
+    try {
+      const recContext = await page.context().browser().newContext({
+        viewport: VIEWPORT, deviceScaleFactor: 1,
+      });
+      const recPage = await recContext.newPage();
+      recPage.on('pageerror', (err) => recErrors.push(String(err)));
+      recPage.on('console', (msg) => { if (msg.type() === 'error') recErrors.push(msg.text()); });
+      await recPage.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
+      const recMutant = await serveMutation(recPage, RECORDER_PATH);
+      await recPage.goto(`${URL_BASE}${RECORDER_PATH}?panel=collapsed`, { waitUntil: 'load' });
+      await recPage.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
+      await recPage.evaluate('__kinect.timeline.settled()');
+      if (MUTATE && recMutant.served() === 0) {
+        throw new Error(`${MUTATE} was staged for ${mutation.file} at ${recMutant.path} and the `
+          + "recorder page never requested it, so this arm ran the tree's own build");
+      }
+      recorder = { page: recPage, close: () => recContext.close() };
+    } catch (err) {
+      recWhy = err.message.split('\n')[0];
+    }
+
+    if (!recorder) {
+      // Not a finding, and not a pass either. Every row in the arm below is about the
+      // recorder, so a page that never opened leaves them untested rather than failed -
+      // counting a harness failure as a finding is the mistake `monitor-check` made and
+      // `docs/instruments.md` keeps, and reddening a row here would be exactly that
+      // mistake. But the shape this branch shipped with was the other one: it printed a
+      // note and let the file run on to `PASS`, so a build where `/record` cannot boot
+      // reports a green baseline with six of section 21's rows silently absent, and the
+      // only thing standing between a reader and that reading was an instruction to add
+      // up the total by hand.
+      //
+      // `untested` is what this file already has for it and had never once been set -
+      // exit 2, `docs/proof-tools.md`'s third code, "the harness did not run, or a claim
+      // went unproven". The run finishes so the sections after this one still answer;
+      // the verdict at the foot is what refuses.
+      untested = 'the recorder arm never opened, so the six dock rows section 21 owns did not run'
+        + ` - ${recWhy}`
+        + (recErrors.length ? ` - the page said: ${recErrors.slice(0, 3).join(' | ')}` : '');
+      note('the recorder arm did not run', recWhy
+        + (recErrors.length ? ` - the page said: ${recErrors.slice(0, 3).join(' | ')}` : ''));
+    } else {
+      try {
+        const rec = await recorder.page.evaluate(GEOMETRY);
+        // The positive half of every absence above, and the reason those absences mean
+        // anything. Five ids, one build, one collapse, and the surface is the only thing
+        // that differs.
+        check(BAR_IDS.every((id) => rec.drawn[id]),
+          'the same collapse on the recorder draws the dock and all four of its buttons, so the editor\'s absences are a difference between the surfaces',
+          `${BAR_IDS.map((id) => `${id} ${rec.drawn[id]}`).join(', ')}, `
+          + `body reads ${rec.collapsed ? 'collapsed' : 'expanded'}`);
+        // The subtraction `resize()` makes, asked on the only surface that still has
+        // something to subtract. It reads as working without this row - the panel
+        // collapses, the dock appears and every button answers - and only the geometry
+        // says the frame is being drawn full height with its last 72px behind the
+        // buttons. The recorder hides its timeline strip, so the dock's own top is what
+        // the picture has to end at here.
+        check(rec.canvasBottom === rec.dock.top,
+          'and there the picture ends exactly where the dock begins, rather than continuing behind it',
+          `canvas bottom ${rec.canvasBottom}, dock top ${rec.dock.top}`);
+
+        // Pressable, and asked at the point a finger actually lands rather than inferred
+        // from the boxes above. A dock underneath something else measures as exactly the
+        // right size in exactly the right place while answering no thumb at all, and
+        // `elementFromPoint` is the only reading that can tell those apart.
+        //
+        // It also keeps the rows below from discovering the same thing as a timeout.
+        // They press with a real click, on purpose: `el.click()` fires the handler on a
+        // button no operator could have reached, which is a row passing for a reason
+        // that has nothing to do with the feature. So an occluded dock has to be a red
+        // row here and a skip below, rather than a click that retries for thirty seconds
+        // and takes the rest of the file down with it as a crash.
+        const onTop = await recorder.page.evaluate(`(() => {
+          const el = document.getElementById('dockCentre');
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return { what: hit ? (hit.id || hit.className || hit.tagName) : null,
+                   own: hit === el || el.contains(hit) };
+        })()`);
+        check(onTop.own,
+          'and a press at the middle of a dock button reaches that button',
+          `the point belongs to ${onTop.what}`);
+
+        // ---- the dock presses the panel's own controls, read as the pose each lands ----
+        const recSettle = () => recorder.page.evaluate('__kinect.timeline.settled()');
+        const pose = `(() => { const c = __kinect.freeCamera;
+          return [+c.position.x.toFixed(4), +c.position.y.toFixed(4), +c.position.z.toFixed(4)]; })()`;
+        const flick = async () => {
+          const stage = await recorder.page.evaluate(`(() => {
+            const r = document.getElementById('stage').getBoundingClientRect();
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+          })()`);
+          await recorder.page.mouse.move(stage.x, stage.y);
+          await recorder.page.mouse.down();
+          await recorder.page.mouse.move(stage.x + 60, stage.y + 30);
+          await recorder.page.mouse.up();
+          await recSettle();
+        };
+
+        if (!onTop.own) {
+          // Skipped rather than attempted, and said out loud. A `click()` on a covered
+          // element retries for thirty seconds and then throws, which ends the file as a
+          // crash - `monitor-check` counting its own timeout as a catch is the case
+          // `docs/instruments.md` keeps for exactly this, and the row above has already
+          // said the true thing about this build.
+          note('the two pose comparisons did not run, nor the row that separates them',
+            'nothing can press a dock that whatever is over it is taking the presses for - '
+            + 'three rows short, and the row above carries what this build is');
+        } else {
+          // The two reference controls are pressed synthetically and the two dock
+          // buttons are not, and the asymmetry is deliberate: `#menuCameraReset` is
+          // inside a closed menu and `#camSensor` is inside the panel this arm has
+          // collapsed, so neither is reachable by a hand right now. They are the
+          // *reading* the dock is compared against rather than the thing under test,
+          // and the thing under test is pressed the way an operator presses it.
+          await recorder.page.evaluate("document.getElementById('menuCameraReset').click()");
+          await recSettle();
+          const centreByMenu = await recorder.page.evaluate(pose);
+          await flick();
+          await recorder.page.locator('#dockCentre').click();
+          await recSettle();
+          const centreByDock = await recorder.page.evaluate(pose);
+          check(JSON.stringify(centreByDock) === JSON.stringify(centreByMenu),
+            'the dock\'s centre lands the pose the View menu\'s own reset lands',
+            `dock ${centreByDock.join(', ')} against menu ${centreByMenu.join(', ')}`);
+
+          await recorder.page.evaluate("document.getElementById('camSensor').click()");
+          await recSettle();
+          const sensorByPanel = await recorder.page.evaluate(pose);
+          check(JSON.stringify(sensorByPanel) !== JSON.stringify(centreByMenu),
+            'and the sensor\'s pose is a different place from the centred one, so the row below can tell them apart',
+            `sensor ${sensorByPanel.join(', ')} against centre ${centreByMenu.join(', ')}`);
+          await recorder.page.evaluate("document.getElementById('menuCameraReset').click()");
+          await recSettle();
+          await recorder.page.locator('#dockSensor').click();
+          await recSettle();
+          const sensorByDock = await recorder.page.evaluate(pose);
+          check(JSON.stringify(sensorByDock) === JSON.stringify(sensorByPanel),
+            'and the dock\'s sensor lands the pose Framing\'s own sensor view lands',
+            `dock ${sensorByDock.join(', ')} against panel ${sensorByPanel.join(', ')}`);
+        }
+      } finally {
+        // Closed before the editor is put back, so the last gesture of this section goes
+        // to the page section 22 inherits and nothing is left holding a socket on the
+        // shooting server.
+        await recorder.close().catch(() => {});
+      }
+    }
 
     note('what this section cannot catch',
-      'anything about the take pair on the surface that does have them. They are the '
-      + 'recorder\'s controls and this is the editor\'s tool, so what is enforced here is '
-      + 'that they stay off this surface - their behaviour on `/record` is uncovered, and '
-      + 'saying so is better than crediting a driver that does not drive');
+      'what the take pair do once pressed. `record` and `mark` forward to `#recGo` and '
+      + '`#recMark`, whose outcome is a take written into `captures/` or a refusal from '
+      + 'the server, and neither is reachable from here without editing the library this '
+      + 'file measures. What is enforced is where they are: the recorder draws them and '
+      + 'the editor withholds them by a rule this section reads');
 
     // Left the way the sections after this one expect to find it.
     await focusStage();
     await page.keyboard.press('h');
     await settle();
   }
+
 
   console.log('\n[22] pinning the drive drops what the loop was going to serve');
 
@@ -9635,8 +11219,19 @@ if (crashed) {
   if (fired.length) console.log(`[editor] rows that had already fired: ${fired.join('; ')}`);
   process.exit(2);
 }
+// Above the mutation verdict on purpose, and it prints what that verdict would have.
+// A run missing rows is not a verdict on a mutation - the rows it is short of may be
+// the rows that answer it, and "caught" claimed off the others is a catch recorded for
+// a reason nobody checked. So it says neither caught nor missed. What it must not also
+// do is swallow the reading `CLAUDE.md` asks for: count failed assertions, never exit
+// codes, and read which ones fired. This branch was written printing only its reason,
+// which is the one verdict path in this file a reader could not count, so it carries
+// the same three lines the crash branch above carries.
 if (untested) {
   console.log(`\n[editor] UNTESTED - ${untested}`);
+  console.log(`[editor] ${checks} assertions ran, ${failures} failed`);
+  if (fired.length) console.log(`[editor] rows that fired: ${fired.join('; ')}`);
+  if (MUTATE) console.log(`[editor] ${MUTATE} is neither caught nor missed here - the run never reached every row that answers it`);
   process.exit(2);
 }
 

@@ -187,7 +187,7 @@ was replaced instead.
 
 ### What replaced it, and what that cost the proofs
 
-`UnrealBloomPass` is gone and `BloomPass` in `web/main.js` is ours: a progressive
+`UnrealBloomPass` is gone and `BloomPass` in `web/bloom-pass.js` is ours: a progressive
 down-and-up sample chain, five downsamples through a thirteen-tap bilinear filter, four
 upsamples through a nine-tap tent accumulating as they go, and one composite. **Ten draws
 against thirteen**, and the width comes from the resampling rather than from a Gaussian

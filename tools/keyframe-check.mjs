@@ -43,13 +43,29 @@
 // the first version of this feature scissored a top-down into the render buffer
 // and it broke step 4's frame-identity claim.
 //
-//   node server/index.js --port 8080 --replay captures/sample.knct &
-//   node tools/keyframe-check.mjs --url http://localhost:8080
-//   node tools/keyframe-check.mjs --mutate pose-linear     # must FAIL
+//   node server/index.js --port 8080 --replay captures/fixture-1g.knct &
+//   node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g
+//   node tools/keyframe-check.mjs --mutate pose-linear       # must FAIL
+//   node tools/keyframe-check.mjs --mutate pose-ignores-ease # must FAIL
 //
-// The fixture is the sample capture and it is not a 30fps take: 284 frames over
-// 30.36s, median gap 64ms, mean 9.32fps. Every source figure below is against that
-// cadence rather than against an assumed even 33ms.
+// **The last two are separable on purpose and the counts are how you tell.**
+// `pose-linear` fires 6 - the spline rows, the uniform-formula anchor, and section
+// 1c's route row, because a straight line between the keys really is a different
+// route. `pose-ignores-ease` fires 4 - the three channels of section 1c plus its
+// handles-do-something control - and leaves every route row green, because a camera
+// that ignores its handles still travels the same curve, just at the wrong times.
+// Two claims, two sets of rows: one says the route is a spline, the other says the
+// traversal of it is shaped.
+//
+// **The take has to be at least `NEEDS_TAKE_SEC` long and the run refuses one that is
+// not**; the reasoning is beside that declaration. The cadence is read off the take
+// rather than assumed, which is a correction rather than a detail: this header used to
+// state "284 frames over 30.36s, median gap 64ms, mean 9.32fps" and the comment in
+// section 6d said "the 49.79s sample this tree holds", while the tree's own
+// `captures/sample.knct` runs 284 frames over 9.42s at 30.03fps. Three figures, one of
+// them right by accident, all written down as facts about a file `captures/` does not
+// track - which is the shape a number nobody re-derived always ends up in. Every source
+// figure below is against the cadence the run prints.
 
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -70,7 +86,13 @@ const HEADED = argv.includes('--headed');
 const MUTATE = flag('--mutate');
 const SHOTS = flag('--shots');
 
-const STAGE = { width: 640, height: 400 };
+// 16:9, and the shape matters as much as the size. This was 640x400, which is 8:5 - a shape
+// `EXPORT_SIZES` offers no resolution for, so `restoreProject` refuses a document framed at
+// it, and this file undoes. The run died mid-way with "this project is framed at 8:5, which
+// this build offers no resolution for" coming out of an undo restoring a snapshot this tool
+// had put the editor into. A stage no user gesture can reach and no document can hold is a
+// stage this file should never have been measuring in.
+const STAGE = { width: 640, height: 360 };
 // A first guess at the timeline strip; the real height is measured after load and the
 // viewport corrected. See the resize below the goto.
 const CHROME_H_GUESS = 148;
@@ -100,15 +122,14 @@ const halfStep = (spec) => spec.step / 2 + 1e-9;
 const MUTATIONS = {
   // Ease handles stop bending the timing, so every scalar segment is a straight
   // lerp whatever its handles say.
-  'ease-ignored': [[
+  'ease-ignored': { file: 'web/curve.js', edits: [[
     `function easeAt(a, b, x) {
-  const u = easeParam(a[0], b[0], x);
-  return bez(a[1], b[1], u);
+  return bezAxis(a, b, 1, easeParam(a, b, x));
 }`,
     'function easeAt(a, b, x) { return x; }',
-  ]],
+  ]] },
   // A step track interpolates, which is the one thing a boolean cannot do.
-  'step-lerps': [[
+  'step-lerps': { file: 'web/curve.js', edits: [[
     `function stepAt(keys, t) {
   const i = keyBefore(keys, t);
   return keys[i < 0 ? 0 : i].value;
@@ -119,9 +140,9 @@ const MUTATIONS = {
   const u = (t - keys[i].t) / Math.max(1e-9, keys[i + 1].t - keys[i].t);
   return u < 0.5 ? keys[i].value : keys[i + 1].value;
 }`,
-  ]],
+  ]] },
   // The camera corners on straight lines between its keys.
-  'pose-linear': [[
+  'pose-linear': { file: 'web/main.js', edits: [[
     `  const position = [0, 1, 2].map((axis) => hermite(
     a.value.position[axis], b.value.position[axis],
     tangentAt(keys, i, axis), tangentAt(keys, i + 1, axis),
@@ -129,11 +150,25 @@ const MUTATIONS = {
   ));`,
     `  const position = [0, 1, 2].map((axis) => a.value.position[axis]
     + (b.value.position[axis] - a.value.position[axis]) * u);`,
-  ]],
+  ]] },
+  // The camera goes back to ignoring its handles, which is what it did before the
+  // pose track was eased at all: the raw fraction of the way through the segment
+  // reaches the spline, the slerp and the fov lerp, so the five preset buttons write
+  // numbers nothing reads and a move departs and arrives at speed.
+  //
+  // Aimed at the remap alone rather than at anything around it. The `hermite` block
+  // below it is what `pose-linear` anchors and the two must stay separable, because a
+  // mutation that reddened both rows could not say which term broke - and these are
+  // genuinely different claims: one is that the route is a spline, the other is that
+  // the traversal of it is shaped.
+  'pose-ignores-ease': { file: 'web/main.js', edits: [[
+    '  const u = easeAt(a.easeOut, b.easeIn, (t - a.t) / span);',
+    '  const u = (t - a.t) / span;',
+  ]] },
   // The carried finding, put back: the pre-roll reads the slope at the target and
   // multiplies, instead of asking how far back the curve covers the span. A hold
   // then answers "no frames needed" for the case that needs the most.
-  'preroll-slope-at-target': [[
+  'preroll-slope-at-target': { file: 'web/main.js', edits: [[
     '    const back = retime.framesBackFor(programSec, surfaceSec, this.outputFps, this.lastFrame);',
     `    // Step 4's two lines restored verbatim, zero-slope branch and all: the slope
     // at a point times a frame count, and a hold answering "no frames needed" for
@@ -141,16 +176,16 @@ const MUTATIONS = {
     // shape of the finding - a tangent has no window to ask about.
     const sourcePerFrame = Math.abs(retime.slopeAt(programSec)) / this.outputFps;
     const back = { frames: sourcePerFrame > 0 ? Math.ceil(surfaceSec / sourcePerFrame) : 0, covered: true };`,
-  ]],
+  ]] },
   // The retime stops being a curve and goes back to a constant slope.
-  'retime-ignores-keys': [[
+  'retime-ignores-keys': { file: 'web/main.js', edits: [[
     `    if (keys.length === 1) return keys[0].value + (programSec - keys[0].t) * this.rate;
     return scalarAt(keys, programSec, EXTEND_ENDS);`,
     '    return programSec * this.rate;',
-  ]],
+  ]] },
   // The evaluator announces its writes, so every evaluated frame schedules an
   // accurate seek, which evaluates, which schedules more.
-  'evaluator-repaints': [[
+  'evaluator-repaints': { file: 'web/main.js', edits: [[
     `  withoutRepaint(() => {
     for (const track of tracks.values()) {
       if (track.keys.length === 0) continue;
@@ -163,7 +198,7 @@ const MUTATIONS = {
     if (borrowed && borrowed.has(track.name)) continue;
     params.set(track.name, track.valueAt(t));
   }`,
-  ]],
+  ]] },
   // The undo snapshot takes the whole registry rather than document state, so
   // dropping render scale for performance lands on the stack and pressing undo
   // puts it back.
@@ -172,10 +207,10 @@ const MUTATIONS = {
   // tool refused the mutation - correctly, and silently as far as anything reading only
   // the exit code was concerned. The claim is unchanged: the snapshot is document state,
   // so widening it to the whole registry has to be caught.
-  'undo-includes-view': [[
+  'undo-includes-view': { file: 'web/main.js', edits: [[
     "      params: params.values(params.names('look')),",
     '      params: params.values(params.names()),',
-  ]],
+  ]] },
   // Undo pushes on every input event rather than on the end of the interaction, so
   // one slider drag is two hundred levels.
   // Re-anchored: the listener's local was renamed `el` to `input`, and a one-word rename
@@ -183,16 +218,16 @@ const MUTATIONS = {
   // undo step, and it had stopped running while reading as though it had. Caught by
   // `syntax-check`'s anchor row rather than by anybody noticing; `docs/instruments.md`
   // carries the case file.
-  'undo-on-input': [[
+  'undo-on-input': { file: 'web/main.js', edits: [[
     "      input.addEventListener('input', () => writeFromControl(name, Number(input.value)));",
     "      input.addEventListener('input', () => { writeFromControl(name, Number(input.value)); history.commit(); });",
-  ]],
+  ]] },
   // A seek plans its span once and never looks again, which is what the code did
   // before a curve could move under it. The hazard is older than step 5 - the speed
   // slider mutates `retime.rate` outside the transport's exclusive queue, so a
   // committed step 4 could hit it too - it is only far harder to reach without a
   // drag rewriting the curve on every pointer move.
-  'seek-plans-once': [[
+  'seek-plans-once': { file: 'web/main.js', edits: [[
     `    let planned = this.planSeek(programSec, options.frames);
     for (let attempt = 0; !this.source.resident(planned.from, planned.to); attempt++) {
       if (attempt >= SEEK_REPLANS) {
@@ -219,56 +254,56 @@ const MUTATIONS = {
     }`,
     `    const planned = this.planSeek(programSec, options.frames);
     await this.source.ensure(planned.from, planned.to);`,
-  ]],
+  ]] },
   // The pre-roll goes back to reading the uniforms, which hold the look at wherever
   // the playhead was parked rather than the look at the target.
   // The surface half alone. It used to carry the trails half too, which made it two
   // claims in one mutation and left it stale the moment the trails half changed
   // shape - and a stale mutation is refused rather than run, which is the guard
   // working but not a catch. `trails-damp-at-target` is the trails half's own.
-  'preroll-reads-uniforms': [[
+  'preroll-reads-uniforms': { file: 'web/main.js', edits: [[
     `    const surfaceSec = (valueAtProgram('fade', programSec)
       + valueAtProgram('wake', programSec)) / 1000;`,
     '    const surfaceSec = uniforms.fadeTime.value + uniforms.wakeTime.value;',
-  ]],
+  ]] },
   // The trails half of the pre-roll goes back to the closed form, which is the
   // product over the window only while damp is constant.
-  'trails-damp-at-target': [[
+  'trails-damp-at-target': { file: 'web/main.js', edits: [[
     `    const back2 = this.trailsFramesBack(programSec);
     const trails = back2.frames;`,
     `    const dampNow = valueAtProgram('trails', programSec);
     const back2 = { covered: true };
     const trails = dampNow > 0 ? Math.ceil(Math.log(AFTERIMAGE_RESIDUAL) / Math.log(dampNow)) : 0;`,
-  ]],
+  ]] },
   // Orientation stops interpolating and holds the earlier key. Every quaternion is
   // still a unit quaternion and every key is still hit exactly, which is what made
   // this invisible while the test rotations were identities.
-  'pose-no-slerp': [[
+  'pose-no-slerp': { file: 'web/main.js', edits: [[
     `  slerpA.fromArray(a.value.quaternion);
   slerpB.fromArray(b.value.quaternion);
   slerpA.slerp(slerpB, u);`,
     '  slerpA.fromArray(a.value.quaternion);',
-  ]],
+  ]] },
   // The retime's editing doors stop holding a key inside its neighbours, so a drag
   // can author a curve that runs downhill.
-  'retime-unclamped': [
+  'retime-unclamped': { file: 'web/main.js', edits: [
     [`  const floor = i > 0 ? keys[i - 1].value : 0;
   const ceiling = i < keys.length - 1 ? keys[i + 1].value : timeline.source.duration;
   key.value = Math.max(floor, Math.min(ceiling, key.value));`,
       '  key.value = Math.max(0, Math.min(timeline.source.duration, key.value));'],
     ['      if (keys[i].value < keys[i - 1].value) {', '      if (false) {'],
-  ],
+  ] },
   // The handle half of the retime guard goes away while the key-value half stays, so
   // a curve whose keys ascend can still be bent downhill inside a segment. Its own
   // mutation rather than part of `retime-unclamped`, because they are two claims:
   // one is about where a key may sit, the other about where its handles may.
-  'retime-handle-unchecked': [[
-    '        if (!h.every((c) => c >= 0 && c <= 1)) {',
+  'retime-handle-unchecked': { file: 'web/main.js', edits: [[
+    '        if (!h[0].every((c) => c >= 0 && c <= 1)) {',
     '        if (false) {',
-  ]],
+  ]] },
   // The animation loop stops catching, so the pair source's refusal escapes it and
   // three never asks for another frame.
-  'tick-uncaught': [[
+  'tick-uncaught': { file: 'web/main.js', edits: [[
     `    try {
       this.tickNow(nowMs);
     } catch (err) {`,
@@ -279,10 +314,10 @@ const MUTATIONS = {
     try {
       this.tickNow(nowMs);
     } catch (err) {`,
-  ]],
+  ]] },
   // The furniture goes back inside the frame, which is where it was first written
   // and where it broke step 4.
-  'chrome-in-frame': [[
+  'chrome-in-frame': { file: 'web/main.js', edits: [[
     `    if (postEnabled()) composer.render(dt);
     else renderer.render(scene, viewCamera);`,
     `    if (postEnabled()) composer.render(dt);
@@ -305,24 +340,48 @@ const MUTATIONS = {
   renderer.setClearColor(held, heldAlpha);
 }
 function drawChrome() {`,
-  ]],
+  ]] },
 };
 
+// **The spec names the file it edits, and the interception is derived from that name.**
+// This used to read the literal `web/main.js` regardless of what the table said, which
+// was true of every entry and true by coincidence: the page is built from more than one
+// module, so an anchor that moves into a neighbouring one would leave a hardcoded route
+// matching nothing, the browser loading the unmutated build, and the run recorded as
+// this tool having missed a bug it was never shown. That is the failure direction
+// `docs/instruments.md` keeps the case file for, and it is silent.
+//
+// Returned with its file rather than as a bare string so the caller can install the
+// route for the right URL and refuse when that URL is never asked for.
 function mutatedSource() {
-  const path = join(REPO, 'web/main.js');
-  let source = readFileSync(path, 'utf8');
-  const edits = MUTATIONS[MUTATE];
-  if (!edits) {
+  const spec = MUTATIONS[MUTATE];
+  if (!spec) {
     throw new Error(`unknown mutation ${MUTATE} - have ${Object.keys(MUTATIONS).join(', ')}`);
   }
-  for (const [from, to] of edits) {
+  let source = readFileSync(join(REPO, spec.file), 'utf8');
+  for (const [from, to] of spec.edits) {
     const hits = source.split(from).length - 1;
     if (hits !== 1) {
-      throw new Error(`mutation ${MUTATE} matched ${hits} times, expected exactly 1: ${from.slice(0, 70)}…`);
+      throw new Error(`mutation ${MUTATE} matched ${hits} times in ${spec.file}, expected exactly 1: ${from.slice(0, 70)}…`);
     }
     source = source.replace(from, to);
   }
-  return source;
+  return { file: spec.file, body: source };
+}
+
+/**
+ * Where a file under `web/` is reached from a browser.
+ *
+ * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
+ * on the basename is a claim about a filename where the server's rule is about a path -
+ * two modules could end in the same name and the wrong one would be served without
+ * anything failing.
+ */
+function servedAt(file) {
+  if (!file.startsWith('web/')) {
+    throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
+  }
+  return `/${file.slice('web/'.length)}`;
 }
 
 // ------------------------------------------------------------------- playwright
@@ -384,29 +443,64 @@ function src(value) {
 // found by plain bisection over sixty halvings rather than by Newton, and the
 // spline is anchored against the textbook uniform formula below.
 
-const LIN_OUT = [1 / 3, 1 / 3];
-const LIN_IN = [2 / 3, 2 / 3];
+const LIN_OUT = [[1 / 3, 1 / 3]];
+const LIN_IN = [[2 / 3, 2 / 3]];
 
-const bez1 = (a, b, u) => {
-  const v = 1 - u;
-  return 3 * v * v * u * a + 3 * v * u * u * b + u * u * u;
+/**
+ * One coordinate of a segment's timing curve, summed as Bernstein terms.
+ *
+ * **The page evaluates the same curve by de Casteljau, and this does not, on purpose.**
+ * A handle is a list of control points now rather than a fixed pair, so the closed-form
+ * cubic this replaced could not answer the question any more - and the obvious
+ * replacement, the same recurrence the page runs, is the one formulation that would
+ * agree with it by construction whatever either of them got wrong. The binomial row is
+ * built as it goes by Pascal's rule, so nothing here shares a line of reasoning with
+ * `bezAxis` beyond the definition of a Bezier itself.
+ *
+ * `mid` is the interior ordinates in order; the ends are pinned at 0 and 1.
+ */
+const bezN = (mid, u) => {
+  const c = [0, ...mid, 1];
+  const n = c.length - 1;
+  let binom = 1;
+  let sum = 0;
+  for (let k = 0; k <= n; k++) {
+    sum += binom * c[k] * ((1 - u) ** (n - k)) * (u ** k);
+    binom = (binom * (n - k)) / (k + 1);
+  }
+  return sum;
 };
 
-function paramAt(ax, bx, x) {
+function paramAt(mid, x) {
   if (x <= 0) return 0;
   if (x >= 1) return 1;
   let lo = 0;
   let hi = 1;
   for (let i = 0; i < 60; i++) {
-    const mid = (lo + hi) / 2;
-    if (bez1(ax, bx, mid) < x) lo = mid;
-    else hi = mid;
+    const at = (lo + hi) / 2;
+    if (bezN(mid, at) < x) lo = at;
+    else hi = at;
   }
   return (lo + hi) / 2;
 }
 
 const easeOf = (key) => key.easeOut ?? LIN_OUT;
 const easeIn = (key) => key.easeIn ?? LIN_IN;
+
+/**
+ * How far through a segment the handles say we are, by this file's own bisection
+ * rather than the page's Newton - which is the point of it existing twice.
+ *
+ * Both the scalar curve and the pose track want this, and a pose wants it for the
+ * same reason a scalar does: the handles remap time and leave the values alone. It
+ * is written here rather than imported from `web/curve.js` because an oracle that
+ * calls the thing under test agrees with it by construction and proves nothing.
+ */
+const ordinates = (a, b, axis) => [
+  ...easeOf(a).map((point) => point[axis]),
+  ...easeIn(b).map((point) => point[axis]),
+];
+const easedFraction = (a, b, x) => bezN(ordinates(a, b, 1), paramAt(ordinates(a, b, 0), x));
 
 function before(keys, t) {
   let i = -1;
@@ -429,9 +523,7 @@ function scalarAt(keys, t, extend = false) {
   }
   const a = keys[i];
   const b = keys[i + 1];
-  const x = (t - a.t) / (b.t - a.t);
-  const u = paramAt(easeOf(a)[0], easeIn(b)[0], x);
-  return a.value + (b.value - a.value) * bez1(easeOf(a)[1], easeIn(b)[1], u);
+  return a.value + (b.value - a.value) * easedFraction(a, b, (t - a.t) / (b.t - a.t));
 }
 
 /** The segment's slope at one of its ends, by a one-sided difference. */
@@ -440,10 +532,7 @@ function endSlope(keys, i, side) {
   const b = keys[i + 1];
   const h = 1e-7;
   const x = side === 0 ? h : 1 - h;
-  const at = (xx) => {
-    const u = paramAt(easeOf(a)[0], easeIn(b)[0], xx);
-    return a.value + (b.value - a.value) * bez1(easeOf(a)[1], easeIn(b)[1], u);
-  };
+  const at = (xx) => a.value + (b.value - a.value) * easedFraction(a, b, xx);
   return (at(Math.min(1, x + h)) - at(Math.max(0, x - h))) / ((b.t - a.t) * (Math.min(1, x + h) - Math.max(0, x - h)));
 }
 
@@ -499,7 +588,17 @@ function quatAngle(qa, qb) {
   return (2 * Math.acos(Math.min(1, dot)) * 180) / Math.PI;
 }
 
-/** Non-uniform Catmull-Rom in Hermite form, tangents divided by neighbour time. */
+/**
+ * Non-uniform Catmull-Rom in Hermite form, tangents divided by neighbour time, and
+ * the whole traversal put through the handles first.
+ *
+ * The ease enters exactly once, and that is the claim rather than a convenience: all
+ * three channels read the same remapped fraction, so shaping the timing cannot move
+ * the curve through space. A build that eased position alone would still round its
+ * corners and would still be wrong - the camera would slide along a path it was no
+ * longer aimed down - and this oracle would catch it, because the quaternion it
+ * predicts is the one taken at the eased fraction.
+ */
 function poseValueAt(keys, t) {
   if (keys.length === 1) return keys[0].value;
   const i = before(keys, t);
@@ -508,7 +607,7 @@ function poseValueAt(keys, t) {
   const a = keys[i];
   const b = keys[i + 1];
   const span = b.t - a.t;
-  const u = (t - a.t) / span;
+  const u = easedFraction(a, b, (t - a.t) / span);
   // The end keys are mirrored one segment outside the path, which is what the
   // textbook clamp means once the parameter is time rather than an index.
   const at = (k) => {
@@ -640,8 +739,8 @@ const HOLD = {
 const EASED_RAMP = {
   rate: 1,
   keys: [
-    { t: 0, value: 0, easeOut: [0.85, 0.05], easeIn: LIN_IN },
-    { t: 10, value: 20, easeOut: LIN_OUT, easeIn: [0.15, 0.95] },
+    { t: 0, value: 0, easeOut: [[0.85, 0.05]], easeIn: LIN_IN },
+    { t: 10, value: 20, easeOut: LIN_OUT, easeIn: [[0.15, 0.95]] },
   ],
 };
 const FLAT = { rate: 1, keys: [] };
@@ -749,12 +848,20 @@ page.on('console', (msg) => { if (msg.type() === 'error') note(msg.text()); });
 page.on('response', (res) => { if (!res.ok()) note(`${res.status()} ${res.url()}`); });
 await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
+// Counted rather than assumed, and read after the page has loaded. A route that
+// matches nothing fulfils nothing and throws no error - the page simply loads the
+// tree's own source - so the only way to tell a mutation that was delivered from one
+// that was never asked for is to watch the interception fire.
+let mutantServed = 0;
+let mutantPath = null;
 if (MUTATE) {
-  const source = mutatedSource();
-  await page.route('**/main.js', (route) => route.fulfill({
-    contentType: 'text/javascript; charset=utf-8', body: source,
-  }));
-  console.log(`[keyframe] MUTATED BUILD: ${MUTATE} - this run is expected to FAIL`);
+  const { file, body } = mutatedSource();
+  mutantPath = servedAt(file);
+  await page.route((url) => url.pathname === mutantPath, (route) => {
+    mutantServed++;
+    route.fulfill({ contentType: 'text/javascript; charset=utf-8', body });
+  });
+  console.log(`[keyframe] MUTATED BUILD: ${MUTATE} in ${file} at ${mutantPath} - this run is expected to FAIL`);
 }
 
 // The editor, which `/?take=` opened until the main menu took `/`. The take stays in
@@ -763,12 +870,25 @@ if (MUTATE) {
 // timing out on a page that was never going to answer.
 await page.goto(`${URL_BASE}/edit?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
 await page.waitForFunction(() => !!globalThis.__kinect);
-// **The page frames at the stage this tool asked for.** The editor letterboxes
-// itself to the export aspect now, so a viewport alone no longer decides the
-// drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
-// makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
-// every buffer-size expectation and every pointer coordinate in this file.
-await page.evaluate('globalThis.__kinect.setTargetSize?.("640x400")');
+
+// **Exit 2, not a failed assertion.** A suite that fails one row on a mutation run reads
+// as a catch, so a mutation the page never asked for has to be the harness declining to
+// run rather than a claim going red - that is what 2 means everywhere else in this
+// suite, and `c507eb7` records the same refusal being added to `library-check` for the
+// same reason. The case it exists for is a module this page does not import: the route
+// is installed, nothing ever requests it, and every row below would pass on the tree's
+// own build while the output said MUTATED at the top.
+if (MUTATE && mutantServed === 0) {
+  console.log(`\n[keyframe] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
+    + 'requested it, so this run would have measured the unmutated build');
+  process.exit(2);
+}
+// **The page frames at the stage this tool asked for.** The editor letterboxes itself to the
+// project's shape, so a viewport alone no longer decides the drawing buffer. Asked for as
+// 16:9 because that is a shape the product actually offers: at 8:5 the editor sits in a
+// framing `restoreProject` refuses, and every undo in this file restores a document written
+// out of that framing.
+await page.evaluate(`globalThis.__kinect.setOutputSize?.("${STAGE.width}x${STAGE.height}")`);
 // The viewport is then sized to whatever the strip actually is, measured off the
 // page. `CHROME_H_GUESS` is a first guess and nothing more: it was 104 while the bar was
 // one row, the bar became two, and the stage quietly came out 570x356 while every
@@ -802,6 +922,49 @@ if (!gpu.colorBufferFloat) throw new Error('no EXT_color_buffer_float: the surfa
 console.log(`[keyframe] ${gpu.renderer}`);
 console.log(`[keyframe] stage ${gpu.buffer.join('x')}, take ${TAKE}: ${TIMES.length} frames, `
   + `${SOURCE_DURATION.toFixed(2)}s source at ${((TIMES.length - 1) / SOURCE_DURATION).toFixed(2)} fps mean`);
+
+/**
+ * How much footage this file's rows need under them, and the refusal when the take does
+ * not hold it.
+ *
+ * **A take too short for these numbers does not fail them honestly, and one of the two
+ * ways it goes wrong is silent.** Section 4e seeks to 12s under a HOLD curve that reaches
+ * source 18s, so on a 9.4s take the whole program is 7.7s and the seek clamps there -
+ * that reddens, which at least gets looked at. Sections 4f and 6d are the quiet half:
+ * their retime keys carry source seconds of 12, 20 and 15, and a curve reaching the end
+ * of the footage early collapses the program, which takes the key being dragged off the
+ * ruler. `drawLane` hides a key outside the window, a hidden element measures as a
+ * zero rectangle, and the drag then presses at the viewport origin - so the gesture never
+ * happens. Two rows redden about the drag not moving anything, and **two more pass**,
+ * because a key that was never dragged also never slid and never fell under its
+ * neighbour. A fixture gap that reddens a row gets investigated; one that greens a row
+ * does not, which is why this refuses rather than runs.
+ *
+ * Measured: all four red rows go green on a 75.6s fixture with nothing in `web/` changed,
+ * at the same 132 assertions. The scan is the same one `editor-check` carries and for the
+ * same reason - it holds this number against the deepest second the file's own text seeks
+ * to, so the declaration cannot quietly fall behind the rows. It cannot see the retime
+ * values, which are named above instead, and that is why the declared figure sits above
+ * the deepest literal rather than on it. The control is `--take sample`: exit 2 naming the
+ * shortfall, where before it ran to the end and reported four failures and two false
+ * passes.
+ */
+const NEEDS_TAKE_SEC = 24;
+const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+const deepestSeek = Math.max(...[...ownSource.matchAll(/\.seek\(\s*(\d+(?:\.\d+)?)\s*\)/g)].map((m) => Number(m[1])));
+if (deepestSeek > NEEDS_TAKE_SEC) {
+  console.log(`\n[keyframe] DID NOT RUN - a row seeks to ${deepestSeek}s while NEEDS_TAKE_SEC is ${NEEDS_TAKE_SEC}`
+    + ' - raise it and point --take at a fixture that holds it, or the clamp will redden rows about the build');
+  process.exit(2);
+}
+if (!(SOURCE_DURATION >= NEEDS_TAKE_SEC)) {
+  console.log(`\n[keyframe] DID NOT RUN - the take "${TAKE}" holds ${SOURCE_DURATION.toFixed(2)}s of source and `
+    + `these rows need ${NEEDS_TAKE_SEC}s: they seek to ${deepestSeek}s and retime through source 20s. `
+    + 'Under a shorter take the program collapses, the dragged key leaves the ruler and the gesture never '
+    + 'happens - four rows redden and two pass against nothing. Point --take at a longer capture '
+    + '(tools/make-fixture.js loops a short one).');
+  process.exit(2);
+}
 
 // A build that never settles takes the page down with it rather than failing an
 // assertion, and a stack trace is a worse verdict than a sentence. An evaluator
@@ -901,9 +1064,9 @@ console.log('\n== 1. scalar with ease handles, step, and pose ==');
 // A check run on default handles would agree with a lerp everywhere and prove
 // nothing about handles at all.
 const EASED = [
-  { t: 0, value: 0, easeOut: [0.75, 0], easeIn: LIN_IN },
-  { t: 4, value: 5, easeOut: [0.2, 0.9], easeIn: [0.25, 1] },
-  { t: 9, value: 1, easeOut: LIN_OUT, easeIn: [0.6, 0.05] },
+  { t: 0, value: 0, easeOut: [[0.75, 0]], easeIn: LIN_IN },
+  { t: 4, value: 5, easeOut: [[0.2, 0.9]], easeIn: [[0.25, 1]] },
+  { t: 9, value: 1, easeOut: LIN_OUT, easeIn: [[0.6, 0.05]] },
 ];
 const STEPS = [
   { t: 0, value: false },
@@ -1063,6 +1226,171 @@ console.log('\n== 1b. evenly spaced keys agree with the textbook uniform formula
     `worst ${err.toExponential(2)} m`);
 }
 
+// ---------------- 1c. the camera's handles shape when it arrives, not where it goes
+
+// The camera track used to ignore its handles entirely: `poseAt` computed the raw
+// fraction of the way through a segment and handed it straight to the spline, the
+// slerp and the fov lerp, so the five preset buttons were disabled for a pose key and
+// a hand-edited document could not have eased one either. What it cost was a move
+// that departs and arrives at speed - measured on three keys dollying 4m over 4s, the
+// camera stepped from 0 to 0.6262 m/s in one frame at the first key and from 0.3125
+// to 0 at the last, because `tangentAt` mirrors the end key one segment outside the
+// path while the evaluator holds the end value beyond it.
+//
+// **The claim that needs enforcing is not "the numbers changed".** It is that the
+// handles moved the timing and left the route alone, which is the whole reason the
+// composition track can have a lane at all without contradicting the design's rule
+// that a camera move cannot be judged from a graph. So the rows below come in pairs:
+// each measurement of agreement is followed by the reading a build that got it wrong
+// would produce, and the last pair is the important one - every pose the eased run
+// visits has to lie on the curve the linear run draws, and a control that fails that
+// same test proves the measure can tell.
+console.log('\n== 1c. the camera\'s handles shape when it arrives, not where it goes ==');
+{
+  // `smooth` on the first and the last key and nothing in between - the two presses
+  // `docs/reference.md` describes, rather than a shape invented for the check. The
+  // interior keys stay linear on purpose: easing every key would stop the camera dead
+  // at each one, which is a different edit and not the one anybody wants.
+  const SMOOTH_OUT = [[0.42, 0]];
+  const SMOOTH_IN = [[0.58, 1]];
+  const RAMPED = PATH.map((k, i) => ({
+    ...k,
+    easeOut: i === 0 ? [...SMOOTH_OUT] : [...LIN_OUT],
+    easeIn: i === PATH.length - 1 ? [...SMOOTH_IN] : [...LIN_IN],
+  }));
+
+  await setTracks({ camera: RAMPED });
+  const at = [];
+  for (let i = 0; i <= 96; i++) at.push((i / 96) * 12);
+  const read = await page.evaluate(
+    `${src(at)}.map((t) => globalThis.__kinect.keyframes.valueAt('camera', t))`,
+  );
+
+  const wantEased = at.map((t) => poseValueAt(RAMPED, t));
+  const posErr = worst(read.map((v, i) => worst(
+    v.position.map((x, axis) => Math.abs(x - wantEased[i].position[axis])),
+  )));
+  const fovErr = worst(read.map((v, i) => Math.abs(v.fov - wantEased[i].fov)));
+  const angErr = worst(read.map((v, i) => quatAngle(v.quaternion, wantEased[i].quaternion)));
+
+  // The control for all three at once: the same keys with the handles taken off. That
+  // is exactly what the page did before this feature, so a build that still ignores
+  // its handles reads as this and every row above it collapses.
+  const wantRaw = at.map((t) => poseValueAt(PATH, t));
+  const rawPosGap = worst(read.map((v, i) => worst(
+    v.position.map((x, axis) => Math.abs(x - wantRaw[i].position[axis])),
+  )));
+  const rawAngGap = worst(read.map((v, i) => quatAngle(v.quaternion, wantRaw[i].quaternion)));
+  const rawFovGap = worst(read.map((v, i) => Math.abs(v.fov - wantRaw[i].fov)));
+
+  console.log(`  5 pose keys, smooth on the first and last: worst position error `
+    + `${posErr.toExponential(1)} m, fov ${fovErr.toExponential(1)}, orientation ${angErr.toExponential(1)}°`);
+  console.log(`  the same keys with the handles ignored would be ${rawPosGap.toFixed(3)} m, `
+    + `${rawFovGap.toFixed(2)} fov and ${rawAngGap.toFixed(1)}° away`);
+  check(posErr < VALUE_EPS, 'a pose track eases its position through the handles it carries',
+    `worst ${posErr.toExponential(2)} m`);
+  // Not `VALUE_EPS`, and the reason is the same one the orientation row below carries.
+  // Both sides solve the same cubic for the eased fraction and they reach it by
+  // different routes - the page runs Newton and falls back to bisection, this file
+  // bisects throughout - so the two agree in `u` to about 1.4e-10 rather than to the
+  // last bit. Position hardly notices because a segment spans about a metre; fov spans
+  // 18 units across this fixture, so the same disagreement arrives eighteen times
+  // larger and lands at 2.5e-9, just outside 1e-9. The threshold is set against the
+  // control rather than against the result: ignoring the handles reads 0.93 fov out,
+  // so 1e-7 sits six orders inside the gap it has to separate.
+  check(fovErr < 1e-7, 'and its field of view with the same fraction',
+    `worst ${fovErr.toExponential(2)} against a 1e-7 tolerance, where the control is ${rawFovGap.toFixed(2)}`);
+  // The orientation row is the one that separates "eased" from "eased position only",
+  // which was the plausible half-implementation: a camera whose position ramps while
+  // its aim does not is sliding down a path it is no longer pointed along.
+  check(angErr < 1e-3, 'and slerps its orientation at that same eased fraction, not the raw one',
+    `worst ${angErr.toExponential(2)}°`);
+  check(rawPosGap > 0.02 && rawAngGap > 1 && rawFovGap > 0.5,
+    'and the handles are doing the work, because ignoring them lands somewhere else in all three',
+    `${rawPosGap.toFixed(3)} m, ${rawAngGap.toFixed(1)}°, ${rawFovGap.toFixed(2)} fov`);
+
+  // Every key still holds its own pose exactly. An ease that shifted a key would be a
+  // timing control that edits the shot, which is the thing this must never become.
+  // Asked at each key's own time rather than fished out of the sweep above. The first
+  // version indexed `at` with `findIndex`, and `at` is 97 samples on a 0.125s grid
+  // while the keys sit at 1.2s and 6.2s among others - so `findIndex` answered -1 for
+  // the two interior keys and the `got ? ... : 0` arm scored them as perfectly held.
+  // A row claiming "every key" was enforcing three of five, and the two it skipped were
+  // the ones an ease is most likely to drag off their marks.
+  const atKeys = await page.evaluate(
+    `${src(RAMPED.map((k) => k.t))}.map((t) => globalThis.__kinect.keyframes.valueAt('camera', t))`,
+  );
+  const keyErr = worst(RAMPED.map((k, i) => worst(
+    k.value.position.map((x, axis) => Math.abs(x - atKeys[i].position[axis])),
+  )));
+  check(keyErr < VALUE_EPS, `and all ${RAMPED.length} keys still hold the pose they were given`,
+    `worst ${keyErr.toExponential(2)} m across every key time`);
+
+  // **The route is the same route.** Every position the eased run passes through has
+  // to be one the unmapped curve passes through too, at some other moment - that is
+  // what "remaps time and nothing else" means, and it is the property the lane's whole
+  // justification rests on. Measured as the distance from each eased sample to the
+  // nearest point on a densely sampled unmapped curve.
+  const dense = [];
+  for (let i = 0; i <= 3200; i++) dense.push(poseValueAt(PATH, (i / 3200) * 12).position);
+  // To the nearest point on the *polyline*, not to the nearest sample. The first
+  // version of this measured sample-to-sample and read 6.26e-3 m against a correct
+  // build, which is a picture of how far apart the samples are rather than of how far
+  // the run left the curve: `dense` is uniform in time and the camera is not uniform
+  // in speed, so the fast stretch between the 1.2s and 6.2s keys gets the sparsest
+  // samples exactly where a wrong answer would hide. Projecting onto the segment
+  // between two samples takes that floor out, and what is left shrinks with the square
+  // of the density rather than linearly.
+  //
+  // That last sentence is measured rather than assumed, because it is the difference
+  // between a residual that is the instrument and a residual that is the build: at 800
+  // samples this reads 2.03e-5 m and at 3200 it reads 1.36e-6, a factor of 14.9 where
+  // pure chord error predicts 16. A real displacement of the path would not have moved
+  // when the sampling did.
+  const distToSegment = (p, a, b) => {
+    const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
+    const len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+    const s = len2 > 0
+      ? Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2))
+      : 0;
+    return Math.hypot(ap[0] - s * ab[0], ap[1] - s * ab[1], ap[2] - s * ab[2]);
+  };
+  const nearest = (p) => {
+    let best = Infinity;
+    for (let i = 0; i < dense.length - 1; i++) {
+      best = Math.min(best, distToSegment(p, dense[i], dense[i + 1]));
+    }
+    return best;
+  };
+  const offPath = worst(read.map((v) => nearest(v.position)));
+
+  // And the control for that measure, because "every sample is near some point of a
+  // densely sampled curve" is a test a surprising number of wrong answers pass. The
+  // straight-line traversal of the same keys is a genuinely different route, and it
+  // has to read far - otherwise `offPath` is measuring the density of `dense` rather
+  // than the shape of anything.
+  const straightPath = at.map((t) => {
+    const i = before(PATH, t);
+    if (i < 0 || i >= PATH.length - 1) {
+      return PATH[Math.max(0, Math.min(PATH.length - 1, i))].value.position;
+    }
+    const u = (t - PATH[i].t) / (PATH[i + 1].t - PATH[i].t);
+    return [0, 1, 2].map((d) => PATH[i].value.position[d]
+      + (PATH[i + 1].value.position[d] - PATH[i].value.position[d]) * u);
+  });
+  const straightOff = worst(straightPath.map((p) => nearest(p)));
+
+  console.log(`  the eased run leaves the unmapped curve by at most ${offPath.toExponential(1)} m; `
+    + `a straight-line traversal of the same keys leaves it by ${straightOff.toFixed(3)} m`);
+  check(offPath < 1e-5,
+    'and the route is untouched - every pose the eased run visits is one the unmapped curve visits',
+    `worst ${offPath.toExponential(2)} m off the curve`);
+  check(straightOff > 0.02,
+    'and that measure can tell, because a genuinely different route through the same keys reads far',
+    `${straightOff.toFixed(3)} m off the curve`);
+}
+
 // ============================== 2. evaluating writes those values through the registry
 
 console.log('\n== 2. evaluation at a program position writes what the tracks say ==');
@@ -1183,8 +1511,8 @@ await applyLook(BLACKWALL_LOOK);
 // interesting case - a seek has to compute it at the target rather than once.
 const LOOK_TRACKS = {
   wake: [
-    { t: 0, value: 0, easeOut: [0.6, 0], easeIn: LIN_IN },
-    { t: 8, value: 900, easeOut: LIN_OUT, easeIn: [0.4, 1] },
+    { t: 0, value: 0, easeOut: [[0.6, 0]], easeIn: LIN_IN },
+    { t: 8, value: 900, easeOut: LIN_OUT, easeIn: [[0.4, 1]] },
     { t: 16, value: 200, easeOut: LIN_OUT, easeIn: LIN_IN },
   ],
   bloom: [
@@ -1848,8 +2176,8 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
   // inside single capture brackets, so `mixT` walks backwards within a pair and the
   // reverse renders with nothing refusing it at all.
   const HANDLE_DESCENT = { rate: 1, keys: [
-    { t: 0, value: 0, easeOut: [0.3, 1.6], easeIn: [2 / 3, 2 / 3] },
-    { t: 8, value: 6, easeOut: [1 / 3, 1 / 3], easeIn: [2 / 3, 2 / 3] },
+    { t: 0, value: 0, easeOut: [[0.3, 1.6]], easeIn: [[2 / 3, 2 / 3]] },
+    { t: 8, value: 6, easeOut: [[1 / 3, 1 / 3]], easeIn: [[2 / 3, 2 / 3]] },
   ] };
   const handleRefused = await page.evaluate(`(() => {
     try {
@@ -1890,8 +2218,8 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
   const easedOk = await page.evaluate(`(() => {
     try {
       globalThis.__kinect.keyframes.setRetime({ rate: 1, keys: [
-        { t: 0, value: 0, easeOut: [0.3, 0.95], easeIn: [2 / 3, 2 / 3] },
-        { t: 8, value: 6, easeOut: [1 / 3, 1 / 3], easeIn: [2 / 3, 2 / 3] } ] });
+        { t: 0, value: 0, easeOut: [[0.3, 0.95]], easeIn: [[2 / 3, 2 / 3]] },
+        { t: 8, value: 6, easeOut: [[1 / 3, 1 / 3]], easeIn: [[2 / 3, 2 / 3]] } ] });
       return true;
     } catch { return false; }
   })()`);
@@ -1944,8 +2272,8 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
     // ask for frames nobody has fetched, and playback would sit waiting for them
     // instead of trying to walk backwards - which is a stall, not this claim.
     k.timeline.retime.keys = [
-      { t: 0, value: 8, easeOut: [1 / 3, 1 / 3], easeIn: [2 / 3, 2 / 3] },
-      { t: 12, value: 2, easeOut: [1 / 3, 1 / 3], easeIn: [2 / 3, 2 / 3] },
+      { t: 0, value: 8, easeOut: [[1 / 3, 1 / 3]], easeIn: [[2 / 3, 2 / 3]] },
+      { t: 12, value: 2, easeOut: [[1 / 3, 1 / 3]], easeIn: [[2 / 3, 2 / 3]] },
     ];
     const before = k.timeline.counters.renders;
     await t.play();
@@ -2312,9 +2640,12 @@ console.log('\n== 6d. a retime key dragged down changes the speed, not when it i
   })()`);
   // **The walk is in seconds converted to pixels, not in pixels.** The retime lane draws
   // zero to the capture's own length across its forty pixels, so what a pixel is worth
-  // depends on the fixture: on the 49.79s sample this tree holds, the old fixed walk of
-  // 3, 6, 9 and 12 pixels was worth 15 seconds, which took a key sitting at 15 exactly
-  // to zero. That is the floor - a curve flat at zero never advances the source, so the
+  // depends on the fixture: on the roughly 50s take this was written against, the old
+  // fixed walk of 3, 6, 9 and 12 pixels was worth 15 seconds, which took a key sitting at
+  // 15 exactly to zero. (That length was written here as a fact about "the sample this
+  // tree holds" and `captures/` is gitignored, so it described a file no checkout has to
+  // have - the header carries the rest of that correction.) That is the floor - a curve
+  // flat at zero never advances the source, so the
   // program length stops being "longer" and falls back to the last key's own time - and
   // the row below read the collapse as the clip failing to slow down. So the drop is
   // three quarters of wherever the key is, in four equal steps, and the pixels for it
@@ -2496,8 +2827,8 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   );
   const moved = worst(curveAfter.map((v, i) => Math.abs(v - curveBefore[i])));
   console.log(`  handle dragged 30px left and 8px down: `
-    + `${JSON.parse(handleBefore).easeOut.map((v) => v.toFixed(3))} -> `
-    + `${JSON.parse(handleAfter).easeOut.map((v) => v.toFixed(3))}`);
+    + `${JSON.stringify(JSON.parse(handleBefore).easeOut)} -> `
+    + `${JSON.stringify(JSON.parse(handleAfter).easeOut)}`);
   // Sampled inside the segment the dragged handle actually shapes. The first handle
   // drawn belongs to the selected key's *outgoing* side, so it bends the segment
   // after it and not the one before - sampling the wrong side reads zero change and

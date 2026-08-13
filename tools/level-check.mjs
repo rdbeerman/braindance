@@ -35,7 +35,7 @@
 //     has to be posed in the sensor's frame rather than the levelled one: its picture
 //     at any cant is the same picture it gives at none. That is what forces the free
 //     camera's up onto the sensor's, which is why navigation's controls are rebuilt
-//     rather than written to - see `setNavigationUp` in `web/main.js`.
+//     rather than written to - see `setNavigationUp` in `web/scene.js`.
 //  5. **There is a neutral way back, and it goes through the control.** The pair is
 //     document state and easy to leave somewhere unusable, so `reset rotation` puts
 //     both axes and both sliders back in one press - and it has to be pressed rather
@@ -102,7 +102,7 @@ const MUTATIONS = {
   // in the room and become a place relative to however the room is currently turned.
   // Section 2's identity is what sees it - the surviving set changes, and no camera
   // move can put a discarded point back.
-  'crop-follows-tilt': { file: 'web/main.js', edits: [[
+  'crop-follows-tilt': { file: 'web/cloud-shader.js', edits: [[
     '  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {',
     '  vec3 cropAt = (modelMatrix * vec4(pos, 1.0)).xyz;\n'
     + '  if (cropOn == 1.0 && (cropAt.x < cropL || cropAt.x > cropR || cropAt.y < cropB || cropAt.y > cropT)) {',
@@ -120,7 +120,7 @@ const MUTATIONS = {
   // class" failure written as one line: two readers, one of them told. There were three
   // readers while a floor could be selected in the picture, and that reader is gone, so
   // the plan is now the only thing standing between this mutation and a green run.
-  'crop-switch-reaches-only-the-shader': { file: 'web/main.js', edits: [[
+  'crop-switch-reaches-only-the-shader': { file: 'web/point-cloud.js', edits: [[
     '  if (uniforms.cropOn.value !== 1) return false;\n',
     '',
   ]] },
@@ -168,7 +168,7 @@ const MUTATIONS = {
   // only because that section now switches a region effect on: with `regionPush`,
   // `regionNoise` and `regionMask` all at zero the shader never evaluates the region
   // coordinate at all, and this mutation and the fix draw the same picture.
-  'region-follows-tilt': { file: 'web/main.js', edits: [[
+  'region-follows-tilt': { file: 'web/cloud-shader.js', edits: [[
     '  vec3 p0 = pos;',
     '  vec3 p0 = (modelMatrix * vec4(pos, 1.0)).xyz;',
   ]] },
@@ -192,7 +192,7 @@ const MUTATIONS = {
   // It shares that row with `plan-ignores-tilt`, which reddens it at 116px flat and 116px
   // on edge. Distinguishable by value and not by name, so the row is load-bearing twice
   // over: weaken it and two controls go quiet together.
-  'level-order-swapped': { file: 'web/main.js', edits: [[
+  'level-order-swapped': { file: 'web/world-tilt.js', edits: [[
     "const tiltEuler = new THREE.Euler(0, 0, 0, 'XYZ');",
     "const tiltEuler = new THREE.Euler(0, 0, 0, 'ZYX');",
   ]] },
@@ -203,7 +203,7 @@ const MUTATIONS = {
   // because that section plants something asymmetric. Every other fixture in this file,
   // and the fov and intrinsics arms of `sensor-view-check`, draw the same picture either
   // way round.
-  'x-not-mirrored': { file: 'web/main.js', edits: [[
+  'x-not-mirrored': { file: 'web/cloud-shader.js', edits: [[
     '    -(pixel.x + 0.5 - center.x) / focal.x * z,',
     '     (pixel.x + 0.5 - center.x) / focal.x * z,',
   ]] },
@@ -402,7 +402,7 @@ try {
       for (let col = 0; col < DW; col++) {
         // The ray this sample lies on, and it is the *page's* unprojection inverted
         // rather than upstream's - x carries the mirror correction `unproject` in
-        // `web/main.js` explains. Planting through an un-negated ray would put every
+        // `web/cloud-shader.js` explains. Planting through an un-negated ray would put every
         // surface in the texture at the mirror image of the normal asked for, and the
         // plane fit would then be graded against a normal nobody planted.
         const ux = -(col + 0.5 - cx) / fx;

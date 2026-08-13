@@ -578,6 +578,107 @@ than membership, and each planted file sits on one dimension's list and off the 
 which makes both a missed form and an over-read form fail, with no row of its own for
 either.
 
+### A tenth round, in a second instrument: a mask consulted after the match is consulted too late
+
+`module-check` carries a lexer of its own for the same reason `numbersIn` does, and it took the
+same shape of correction on its first run — with one difference worth reading, because it is not
+about a token being asked of a character. Everything about the mask was right. It was *used* at
+the wrong moment.
+
+The scan matched `import ... from '<specifier>'` over the raw source and then asked the mask
+whether the match had begun in code. A regular expression matches **leftmost-first**, and
+`web/main.js` carries a paragraph containing the word `import` a few lines above a real import
+declaration — so the engine started at the word in the prose, stretched the clause across the
+comment to the `from` on the declaration below, and returned one match whose index is inside a
+comment. The mask answered honestly, the match was discarded, and the declaration underneath it
+was never matched at all: its edge left the graph in silence. Measured before it was fixed:
+`web/scene.js` and `web/curve.js` lost their edges and the run reported them as modules nothing
+loads, which reads as a finding about the tree rather than about the instrument.
+
+**A filter on where a match *landed* cannot undo a match that started somewhere else.** The
+repair is to remove the comment from the text before matching rather than to test the match
+afterwards, which needs a third state: a comment is blanked to spaces, and a string **body** is
+kept, because the specifier lives in one. Newlines survive the blanking so every line number
+still means what it says.
+
+### A control aimed at something the exemption table already covers is answered by the table
+
+The falsification control for "no module writes into a binding it imported" was first written as
+`EASE_OUT_LINEAR[0] = 1 / 3;` planted in `web/main.js` — a real cross-boundary write, into a real
+imported array, and the run came back **30 assertions, 0 failed, NOT CAUGHT** with the tool
+working perfectly. `web/curve.js::EASE_OUT_LINEAR` is in the exemption table, so the write was
+found, matched, and excused.
+
+The tell is that every object this tree exports is exempted, by construction: the table was
+written from what the tree holds, so *any* plant aimed at an object is aimed at an entry. The
+control has to be aimed somewhere the table is not, which here is a memo hung on an imported
+**function** — and that turns out to be the stronger claim as well, since it says the sweep
+ranges over every name an import brings in rather than over the ones the table already knows
+about. **When an instrument has an exemption list, ask whether your control lands inside it**;
+a mutation of the subject cannot reach a case the subject's own exemptions cover.
+
+### The population a floor counts has to be the population that was walked
+
+`module-check`'s write sweep printed its own floor as `inTree.filter(e => e.names.length).length`
+— every in-tree edge carrying a named import — while the sweep itself began
+`const src = sources.get(edge.from); if (src === undefined) continue;`. An edge out of a page's
+inline module is keyed `page.html#module0`, which is never in the map of *files*, so every
+inline module was skipped and the floor counted it as swept. Measured: a write planted in
+`web/menu.html`'s inline module came back green with the row reading `7 import declarations
+swept` where the clean tree reads 6 — the number went **up** as the sweep went blind, which in
+a log reads as the sweep having widened.
+
+A filter that resembles the walked set is not the walked set. The repair is to increment a
+counter at the point of the work, and to make an edge with no body a **failed assertion of its
+own** rather than a `continue` — folding it into the sweep's message would make one row mean
+two faults, which is exactly the blast radius a control set is arranged to avoid. Every other
+floor in that tool was recomputed the same way at the same time, because fixing the sweep's
+would have left the other five outside the list.
+
+### A rule whose exemption list is written from the subject cannot be falsified by the subject
+
+Rule 3 of `module-check` has two classifiers — `shapeOfInit`, which decides whether an export
+is an object somebody can write into, and `writesInto`, which finds the writes. Neither had a
+control. Every object `web/` exports is in the exemption table by construction, since the table
+was written from what the tree holds, so a mutation aimed at any of them is answered by the
+table and comes back NOT CAUGHT with the tool working perfectly. What was left standing over
+both classifiers was a single conjunct in the exemption audit: an entry that covers nothing
+fails, so a classifier that flagged nothing would eventually redden *those* rows.
+
+Measured, and this is the shape to recognise: forcing `const covers = true;` left the clean run
+green **and left all eight declared mutations still catching**, because each of them falsifies
+something else as well. Compose the forcing with either classifier stubbed and the tool goes
+blind while staying green — `covers=true` plus `writesInto` returning `[]`, or plus
+`shapeOfInit` answering `'primitive'`, both PASS. The declared control that looks like it
+covers this, `exemption-outlives-its-export`, cannot: un-exporting the binding falsifies
+`known` and `covers` at once and the row reports the `known` branch.
+
+Two repairs, and both were needed. A mutation that falsifies `covers` **alone** —
+`exemption-covers-nothing` promotes an exempted control-point pair to the number it is made of,
+so the entry still names a real export and covers nothing, one row. And a probe tree carrying
+one of every export and import spelling, asserted as exact sets, so both classifiers are
+falsified on every run rather than backstopped by a filter. With both in place, forcing
+`covers` true now reddens the clean run by itself.
+
+### A sweep ranges over the names an import binds, not the names it asks for
+
+The same tool's sweep took `p.split(/\s+as\s+/)[0]` off every import clause — the **exported**
+spelling, which is correct for asking whether the target exports the name and wrong for
+searching the importing file, which contains the *local* one. Three spellings of one defect
+therefore sat outside the swept population: a renamed import (`{ scalarAt as scalarAtLocal }`,
+where the sweep searched for `scalarAt`), a namespace import (`import * as curve`, where the
+clause parse returned no names at all), and a default import (likewise). Measured, each against
+the unaliased spelling of the identical write which the sweep does redden: all three came back
+`30 assertions, 0 failed, NOT CAUGHT`.
+
+This is one population gap rather than three bugs, and the tell is in the row's own text — it
+claimed to range over "every name an import brings in", which is a claim about bindings while
+the code held far-side names. **When a row's sentence and its variable disagree about which
+side of a boundary a name is on, the sentence is usually the design and the variable is the
+defect.** Renaming on import is the ordinary way a fifteen-thousand-line split resolves a name
+collision, so this was the spelling most likely to appear in exactly the work the tool was
+written for.
+
 ### A comment that was true when written, and false one commit later
 
 The scan's own paragraph said legacy octal could be ignored: `01000` is 512, it is a
@@ -647,8 +748,11 @@ The mistake is not the missing recursion. It is that the enumeration was **the f
 exist** while the comment above it claimed the enumeration was **the tree**, and the two are
 the same list right up until they are not. A traversal cannot be falsified by the tree it
 walks when that tree has nothing in it to recurse into, so the control is a tree the row
-builds: `web/flat.js` with no grid and `web/nested/buried.js` with one, run through the same
-walker, asserting it answers `['web/nested/buried.js']`. A walker that stops at the top
+builds under a probe root of its own: a `flat.js` with no grid and a `nested/buried.js` with
+one, run through the same walker, asserting it answers the buried one alone. Those two paths
+are relative to the probe root and never to a checkout, which is why they are written without
+the directory the walker is handed — a path spelled the way this repo cites its own modules
+is a citation, and `syntax-check` resolves those. A walker that stops at the top
 answers `[]` and the row goes red, where against the real `web/` it would answer exactly
 what the row wants. **When a row's claim is about a shape the subject does not currently
 have, build the shape and run the same code over it** — a mutation of the subject cannot
@@ -932,6 +1036,34 @@ leaves the listing identical, and moves only the monotonic write count. It now f
 row and leaves the contents row passing, which is what makes the count load-bearing rather
 than a second way of saying the same thing.
 
+### A comment naming which rows catch a mutation is a claim, and this one was wrong
+
+`export-check`'s threshold note ends by pricing what its two bloom mutations cost the bands it
+widened, and it used to say that `bloom-reference-1080` — the chain frozen at the wrong
+reference — "is not caught on these rows at either band, which is not a gap, and the two
+cross-build rows further down are what catch it". Read that way for as long as it stood: the
+one number CLAUDE.md states twice had a named catcher, so nobody looked.
+
+Measured on 2026-08-11, both arms against a server replaying `fixture-1g`, once on the module
+split and once on `84084b0` before it with the mutation still in `web/main.js`: **50 of 50
+passed and 0 failed on both.** Nothing catches it. And the mutation is delivered rather than
+absent, which is the distinction that makes this a coverage hole rather than a harness one —
+the numbers move, the bloom row's luminance ratio going 1.0006 to 1.0038 and the two
+`whole look rebases` rows going 0.410 to 0.382 and 0.371 to 0.345 on the worst of forty tile
+means. They move *toward* agreement, which is why no threshold notices.
+
+Two things worth keeping. The first is that this was found by running the mutation on both
+sides of a refactor for an unrelated reason: the specs were re-pointed at
+`web/bloom-pass.js`, and the run at HEAD was taken only to prove the re-pointing had not
+broken a control that turned out never to have worked. **Re-running the baseline in the
+conditions the failure happened in is what separated "I broke it" from "it was never there",
+and it is the whole of why that rule is in `CLAUDE.md`.** The second is where the coverage went
+instead: `test/bloom-chain.test.mjs` asserts the arithmetic directly and reddens four of its
+six rows on exactly this mutation, in milliseconds and with no GPU. A picture comparison
+between two output sizes cannot see a chain that is wrong by a constant factor, because both
+sizes agree about it — so the instrument that can see it is a different kind of instrument, not
+a tighter band on this one.
+
 ### A mutation run that exits non-zero with zero failed assertions did not run
 
 Every tool that carries mutations refuses one whose anchor text it cannot find, and
@@ -1059,6 +1191,115 @@ missed defect, so it is the cheap direction of the same mistake. The fix is `spe
 to `{ file, edits }` and declaring its own target, not the resolver learning a second tool's
 name: a resolver that knows which tool is asking is the hardcoded list this row exists to
 replace.
+
+### A filter on the file identity is the same hole as a route that was never installed
+
+The rule above guards the *anchor*: the text a mutation edits still exists, exactly once. This
+is the next question along, asked of the same spec — the file that text lives in is one the
+tool can still deliver. `editor-check` chose the bytes it would serve by comparing the
+mutation's file against the two names it had always carried:
+
+```
+const mutatedJs   = mutation?.file === 'web/main.js'    ? mutation.body : null;
+const mutatedHtml = mutation?.file === 'web/index.html' ? mutation.body : null;
+```
+
+All ninety-nine of its specs satisfied that, eighty-nine naming `web/main.js` and ten naming
+`web/index.html`, so it was true by coincidence rather than by construction — and the
+coincidence had a date on it, because `web/main.js` is being split into modules and the first
+spec to land on one of them leaves both bodies null. Neither route is then installed, and the
+two delivery guards were written against those same two names — `if (mutatedJs &&
+!servedModule) throw` — so neither of them can fire either. The run prints `MUTATED BUILD` at
+the top, drives the tree's own source through twenty-two sections, and ends `NOT CAUGHT`, which
+is the verdict this suite reserves for a check that is blind to a real bug rather than for a
+harness that never tried.
+
+**Measured rather than reasoned about.** A temporary spec pointed at `web/scene.js` — a module
+`main.js` imports, so every surface loads it — came back at 461 assertions with 0 failed and
+`NOT CAUGHT`, against an unmutated baseline of 461 assertions with 0 failed on the same server
+and the same fixture. Identical to the assertion, which is what the tree's own source running
+looks like from outside. Delivered by file identity, the same spec fires one row: `and the
+release still owed it movement when the key went in`, at `0.000 m still to travel`, which is
+the drift the damping it removes is what produces.
+
+**It is the hole the tool's own comment already recorded, entered from the other end.** That
+comment — "a route that was declared and never installed ran the tree's own source and came
+back NOT CAUGHT with every row green" — closed the case where the route is missing. This is the
+case where the route is written and correct and unreachable, because the selection in front of
+it does not recognise the file. The general shape is worth more than either instance: **a
+delivery and the check that it was delivered must not be conditioned on the same term.** A
+guard reading `mutatedJs` cannot see the failure of a selection that computed `mutatedJs`, and
+a count of the requests the page actually made is independent of both.
+
+The fix is one `servedAt(file, documentPath)` resolving any file under `web/` to the path a
+browser asks for it at, one `serveMutation` installing that route on every page the tool opens,
+and a guard of `MUTATE && served() === 0` — a third branch would have left the fourth file
+outside the list. Two refusals fall out of it, and both are exit 2 rather than a red row,
+because a red row on a mutation run reads as a catch. A file no page here is served from is
+refused before a browser launches: `web/menu.html` exits 2 with "neither a module or stylesheet
+under `web/` nor the document `/edit` is served from", zero assertions run. A file that is
+served but never requested is refused after the page has loaded: `web/library.js`, staged at
+`/library.js` and never asked for, exits 2 naming both. Before the fix that second spec was the
+silent one — 461 assertions, 0 failed, `NOT CAUGHT`.
+
+**Stylesheets are in the mapping because the page asks for one, and the arm was measured
+rather than assumed.** `web/index.html` links `/nav.css`, so a spec naming it is delivered:
+a temporary one moving `.appstatus`'s `margin-left: auto` to `0` came back 461 assertions, 0
+failed, `NOT CAUGHT` — and the `served() === 0` guard stayed silent, which is the reading that
+separates the two ways of arriving at that verdict. The bytes were handed over and no row in
+this tool measures anything the change moves, which is "a mutation that does nothing reads as a
+check that found nothing" three sections up rather than the delivery hole this case is about.
+The content type is the one the server itself sends for that extension, checked against
+`curl -I` rather than chosen: a stylesheet answered with the wrong MIME is refused by the
+browser outright, so the page would lose `nav.css` entirely and the run would be measuring an
+unstyled build.
+
+**Keying the document on its suffix is where the class would have stayed open.** A rule reading
+"ends in `.html`, so serve it as this page" takes `web/menu.html` — a real file this server
+really serves, at `/` — and hands its bytes over as the editor's document, whereupon the route
+fires, the counter counts it, the guard is satisfied, and every row below asserts against a page
+nobody wrote. That is `registry-check`'s recorded failure one level out. So the mapping is an
+identity test against the two entries of `server/index.js`'s `PAGES` map that name the surfaces
+this tool opens, and anything else falls through to being refused.
+
+**What this does not close.** `web/` holds a fifth kind of file this mapping has no branch
+for — nothing here serves an image or a font — and that is deliberate rather than forgotten:
+the refusal is loud, and a branch no page exercises is a path nothing has measured.
+
+**And the routing for a third file is exercised now, which it was not when this case was
+written.** The paragraph here used to say every remaining spec named `web/main.js` or
+`web/index.html` and that the first spec landing on an extracted module would be what tried
+it. That happened when the cloud's two GLSL programs became `web/cloud-shader.js`:
+`crop-axes-swapped` and `crop-in-image-space` name that file, and `crop-in-image-space` runs
+461 assertions with 1 failed and prints `MUTATED BUILD: crop-in-image-space in
+web/cloud-shader.js at /cloud-shader.js`, the fired row being the one its spec names — the cut
+walking with depth in the direction the plane sits. So the fix above is measured on the case
+it was built for rather than on the case that prompted it.
+
+**And the same filter is still standing in `sensor-view-check`**, at its lines 779-780, in the
+same two comparisons. It is the safe half of this shape rather than the silent one — that tool
+refuses a third file at exit 2 before opening a page, and its own comment says why — so what it
+loses to a split is a control rather than a verdict. It is written down here because the two
+were one defect with two outcomes, and the loud one is the one nobody goes back for.
+
+**`registry-check` was the other loud one, and a split is what came for it.** It staged the
+edit into whichever file its spec named and then returned a fixed pair — `web/main.js` and
+`web/index.html`, the module and the panel it has to be paired with — so a spec naming a third
+file had its staged bytes discarded at that last line while the route still resolved to that
+module's own path. Its comment said as much and refused the whole run at exit 2, with the note
+that fixing the pairing was out of scope until something needed it. Eighteen specs needed it at
+once: every mutation of the cloud's shaders moved to `web/cloud-shader.js`, and a refusal there
+is eighteen falsification controls that cannot run, which is worse than the failure the refusal
+was protecting against. The fix is the same shape as the one above — the staged file is carried
+beside the pair and served at its own path, registered after the module's route so it wins when
+the two paths are the same, and `mutantServed` counts on that route rather than on the file — and
+it is falsified rather than argued: serving `main.js`'s bytes at `/cloud-shader.js`, which is
+exactly what the discarded staging would have done, takes the run to `DID NOT RUN` at exit 2
+with zero assertions and a 30-second `waitForFunction` timeout, because a module answering with
+another module's text exports none of the names its importer asks for. With the fix,
+`mix-ignores-normalisation` fires 2 assertions and the row it names is the one that reddens,
+and `crush-ignored`, which still names `web/main.js`, fires 3 and reddens the drop-one sweep on
+`crush` — so neither path was traded for the other.
 
 ### A mutation can erase its own evidence
 
@@ -1468,6 +1709,22 @@ test. The menu is the door a document from another build actually arrives throug
 to the console is part of what arriving through it does. **When an instrument's own noise
 collides with a sweep, move the noise, never the sweep.**
 
+### The one parameter a symmetric ease provably cannot move
+
+`test/curve.test.mjs` gained a row asserting that easing a segment is a different traversal
+of it rather than a no-op — without one, the whole "handles shape the timing" test passes
+against a build whose ease does nothing at all. The probe went at the midpoint, which is the
+obvious place to stand and the only place in the unit interval where the answer is fixed:
+`smooth` is `[0.42, 0]` and `[0.58, 1]`, symmetric about the centre, so `easeAt(0.5)` is
+0.5 for it and for linear alike. The row failed against a correct build, reporting a midpoint
+that had not moved because a correct build does not move it.
+
+A quarter of the way in is where an ease-out has actually done something, and the repair kept
+both samples rather than swapping one for the other: the quarter point is the claim, and the
+midpoint is now asserted to be *unchanged*, which turns an accident into the statement that
+the ease is symmetric. **Rule 4 again, in its purest form — the convenient place to stand and
+the fixed point of the thing being measured were the same place.**
+
 ## What do my arms agree about
 
 **When one probe turns out to be blind to something, ask what all of them are blind to
@@ -1596,6 +1853,114 @@ the row look grounded: the arm is reading live state through a real seam, and th
 reads simply is not the one the behaviour depends on. Ask what the *subject* reads, not what is
 convenient to read about it.
 
+**A sixth, and the skipped object was a name that answers *yes* to every question its
+neighbours ask.** `module-check` ran **57 assertions, 0 failed, PASS** on a `web/main.js`
+carrying six imports nothing in the file used — `vertexShader` and `fragmentShader` from
+`./cloud-shader.js`, `BloomPass` from `./bloom-pass.js`, and `easeParam`, `easeAt` and
+`easeSlopeAt` from `./curve.js`. Three went dead when their callers moved out one commit after
+their module was made and three were dead at the branch point, and they were found by a person
+grepping rather than by the tool built to hold that boundary.
+
+What makes this worth writing down is *why* three rules missed it, because the answer is not
+that anybody scoped them badly. A dead import is a green answer to every question the tool
+asks: the graph is still acyclic through it, the specifier still resolves, the file is still
+reached from a page so it is not an orphan, the name is still a name the other side exports, and
+nothing writes into it because nothing touches it at all. The tool had a row for an orphan
+*file* and a row for an import naming a *missing* name — the two questions on either side of
+this one — and the shape between them is the one where every observation comes back healthy.
+**When two rows sit either side of a gap, the gap is where the fault will be**, because a fault
+that reddened either of them would have been fixed already.
+
+Two things came out of closing it. The first: the consumer set for "does anything import this
+export" **cannot be the directory under test**. Seven of `web/`'s exports have no importer inside
+`web/` — `server/library.js` reads `POLLED_NODE_FIELDS`, `tools/fake-grabber.mjs` and
+`tools/library-check.mjs` read `CAPTURE_FORMAT`, and five more are held only by `test/` — and
+measured by commenting the outside walk out, a row scoped to `web/` reddens all seven on a
+healthy tree. A check that cries wolf on its first run is deleted rather than fixed, so the
+scoping decision is the row surviving or not. The direction the walk is allowed to be wrong in
+follows from the same argument: a directory it misses costs a consumer and reddens a live
+export, which somebody sees, while a directory it should not have walked manufactures a consumer
+and keeps a dead export green.
+
+The second: the use question is asked of a **name** and not of a scope, and it took a control
+coming back NOT CAUGHT to find where that bites. `--mutate import-used-under-its-far-side-name`
+renamed `pollRecordState` to `poll` on import, leaving the file full of the far-side name and
+holding no reference to the binding it makes — and the row stayed green, because
+`web/main.js:9860` defines a method called `poll` in an object literal, which is a name written
+in code position with no dot in front of it and so indistinguishable from a reference. The
+control now uses an alias nothing else spells; the limitation is in the tool's header beside the
+other one, that a name appearing only inside a string body reads as used. Both are false
+negatives, which is the direction an instrument may be wrong in — but the rule is that a
+limitation lives in a comment, never inside a control, where it reads as the rule not working.
+
+**And the row written to close that hole shipped six of its own**, found by reading the rule
+rather than by running it, which is the part worth keeping. `module-check` came back **60
+assertions, 0 failed, PASS** while every one of the following was true of the tree it passed.
+They are one family: each is a place where the run *held* the fact and did not *ask* it.
+
+**Two halves computed in one run and never joined.** Rule 4 asks whether an import is read and
+whether an export is asked for, and the second half took the import declaration as its evidence
+without consulting the first. So the same run reddened `web/main.js` for not reading
+`easeSlopeAt` and, five lines further down, counted that identical dead line as the consumer
+keeping `web/curve.js`'s export of it alive. Measured against `883f070^` rather than forced:
+that is what it printed. The dead export became findable only because a person had removed the
+import by hand in the commit before — and a name moved out of a module leaves exactly that pair
+behind, so unjoined they conceal each other indefinitely. With the halves joined, the same tree
+reddens both rows in one run and names all six imports and the export. **When one row's answer
+is another row's input, join them or the run can be right twice and say so once.**
+
+**A population walked for one purpose and trusted for another.** The consumer set had already
+been widened to the whole checkout, for the good reason that seven of `web/`'s exports are read
+only from `server/`, `tools/` and `test/`. But the widening carried 55 name-level bindings into
+the join that were never asked the use question the tool exists to ask, because that question
+was scoped to `web/`. An export whose only importer was outside `web/` and itself dead therefore
+read as asked-for — the same defect, one directory over, in the machinery built to close it.
+**A row that reaches outside its subject to collect evidence has to apply its own standard to
+what it collects.**
+
+**A binding that stands in for a whole module, with nothing saying it had.** A namespace import
+consumed every export of its target, so the single `import * as clip` in
+`test/clip-range.test.mjs` switched the export row off for `web/clip-range.js` entirely: an
+export nothing wanted reddened the row when it was appended to `web/view-window.js` and did not
+when it was appended there. What makes it the worst of the six is that the passing output said
+nothing about a module having gone blind. The repair is narrowing plus disclosure — a dotted
+reach asks for one name, a destructure asks for its pattern's names, and **everything else is
+one bucket that consumes the module and fails a row of its own**. Enumerating the opaque cases
+instead would have been the mistake: `ns[k]` is the one that comes to mind, and `Object.keys`,
+`{ ...ns }`, `for (const k in ns)` and passing the binding to a function are the ones that do
+not, and a narrowing that consumed nothing for them would redden a clean tree.
+
+**A limitation written down is not a limitation measured.** The header named two false negatives
+in the use question and was wrong about the shape of both. It said a name mentioned only inside a
+GLSL template literal would read as used; template text is left at mask 0 by the lexer and blanked
+to spaces, so that plant was caught the whole time and the surviving case was the quoted string.
+It named the property-key case as unclosable, on a measurement of a lookahead over `:` or `(` at
+the head of a line that cost twelve false positives — but the narrower question, are the nearest
+code characters either side of the hit a `{` or `,` and a `:`, costs none on this tree and closes
+the object-literal key outright. Both closures were free, and both had been sitting behind a
+paragraph confident enough to stop anybody re-measuring. The method shorthand `{ poll(gl) { … } }`
+really is open, and it was re-measured afterwards rather than inherited: the `poll` alias still
+comes back NOT CAUGHT. **Re-run the measurement a limitation rests on when you touch the thing it
+is about**, because a limitation is a claim about the instrument like any other.
+
+**And the floor lesson two sections up, repeated in a new row by the same author in the same
+week.** Rule 4's import row printed `118 names across 28 in-tree and 17 bare declarations` with
+the bare count taken off the collection rather than off the sweep, so a version that iterated
+`inTree` alone — measured by forcing exactly that — left the clean run green at 60 assertions,
+every one of the twenty controls then declared still catching, and the row still claiming its 17.
+The counts are now incremented where the question is asked, and `--mutate dead-bare-import` is
+the arm that half never had. **A rule you have written down about one row is not a rule the next
+row inherits**; the only version that holds is the one where the count cannot be computed anywhere
+but at the point of the work.
+
+Two notes for anybody re-running those forcings. A scratch copy of the tool needs
+`--root <checkout>`, because `ROOT` is derived from `import.meta.url` and a copy living in a
+temporary directory otherwise exits 2 with "no web/ or no package.json" — which reads as the
+forcing having broken something when it is the copy looking in the wrong place. And the in-tree
+declaration count the import row prints is two below rule 2's edge count on this tree: those two
+are the pages' `<script src>` edges, which bind no name, so the gap is the count being taken
+where the question is asked rather than a population going missing.
+
 ### The third form: a fixture symmetric under the very transform you are testing
 
 The two forms above are about arms agreeing and about an object nobody looks at. There is a
@@ -1676,6 +2041,78 @@ were driven and never executed, counted as swept and not swept. The sweep now dr
 take and a closed one, GET and HEAD, document names that exist and names that do not, and
 asserts by name that every route got past the 409 — with any route it cannot build a concrete
 URL for named rather than silently driven at a URL still carrying a literal `:foo`.
+
+### A class closed over the rows that were red, with the green ones exempted by the diagnosis
+
+`export-check` compares one look through two builds in five places, and the episode that
+produced `sameChain` — two builds silently running different post chains, reported for as long
+as those rows existed as a luminance ratio — put the guard on three of them. The two it skipped
+are the `rebase-full` pair, and the reason they were skipped is written down in
+`docs/proof-tools.md`: they spread nothing, so Blackwall's own `rgbSplit`, `scanlines` and
+`grain` survive on both sides and both builds run the grade, which is why they stayed green
+while the other three went red. The commit that landed all this then claimed in prose that
+**every** cross-build row required a matching chain. It was three of five.
+
+The exemption is the investigation's own conclusion used as the next investigation's
+precondition. "Both builds run the grade" is a true statement about the pair of builds this row
+spans today; whether a pass runs is derived from a *set* of parameter names, and the defect the
+guard exists for is a future build changing that set. So the exempted rows are exactly the rows
+that would go on reporting a chain divergence as a ratio — the failure the guard was written
+after an hour of chasing.
+
+**The thing worth taking is where the exemption was.** It was on the two rows that were passing.
+A red row gets an explanation and the explanation gets read; a green row gets one sentence in a
+document and nothing ever looks at it again, because nothing is drawing attention to it until
+the build it was wrong about arrives. An external reviewer found this, on a diff that had been
+read by the author and by a panel, and what it had to notice was not a defect in the code but a
+gap between a list of three call sites and the word "every" one paragraph away.
+
+Underneath all five sat a second hole with the shape this file records most often. `chainOf`
+reads `arm.passes ?? []` and joins, so an arm off a page that stopped publishing its composer
+answers `''` — and `'' === ''` is a match, so a failed readback passed as agreement and would
+have kept passing. The first repair put a non-empty requirement inside `sameChain` and claimed
+in its comment that this closed the class; it does not, because a row that reads `chainOf`
+directly never calls the predicate and inherits the hole untouched. **The failure belongs to
+the readback, so the guard belongs there**: `armAt` is the one funnel every arm in the file goes
+through, it now records each arm under its label, and a row near the foot asks the whole
+population whether every arm published the chain it rendered through. That one names the arm
+that came back silent, fires whether the silence was ever compared or not, and asserts the
+population size beside it — because a row over a list is a row that passes on an empty list, and
+this same file already shipped one of those. The narrower term stayed in `sameChain` to stop a
+*comparison* being believed on two silences. The floor is a chain of at least one name, and no
+correct build can trip over it: `RenderPass` and `OutputPass` are added in `web/post-chain.js`
+and neither is ever disabled — only the afterimage, the bloom and the grade are.
+
+**The control is a probe, and the mutation that was supposed to replace it was built, run and
+thrown away.** A control for the chain term has to diverge the two builds' chains without moving
+the picture, or the row it reddens cannot say which of its terms did the work. The candidate was
+`trail-gate-admits-zero`: the trail's gate is `damp > 0`, so admitting zero puts
+`AfterimagePass:on` in this build's chain and nowhere in the pinned build's, and three's
+`AfterimageShader` is `max(texelNew, texelOld * damp * when_gt(texelOld, 0.1))`, which at a damp
+of zero is `max(new, 0)` — the pass returning its input. The shader source was read rather than
+recalled, and the algebra is right.
+
+It was still wrong. Measured, the chain half worked exactly as designed —
+`RenderPass+AfterimagePass+OutputPass` against `RenderPass+OutputPass` on the three arms whose
+trail is zero — and the worst of forty tile means went from 0.602, 0.070 and 0.071 of 255 to
+**42.502, 22.141 and 27.607**, at a luminance ratio of 1.64. An enabled pass is another
+ping-pong through the composer's render targets whatever its shader computes, so an identity
+shader is not a free pass, and each of those rows then failed on the tolerances as well as on the
+chain: a mutation caught twice over, which proves nothing about either catcher. **The
+generalisation is the useful part — no product edit can diverge the chain and leave the pixels,
+because the divergence is a pass appearing or disappearing and the composer charges for the pass
+rather than for what it computes.** So this is a claim whose falsification cannot be a source
+mutation, and saying that is better than shipping a mutation that reddens the right rows for the
+wrong reason.
+
+The probes are the control. Filtering `ShaderPass` out of the old build's full arm gives 48 of
+50, failing exactly the two whole-look rows and no others, **with the luminance ratio at 1.00883
+and the worst tile at 0.410/255, unchanged from the clean run to five figures.** That is the
+reading that justifies the whole repair — the pixel tolerances see a chain divergence as nothing
+at all, so on those rows `sameChain` is not a second opinion, it is the only one. A second probe
+emptying every arm's pass list gives 45 of 50, failing exactly the five cross-build rows, which
+is the vacuity the population row now catches at its source. Both are recorded here with their
+numbers because that is the whole of what stands behind those rows.
 
 ### The half measured by hand is the half the next round finds
 
@@ -2230,6 +2667,75 @@ nobody re-runs at the width the claim actually needs.
   existing preset arm asked about one document in isolation. The property a user has is a
   sequence of presses.
 
+## A pointer check that walked one kind of pointer and never noticed the other
+
+`syntax-check` had a block whose comment said the disclosure chain is load-bearing and nothing
+was checking it, and it closed exactly the pointers it was written for: every `docs/*.md` path
+cited from `CLAUDE.md` or from `tools/`, resolved against the tree. It was right about the
+class it named and blind to the neighbour in the same sentence. The documents and the tools
+cite **modules** far more often than they cite each other — thirty `web/….js` paths against six
+`docs/` ones — and none of those was being asked anything at all.
+
+Nothing was wrong until the browser bundle split. Then `web/main.js` went from 15,449 lines to
+13,206 with twelve modules beside it, and **fourteen** citations were left naming the bundle for
+code that had been carried out of it. Eight of them are one sentence copied around the suite —
+the unprojection's mirror correction, which is in `web/cloud-shader.js` and which
+`web/library.js`, `export-check` twice, `registry-check`, `monitor-check` twice, `level-check`
+and `server/protocol.js` all sent a reader to the bundle for. The rest are `CROP_LIMIT`, which is
+declared in `web/point-cloud.js` while the prose told a reader to raise it in the bundle,
+`setNavigationUp` in `web/scene.js`, the boot uniform block in `web/point-cloud.js` with two
+tools still naming the bundle for it, the GLSL one lexer's ambiguity is argued from, and the
+`readGhost` comment this suite quotes. Every one of those paths still resolves, which is the
+second lesson below.
+
+Four more claims went with them without naming a wrong file at all — a mutation table described
+as "most live in `web/main.js`" when nine of its twenty-two do, a paragraph saying every entry in
+another table names the bundle, a header calling it fifteen thousand lines, and a mutation
+recorded as unbuildable because its anchor matched twice, which a re-anchoring in `c757210` fixed
+without the note above it hearing about it. **A count is a citation of a file's contents**, and it
+rots on the same edit as a path does with nothing to resolve it against.
+
+**The audit that found the first five could not have found the other eight, and the reason is
+worth copying.** It was a script: for every citation, take the backticked identifiers within two
+lines and ask whether each is declared in a *different* `web/` module. That reaches a citation
+whose subject is a **name** and is blind to one whose subject is a **phrase** — "the uniform
+block", "twelve hundred lines of GLSL", "most of these live here" — and blind again to a name
+written without backticks, which is how three copies of one sentence about `unproject` survived
+the first pass. What closed it was enumerating every mention of the bundle in prose and comments,
+about thirty-five sites, and reading the sentence at each. **A heuristic over a citation's
+neighbours is a way to rank the reading, not a way to skip it.**
+
+**The enumeration and the question are set separately, and widening one is not widening the
+other.** This document already carries that rule from `library-check`'s grid scan, where the
+walk stayed wide and the question narrowed to the JavaScript; here it arrives as two decisions
+made in the same block. The **citing** set had to widen from two files to every prose page and
+every source file this repo ships, because the documents cite each other and the modules cite
+each other and a scan reading only the two files that point at `docs/` saw four of the thirty.
+The **question** had to narrow at the same time: a path in a string is data and a path in a
+comment is a citation, which is the mirror of the rule `numbersIn` already applies when it
+refuses to read a declaration out of a debug message. Dropping the strings loses the `file:`
+target of a mutation table and the `module:` of `module-check`'s exemption table, and both of
+those are answered better elsewhere — the anchor row fails a mutation anchoring into a file that
+is not there, and `module-check` audits its own table for an entry naming a module that is gone.
+
+**The exclusion is load-bearing and was measured rather than argued.** Taken out, the row goes
+red on a clean tree with seven paths: six are the fixture paths `library-check` builds its probe
+tree out of, which are relative to a temporary root and name nothing in any checkout, and the
+seventh is the module name this check's own mutation table plants for being absent. A row
+falsified by its own controls on every clean run is the failure this whole document is about,
+arriving from the direction where the instrument is the subject.
+
+**And the bound has to be said out loud, because the check is weaker than it reads.** A citation
+is checked for resolving and never for being *right*. All fourteen of the stale ones above name a
+file that exists, so the tool that now guards this class would not have caught a single one of
+them — they were found by reading, and the arm that exists after them is for the next split
+rather than for this one. The line form is the same bound one step in: a citation past the end
+of the file fails, and a line that has drifted into the middle of something else does not.
+`server/capture.js` had already reached the only answer that works and wrote it down —
+`handleFrame` is cited by name because the line it used to name had drifted nine hundred lines
+into the middle of a shader with nothing failing. **Cite a function, not a line**, and read the
+sentence around a citation rather than trusting that the path resolved.
+
 ## A mirroring assertion on a surface where the painter never runs
 
 The panel's collapsed dock repeats two of the recorder's controls, and it repeats them by
@@ -2269,3 +2775,319 @@ offers neither `record` nor `mark` — and the dock, which is that panel collaps
 both, over a `recordState` frozen at the object it was declared as, with the click still
 reaching `POST /record/start`. A control with no state behind it, on the surface where nobody
 is watching the sensor. `--mutate dock-offers-the-take-on-the-editor` is that bug put back.
+
+## A settled flag that could not see the end of what it was settling
+
+`editor-check` section 9 compares the picture a released orbit leaves against the picture an
+accurate seek to the same moment gives. Its control demanded that the signature be able to
+tell *two moments of the capture* apart by more than 2 of 255 on the worst of forty tile
+means. That row had already gone red once, been diagnosed as "the subject had not moved" and
+patched by walking outwards through candidate moments; it went red again at 0.32.
+
+**The control's answer was a property of what happened in the room, not of the build.** No
+pair among nine moments spread over a 75.6s fixture reads further than 0.32 apart, and the
+widest pair anywhere in the take is 0.19. The seeks all landed — program time exact, every
+frame index distinct, the render and frame-fetch counters climbing at each one — and the
+pictures genuinely do differ: up to 76/255 on individual pixels, with 0.18–0.26% of pixels
+more than 8/255 apart. The subject moved. A mean over a fortieth of the region is a low-pass
+filter and averaged it away. Every fixture this repo can build is that capture looped, so no
+walk outwards can ever answer it, and a band re-derived to suit today's footage would have
+been the same defect with a newer number in it.
+
+The repair was to stop asking one question through two instruments. The **moment** comes off
+the transport, which knows it exactly; the **picture** becomes an equality against an accurate
+seek to that same moment, which is enforceable because the renderer is bit-deterministic at a
+settled program time; and the falsification control becomes a scrub draft of that moment,
+which is a property of the renderer rather than of the room and reads 16.46/255 here.
+
+**Chasing the residual is what found the real bug, and the residual was the finding.** The
+released picture sat 0.03 from the accurate one where a deterministic renderer owes 0.0000.
+It was not the release: two *consecutive* clean seeks to the identical program time disagreed
+by the same amount, and the disagreement accumulated with the number of intervening seeks.
+`orbitSettling` and `orbitRedrawWanted` both come off OrbitControls' `change` event, which is
+raised on a displacement threshold; damping is asymptotic, so below that threshold the camera
+goes on creeping and nothing says so. Every `seekNow` then runs `advanceNavigation`, which is
+another `controls.update()`, which moves it again — so each seek rendered from a slightly
+different pose. Measured at the shipped `dampingFactor` of 0.07: after `settled()` returns,
+hand-driving `update(0)` moved the camera 8.376e-4, 7.789e-4 then 7.243e-4 m, a ratio of
+0.92993 every step — exactly `1 - dampingFactor` — and it took 356 to 496 further updates to
+reach a pose that renders bit-identical twice.
+
+`finishOrbitDrift` is the door this file already had for it, and five gestures already used
+it; its own comment says the loop's settle branch "now seeks to a pose that has finished
+moving instead of one that is still travelling", which was true of every caller except that
+branch. With the call in, `landed` reads 0.0000.
+
+Three lessons, and the second is the one that generalises:
+
+- **A flag named for a state usually names an event.** `settled` meant "the controls stopped
+  telling us they were moving". The gap between that and "stopped moving" was invisible
+  because it was below the threshold of the thing doing the telling — which is where every
+  such gap lives, by construction.
+- **Ask whether a control's answer is a property of the build or of the fixture.** A control
+  whose value the footage decides cannot fail a build; it can only fail a shoot. The
+  repository already knows this shape for looks and sizes, and this is the same thing in the
+  time axis.
+- **A residual an order of magnitude below the band is worth explaining before the band is
+  chosen.** The 0.03 would have been covered by any tolerance anybody picked, and the picking
+  is what would have buried it. It was the whole bug.
+
+## A residual that is the instrument, and how to tell it from one that is the build
+
+`keyframe-check` section 1c asserts that easing the camera remaps *when* it arrives and leaves
+the route it takes alone. The measure is the distance from each pose the eased run visits to
+the nearest point on the unmapped curve, and the first version of it took that distance to the
+nearest *sample* of a densely sampled curve. It read **6.26e-3 m** against a correct build.
+
+Six millimetres is a number that could plausibly be either a genuine displacement of the path
+or a picture of how far apart the samples are, and nothing about the reading says which. Two
+things separated them:
+
+- **The samples were uniform in time, and the camera is not uniform in speed.** So the sparsest
+  samples sat on the fast stretch between the 1.2s and 6.2s keys, which is exactly where a real
+  path shift would hide. Projecting onto the segment between two samples rather than onto the
+  samples themselves took that floor out and the reading fell to **2.03e-5 m**, a factor of 300
+  for a change that touched no build code.
+- **What was left was then made to prove which kind of thing it was.** Chord error against a
+  polyline falls with the square of the density, so quadrupling the sample count has to divide
+  it by about 16 while a real displacement would not move at all. Measured: 2.03e-5 at 800
+  samples and **1.36e-6** at 3200, a factor of **14.9** against a predicted 16.
+
+**The scaling test is the point, not the smaller number.** Tightening a threshold until a row
+goes green is indistinguishable, from the outside, from having measured something — and this
+repo's own history is mostly of bands re-derived to suit the reading in front of somebody. A
+residual that responds to the instrument the way theory says it should is an instrument
+artefact; one that does not is a finding. Ask the residual to move before deciding it is noise.
+
+The fov row in the same section is the smaller sibling of the same lesson and is left at a
+looser tolerance than its neighbours on purpose. Both sides solve the same cubic by different
+routes — the page runs Newton with a bisection fallback, the tool bisects throughout — so they
+agree in the eased fraction to about 1.4e-10. Position spans about a metre and does not notice;
+fov spans 18 units across that fixture, so the same disagreement arrives eighteen times larger
+at 2.5e-9 and lands just outside the 1e-9 the positions get. **The threshold is set against the
+control rather than against the result**: ignoring the handles entirely reads 0.93 fov out, so
+1e-7 sits six orders inside the gap it has to separate rather than being the number that let
+the run through.
+
+## A mutation that disables a control hangs the check that presses it
+
+`editor-check`'s `ease-gate-hardcodes-scalar` puts the ease gate back to naming one kind, which
+shuts the preset row for pose keys. The section that presses those five buttons did what every
+other press in the file does — `page.locator(...).click()` — and Playwright's click waits for a
+control to become actionable rather than failing on one that is not. So the mutated run sat for
+the full 30s timeout and reported **`DID NOT RUN`, exit 2, with zero failed assertions**.
+
+That is a crash wearing the shape of a catch, and the two are distinguishable only by reading
+which assertions fired. CLAUDE.md's rule 3 is the general form and this is its browser-shaped
+instance: the tools disagree about what a caught mutation exits, and a run with no failed
+assertions and a non-zero exit is something to investigate rather than a catch to record. It is
+also the same lesson `lanes-clear-siblings` taught — a check has to survive the fault it checks
+for, or a caught mutation reads as an untested one.
+
+The repair is to read the disabled state and assert on it instead of walking into it: the dead
+preset row *is* the finding, so the row now fails with `the preset row is dead for a pose key,
+so nothing could be pressed` and the run continues. The handle-drag rows needed the same
+treatment for the same reason — `pose-segments-never-shaped` leaves no handle on the lane, and
+a `boundingBox()` of null dereferenced is another exit 2 where a clean red was owed.
+
+**Any mutation that removes a control, rather than changing what a control does, has this
+shape.** When adding one, ask what the check does when the thing it reaches for is not there.
+
+**And the paragraph above did not stop it happening again**, which is the part worth keeping.
+A row added to the same section later that session — the one asserting a pose handle cannot
+be dragged out of the unit box — reached for `.first().boundingBox()` with no count in front
+of it, and `pose-segments-never-shaped` went straight back to DID NOT RUN and exit 2 with
+eight clean reds owed. Two guarded call sites and a written-up case file were sitting a few
+hundred lines away. A lesson recorded in prose is not a lesson the next row inherits: what
+would have caught this is the guard being the only shape this file reaches for a handle in,
+so the unguarded version has nowhere to be copied from.
+
+## A sweep that reads its coverage domain off the thing under test
+
+The camera track gaining ease handles replaced five scattered `row.kind !== 'scalar'`
+comparisons with one `KINDS` table, and `editor-check` section 5 was rewritten to enumerate
+that table through a page hook — `easedKinds()` — so that a fourth track kind added later
+would be asked about by existing rather than by somebody remembering. Both of section 5's
+loops then ranged over the returned list, and a row asserted that every kind in it had a
+fixture in the tool.
+
+**That row is one-directional, and the direction it does not cover is the reported bug.**
+Flip a single token — `eases: false` on the pose entry — and `easedKinds()` returns
+`['scalar']`. Both loops silently stop producing pose rows. The fixture-completeness row
+passes, because nothing is unfixtured when nothing is claimed. `keyframe-check` stays green
+too, because the evaluator never consults the table. The result is the original defect back
+in the product — preset buttons dead on a camera key, no handles, no lane curve — with the
+entire suite green and one word changed.
+
+The general shape is worth naming, because "have the check enumerate it" is otherwise good
+advice this repository gives itself: **an enumeration that closes the class must not be read
+from the subject.** A sweep driven by the subject's own declaration of what it does can be
+switched off by editing the declaration, and it will report full coverage of the empty set.
+Enumerating from the *tool* is not the answer either — that is the hand-maintained list the
+enumeration was introduced to replace. Both directions together are:
+
+- every kind the page declares easable has a fixture here (the tool cannot fall behind the
+  page), and
+- every kind the tool has a fixture for is still declared easable (the page cannot shrink
+  its own coverage).
+
+The second is the one that carries the falsification, and it works because the fixture table
+lives in a file the mutation cannot reach.
+
+A related trap sat in the comment beside the mutation aimed at this area. It justified
+aiming at one call site rather than at the table by claiming a table edit "would redden every
+kind-dependent row at once", which is true of most of the table's fields and exactly false of
+the one that gates the sweep: editing `eases` reddens **zero** rows. A plausible-sounding
+reason for a scoping decision is worth re-deriving against the specific field, because the
+comment was what stopped anybody looking.
+
+## A driver credit is prose, and nothing joins it to a press
+
+`editor-check` covers its control sweep two ways: a rule that claims a class by container,
+and `DRIVER_IDS`, a table naming one control at a time and crediting the driver that presses
+it. The table's own comments already record two entries that credited a driver which did not
+drive, and say in as many words that this is the shape the table exists to refuse.
+
+Three more were found at once, and finding them was an accident of the shape and the rate
+moving surfaces. `tFps` was credited to "timeline-check and export-check change the output
+rate and count frames": both of those write `transport().outputFps` directly and neither has
+ever referenced the element. `tDeliverable` and `tDeliverableNew` were credited to
+`library-check`, which writes deliverable directories on the server, reads `#tNote`, and
+touches neither control. So of five entries read closely, three were false and two of those
+were false in both halves.
+
+**The mechanism is that a credit is a string.** Nothing joins `DRIVER_IDS['tFps']` to a
+press of `#tFps` anywhere — the sweep asks whether the key exists, not whether the sentence
+is true — so an entry is exactly as good as the last person to read it. That is not an
+argument for deleting the table, because the alternative is the container rule, which is
+worse in the same direction: it claims everything the container grows. It is an argument for
+treating an entry as a claim with an owner. When a control moves, the entry moves with it and
+is re-derived rather than carried across, and the honest repair for a credit with no true
+answer is to make one true — section 1 presses those three now.
+
+**And a container rule widened to a new container is the same failure with a bigger blast
+radius.** `shelldialogs` was widened from two dialogs to three when the shape and the rate
+moved into a new modal, which is a rule claiming every enabled control in a container the
+tool had never opened. The `appbar` rule's comment records that exact mistake twice. The
+repair is to make the claim true — the new dialog is opened, both of its controls are driven,
+and both of its ways out are pressed — and then to run `plant-unswept-control` and read
+*which* assertion fires, rather than trusting the exit code. It fired naming
+`tPlantedControl`, which is the row doing its job; a widening that swallowed the planted
+control would have read green at 488 assertions.
+
+## A hook renamed under a tool that deliberately boots two builds
+
+`registry-check` renders this tree against a `web/main.js` pulled out of history with `git
+show`, so it is the one tool in the suite holding two builds at once. Renaming a page hook —
+`setTargetSize` to `setOutputSize`, because the name referred to a variable that no longer
+existed — left the old arm answering to a name nothing asked it. Reached as
+`globalThis.__kinect.setOutputSize?.("640x400")`, which is how five of that hook's six
+callers spell it, the miss is silent by construction: the arm kept its default 16:9 letterbox
+at 640x360 while this tree framed 1.6 at 640x400, and **all six cross-build rows went red
+naming pixels that differ.** Six findings about readings, produced by a rename.
+
+Two things are worth keeping out of this.
+
+**An optional call on a probe hook is a resize that can quietly not happen.** `?.` is right
+where the absence is meaningful and wrong where it stands in for "this build might spell it
+differently" — the first is a fact about the build, the second is a rename nobody has
+noticed yet. A cross-build tool has to address each build in the language it speaks, which is
+what `git show` already commits it to, so asking by both names is the accommodation rather
+than the smell. It is not a compatibility path inside the program, which is the thing this
+repo refuses.
+
+**But do not then throw when neither name answers**, which is the obvious next step and is
+wrong here. One of this tool's two arms predates letterboxing entirely, publishes neither
+name, and arrives at the right buffer by having nothing to fit — so a throw turns a correct
+no-op into `DID NOT RUN` for the whole file. It did, on the first attempt at the repair. The
+absence is meaningful on one arm and a rename on the other, and only reading what each arm
+actually publishes tells them apart.
+
+**And the control that settles it is the baseline in the failing conditions, not reasoning
+about the diff.** Five of the six rows went green with the accommodation in place and one did
+not — `readGhost`, two of six frames rather than six of six, which is a different shape and
+so a different cause. A worktree at the commit before the branch's work, served on its own
+port and checked from its own tree, produced the identical row with identical hashes. That
+row is older than the change sitting on top of it, and ten minutes of `git worktree` is what
+separates "pre-existing" from "mine" when both readings fit.
+
+## A row that has always been red is measuring something it never claimed
+
+`registry-check` section 1b renders each of the five readings at 1.0 against the pinned
+build's numbered shading mode and asserted the two came back bit-identical over six frames.
+Four rows passed. `readGhost` disagreed at frames 2 and 3, and had done since the section was
+written — carried as a known standing failure, calibrated into `crush-gates-the-grade`'s
+expected-failure string as "widening from its own standing 2 of 6 frames to 6 of 6", and
+recorded twice in `web/cloud-shader.js` as reproducing unchanged across shader rewrites.
+
+**Nobody had measured how much it differed by.** One byte out of 1,024,000, by exactly 1 —
+one colour channel of one fragment, on each of two frames. Everything else was identical.
+That is not a reading rendering differently; it is two independently compiled shaders
+rounding one fragment the other way, which is the effect `web/cloud-shader.js` already had
+two case files about: adding a branch the shader never takes reddened three of these rows,
+because a branch in the common path costs the compiler the contractions it was making either
+side. The row claimed "this reading renders what its mode rendered" and enforced "these two
+compilations agree", which is a claim about a driver and not one this product can keep.
+
+The general shape: **an exact-equality assertion across two independently built artifacts is
+measuring the toolchain as well as the thing.** That is fine while it passes and worthless the
+moment it does not, because the standing failure cannot be told from a new one — and a row
+already red is exactly where a new defect hides, which this repository says out loud in the
+comment beside the mutation that was calibrated against it.
+
+Two things made the repair safe rather than a loosening.
+
+**The threshold came from both ends, measured.** Noise is 1 byte at delta 1. The quietest true
+positive the row must catch is `ghost-alpha-term-dropped`, one term removed from the ghost's
+alpha: 187,245 to 191,215 bytes — about 18.6% of the frame — at deltas of 47 to 52. Sixty-four
+bytes sits 64x above the noise and 2,900x below the defect, and no value in between is
+arguable. Two conditions rather than one, because a defect can be loud in either dimension:
+many fragments moved one step trips the count, a few moved far trips the delta. What neither
+catches is one fragment moved one step, and that is stated in the tool rather than left to be
+discovered — such a change is by construction indistinguishable from the noise the row had
+been printing since it shipped.
+
+**The passing line names what it absorbed.** It reads `6 frames, 2 within tolerance (worst 1
+bytes of 1024000, delta 1)`. A tolerance that reports nothing is a blindfold: the day that
+line says 6 frames, or the worst byte count climbs, is a day to come back and look, and a bare
+`PASS` would never say so.
+
+The result is worth recording because it runs against the intuition that relaxing a check
+weakens it. Before, `ghost-alpha-term-dropped` was caught against a row that was already red,
+so its claim to redden "the readGhost row of 1b, alone" could not be read off a run. After,
+it fires exactly one assertion and that row is green at baseline. Every mutation that touches
+the section got sharper: `rgb-contributes-no-alpha` now shows the other four readings visibly
+passing, and `mix-ignores-normalisation` — whose whole point is that 1b keeps passing while 8b
+fails — can finally demonstrate it.
+
+## An assertion that reads back what the edit was allowed to move
+
+`+pt` on a key is Bezier degree elevation, and the property worth having is that the picture
+does not change: the extra control point appears, every other one shifts to the place that
+keeps the curve where it was, and no rendered frame moves. That is what lets the control be an
+ordinary undoable press rather than something a take has to be judged after.
+
+**The obvious row for that claim is the wrong row, and it is wrong in the dangerous
+direction.** Reading the handles back and requiring them to be unchanged fails against a
+correct build — every control point is *supposed* to move — and passes against the one
+implementation this needs to catch: an `elevate` that appends a point and leaves the others
+alone keeps the earlier handles exactly where they were and bends the curve. So the row that
+looks like the tightest statement is satisfied by the defect and reddened by the fix.
+
+The row that works samples the *rendered* curve through `valueAt` at seven points inside the
+segment and requires the two sets to agree. In the browser it agrees to `0.000e+0`, and
+`--mutate elevation-moves-the-curve` — which appends a control point at (0.5, 0.5) instead of
+elevating — moves it by `3.590e-2`. The lesson generalises past this control: when an edit is
+*defined* as moving its own representation while preserving what the representation means, the
+assertion belongs downstream of the meaning. Asserting on the representation asks whether the
+edit happened, which is the question the count already answers.
+
+**The same shape one layer up.** `editor-check`'s preset sweep compared `got.easeOut[0]`
+against `want.out[0]`, which read the first control point of each. That was a complete
+comparison while a handle *was* one control point and became a prefix comparison the moment it
+became a list — so `glide` writing only its first point would have passed, leaving a cubic
+wearing a quintic's first handle. `--mutate glide-is-a-cubic` is the control, and it is worth
+keeping because everything else about that mutation stays green: the ordinates are still 0 and
+1, so the camera's *rate* still reaches zero at the key and every velocity assertion in the
+suite passes. What goes is only the degree, and with it the acceleration claim that was the
+whole reason for the second point.

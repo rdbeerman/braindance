@@ -24,7 +24,8 @@
     "record": "node server/index.js --record",
     "syntax": "node tools/syntax-check.mjs",
     "test": "npm run test:offline",
-    "test:offline": "node tools/syntax-check.mjs && node tools/release-gate-check.mjs"
+    "test:unit": "node --test test/*.test.mjs",
+    "test:offline": "node tools/syntax-check.mjs && node --test test/*.test.mjs && node tools/release-gate-check.mjs"
   },
   "dependencies": {
     "three": "^0.185.1",

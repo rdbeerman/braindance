@@ -67,10 +67,15 @@ const SAMPLES = Number(flag('--samples', '24'));
 const WARMUP = Number(flag('--warmup', '4'));
 const SHOTS = flag('--shots');
 
-// The stage is what gets hashed, so it is fixed at 640x400 - the size the design
-// document's draft-scrub figures were measured at - and the viewport is that plus
-// the timeline strip rather than the other way round.
-const STAGE = { width: 640, height: 400 };
+// The stage is what gets hashed, so it is fixed at 640x360 - 16:9, a shape
+// `EXPORT_SIZES` actually offers a resolution for. This was 640x400 (8:5), which
+// `restoreProject` refuses: `keyframe-check` died mid-run with "this project is
+// framed at 8:5, which this build offers no resolution for" out of an undo
+// restoring a snapshot the tool had put the editor into. This file never restores
+// a project, so 8:5 never crashed it, but it was still measuring the transport in
+// a framing no document here can hold. The viewport is the stage plus the
+// timeline strip rather than the other way round.
+const STAGE = { width: 640, height: 360 };
 // The first guess only. The strip is measured off the page after load and the
 // viewport corrected - see the resize below the goto, and the assertion beside it.
 const TIMELINE_H_GUESS = 148;
@@ -97,17 +102,17 @@ const CONTROL_MIN_PCT = 1.0;
 // shown.
 const MUTATIONS = {
   // The pre-roll stops being a function of anything.
-  'preroll-constant': [[
+  'preroll-constant': { file: 'web/main.js', edits: [[
     'const frames = Math.max(back.frames, trails);',
     'const frames = 8;',
-  ]],
+  ]] },
   // Nothing is rendered ahead of the target.
-  'preroll-none': [[
+  'preroll-none': { file: 'web/main.js', edits: [[
     'let start = Math.max(0, target - length);',
     'let start = target;',
-  ]],
+  ]] },
   // Program time stops being scaled into source time.
-  'rate-ignored': [[
+  'rate-ignored': { file: 'web/main.js', edits: [[
     `  sourceSecAt(programSec) {
     const keys = this.keys;
     if (keys.length === 0) return programSec * this.rate;
@@ -115,54 +120,54 @@ const MUTATIONS = {
     return scalarAt(keys, programSec, EXTEND_ENDS);
   },`,
     '  sourceSecAt(programSec) { return programSec; },',
-  ]],
+  ]] },
   // The blend fraction snaps to a frame, so an output rate above the capture
   // rate repeats frames instead of interpolating between them. Anchored on the
   // line above it, because the pinned source ends in the same statement and a
   // replacement that hit both would be mutating something this check never runs.
-  'duplicate-frames': [[
+  'duplicate-frames': { file: 'web/main.js', edits: [[
     'const offset = Math.min(Math.max(sourceSec - times[i], 0), span);\n'
     + '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: span };',
     'const offset = Math.min(Math.max(sourceSec - times[i], 0), span);\n'
     + '    return { steps, mixT: Math.round(offset / span), sinceFrameSec: offset, spanSec: span };',
-  ]],
+  ]] },
   // A draft stops bypassing the accumulators, so it inherits its history.
-  'draft-keeps-accumulators': [[
+  'draft-keeps-accumulators': { file: 'web/main.js', edits: [[
     '    params.apply(BYPASS_ZERO);',
     '    /* mutation: the bypass is skipped */',
-  ]],
+  ]] },
   // A draft rebuilds the pair it is already holding, so every frame of an orbit
   // pays two depth expansions, two binds and two state advances to arrive back
   // where it started. Nothing about the image changes, which is the point: this
   // is a cost claim, and section 3c is the only thing that reads the counters
   // that can see it.
-  'draft-always-resets': [[
+  'draft-always-resets': { file: 'web/main.js', edits: [[
     'if (target !== this.frame || this.source.applied !== i + 1) {',
     'if (true) {',
-  ]],
+  ]] },
   // The accumulators are not cleared before a pre-roll.
-  'no-reset': [[
+  'no-reset': { file: 'web/main.js', edits: [[
     '  clearFeedback(\n'
     + '    [statePrev, stateNext, afterimage._textureComp, afterimage._textureOld],\n'
     + "    'afterimage internals moved: the accumulator reset is no longer complete',\n"
     + '  );',
     '  /* mutation: accumulator reset skipped */',
-  ]],
+  ]] },
   // The surface memory's age ceiling drops back under the longest life the
   // sliders can ask for, so a ray that stops swapping sheds forever. The boot
   // assertion is removed with it, because that is what the assertion is for -
   // without removing it the page would refuse to start and the check would be
   // proving that a throw happens rather than that the image is wrong.
-  'age-clamp-low': [
+  'age-clamp-low': { file: 'web/surface-memory.js', edits: [
     ['const MAX_AGE = 6.0;', 'const MAX_AGE = 4.0;'],
     ['  if (MAX_AGE < longestLife) {', '  if (false) {'],
-  ],
+  ] },
   // The registry stops announcing its writes, so a slider moved while the
   // playhead is parked changes neither the image nor the estimate.
-  'no-repaint': [[
+  'no-repaint': { file: 'web/main.js', edits: [[
     '    paramWritten(name, spec.tag);',
     '    /* mutation: the write is not announced */',
-  ]],
+  ]] },
   // The mode stops asking for one, so selecting a reading of the footage that
   // writes no parameter leaves the previous one on screen.
   // Anchored on the block that follows it, because `requestRepaint()` on its own
@@ -179,27 +184,51 @@ const MUTATIONS = {
   // is an ordinary registry parameter now, so what would break it is the registry
   // declining to announce that one changed. Everything else still announces, so the
   // whole-look rows below stay green - they write non-reading values too.
-  'reading-write-skips-repaint': [[
+  'reading-write-skips-repaint': { file: 'web/main.js', edits: [[
     '    paramWritten(name, spec.tag);',
     '    if (!PARAMS[name].reading) paramWritten(name, spec.tag);',
-  ]],
+  ]] },
 };
 
+// **The spec names the file it edits, and the interception is derived from that name.**
+// This used to read the literal `web/main.js` and serve it back over a hardcoded
+// `**/main.js` route, which was true of every entry and true by coincidence: the page
+// is built from more than one module, so an anchor that moves into a neighbouring one
+// leaves the route matching nothing, the browser loading the unmutated build, and the
+// run recorded as this tool having missed a bug it was never shown. That is the failure
+// direction `docs/instruments.md` keeps the case file for, and it is silent.
+//
+// Returned with its file rather than as a bare string so the caller can install the
+// route for the right URL and, below, refuse when that URL is never asked for.
 function mutatedSource() {
-  const path = join(REPO, 'web/main.js');
-  let source = readFileSync(path, 'utf8');
-  const edits = MUTATIONS[MUTATE];
-  if (!edits) {
+  const spec = MUTATIONS[MUTATE];
+  if (!spec) {
     throw new Error(`unknown mutation ${MUTATE} - have ${Object.keys(MUTATIONS).join(', ')}`);
   }
-  for (const [from, to] of edits) {
+  let source = readFileSync(join(REPO, spec.file), 'utf8');
+  for (const [from, to] of spec.edits) {
     const hits = source.split(from).length - 1;
     if (hits !== 1) {
-      throw new Error(`mutation ${MUTATE} matched ${hits} times, expected exactly 1: ${from}`);
+      throw new Error(`mutation ${MUTATE} matched ${hits} times in ${spec.file}, expected exactly 1: ${from}`);
     }
     source = source.replace(from, to);
   }
-  return source;
+  return { file: spec.file, body: source };
+}
+
+/**
+ * Where a file under `web/` is reached from a browser.
+ *
+ * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
+ * on the basename is a claim about a filename where the server's rule is about a path -
+ * two modules could end in the same name and the wrong one would be served without
+ * anything failing.
+ */
+function servedAt(file) {
+  if (!file.startsWith('web/')) {
+    throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
+  }
+  return `/${file.slice('web/'.length)}`;
 }
 
 // ------------------------------------------------------------------- playwright
@@ -266,9 +295,9 @@ const check = (ok, label, detail = '') => {
 
 // --------------------------------------------------------------- in-page helpers
 //
-// Pixels never cross back over the wire - a 640x400 frame is a megabyte and there
-// are dozens per run - so every comparison is made in the page and only its
-// summary comes back.
+// Pixels never cross back over the wire - a 640x360 frame is most of a megabyte
+// and there are dozens per run - so every comparison is made in the page and only
+// its summary comes back.
 const INSTALL = `(() => {
   const k = globalThis.__kinect;
   globalThis.__tl = {
@@ -412,12 +441,20 @@ page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()
 page.on('response', (res) => { if (!res.ok()) errors.push(`${res.status()} ${res.url()}`); });
 await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
+// Counted rather than assumed, and read after the page has loaded. A route that matches
+// nothing fulfils nothing and throws no error - the page simply loads the tree's own
+// source - so the only way to tell a mutation that was delivered from one that was never
+// asked for is to watch the interception fire.
+let mutantServed = 0;
+let mutantPath = null;
 if (MUTATE) {
-  const source = mutatedSource();
-  await page.route('**/main.js', (route) => route.fulfill({
-    contentType: 'text/javascript; charset=utf-8', body: source,
-  }));
-  console.log(`[timeline] MUTATED BUILD: ${MUTATE} - this run is expected to FAIL`);
+  const { file, body } = mutatedSource();
+  mutantPath = servedAt(file);
+  await page.route((url) => url.pathname === mutantPath, (route) => {
+    mutantServed++;
+    route.fulfill({ contentType: 'text/javascript; charset=utf-8', body });
+  });
+  console.log(`[timeline] MUTATED BUILD: ${MUTATE} in ${file} at ${mutantPath} - this run is expected to FAIL`);
 }
 
 // The editor, which `/?take=` opened until the main menu took `/`. The take stays in
@@ -426,18 +463,30 @@ if (MUTATE) {
 // timing out on a page that was never going to answer.
 await page.goto(`${URL_BASE}/edit?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
 await page.waitForFunction(() => !!globalThis.__kinect);
+
+// **Exit 2, not a failed assertion.** A suite that fails one row on a mutation run reads
+// as a catch, so a mutation the page never asked for has to be the harness declining to
+// run rather than a claim going red - that is what 2 means everywhere else in this
+// suite, and `c507eb7` records the same refusal being added to `library-check` for the
+// same reason. The case it exists for is a module this page does not import: the route
+// is installed, nothing ever requests it, and every row below would pass on the tree's
+// own build while the output said MUTATED at the top.
+if (MUTATE && mutantServed === 0) {
+  console.log(`\n[timeline] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
+    + 'requested it, so this run would have measured the unmutated build');
+  process.exit(2);
+}
 // **The page frames at the stage this tool asked for.** The editor letterboxes
 // itself to the export aspect now, so a viewport alone no longer decides the
-// drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
-// makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
-// every buffer-size expectation and every pointer coordinate in this file.
-await page.evaluate('globalThis.__kinect.setTargetSize?.("640x400")');
+// drawing buffer - but 640x360 is 16:9, the menu's own default, so there is no
+// letterbox and no offset to carry: the buffer comes out exactly 640x360.
+await page.evaluate('globalThis.__kinect.setOutputSize?.("640x360")');
 // And the viewport is sized to whatever fixed furniture actually surrounds the stage,
 // measured rather than assumed. `TIMELINE_H` was a constant that went stale the moment
 // the bar became two rows, and the Pencil shell adds the same risk at the top: every
 // image in this file is compared against another image from the same run, so a shorter
 // stage agrees with itself perfectly and the header quietly stops being true. The
-// buffer is then asserted, because a tool whose first line says "640x400" should be the
+// buffer is then asserted, because a tool whose first line says "640x360" should be the
 // thing that enforces it.
 {
   const furniture = await page.evaluate(`(() => {

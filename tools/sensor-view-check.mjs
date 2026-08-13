@@ -227,8 +227,8 @@ const CAPTURES_DIR = resolve(flag('--captures', join(REPO, 'captures')));
 const DW = 512;
 const DH = 424;
 
-// The boot defaults in `web/main.js`'s uniform block - what a page that fetched
-// nothing would be unprojecting on. The recorder arm needs them, because "the
+// The boot defaults in the uniform block in `web/point-cloud.js` - what a page that
+// fetched nothing would be unprojecting on. The recorder arm needs them, because "the
 // intrinsics arrived" is only evidence if the numbers that did not arrive are
 // different numbers.
 const BOOT_DEFAULTS = { fx: 366, fy: 366, cx: 256, cy: 212 };
@@ -399,6 +399,21 @@ function mutatedSource(name) {
   return { file: spec.file, body: source };
 }
 
+/**
+ * Where a file under `web/` is reached from a browser.
+ *
+ * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
+ * on the basename is a claim about a filename where the server's rule is about a path -
+ * two modules could end in the same name and the wrong one would be served without
+ * anything failing.
+ */
+function servedAt(file) {
+  if (!file.startsWith('web/')) {
+    throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
+  }
+  return `/${file.slice('web/'.length)}`;
+}
+
 // ------------------------------------------------------------------- playwright
 
 async function loadPlaywright() {
@@ -539,11 +554,11 @@ const PROBE = `(() => {
       return this.pose();
     },
 
-    // One stage shape at a time, applied and then read. \`setTargetSize\` resizes
+    // One stage shape at a time, applied and then read. \`setOutputSize\` resizes
     // synchronously, so the camera's aspect is already the new one when
     // \`sensorView\` reads it and there is nothing to wait for.
     at(size) {
-      k.setTargetSize(size);
+      k.setOutputSize(size);
       const returned = k.sensorView();
       return { returned, pose: this.pose() };
     },
@@ -763,6 +778,25 @@ if (MUTATE) console.log(`[sensor-view] MUTATED BUILD: ${MUTATE} in ${mutation.fi
 // the one the touched file expects.
 const mutatedJs = mutation?.file === 'web/main.js' ? mutation.body : null;
 const mutatedHtml = mutation?.file === 'web/index.html' ? mutation.body : null;
+// A mutation whose file is neither of the two this function knows how to serve is
+// not "not caught" - it is not delivered, and those read identically from outside
+// unless this refuses. `main.js` is splitting into more than one module, and a
+// mutation that follows a claim into a third one would fall through both branches
+// above, install no route, throw no `servedModule` guard, and let the run complete
+// on the unmutated tree - which prints `NOT CAUGHT`, the verdict this suite reserves
+// for a check that is blind to a real bug, when the truth is a harness that never
+// tried. So this is caught here, before any page opens, and exits the same way an
+// anchor that stopped matching does.
+if (mutation && mutation.file !== 'web/main.js' && mutation.file !== 'web/index.html') {
+  console.log(`[sensor-view] DID NOT RUN - ${MUTATE} edits ${mutation.file}, which this tool has no route `
+    + 'for yet (only web/main.js and web/index.html) - it would never reach a page');
+  process.exit(2);
+}
+// Read off the mutation's own declared file rather than assumed to be `main.js` - the
+// assumption every mutation here has satisfied so far, but coincidentally, the way
+// `registry-check` and `keyframe-check` record the same coincidence for the same
+// reason: the page this tool patches is one file today and will not always be.
+const mutantJsPath = mutatedJs !== null ? servedAt(mutation.file) : null;
 
 const pageErrors = [];
 
@@ -828,7 +862,7 @@ async function openPage({ path = EDITOR_PATH, take = TAKE, intrinsics = null, ba
   // check that found nothing.
   let servedModule = false;
   if (mutatedJs) {
-    await page.route('**/main.js', (route) => {
+    await page.route((url) => url.pathname === mutantJsPath, (route) => {
       servedModule = true;
       route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: mutatedJs });
     });
@@ -890,7 +924,8 @@ async function openPage({ path = EDITOR_PATH, take = TAKE, intrinsics = null, ba
     throw new Error('the hello was never intercepted - this arm ran on the take\'s own intrinsics');
   }
   if (mutatedJs && !servedModule) {
-    throw new Error(`the mutated module was never served on ${path} - this page ran the tree's own build`);
+    throw new Error(`the mutated module was staged for ${mutantJsPath} and never requested on ${path} - `
+      + 'this page ran the tree\'s own build');
   }
   if (mutatedHtml && !servedHtml) {
     throw new Error(`the mutated markup was never served on ${path} - this page ran the tree's own panel`);

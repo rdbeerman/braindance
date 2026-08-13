@@ -107,8 +107,11 @@ const MUTATIONS = {
   // spelling of `mix-ignores-normalisation`, indistinguishable from it by the rows that
   // went red, so it could not tell anybody which claim was load-bearing.
   'rgb-contributes-no-alpha': {
-    from: '    alphaFactor += readRgb;',
-    to: '    alphaFactor += 0.0;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    alphaFactor += readRgb;',
+      '    alphaFactor += 0.0;',
+    ]],
     fails: 'the readRgb row of 1b, alone - the other four readings are untouched',
   },
   // Section 1b, the readGhost row and only that row. The three alpha-writing readings
@@ -116,8 +119,11 @@ const MUTATIONS = {
   // there is transcription rather than arithmetic - and a check that compared only
   // colour would pass a build that dropped a term from one of them.
   'ghost-alpha-term-dropped': {
-    from: '    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * readGhost;',
-    to: '    alphaFactor += (0.25 + 0.75 * rim) * readGhost;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * readGhost;',
+      '    alphaFactor += (0.25 + 0.75 * rim) * readGhost;',
+    ]],
     fails: 'the readGhost row of 1b, alone - so 1b compares alpha and not just colour',
   },
   // Section 8b: the mix stops being a ratio while every single reading stays exactly
@@ -125,8 +131,11 @@ const MUTATIONS = {
   // weight is 1 and the rest are 0. This is the mutation section 1b cannot see and the
   // whole reason 8b exists.
   'mix-ignores-normalisation': {
-    from: 'float norm = readSum > 0.0 ? 1.0 / readSum : 0.0;',
-    to: 'float norm = readSum > 0.0 ? 1.0 : 0.0;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      'float norm = readSum > 0.0 ? 1.0 / readSum : 0.0;',
+      'float norm = readSum > 0.0 ? 1.0 : 0.0;',
+    ]],
     fails: 'the scale-cancels row of 8b, with every row of 1b still passing',
   },
   // Section 8's falsification sweep: one weight reaches no pixel. Dropping it from the
@@ -139,8 +148,11 @@ const MUTATIONS = {
   // in that bucket rather than one is the right answer here, and a fourth would mean a
   // parameter had quietly become reachable only from ghost.
   'weight-ignored': {
-    from: '  if (readGhost > 0.0) {',
-    to: '  if (false) {',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '  if (readGhost > 0.0) {',
+      '  if (false) {',
+    ]],
     fails: 'readGhost, ghostRim and ghostFill in the drop-one sweep, plus readGhost\'s 1b row',
   },
   // The duotone's amount reaches no pixel, and it takes the hue, the split and the motion
@@ -150,8 +162,11 @@ const MUTATIONS = {
   // right answer and a fifth would mean some other parameter had quietly become reachable
   // only through the duotone.
   'duotone-ignored': {
-    from: '  if (duotoneDepth > 0.0) {',
-    to: '  if (false) {',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '  if (duotoneDepth > 0.0) {',
+      '  if (false) {',
+    ]],
     fails: 'duotoneDepth, duotoneHue, duotoneSplit and duotoneMotion in the drop-one sweep, '
       + 'plus the planted section\'s two motion rows, which the block being off takes with it',
   },
@@ -162,8 +177,11 @@ const MUTATIONS = {
   // cannot draw the silhouette this parameter exists for, which is exactly the shape of
   // failure that ships looking like a control that works.
   'duotone-ignores-depth': {
-    from: '    float k = smoothstep(duotoneSplit - w * 0.5, duotoneSplit + w * 0.5, t);',
-    to: '    float k = 0.5;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    float k = smoothstep(duotoneSplit - w * 0.5, duotoneSplit + w * 0.5, t);',
+      '    float k = 0.5;',
+    ]],
     fails: 'duotoneSplit and duotoneSpan in the drop-one sweep - the amount and the hue still '
       + 'reach pixels, and the span goes with the split because the ramp it widens is gone - '
       + 'plus the metre section\'s control row, since a ramp replaced by a constant cannot be '
@@ -173,8 +191,11 @@ const MUTATIONS = {
   // lands in a uniform nothing reads. The plain shape, and the drop-one sweep is what sees
   // it: a parameter whose picture never changes when you take it away.
   'duotone-span-ignored': {
-    from: '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
-    to: '    float w = 1.0;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
+      '    float w = 1.0;',
+    ]],
     fails: 'duotoneSpan in the drop-one sweep - every other duotone term still reaches pixels, '
       + 'since the ramp goes on running at the width it had before this parameter - and the whole '
       + 'of the metre section, whose two invariance rows read a ramp that is once again a share '
@@ -189,8 +210,11 @@ const MUTATIONS = {
   // parameter was added to remove, reinstated in a form nothing that renders one range can
   // detect.
   'duotone-span-against-a-frozen-range': {
-    from: '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
-    to: '    float w = duotoneSpan / 5.95;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
+      '    float w = duotoneSpan / 5.95;',
+    ]],
     fails: 'the duotone span\'s two invariance rows, which render the same take at two clip '
       + 'ranges and hold the graded band still in metres - and nothing else, because at the '
       + 'default range this mutation is the shipped arithmetic',
@@ -201,8 +225,11 @@ const MUTATIONS = {
   // section's motion rows too, and those are the rows that say the sweep is measuring the
   // speed rather than something else that moved with it.
   'vspeed-ignored': {
-    from: '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
-    to: '    vSpeed = 0.0;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
+      '    vSpeed = 0.0;',
+    ]],
     fails: 'duotoneMotion in the drop-one sweep and the proven-parameter count beneath it, '
       + 'plus the planted section\'s two motion rows - the one that says a planted pair moves '
       + 'the picture and the one that says it moves it toward the hot pole',
@@ -214,8 +241,11 @@ const MUTATIONS = {
   // in. Nothing here could see it before the planted section existed, because both arms
   // of every comparison in this file run at the same frame rate by construction.
   'vspeed-unnormalised': {
-    from: '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
-    to: '    vSpeed = paired ? abs(mmC - mmP) : 0.0;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
+      '    vSpeed = paired ? abs(mmC - mmP) : 0.0;',
+    ]],
     fails: 'the same-speed-over-two-spans row of the planted section, alone - the drop-one '
       + 'sweep stays green, and so do the two rows either side of it',
   },
@@ -225,8 +255,11 @@ const MUTATIONS = {
   // few for any hashed run over it to notice, so the only thing that can see this is a
   // pair planted across the threshold on purpose.
   'vspeed-ignores-the-gate': {
-    from: '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
-    to: '    vSpeed = mmP > 0.0 ? abs(mmC - mmP) / spanSec : 0.0;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
+      '    vSpeed = mmP > 0.0 ? abs(mmC - mmP) / spanSec : 0.0;',
+    ]],
     fails: 'the row that says a jump past the snap threshold is a different surface, alone',
   },
   // The speed read off one fixed texel rather than the point's own, which is the failure a
@@ -237,8 +270,11 @@ const MUTATIONS = {
   // question at all. The blend keeps the point's own sample, so nothing about the geometry
   // moves and section 1b is untouched.
   'vspeed-reads-one-texel': {
-    from: '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
-    to: '    vSpeed = paired ? abs(mmC - depthAt(depthPrev, ivec2(0))) / spanSec : 0.0;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
+      '    vSpeed = paired ? abs(mmC - depthAt(depthPrev, ivec2(0))) / spanSec : 0.0;',
+    ]],
     fails: 'the two chequered-plant rows of the planted section - the one that says the '
       + 'chequer is neither of the uniform frames and the one that says its mean red sits '
       + 'between them',
@@ -249,8 +285,11 @@ const MUTATIONS = {
   // in this file can fail on a default that leaks, because every other comparison here either
   // has the term raised on both sides or has the block switched off entirely.
   'motion-leaks-at-zero': {
-    from: '    k = mix(k, 1.0, duotoneMotion * smoothstep(0.0, 1200.0, vSpeed));',
-    to: '    k = mix(k, 1.0, (duotoneMotion + 0.02) * smoothstep(0.0, 1200.0, vSpeed));',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '    k = mix(k, 1.0, duotoneMotion * smoothstep(0.0, 1200.0, vSpeed));',
+      '    k = mix(k, 1.0, (duotoneMotion + 0.02) * smoothstep(0.0, 1200.0, vSpeed));',
+    ]],
     fails: 'the motion-of-0-is-inert row, alone - every other row has the term raised on '
       + 'both sides or has nothing moving on either',
   },
@@ -261,8 +300,11 @@ const MUTATIONS = {
   // they write the span themselves, which is what makes this a probe that has to sit
   // somewhere else: on the real transport, against the times the drive reports.
   'spansec-nominal': {
-    from: '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: span };',
-    to: '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: 1 / 30 };',
+    file: 'web/main.js',
+    edits: [[
+      '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: span };',
+      '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: 1 / 30 };',
+    ]],
     fails: 'the row that holds spanSec against the gaps between the pinned frames, alone',
   },
   // The unit conversion dropped, which is a defect no image comparison can see the shape
@@ -270,8 +312,11 @@ const MUTATIONS = {
   // whether the slider reaches a pixel goes on passing. What separates the two builds is
   // the number at the uniform, so the landing row is the only thing that can fail here.
   'duotone-hue-in-degrees': {
-    from: '    apply: (v) => { uniforms.duotoneHue.value = THREE.MathUtils.degToRad(v); } },',
-    to: '    apply: (v) => { uniforms.duotoneHue.value = v; } },',
+    file: 'web/main.js',
+    edits: [[
+      '    apply: (v) => { uniforms.duotoneHue.value = THREE.MathUtils.degToRad(v); } },',
+      '    apply: (v) => { uniforms.duotoneHue.value = v; } },',
+    ]],
     fails: 'the duotoneHue row of the one-at-a-time landing sweep, reporting "landed 47 want '
       + '0.8203047484373349", and the all-at-once row beside it - that second one is the same '
       + 'comparison over the whole set rather than a separate finding',
@@ -281,8 +326,11 @@ const MUTATIONS = {
   // the only row that can see it is the drop-one sweep, where reverting a parameter that
   // reaches nothing changes no pixel.
   'crush-ignored': {
-    from: '      col = max(col - crush, 0.0) * 1.12;',
-    to: '      col = max(col - 0.018, 0.0) * 1.12;',
+    file: 'web/post-chain.js',
+    edits: [[
+      '      col = max(col - crush, 0.0) * 1.12;',
+      '      col = max(col - 0.018, 0.0) * 1.12;',
+    ]],
     fails: 'crush in the drop-one sweep, alone',
   },
   // The guard around the raster's default path removed, so the general form computes what
@@ -296,20 +344,29 @@ const MUTATIONS = {
   // bearing, green means it does not and the branch should come out, because a fast path
   // that is bit-identical to the slow one is the second implementation this repo refuses.
   'raster-recomputes-the-default': {
-    from: '        if (scanAxis.x == 0.0 && scanAxis.y == 1.0 && scanPitch == 1.3 && scanHard == 0.0) {',
-    to: '        if (false) {',
+    file: 'web/post-chain.js',
+    edits: [[
+      '        if (scanAxis.x == 0.0 && scanAxis.y == 1.0 && scanPitch == 1.3 && scanHard == 0.0) {',
+      '        if (false) {',
+    ]],
     fails: 'the raster-at-0.35 row against the pinned build, and nothing else',
   },
   // The lattice switched off at its own guard: a cell that quantises nothing.
   'lattice-ignored': {
-    from: '  if (lattice > 0.0) {',
-    to: '  if (false) {',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '  if (lattice > 0.0) {',
+      '  if (false) {',
+    ]],
     fails: 'lattice and latticeCell in the drop-one sweep',
   },
   // The ripple switched off the same way.
   'ripple-ignored': {
-    from: '  if (ripple > 0.0 && rw > 0.0) {',
-    to: '  if (false) {',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '  if (ripple > 0.0 && rw > 0.0) {',
+      '  if (false) {',
+    ]],
     fails: 'ripple, rippleFreq and rippleSpeed in the drop-one sweep, and the ripple-alone row',
   },
   // The gate put back the way it was before the ripple existed, so the region weight is
@@ -317,8 +374,11 @@ const MUTATIONS = {
   // cannot see this**: the scrambled set raises all four at once, so the weight is there
   // anyway and the ripple goes on working. Only the arm that raises it alone reddens.
   'ripple-outside-the-gate': {
-    from: '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0 || ripple > 0.0)',
-    to: '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0)',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0 || ripple > 0.0)',
+      '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0)',
+    ]],
     fails: 'the ripple-alone row, and nothing else - the drop-one sweep stays green',
   },
   // The stepped clock made continuous, which is the term's whole character: a machine
@@ -326,8 +386,11 @@ const MUTATIONS = {
   // off the eighths it steps in, so the smooth phase lands somewhere the stepped one never
   // does rather than agreeing with it by luck at one instant.
   'ripple-clock-continuous': {
-    from: '      float cycles = dist * rippleFreq - floor(time * rippleSpeed * 8.0) * 0.125;',
-    to: '      float cycles = dist * rippleFreq - time * rippleSpeed;',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '      float cycles = dist * rippleFreq - floor(time * rippleSpeed * 8.0) * 0.125;',
+      '      float cycles = dist * rippleFreq - time * rippleSpeed;',
+    ]],
     fails: 'the stepped-clock row, and nothing else - the drop-one sweep stays green',
   },
   // The band axis nailed back to the sensor's rows, which is what it was before this
@@ -337,8 +400,11 @@ const MUTATIONS = {
   // reverted. A build that quietly lost it tears horizontally under a green run, which is
   // the whole of what this control was added to stop being the only option.
   'glitch-axis-ignored': {
-    from: '      ? floor(mix(position.y, position.x, glitchAxis) / glitchBands)',
-    to: '      ? floor(position.y / glitchBands)',
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '      ? floor(mix(position.y, position.x, glitchAxis) / glitchBands)',
+      '      ? floor(position.y / glitchBands)',
+    ]],
     fails: 'glitchAxis in the drop-one sweep, alone',
   },
   // The streak switched off at its own guard, which is the plainest thing that can go
@@ -346,8 +412,11 @@ const MUTATIONS = {
   // change. The drop-one sweep is where that shows, because reverting a parameter nothing
   // reads leaves the image where it was.
   'streak-ignored': {
-    from: '      if (streak > 0.0) {',
-    to: '      if (false) {',
+    file: 'web/post-chain.js',
+    edits: [[
+      '      if (streak > 0.0) {',
+      '      if (false) {',
+    ]],
     // Six rows and not the one this first claimed, taken off the run rather than
     // predicted - and it has grown twice, which is the argument for taking it off a run
     // every time rather than reasoning about it. The drop-one sweep names both `streak`
@@ -376,8 +445,11 @@ const MUTATIONS = {
   // is the sharper half of `duotone-ignored`: that one asks whether the term is wired up at
   // all, this one asks whether it does the thing it is named for.
   'streak-ignores-angle': {
-    from: '          vec3 tap = texture2D(tDiffuse, vUv + d * texel * streakAxis).rgb;',
-    to: '          vec3 tap = texture2D(tDiffuse, vUv + vec2(0.0, d * texel.y)).rgb;',
+    file: 'web/post-chain.js',
+    edits: [[
+      '          vec3 tap = texture2D(tDiffuse, vUv + d * texel * streakAxis).rgb;',
+      '          vec3 tap = texture2D(tDiffuse, vUv + vec2(0.0, d * texel.y)).rgb;',
+    ]],
     fails: 'streakAngle in the drop-one sweep and the proven-parameter count beneath it, '
       + 'and all three of the direction section\'s pair rows - a nailed build renders the '
       + 'same frame at every angle, so each pair differs by exactly nothing',
@@ -405,8 +477,11 @@ const MUTATIONS = {
   // prediction come true - the failure `docs/instruments.md` records twice, both times
   // arriving with a written justification that stopped anybody looking again.
   'streak-angle-in-degrees': {
-    from: '      grade.uniforms.streakAxis.value.set(Math.sin(r), Math.cos(r));',
-    to: '      grade.uniforms.streakAxis.value.set(Math.sin(v), Math.cos(v));',
+    file: 'web/main.js',
+    edits: [[
+      '      grade.uniforms.streakAxis.value.set(Math.sin(r), Math.cos(r));',
+      '      grade.uniforms.streakAxis.value.set(Math.sin(v), Math.cos(v));',
+    ]],
     fails: 'the streakAngle row of the one-at-a-time landing sweep, reporting "landed '
       + '[-0.097181906,0.995266636] want [0.920504853,-0.390731128]", and the all-at-once '
       + 'row beside it - that second one is the same comparison over the whole set rather '
@@ -421,16 +496,22 @@ const MUTATIONS = {
   // is reverted. This is the vertical column grille the whole of D1 is for, so a build
   // that quietly lost it would be drawing television scanlines under a green run.
   'raster-ignores-angle': {
-    from: '          float coord = dot(vUv * ref, scanAxis);',
-    to: '          float coord = vUv.y * ref.y;',
+    file: 'web/post-chain.js',
+    edits: [[
+      '          float coord = dot(vUv * ref, scanAxis);',
+      '          float coord = vUv.y * ref.y;',
+    ]],
     fails: 'scanAngle in the drop-one sweep, alone',
   },
   // The pitch back to the literal it was promoted from. Its default *is* that literal, so
   // nothing about the shipped picture moves - which is the point, and which leaves the
   // drop-one sweep as the only thing that can tell the two builds apart.
   'raster-pitch-fixed': {
-    from: '          float wave = sin(coord * scanPitch + time * 2.0) * 0.5 + 0.5;',
-    to: '          float wave = sin(coord * 1.3 + time * 2.0) * 0.5 + 0.5;',
+    file: 'web/post-chain.js',
+    edits: [[
+      '          float wave = sin(coord * scanPitch + time * 2.0) * 0.5 + 0.5;',
+      '          float wave = sin(coord * 1.3 + time * 2.0) * 0.5 + 0.5;',
+    ]],
     fails: 'scanPitch in the drop-one sweep, alone',
   },
   // The duty cycle dropped, leaving the sine the term has always drawn. This is the
@@ -438,8 +519,11 @@ const MUTATIONS = {
   // and a build without it draws rotated softness at every setting - which looks like a
   // raster right up until you compare it against a reference frame.
   'raster-hard-ignored': {
-    from: '          line = mix(wave, smoothstep(0.5 - w, 0.5 + w, wave), scanHard);',
-    to: '          line = wave;',
+    file: 'web/post-chain.js',
+    edits: [[
+      '          line = mix(wave, smoothstep(0.5 - w, 0.5 + w, wave), scanHard);',
+      '          line = wave;',
+    ]],
     fails: 'scanHard in the drop-one sweep, alone',
   },
   // The tempting edit, planted: `crush` joins the four terms that gate the grade pass, so
@@ -453,15 +537,22 @@ const MUTATIONS = {
   // boot failure would arrive as four separate landing rows and it arrives as one row
   // naming four terms in its detail, which is the sort of thing only a run settles.
   //
-  // Note what reddening 1b's readGhost row means here, since that row is red in every run
-  // of this tool: it goes from its own standing 2 of 6 frames to 6 of 6. A row already
-  // failing is exactly where a new defect hides, so the count is not the reading - the
-  // frame tally is.
+  // 1b's readGhost row used to be red in every run of this tool, and the note here used to
+  // say so - it went from a standing 2 of 6 frames to 6 of 6, and the count was not the
+  // reading because a row already failing is exactly where a new defect hides. That is
+  // fixed rather than still true: the standing failure was one byte of 1,024,000 differing
+  // by 1, which is two compilers rounding a fragment differently, and 1b compares pictures
+  // now. All five of its rows are green at baseline, so all five reddening here is five
+  // clean signals rather than four and a widening.
   'crush-gates-the-grade': {
-    from: '  return grade.uniforms.rgbSplit.value > 0',
-    to: '  return grade.uniforms.crush.value > 0 || grade.uniforms.rgbSplit.value > 0',
-    fails: 'the pass-gate row for crush, all five rows of 1b (readGhost widening from 2 of 6 '
-      + 'frames to 6 of 6), and the boot comparison naming all four gating terms',
+    file: 'web/main.js',
+    edits: [[
+      '  return grade.uniforms.rgbSplit.value > 0',
+      '  return grade.uniforms.crush.value > 0 || grade.uniforms.rgbSplit.value > 0',
+    ]],
+    fails: 'the pass-gate row for crush, all five rows of 1b (each at 6 of 6 frames and '
+      + 'about three quarters of every frame), and the boot comparison naming all four '
+      + 'gating terms',
   },
 };
 
@@ -500,23 +591,104 @@ process.on('uncaughtException', (err) => {
 // recorded as the check having missed a bug it was never shown. And a mutation is a
 // piece of source text, so it stops matching the moment the code it names is edited -
 // the refusal is what surfaces that rather than a silent pass.
+// **The target comes off the spec rather than out of this function.** Every entry used
+// to be a bare `{ from, to }` and the file was the literal `web/main.js` written here,
+// which was true of all of them and true by coincidence rather than by declaration:
+// `syntax-check`'s anchor row had to infer the same fact from the shape to check these
+// anchors at all, and `docs/instruments.md` records that inference being wrong within
+// days of being written. So the spec says where it edits, the way every other tool in
+// the suite says it, and a mutation that moves to another file moves by editing its own
+// entry rather than by this function learning a second path.
 const mutatedSource = (() => {
   if (!MUTATE) return null;
-  const js = readFileSync(join(REPO, 'web/main.js'), 'utf8');
-  const { from, to } = MUTATIONS[MUTATE];
-  const hits = js.split(from).length - 1;
-  if (hits !== 1) {
-    throw new Error(`mutation ${MUTATE} matched its anchor ${hits} times, not once: ${JSON.stringify(from)}`);
+  const spec = MUTATIONS[MUTATE];
+  if (!spec) throw new Error(`unknown mutation ${MUTATE} - have ${Object.keys(MUTATIONS).join(', ')}`);
+  const staged = new Map();
+  const read = (rel) => {
+    if (!staged.has(rel)) staged.set(rel, readFileSync(join(REPO, rel), 'utf8'));
+    return staged.get(rel);
+  };
+  for (const [from, to] of spec.edits) {
+    const body = read(spec.file);
+    const hits = body.split(from).length - 1;
+    if (hits !== 1) {
+      throw new Error(`mutation ${MUTATE} matched its anchor ${hits} times in ${spec.file}, not once: `
+        + `${JSON.stringify(from)}`);
+    }
+    staged.set(spec.file, body.replace(from, to));
   }
-  return { js: js.replace(from, to), html: readFileSync(join(REPO, 'web/index.html'), 'utf8') };
+  // The panel and the module, which this tool has always served as a pair because a
+  // build's `PARAMS` throws at boot on a parameter with no control in the markup - and
+  // beside them whatever file the spec actually edited. For a spec naming `main.js` that
+  // third member is the same string as `js`; for one naming a module `main.js` imports it
+  // is that module's own bytes, requested by the browser under its own path.
+  //
+  // **This used to be the pair alone, and a spec naming a third file was refused outright**
+  // with a note saying the pairing would be fixed when something needed it. Eighteen of the
+  // entries below need it: the cloud's two GLSL programs are `web/cloud-shader.js` now, and
+  // a refusal there is eighteen falsification controls that cannot run. What the refusal
+  // was protecting against is real and is closed differently here - the staged edit used to
+  // be discarded at this line while `mutantPath` still resolved to the module's own path,
+  // so the interception fired on a request for that module and answered it with `main.js`'s
+  // unmutated bytes, which reads as a delivered mutation and asserts about code nobody
+  // wrote. Serving each file at its own path is what makes that impossible rather than
+  // refused.
+  return { js: read('web/main.js'), html: read('web/index.html'), mutated: read(spec.file) };
 })();
+
+/**
+ * Where a file under `web/` is reached from a browser.
+ *
+ * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
+ * on the basename is a claim about a filename where the server's rule is about a path -
+ * two modules could end in the same name and the wrong one would be served without
+ * anything failing. `timeline-check` carries the same function for the same reason;
+ * this file keeps its own copy rather than importing one, the way every tool here
+ * resolves its own `REPO` rather than sharing it.
+ */
+function servedAt(file) {
+  if (!file.startsWith('web/')) {
+    throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
+  }
+  return `/${file.slice('web/'.length)}`;
+}
+
+// The route below used to be a bare `'**/main.js'` glob, true of every mutation this
+// file carried at the time and true by coincidence: every entry in `MUTATIONS` named
+// `web/main.js` then, so a glob on that basename happened to be a path. It stayed a
+// coincidence right up until the tree it patches was about to stop being one file -
+// at which point a mutation whose anchor moved into a neighbouring module would have
+// gone on matching the glob's basename while matching no request any browser makes,
+// which is silent in exactly the way `docs/instruments.md` keeps case files for. So
+// the target is read off the mutation's own declared file, the way `timeline-check`
+// reads it, and it is computed here rather than at every call site because every
+// call site wants the same answer under `--mutate`: which file, if any, is the
+// mutated one.
+const MAIN_PATH = servedAt('web/main.js');
+const mutantPath = MUTATE ? servedAt(MUTATIONS[MUTATE].file) : MAIN_PATH;
+// Counted rather than assumed. A route that matches nothing fulfils nothing and
+// throws no error - the page simply loads the tree's own source - so the only way to
+// tell a mutation that was delivered from one that was never asked for is to watch
+// the interception fire, and it has to be watched across every page this file opens
+// under `--mutate`, not just the first: the after-arm, the pin arm and the panel arm
+// all default to the current tree's source, and any one of them failing to ask for
+// the mutated module would leave the others carrying a run that never happened.
+let mutantServed = 0;
 
 const HEADED = argv.includes('--headed');
 const SOURCE_FRAMES = Number(flag('--frames', '6'));
 const STRIDE = Number(flag('--stride', '4'));
 const SUBSTEPS = Number(flag('--substeps', '3'));
 
-const VIEW = { width: 640, height: 400 };
+// 640x360 - 16:9, a shape `EXPORT_SIZES` actually offers a resolution for. This was
+// 640x400 (8:5), which `restoreProject` refuses: `keyframe-check` died mid-run with
+// "this project is framed at 8:5, which this build offers no resolution for" out of an
+// undo restoring a snapshot the tool had put the editor into. This file never restores
+// a project, so 8:5 never crashed it here, but it was still asking the editor to frame
+// at a shape no document in this product can hold. 640x360 matches the menu's own
+// default aspect, so the fit below has nothing to letterbox - the drawing buffer comes
+// out at exactly the viewport's own shape, minus only the application bar.
+const VIEW = { width: 640, height: 360 };
 // The height the current editor gives its fixed application bar, and it is **measured
 // off the page rather than declared here**. Historical comparison pages have no shell,
 // so their viewport is shortened by the same amount to make both arms render the same
@@ -1279,9 +1451,34 @@ async function openPage({
     // under a heading that says they came from different code.
     await page.route((url) => url.pathname === RECORDER_PATH,
       (route) => { servedHtml = true; return route.fulfill({ contentType: 'text/html; charset=utf-8', body: source.html }); });
-    await page.route('**/main.js', (route) => route.fulfill({
+    await page.route((url) => url.pathname === MAIN_PATH, (route) => route.fulfill({
       contentType: 'text/javascript; charset=utf-8', body: source.js,
     }));
+  }
+  // The file the mutation actually edits, at its own path.
+  //
+  // **Only ever installed for this tree's own pages, and that is the whole of why it is
+  // outside the block above.** `beforeArm` and the mode-comparison arms pass an explicit
+  // historical `source`, and mutating the thing a comparison is measured *against* moves
+  // both sides and proves nothing - a historical `main.js` predates the split and asks for
+  // no siblings at all, so the only way it could take this route is a rev that does, which
+  // is a comparison across two builds rather than one.
+  //
+  // Registered after the `main.js` route so it wins when the two paths are the same, which
+  // is every spec that edits `main.js`: the body it serves is that same staged text, so the
+  // one thing the ordering decides is that `mutantServed` counts. Counting on the route
+  // rather than on the file makes the guard below evidence that the mutated bytes were
+  // asked for, instead of evidence that some page asked for something.
+  //
+  // `mutatedSource` is null on a run with no mutation, and the default `source` is that
+  // same null - so the pair test alone would install this route on every clean page and
+  // answer `/main.js` with a property of null. The mutation has to exist for there to be
+  // one to serve.
+  if (mutatedSource && source === mutatedSource) {
+    await page.route((url) => url.pathname === mutantPath, (route) => {
+      mutantServed++;
+      return route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source.mutated });
+    });
   }
   if (pin) {
     await page.route('**/__pinned.bin', (route) => route.fulfill({
@@ -1303,10 +1500,10 @@ async function openPage({
   if (comparisonShell) {
     // The comparison build predates the fixed application bar. Canonicalise both
     // revisions onto its existing bottom-strip allocation before changing target
-    // aspect, so the comparison viewport gives both the same 640x400 content box
+    // aspect, so the comparison viewport gives both the same 640x360 content box
     // through the same layout mechanism. The real current shell is measured separately
     // below and by editor-check; this arm is about shader identity across the old mode
-    // boundary, at the fixed 640x400 frame it was originally calibrated against.
+    // boundary, at the fixed 640x360 frame it is now calibrated against.
     await page.evaluate((height) => {
       const appBar = document.getElementById('appBar');
       if (appBar) appBar.style.display = 'none';
@@ -1320,10 +1517,53 @@ async function openPage({
   }
   // **The page frames at the stage this tool asked for.** The editor letterboxes
   // itself to the export aspect now, so a viewport alone no longer decides the
-  // drawing buffer: a 640x400 stage is 1.6, the menu's default is 16:9, and the fit
-  // makes the buffer 640x360 with a 20px offset unless told otherwise. That moves
-  // every buffer-size expectation and every pointer coordinate in this file.
-  await page.evaluate('globalThis.__kinect.setTargetSize?.("640x400")');
+  // drawing buffer - except here it still effectively does, because 640x360 is 16:9,
+  // the same shape the menu opens on by default, so there is nothing to letterbox:
+  // with or without this call the buffer lands at exactly 640x360. This was 640x400
+  // (8:5), which did letterbox against the 16:9 default and moved every buffer-size
+  // expectation in this file - see the header on `VIEW` for why that shape is gone.
+  //
+  // **Asked for anyway, because this is the tool that boots two builds, and a default
+  // that happens to agree is not a guarantee this file gets to lean on.** This hook
+  // was `setTargetSize` until the shape moved onto the document and the pixel count onto
+  // the deliverable, and the arms below are `git show` of a `web/main.js` from before
+  // that - so the name the current tree answers to is not the name they answer to. A
+  // single name reaches one arm and not the other, and spelled `?.` the miss is silent:
+  // `f49c833^` publishes `setTargetSize`, so under the new name alone that arm skipped
+  // its resize. Measured at the time this ran at 640x400 (8:5) against a 16:9 default,
+  // a skipped resize was visibly the wrong shape: every one of the six cross-build rows
+  // went red naming pixels that differ - a rename reading as six findings about
+  // readings. Measured, not reasoned: that is what the run printed.
+  //
+  // **That particular tell is gone now, and it is worth saying rather than leaving to be
+  // found later.** At 640x360 the shape a silently-skipped call leaves an arm on is the
+  // default project aspect, and the default is 16:9 - the same shape this call now asks
+  // for - so *this specific* miss, on *this specific* revision, no longer produces a
+  // buffer of a different size and the six rows would not repeat this history. It is a
+  // narrower loss than it sounds: `frameDelta` below still fails hard on any arm whose
+  // buffer is a different pixel count than the other's, so a rename to a third spelling,
+  // or a future default that is not 16:9, is still caught the same way it always was.
+  // What is gone is protection against the one coincidence where the miss and the ask
+  // land on the same shape by accident. `?? k.setTargetSize` still has to be right; there
+  // is just one fewer way left for this file to notice on its own if it stops being so.
+  //
+  // A tool that loads two builds has to address each in its own language, which `git
+  // show` above already commits it to. It is not a compatibility path inside the program,
+  // which is the thing this repo refuses.
+  //
+  // **And optional after both, which is the half that is easy to get backwards.** The
+  // instinct is to throw when neither name answers, on the grounds that a stage which
+  // silently did not resize is a geometry failure wearing the shape of a colour finding.
+  // That is true of an arm that *has* a letterbox and false of `151020b^`, which is the
+  // boot-state arm and predates letterboxing entirely: its buffer is the viewport's, it
+  // publishes neither name, and it arrives at 640x360 by having nothing to fit - which was
+  // true of it at any stage this file has ever asked for, letterboxed or not. Throwing
+  // there turns a correct no-op into DID NOT RUN for the whole file, which is what it did
+  // before this comment was first rewritten.
+  await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    (k.setOutputSize ?? k.setTargetSize)?.('640x360');
+  })()`);
 
   // Proof the interception held, independent of the readings it protects. The
   // sensor's hello carries fx as 366.031494 and the uniform defaults to exactly
@@ -1399,8 +1639,24 @@ async function bootState(opts, reader = landingReader) {
 
 // **The after arm goes first, because it is what says how tall the bar is.** The
 // before arm's viewport is derived from that measurement, so the order is a
-// dependency rather than a preference.
+// dependency rather than a preference. It is also the first page this file opens on
+// the current tree, which makes it the earliest point the delivery guard below can
+// answer honestly: every later arm installs the same route the same way, so if this
+// one never asked for the mutated module, none of them will either.
 const afterArm = await bootState({});
+// **Exit 2, not a failed assertion.** A suite that fails a row on a mutation run
+// reads as a catch, so a mutation the page never asked for has to be the harness
+// declining to run rather than a claim going red - the same convention every other
+// tool in this suite uses for the same reason, `c507eb7` records it arriving at
+// `library-check`, and it holds here even though this file's own convention for an
+// ordinary catch is inverted (0 caught, 1 not caught): a run that tested nothing is
+// neither of those, and reusing either code would make it unrecoverably ambiguous
+// with a real verdict.
+if (MUTATE && mutantServed === 0) {
+  console.log(`\n[registry] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
+    + 'requested it, so this run would have measured the unmutated build');
+  process.exit(2);
+}
 const measuredBar = await afterArm.page.evaluate(
   "Math.round(document.getElementById('appBar').getBoundingClientRect().height)");
 await afterArm.page.close();
@@ -1668,10 +1924,11 @@ for (const stage of Object.keys(beforeArm.out)) {
     wrong.length ? wrong.join('; ') : seen.join(', '));
 }
 
-// The fixed shell gives the renderer 32 fewer vertical pixels. With the proof's
-// 640x400 target aspect that content box is 589x368. The historical page has no target
-// fit, so it is opened directly at that content size; both arms must then land on the
-// same exact buffer rather than gaining a layout exception in the golden comparison.
+// The fixed shell gives the renderer 38 fewer vertical pixels - `web/nav.css`'s figure,
+// the same one `shellGeometry` measures rather than trusts. With the proof's 640x360
+// target aspect that content box is 572x322. The historical page has no target fit, so
+// it is opened directly at that content size; both arms must then land on the same
+// exact buffer rather than gaining a layout exception in the golden comparison.
 check(
   beforeArm.out.boot.landing.renderScale === SHELL_CONTENT.width
     && afterArm.out.boot.landing.renderScale === SHELL_CONTENT.width,
@@ -1760,7 +2017,7 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
 
   // **The old arm is the old readings, not the old geometry.** The unprojection's x sign
   // changed after this rev: the sensor's frames arrive horizontally mirrored and this build
-  // undoes them, which `unproject` in `web/main.js` carries the reasoning for. Left alone,
+  // undoes them, which `unproject` in `web/cloud-shader.js` carries the reasoning for. Left alone,
   // the pinned build draws the room reflected and every row below reports 6 of 6 frames
   // differing over a change that has nothing to do with a reading - measured, before this
   // was here: all five rows plus the raster, uniformly, where at HEAD five of the six pass.
@@ -1824,12 +2081,24 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
         ${extra}
         k.drive.reset();
         pinCamera(k.freeCamera);
-        const hashes = [];
+        // The frames themselves rather than digests of them, because the comparison
+        // downstream is a measurement and a hash answers only "same or not". Base64 so
+        // the bridge carries a string: five readings by six frames of 640x360 RGBA is
+        // about 37MB per arm, which node holds without complaint and which buys the row
+        // the ability to say *how* two builds differ rather than only that they do.
+        // Chunked into the encoder because a single spread of a million-element typed
+        // array overflows the argument list.
+        const frames = [];
         for (const t of ${JSON.stringify(at)}) {
           k.drive.stepTo(t);
-          hashes.push(await sha256(k.drive.readPixels()));
+          const px = k.drive.readPixels();
+          let bin = '';
+          for (let i = 0; i < px.length; i += 0x8000) {
+            bin += String.fromCharCode.apply(null, px.subarray(i, i + 0x8000));
+          }
+          frames.push(btoa(bin));
         }
-        return hashes;
+        return frames;
       })()`.replace(/\$MODE/g, String(mode)).replace(/\$READING/g, JSON.stringify(reading)));
     }
     await p.close();
@@ -1846,23 +2115,84 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
   );
   console.log(`  comparison geometry old ${JSON.stringify(oldArm.meta)} new ${JSON.stringify(newArm.meta)}`);
 
+  // **The same picture, which is not the same bytes, and the gap between those was a red
+  // row in every run of this tool for as long as it existed.**
+  //
+  // `readGhost` disagreed with its pinned mode at frames 2 and 3 and nothing else did. It
+  // was carried as a known standing failure - `crush-gates-the-grade` was calibrated
+  // against it, and two comments in `web/cloud-shader.js` record it reproducing unchanged
+  // across shader rewrites - which is the worst place for a defect to sit, because a row
+  // already red is where a new one hides. So it was measured rather than carried further.
+  //
+  // The two frames differ by **one byte out of 921,600, by exactly 1**. That is a single
+  // colour channel of a single fragment landing the other side of a rounding boundary, and
+  // it is the shape `web/cloud-shader.js` already has two case files about: adding a branch
+  // the shader never takes reddened three of these rows, because a branch in the common
+  // path costs the compiler the contractions it was making either side. The two arms are
+  // independently compiled shaders whose source differs by everything the registry did, so
+  // asking them for identical bytes asks the two compilations to agree - which is a claim
+  // about a driver rather than about a reading, and not one this product can keep.
+  //
+  // **The threshold is derived from both ends rather than picked.** Measured noise is 1
+  // byte at delta 1 - re-measured at 640x360 rather than carried over from the 640x400 stage
+  // this was first calibrated at, because a frame at a different pixel count is a different
+  // population and the old figures would be a number this repo would find later and have to
+  // correct. The smallest true positive this row has to catch is `ghost-alpha-term-dropped`,
+  // which removes one term from the ghost's alpha: it moves 156,247 to 159,539 bytes - about
+  // 17% of the frame - with deltas of 47 to 52, unchanged from before because a delta is a
+  // colour-channel magnitude and does not move with the frame's pixel count. So 64 bytes
+  // sits 64x above the noise and about 2,400x below the quietest real defect, and there is
+  // no value in between that a sane instrument would disagree about.
+  //
+  // Two conditions rather than one, because a defect can be loud in either dimension: a
+  // handful of fragments moved a long way trips the delta, and a great many moved one step
+  // trips the count. What neither catches is a defect that moves one fragment by one step,
+  // and that is stated rather than hidden - such a change is *by construction*
+  // indistinguishable from the compiler noise this row has been printing since it shipped.
+  const TOLERATED_BYTES = 64;
+  const framePixels = (s) => Buffer.from(s, 'base64');
+  const frameDelta = (x, y) => {
+    const A = framePixels(x);
+    const B = framePixels(y);
+    if (A.length !== B.length) return { bytes: Infinity, max: Infinity, sized: [A.length, B.length] };
+    let bytes = 0;
+    let max = 0;
+    for (let i = 0; i < A.length; i++) {
+      const d = Math.abs(A[i] - B[i]);
+      if (d) { bytes++; if (d > max) max = d; }
+    }
+    return { bytes, max, of: A.length };
+  };
+
   for (const [reading, mode] of Object.entries(READING_WAS)) {
     const a = oldArm.out[reading];
     const b = newArm.out[reading];
-    const first = a.findIndex((h, i) => h !== b[i]);
-    check(eq(a, b),
-      `${reading.padEnd(13)} at 1.0 is bit-identical to mode ${mode} at ${AGAINST_REV}`,
-      // **Which frames, not which frame.** Reporting only the first mismatch cannot
-      // tell a transient from a divergence, and those are different findings: one
-      // frame out of a walk is a warm-up the two builds enter differently, while every
-      // frame from some index on is a term that has actually changed. `readGhost` is
-      // the row that needed asking - it disagrees at exactly one frame of however many
-      // are walked - and the old detail line looked identical either way.
-      first < 0
-        ? `${a.length} frames`
-        : `${a.filter((h, i) => h !== b[i]).length} of ${a.length} frames differ, first at `
-          + `${first}: ${a[first].slice(0, 12)} vs ${b[first].slice(0, 12)} `
-          + `(mismatched: ${a.map((h, i) => (h === b[i] ? null : i)).filter((i) => i !== null).join(', ')})`);
+    const deltas = a.map((frame, i) => frameDelta(frame, b[i]));
+    const moved = deltas
+      .map((d, i) => ({ ...d, frame: i }))
+      .filter((d) => d.bytes > TOLERATED_BYTES || d.max > 1);
+    const touched = deltas.filter((d) => d.bytes > 0).length;
+    check(moved.length === 0,
+      `${reading.padEnd(13)} at 1.0 renders the same picture as mode ${mode} at ${AGAINST_REV}`,
+      // **Which frames and by how much, not which frame.** Reporting only the first
+      // mismatch cannot tell a transient from a divergence, and those are different
+      // findings: one frame out of a walk is a warm-up the two builds enter differently,
+      // while every frame from some index on is a term that has actually changed. The
+      // magnitudes are printed beside them for the same reason one step further on - a
+      // row that says "2 of 6 frames differ" and a row that says "1 byte of 921,600 by
+      // 1" are the same row, and only the second one lets a reader tell a defect from two
+      // compilers rounding a fragment differently.
+      //
+      // The passing line names what was tolerated rather than saying nothing, because a
+      // green row that quietly absorbed a difference is how a tolerance turns into a
+      // blindfold. On this rig it reads `6 frames, 2 within tolerance`, and a day when it
+      // reads 6 is a day to come back and look.
+      moved.length === 0
+        ? `${a.length} frames${touched ? `, ${touched} within tolerance `
+          + `(worst ${Math.max(...deltas.map((d) => d.bytes))} bytes of ${deltas[0].of}, `
+          + `delta ${Math.max(...deltas.map((d) => d.max))})` : ''}`
+        : `${moved.length} of ${a.length} frames differ beyond ${TOLERATED_BYTES} bytes or 1 step: `
+          + moved.map((d) => `f${d.frame} ${d.bytes} bytes of ${d.of} max ${d.max}`).join(', '));
   }
 
   // ---- the grade term whose default is not zero, at the value the shipped look uses.

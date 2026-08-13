@@ -84,6 +84,44 @@ const MUTATIONS = {
       "shell.exportCloseDialog.addEventListener('click', () => ui.exportDialog.close());",
     ]],
   },
+
+  // The citation row's control, and it plants the failure that row exists for rather than
+  // an invented one: a module named in this repo's own prose, renamed to something the
+  // tree does not hold. Splitting the browser bundle into twelve modules produced that
+  // fourteen times over - the prose went on naming the file a thing used to be in while the
+  // thing moved to a module beside it - and the name planted here is deliberately one no
+  // page, tool or document mentions, so the anchor row above still finds it exactly once.
+  'web-citation-outlives-its-module': {
+    file: 'CLAUDE.md',
+    edits: [[
+      'which is the fault `web/main.js` has actually shipped twice',
+      'which is the fault `web/render-loop.js` has actually shipped twice',
+    ]],
+  },
+
+  // The other half of the same row, and it needs a mutation of its own because a citation
+  // naming a file that exists cannot be falsified by deleting a file. A `file:line` form
+  // rots without the path rotting - which is the more common way of the two, since the
+  // path survives every edit to the file it names and the line survives none of them.
+  'line-citation-past-the-end': {
+    file: 'docs/proof-tools.md',
+    edits: [['`web/main.js:9860` is and what made', '`web/main.js:98600` is and what made']],
+  },
+
+  // The third half of the same row, and the one that says the walk reaches outside the
+  // prose. Both mutations above plant their failure in a file the old citing set already
+  // read - a root markdown page and a `docs/` page - so both stayed caught while the walk
+  // covered four source directories and `docs/`, and neither could tell you that
+  // `native/grabber.cpp`, `presets-builtin/README.md` and this repo's own CI workflow were
+  // outside it. All three cite a module. This plants the same rot in the C++ file, which is
+  // the furthest one from the prose and the one whose citation is load-bearing: the comment
+  // it sits in exists to say that the constant beside it is a second spelling of a value
+  // `web/format.js` owns, so a reader sent to a file that is not there loses the only
+  // pointer to the owner.
+  'citation-outside-the-prose': {
+    file: 'native/grabber.cpp',
+    edits: [['Node reads `web/format.js` by path', 'Node reads `web/capture-format.js` by path']],
+  },
 };
 
 // Reads a file, and applies the mutation to it when the mutation is one that names it.
@@ -122,7 +160,23 @@ if (mutateAt !== -1 && !MUTATIONS[mutation]) {
 
 // The server, the tools and the browser bundle. Everything else with a .js in it is
 // either vendored, built or a capture, and none of those are ours to parse.
-const FLOORS = { server: 5, tools: 12, web: 2 };
+// A floor per directory rather than a total, so a walk that stops finding a tree says so
+// instead of being covered by another tree having grown. `web` and `test` are raised in
+// step with every phase that splits `main.js`, and raised in the same commit rather than
+// left slack: the floor is a claim that the walk still reaches the modules, and one left
+// behind the tree it counts goes on passing with half of them deleted. `web` was 2 before
+// the split began and 4 after `scene.js`, `curve.js` and `record-poll.js`; it was 9 with
+// `world-tilt.js`, `export-sizes.js` and `plan-geometry.js` beside them, 11 with
+// `view-window.js` and `clip-range.js`, 13 with `cloud-shader.js` and `bloom-pass.js`,
+// 15 with `gpu-textures.js` and `surface-memory.js`, 16 with `post-chain.js`, and it is
+// 17 with `point-cloud.js`. `test` moves with it for the same reason - most of those
+// modules arrived with a test file, which is most of why they are modules - but it has
+// stopped moving, and the last three phases are why. `surface-memory.js` asks the live
+// context whether it can render to float, `post-chain.js` hands a composer a renderer and
+// `point-cloud.js` imports both of them, so none of the three can be imported under bare
+// node at all, and a floor that counted a test nobody can write would be a floor that has
+// to be lowered later.
+const FLOORS = { server: 5, test: 10, tools: 12, web: 17 };
 
 // **Two different questions, so two different sets, and the difference is the point.**
 // `PARSES` is what `node --check` can be handed and have its answer mean anything - a
@@ -247,6 +301,61 @@ if (!existsSync(DOC)) {
   }
 }
 
+// Blanks the body of every string and template literal, leaving comments, code and every
+// newline where they were so a line number still means what it says. It is the inverse of
+// the comment stripping the shell row below does, and it is here for the inverse reason:
+// that row wants the code and this one wants the prose, and in a JavaScript file the prose
+// is the comments.
+//
+// **A path in a string is data; a path in a comment is a citation**, which is the same
+// distinction `library-check`'s own scanner draws when it refuses to read a number out of
+// a debug message. What it drops here is the `file:` target of a mutation table and the
+// `module:` of `module-check`'s exemption table - both of which name modules, and both of
+// which are already answered somewhere better: a mutation anchoring into a file that is
+// not there fails the anchor row further down this file, and an exemption entry naming a
+// module that is gone fails `module-check`'s own audit of that table. What it would keep
+// is the fixture paths `library-check` builds its probe tree out of, which are relative to
+// a temporary root and name nothing in this checkout at all - and, sharper than that, the
+// two module names this file's own mutation table plants, which are chosen for being absent
+// and are absent on a clean tree by definition. Measured by taking the exclusion out and
+// running: seven paths red, six of them the probe tree's and the seventh this table's, plus
+// the line citation this table moves past the end of the file. A row falsified by its own
+// controls on every clean run is the shape this file's header refuses, so the exclusion is
+// load-bearing rather than tidy.
+//
+// Deliberately not a lexer, and the bound is worth stating because this repo has paid for
+// the other kind: a regex literal spelling a module path would be read as code and its
+// text reported, which fails loudly and has never happened, where the alternative reading
+// swallows to the next slash and loses a citation in silence. `docs/instruments.md`
+// carries nine rounds of that argument under a scanner that had to be exact; this one does
+// not, because over-reporting a citation costs a red row somebody reads.
+const withoutStringBodies = (src) => {
+  let out = '';
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '/' && (src[i + 1] === '/' || src[i + 1] === '*')) {
+      const end = src[i + 1] === '/' ? src.indexOf('\n', i) : src.indexOf('*/', i + 2) + 1;
+      const stop = end <= 0 ? src.length : end + (src[i + 1] === '/' ? 0 : 1);
+      out += src.slice(i, stop);
+      i = stop - 1;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1;
+      while (j < src.length) {
+        if (src[j] === '\\') { j += 2; continue; }
+        if (src[j] === c || (c !== '`' && src[j] === '\n')) break;
+        j++;
+      }
+      out += src.slice(i, j + 1).replace(/[^\n]/g, ' ');
+      i = j;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+};
+
 // **And every `docs/*.md` anything points at has to exist**, for the same reason and by
 // the same shape as the block above. `CLAUDE.md` was 704 lines and was split into three
 // documents it now sends you to by name, with fourteen comments in `tools/` citing those
@@ -268,20 +377,168 @@ if (!existsSync(DOC)) {
 // comment deliberately does not spell: the scan reads its own prose, so a filename
 // written here as an example is a citation like any other and fails the run that quotes
 // it. Append the line to the runbook, run, revert.
+//
+// **And the same question asked of the modules, because a `web/` citation rots faster than
+// a `docs/` one and nothing was asking it.** `web/main.js` was fifteen thousand lines and
+// is now a seventh smaller with twelve modules beside it, and the prose did not move with the
+// code: fourteen citations were left naming the browser bundle for code that had been carried
+// out of it. That is the ordinary consequence of a split rather than anything unusual, and
+// it is why the walk had to widen twice over. The **citing** set is every prose page this
+// repo ships and every source file it ships, not `CLAUDE.md` and `tools/` alone - the
+// documents cite each other and the modules cite each other, and a scan that reads only the
+// two files that point at `docs/` would have seen four of the thirty. The **question** is
+// two questions asked of one walk, because they are the same claim about two kinds of
+// target and a second walk beside this one would be the second path this repo keeps
+// refusing.
+//
+// **Read through `sourceWithMutation` rather than off disk**, which is the whole reason
+// this block builds repo-relative paths where it used to build absolute ones. A row that
+// reads the tree directly cannot be falsified by a mutation, so the control would have been
+// green against every build there is - the delivery hole `docs/instruments.md` records
+// `library-check` shipping, arriving here in the one block whose subject is prose.
+//
+// **What this cannot see, said out loud.** A citation is checked for resolving and not for
+// being *right*: `web/point-cloud.js` cited for something that moved to a neighbouring
+// module passes here, because the file is there. The line form is the same bound one step
+// in - a line past the end of the file fails, and a line that has drifted into the middle
+// of something else does not. `server/capture.js` records what that costs and answers it
+// the only way that works, by citing `handleFrame` by name after the line it used to name
+// had drifted nine hundred lines into the middle of a shader with nothing failing. Cite a
+// function, not a line; the line form is checked here because it exists, not because it is
+// a good idea.
+//
+// The controls are `--mutate web-citation-outlives-its-module`, which renames a module in
+// CLAUDE.md's own prose to something the tree does not hold, and
+// `--mutate line-citation-past-the-end`, which moves a line citation past the end of the
+// file it names. Two, because the halves fail differently: a path that still resolves
+// answers for a line that does not.
 {
-  const citing = [join(ROOT, 'CLAUDE.md'), ...walk(join(ROOT, 'tools'), SHIPPED)];
+  // **The set a citation can be written in is every file this repo ships, and it used to be
+  // a list.** The old set was root markdown, `docs/**.md`, and `.js`/`.mjs`/`.sh` under the
+  // four floors - which is the tree a citation is *usually* written in and not the tree one
+  // *can* be written in. Three files were outside it and all three cite a module:
+  // `native/grabber.cpp` names `web/format.js` as the owner of the constant it is a second
+  // spelling of, `presets-builtin/README.md` names `web/main.js`, and this repo's own CI
+  // workflow names it too. Point any of those at a module that has moved and the row above
+  // stayed green while printing that every cited module resolves, which is a claim about
+  // coverage the instrument did not have - the same shape as a row that measures 1200 and
+  // says 1080p.
+  //
+  // An allowlist of directories is the wrong instrument for "everywhere", because it rots
+  // in the direction that reads as success: a source tree added next year is simply not
+  // asked, and nothing says so. **A denylist read from `.gitignore` rots the other way** -
+  // whatever this repo declares it does not ship excludes itself by existing, and a new
+  // gitignored directory needs no edit here. That is also why this still needs nothing but
+  // the filesystem: `git ls-files` would be the more direct spelling of "what this repo
+  // ships" and would make the one tool that runs on a bare checkout depend on git.
+  //
+  // The cost of over-reaching is a red row somebody reads, which is the direction this file
+  // already chose twice. Measured on this tree at the time of writing: nothing under
+  // `third_party/` cites a `web/` module, so the widened walk adds three citations and no
+  // false ones.
+  const ignored = (() => {
+    const names = new Set(['.git']);
+    const paths = new Set();
+    const globs = [];
+    const raw = existsSync(join(ROOT, '.gitignore'))
+      ? readFileSync(join(ROOT, '.gitignore'), 'utf8') : '';
+    for (const line of raw.split('\n')) {
+      // A negation re-includes rather than excludes, and reading one as an exclusion would
+      // hide a tree this walk is supposed to reach. There are none today; skipping them
+      // keeps that true rather than silently inverting one that arrives.
+      const pattern = line.trim();
+      if (!pattern || pattern.startsWith('#') || pattern.startsWith('!')) continue;
+      const clean = pattern.replace(/^\/+/, '').replace(/\/+$/, '');
+      if (!clean) continue;
+      if (clean.includes('*')) {
+        globs.push(new RegExp(`^${clean.split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*')}$`));
+      } else if (clean.includes('/')) paths.add(clean);
+      else names.add(clean);
+    }
+    return (rel, name) => names.has(name) || paths.has(rel) || globs.some((g) => g.test(name));
+  })();
+  // Named `walkShipped` rather than `shipped`, which is already a module-level binding
+  // holding the tool list this file checks against CLAUDE.md. Shadowing it here would be
+  // legal and would read as the same thing twice.
+  const walkShipped = (dir, out = []) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue;
+      const p = join(dir, entry.name);
+      if (ignored(relative(ROOT, p), entry.name)) continue;
+      if (entry.isDirectory()) walkShipped(p, out);
+      else out.push(p);
+    }
+    return out;
+  };
+  const citing = walkShipped(ROOT).map((p) => relative(ROOT, p)).sort();
+
   const cited = new Set();
-  for (const file of citing) {
-    if (!existsSync(file)) continue;
-    for (const m of readFileSync(file, 'utf8').matchAll(/\bdocs\/[A-Za-z0-9._-]+\.md\b/g)) cited.add(m[0]);
+  // Keyed by the citation as written, so `web/main.js` and `web/main.js:9860` are two
+  // entries and the line form is not answered by the bare one appearing elsewhere.
+  const modules = new Map();
+  let scanned = 0;
+  for (const rel of citing) {
+    const raw = sourceWithMutation(rel);
+    if (raw === null) continue;
+    // A screenshot cannot cite anything, and reading `media/` as text is the only cost the
+    // widened walk adds. Sniffed rather than listed by extension for the same reason the
+    // exclusions are: a list of binary suffixes is one more thing that rots quietly, and a
+    // NUL in the first bytes is what "not text" actually means. Decoded as UTF-8 already,
+    // so an invalid byte is a replacement character rather than a throw, and the check is
+    // for the NUL that no source file of ours contains.
+    if (raw.includes('\u0000')) continue;
+    scanned++;
+    // Markdown is prose throughout, and a shell script is scanned whole because it has no
+    // second kind of text worth separating - both read in the over-reporting direction,
+    // which is the one that fails where somebody sees it.
+    const text = /\.(js|mjs)$/.test(rel) ? withoutStringBodies(raw) : raw;
+    for (const m of text.matchAll(/\bdocs\/[A-Za-z0-9._-]+\.md\b/g)) cited.add(m[0]);
+    // A range takes its last line, because that is the bound the file has to reach: a
+    // `:844-847` whose 844 still exists and whose 847 does not is a citation half of which
+    // is off the end, and reading the start would call that resolved.
+    for (const m of text.matchAll(/\bweb\/[A-Za-z0-9._/-]+\.js\b(?::(\d+)(?:-(\d+))?)?/g)) {
+      const at = `${rel}:${text.slice(0, m.index).split('\n').length}`;
+      if (!modules.has(m[0])) modules.set(m[0], { path: m[0].split(':')[0], line: m[2] ?? m[1], at });
+    }
   }
+
   const missing = [...cited].filter((p) => !existsSync(join(ROOT, p))).sort();
   if (cited.size === 0) {
     fail('nothing cites a docs/ page, so this assertion passed on nothing - the disclosure chain is gone or this scan is looking in the wrong place');
   } else if (missing.length) {
     fail(`${missing.join(', ')} is cited but does not exist - a pointer that outlives its target teaches a document nobody can read`);
   } else {
-    console.log(`  docs/   all ${cited.size} cited pages exist`);
+    console.log(`  docs/   all ${cited.size} cited pages exist, over ${citing.length} pages and source files`);
+  }
+
+  // The floor, in the shape the row above has and for the same reason: a scan that matched
+  // nothing would print a clean line about zero citations, which is the green light wired
+  // to nothing this file's own header is about.
+  const byLine = [...modules.values()].filter((c) => c.line);
+  const gone = [];
+  const past = [];
+  for (const [cite, { path, line, at }] of modules) {
+    const full = join(ROOT, path);
+    if (!existsSync(full)) { gone.push(`${cite} at ${at}`); continue; }
+    if (!line) continue;
+    const lines = readFileSync(full, 'utf8').split('\n').length;
+    if (Number(line) > lines) past.push(`${cite} at ${at}, where ${path} has ${lines} lines`);
+  }
+  if (modules.size === 0) {
+    fail('nothing cites a web/ module, so this assertion passed on nothing - either the prose stopped naming the modules or this scan is looking in the wrong place');
+  } else {
+    // Two failures rather than one, because which of the two it is decides what to do:
+    // a path that is gone is a module that moved and took its prose with it, and a line
+    // past the end is a file that grew or shrank under a citation nobody re-read.
+    if (gone.length) {
+      fail(`${gone.join('; ')} - the module is not there, so the citation sends a reader to a file this checkout does not have`);
+    }
+    if (past.length) {
+      fail(`${past.join('; ')} - the line is past the end of the file, so whatever it named has moved`);
+    }
+    if (!gone.length && !past.length) {
+      console.log(`  web/    all ${modules.size} cited modules exist, ${byLine.length} of them named by line`);
+    }
   }
 }
 
@@ -541,10 +798,10 @@ if (!existsSync(DOC)) {
 // reason that has nothing to do with the tree.
 {
   const DECLARATION = /^const MUTATIONS = \{$/m;
-  // Where a shape that does not carry its own target points. Both are facts about the
-  // shape rather than about any tool: a bare `[from, to]` pair is only ever the C++
-  // registration mutation, and the three JavaScript shapes all edit the browser bundle.
-  const MAIN = 'web/main.js';
+  // The one shape left that does not carry its own target: a bare `[from, to]` pair,
+  // which is only ever the C++ registration mutation. It is a fact about the shape
+  // rather than about any tool, which is the property that makes it safe to infer -
+  // and it is the last one, because every JavaScript table now declares its file.
   const REGISTRATION = 'third_party/libfreenect2/src/registration.cpp';
   // One name reused for every extraction, so a crash can leak at most one file, and
   // dotted-and-suffixed so the documentation row above catches it on the next run rather
@@ -578,29 +835,42 @@ if (!existsSync(DOC)) {
     (line, spec) => (/^[./]|^node:/.test(spec) ? line : ''),
   );
 
-  /** What a single entry anchors on, or why it anchors on nothing, or null for unknown. */
+  /**
+   * What a single entry anchors on, or why it anchors on nothing, or null for unknown.
+   *
+   * **An anchor carries its own file rather than borrowing the spec's**, and the two are
+   * usually the same string. They stopped being the same when the page split into modules:
+   * `export-check`'s `scale-by-width` moves the reference every screen-space term is
+   * expressed against, one of those terms is written in `resize` and another is the first
+   * line of a shader that now lives beside its pass, so one mutation's two edits land in
+   * two files. An edit may therefore name its file as a third element, with the spec's
+   * `file` as the default for the ones that do not - and each anchor is checked against
+   * the file it names, because a `from` looked for in the wrong file matches zero times
+   * and reddens as a stale anchor, which is a true statement about the wrong thing.
+   */
   const shapeOf = (spec) => {
+    // The C++ table, and now the only array shape. The JavaScript tables that used to
+    // arrive as a bare array of edit pairs - `timeline-check` and `keyframe-check` -
+    // declare `{ file, edits }` like everything else, so a nested-array first element
+    // is no longer a shape this row recognises and would fail below naming the tool.
     if (Array.isArray(spec)) {
-      // Both array shapes are pairs, so `Array.isArray` alone cannot tell them apart -
-      // it is the first element that says which. Read it wrong and every registration
-      // anchor reports hundreds of hits, which is loud and still wrong.
-      if (typeof spec[0] === 'string') return { file: REGISTRATION, from: [spec[0]] };
-      if (Array.isArray(spec[0])) return { file: MAIN, from: spec.map(([from]) => from) };
-      return null;
+      return typeof spec[0] === 'string' ? { anchors: [{ file: REGISTRATION, from: spec[0] }] } : null;
     }
     if (typeof spec === 'function') return { anchorless: 'functions that redirect the oracle' };
     if (spec === null || typeof spec === 'string') return { anchorless: 'whole replacement file bodies' };
     if (typeof spec === 'object') {
       if (typeof spec.file === 'string' && Array.isArray(spec.edits)) {
-        return { file: spec.file, from: spec.edits.map(([from]) => from) };
+        return {
+          anchors: spec.edits.map(([from, , where]) => ({ file: where ?? spec.file, from })),
+        };
       }
-      // `registry-check`'s shape, and it is the last entry in the tree that names no file.
-      // It is left resolving to the bundle rather than made to declare one, because this
-      // row's job is to report the shapes that exist rather than to require a rewrite of a
-      // tool it is checking - but the inference is a guess about a tool, which is the thing
-      // the rest of this resolver refuses to do, and it has already been wrong once.
-      // Anything new belongs in `{ file, edits }`.
-      if (typeof spec.from === 'string') return { file: MAIN, from: [spec.from] };
+      // `registry-check`'s old `{ from, to }` shape used to be read here and resolved to
+      // the browser bundle by inference. It is gone: that table declares `{ file, edits }`
+      // now, and the branch went with it rather than being left as a path nothing takes.
+      // The inference was a guess about a tool, which is the thing the rest of this
+      // resolver refuses to do, and it had already been wrong once - the case is in
+      // `docs/instruments.md`. An entry in that shape now falls through and fails below
+      // naming its tool, which is the loud direction and the whole point.
     }
     return null;
   };
@@ -667,18 +937,18 @@ if (!existsSync(DOC)) {
         if (!anchorless.some((a) => a.name === name)) anchorless.push({ name, why: shape.anchorless });
         continue;
       }
-      const body = targetSource(shape.file);
-      if (body === null) {
-        fail(`${name}/${mutation} anchors into ${shape.file}, which does not exist`);
-        continue;
-      }
-      for (const from of shape.from) {
+      for (const { file, from } of shape.anchors) {
+        const body = targetSource(file);
+        if (body === null) {
+          fail(`${name}/${mutation} anchors into ${file}, which does not exist`);
+          continue;
+        }
         carriesAnchors = true;
         anchorsChecked++;
         const hits = body.split(from).length - 1;
         if (hits !== 1) {
           stale++;
-          fail(`${name}/${mutation} matches ${hits} times in ${shape.file}, expected exactly 1`
+          fail(`${name}/${mutation} matches ${hits} times in ${file}, expected exactly 1`
             + ` - ${hits === 0 ? 'the text it anchors on has moved, so this control cannot run' : 'the text it anchors on appears more than once, so the tool refuses it'}`);
         }
       }

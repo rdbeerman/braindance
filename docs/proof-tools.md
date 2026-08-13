@@ -54,6 +54,18 @@ not run" rather than "the harness found something", so a mutation that failed to
 never be recorded as a mutation that was caught. `guard-check` and `vendor-check` use it the
 same way. The convention was reached independently several times and it is one rule.
 
+`editor-check` is the fifth, and it is the one that shows what the rule is worth, because it
+carried the machinery for a year without ever setting it. Section 21 opens a second page on
+`/record` to read the dock the editor withholds, and a page that fails to boot, settle or take
+its route interception left six rows unrun behind a printed note — so a build with a broken
+recorder reported `PASS`, and the only thing between a reader and that reading was a comment
+asking them to add the total up by hand. It now exits **2** naming the arm and its reason. Two
+consequences worth having in front of you before reading one: a mutation run that lands here is
+reported as *neither* caught nor missed, because the rows it is short of may be the rows that
+answer the mutation, and the verdict prints the assertion count and the rows that fired the way
+the crash branch does, since an outcome nobody can count is the thing the exit-code rule at the
+top of this file exists to refuse.
+
 ## Mutations
 
 `--mutate <name>` serves a deliberately broken `main.js` into the running server, or for the
@@ -132,8 +144,16 @@ mutation that never arrived has to be the harness declining to run.
 Measured when the mechanisms were collapsed: 19 of the 20 page mutations delivered, each
 named with the URL and the byte count, `gallery-has-no-way-back` among them at `/gallery`,
 which is the case the interception existed for. The twentieth is `marks-ignore-retime`, which
-cannot be constructed at all — its anchor matches twice in `web/main.js` and the
-match-exactly-once refusal stops it, a stale anchor that predates this and is tracked in #28.
+could not be constructed at all — its anchor matched twice in `web/main.js` and the
+match-exactly-once refusal stopped it, a stale anchor that predated this and was tracked in #28.
+That is closed and the fix is worth knowing, because it is not the one a reader would guess: the
+duplicate is still there in `web/main.js`, once at four spaces of indentation and once at six,
+and `c757210` re-anchored the entry onto a leading newline and four spaces, which by that alone
+cannot match the six-space copy inside the
+`miniMarks` map. So the anchor matches exactly once now, which is what `syntax-check`'s anchor
+row reports across all 406 anchors in the suite. Whether the mutation *delivers* has not been
+re-measured — the anchor being constructible is the weaker claim, and only the weaker one is
+stated here.
 The control for the delivery refusal is to stop staging `web/` files and run a page mutation:
 it names the file, the URL and both byte counts, and exits 2 without printing an assertion.
 
@@ -184,17 +204,83 @@ arithmetic around those lines differently, an effect `web/main.js` already recor
 three false regressions in `registry-check` when the flare was guarded, and one that
 reverting at HEAD cannot undo because the surrounding code has moved 40 commits since.
 
-**The five cross-build rows against `f14b4be…^` are still red and deliberately were not
-re-baselined.** They are the same difference seen against a build that predates it rather
-than against a second output size, which is why they read so much larger — the worst of
-forty tile means is 24.297/255, which is visible rather than sub-LSB. Moving a 0.02 ratio
-band past 1.03 would delete the claim rather than re-baseline it. What they need is either
-the cause found or the comparison moved off parameter defaults onto what the shipped look
-names, which is the lesson `docs/instruments.md` already draws from the `glitchTint` case.
-Nothing in the mirror work touched them: with the historical arm normalised for the sign,
-the two Blackwall arms read 1.21 and 1.12 of 255 on the worst of forty tile means, against
-1.02 and 0.95 for the same rows at HEAD — run-to-run noise — where an un-normalised arm
-reports 22.19 and 22.14. The normalisation is what makes that comparison possible at all,
+**The five cross-build rows against `f14b4be…^` were red, and the cause has been found:
+the two builds were rendering through different post chains.** That paragraph used to end
+"what they need is either the cause found or the comparison moved off parameter defaults" —
+it was the first, and the second would have hidden it.
+
+`gradeNeeded()` here is true if any of `rgbSplit`, `scanlines`, `grain`, `vignette` or
+`streak` is up. At the pinned rev it knows only the first three, because the vignette was a
+baked `0.55` inside the pass rather than a parameter. Blackwall carries `vignette: 0.55`,
+and the `OFF` look those arms spread zeroes exactly the three names both builds share — so
+the grade switched **off** over there and stayed **on** here, and the cross-build rows have
+been comparing a graded image against an ungraded one for as long as they have existed. The
+grade adds the vignette, a Reinhard `col / (1 + col)` and a toe subtracting 0.018 linear
+from every pixel, and the toe is the term the numbers were about: it pushes the faint edge
+of every splat under the tool's own `lum > 8` threshold.
+
+**The reading that named it was a coverage deficit of 7.7% and 7.8% at an identical drawn
+point size**, which is a difference a point-size reference cannot produce. Confirmed by
+removal, one arm at a time against unchanged old arms: 960x600 goes from luminance ratio
+1.06344 / worst 24.297 to **1.00258 / 0.602**, 16:9 from lit 0.92265 / lum 0.43720 / worst
+6.997 to **1.00043 / 1.00079 / 0.070**, 4:3 from 0.92220 / 0.55736 / 10.121 to **1.00043 /
+1.00101 / 0.071**. The control that says it is the pass rather than one term inside it:
+zeroing `crush` alone with the grade still on moves the same row the *other* way, to lit
+1.22463 and worst 23.343, because the lift without the toe adds coverage.
+
+The repair is `CROSS_BUILD_OFF`, which is `OFF` with the vignette taken out, reaching only
+the arms that render one look through two builds. **It is deliberately not in `OFF`**: eleven
+within-build rows spread that, and their bands in `RES_TOLERANCE` were measured with the
+grade running. The two `rebase-full` rows spread nothing and were already green — because
+Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both sides, so both builds run the
+grade — and that table came out that way rather than being fitted, which is the reason to
+believe the diagnosis.
+
+**The class is closed rather than the instance.** Whether a pass runs is *derived*, so a
+build that adds one name to a gate silently changes which arms are comparable and the only
+symptom is a ratio. `RES_ARM` now returns the composer's own pass list, and every cross-build
+row requires the two builds to have run the same chain — printed in the row's message either
+way. `UnrealBloomPass` becoming `BloomPass` is normalised by name rather than skipped, so a
+rename nobody knew about fails loudly instead of passing quietly.
+
+**"Every cross-build row" was three of five when that paragraph was written, and the two it
+missed are the two the paragraph above explains were green.** The guard went on the arms the
+vignette had reddened and not on the `rebase-full` pair, whose exemption is the sentence
+ending "so both builds run the grade" — a finding about the two builds this pair spans now,
+used as a standing precondition for whatever it spans later. That is the instance rather than
+the class, wearing the class's own paragraph, and it survived a round of review because a
+green row is where an exemption is cheapest to write and hardest to see. Both rows carry
+`sameChain` now and print both chains. The same edit closed a second hole underneath all five:
+`chainOf` answers `''` for an arm off a page that stopped publishing its composer, and two
+empty chains compared equal, so a failed readback read exactly like a match. That is guarded at
+the readback rather than at the comparison — `armAt` records every arm it takes, and a row at
+the foot asks the population whether each one published a chain, so a future row reading
+`chainOf` without going through `sameChain` is covered by a check that already exists. No
+correct build can trip it: `RenderPass` and `OutputPass` are never disabled, so the floor for a
+healthy arm is two names.
+
+**The chain rows have no mutation, and the one built for them was measured and discarded.** A
+control for the chain term has to diverge the two builds' chains without moving the picture, or
+the row cannot say which term did the work. `trail-gate-admits-zero` admitted a damp of zero to
+the trail's gate, which put `AfterimagePass:on` in this build's chain and nowhere in the pinned
+build's; three's `AfterimageShader` is `max(new, old * damp * when_gt(...))`, an identity at damp
+zero. The chain diverged exactly as designed and the picture moved anyway — the worst of forty
+tile means went from 0.602, 0.070 and 0.071 of 255 to 42.502, 22.141 and 27.607 — because an
+enabled pass is another ping-pong through the composer's targets whatever its shader computes.
+That generalises: no product edit can diverge the chain and leave the pixels, so this claim's
+falsification cannot be a source mutation. `docs/instruments.md` carries the two probes that
+stand in for one, with the reading that matters — a divergent chain moves the luminance ratio and
+the worst tile not at all.
+
+One row beside them **could not fail on any input**: "every parameter every row asks for
+exists on this build" read `Object.entries` over a `Map`, which is `[]`, so it printed a pass
+whatever the arms had dropped. Nothing was hiding behind it — `dropped` is genuinely empty on
+every arm — but the thing that would have said so was the broken one. It now reads 13 arms.
+
+Nothing in the mirror work touched these rows: with the historical arm normalised for the
+sign, the two Blackwall arms read 1.21 and 1.12 of 255 on the worst of forty tile means,
+against 1.02 and 0.95 for the same rows at HEAD — run-to-run noise — where an un-normalised
+arm reports 22.19 and 22.14. The normalisation is what makes that comparison possible at all,
 and it is why the sign appears in this tool as well as in `registry-check`.
 
 **`registry-check` is red on one row, `readGhost`, and it predates this branch.** The claim is
@@ -202,8 +288,8 @@ that `readGhost` at 1.0 is bit-identical to the old `mode 2` at `f49c8339…^`. 
 branch point `6e1be6f` it fails on one frame of six; at HEAD it fails on two, frames 2 and 3.
 So it is not something this branch introduced, and it did get worse here — both halves of that
 sentence matter, and neither was written down anywhere until now, which is how a known-red row
-becomes a row nobody re-derives. A comment in `web/main.js` calls it "the pre-existing readGhost
-failure" and that comment arrived in `40ab241`, which is testimony rather than a measurement;
+becomes a row nobody re-derives. A comment in `web/cloud-shader.js` calls it "the pre-existing
+readGhost failure" and that comment arrived in `40ab241`, which is testimony rather than a measurement;
 the two runs above are the measurement. Nothing has dated the one-frame-to-two change, and the
 same bisect harness that dated the `export-check` rows would do it.
 
@@ -539,6 +625,27 @@ untested surface. That is the misattribution the `DRIVER_RULES` array was re-key
 arriving as an ordering rather than as an index. A row that reddens for a control inside a
 dialog is therefore a coverage failure like any other and not an artifact of the widening.
 
+**Section 5's ease rows carry two fixture traps, and both were found by a row that refused to
+go green.** The first is that a segment's control polygon belongs to *two* keys: pressing
+`glide` on the key you have selected writes its outgoing side and leaves the next key's
+incoming side wherever it was, so a fixture planted bent and then "fixed" with `glide` still
+reads 0, 0.2, 0.4, 0.1, 1 — crossed, and crossed in a way that looks tidy. `ends` is what
+writes a whole polygon, because it writes the departure and the arrival. The second is that a
+synthetic drag has to be aimed at a coordinate the browser will deliver *and* at an element
+that will receive it: `.tcut` is a full-height clip marker parked over the head of the strip by
+section 3, so a handle drag planted at 1s and 5s pressed the marker instead and the handle it
+meant to move never moved. Both failures read identically from the assertion — a handle sitting
+where it started — and neither is distinguishable from a clamp doing its job, which is why the
+row asserts the point *landed on its neighbour* rather than that it stayed inside a bound.
+`document.elementFromPoint` at the press coordinate is what separated them, and it is the first
+thing to reach for when a synthetic drag appears to do nothing.
+
+Its `handle-clamped-to-the-segment` mutation is the control for that row, and it is only
+visible on a control point that is not index 0 — with one point a side, the neighbours *are*
+the segment's ends and the two clamps are the same clamp. Every other handle gesture in the
+file grabs the first `.thandle` in DOM order, so before this row the indexed drag had nothing
+asking about it at all.
+
 Its `nav-at-the-foot` mutation is the control for section 1's second claim, that the way out of
 the editor is *reachable* rather than merely present. Its own two flaws — a probe in a dead zone
 and a probe that moved the page it measured — are in `docs/instruments.md`, because both are
@@ -599,6 +706,19 @@ resume failures above. Hash the files the run depends on before the baseline and
 the last mutation, report the hashes with the numbers, and check
 `pgrep -f "tools/.*-check.mjs"` before starting — on this machine another agent's run is the
 normal state.
+
+**Its mutations are delivered by the file they name, and two of its exit-2 refusals are about
+that delivery rather than about the build.** Whatever file a spec declares is served to the
+page at the path a browser asks for it at — `web/index.html` is the document `/edit` and
+`/record` are, and a module or stylesheet under `web/` is its own path — and the run refuses if
+the page never asked. `DID NOT RUN - <name> was staged for <file> at <path> and the page never requested
+it` means the module is one this surface does not import, and the same sentence naming the
+recorder page means it reached the editor and not the recorder, which takes the run to
+`UNTESTED` even when the editor arm caught the mutation. `DID NOT RUN - <file> is neither a
+module or stylesheet under web/ nor the document /edit is served from` is refused before a
+browser launches at all. Neither is a finding, and neither used to exist: a spec naming a third file was served
+nothing and reported `NOT CAUGHT` against the tree's own source. `docs/instruments.md` carries
+the case.
 
 **Section 15 grades a feature whose whole design is that it stores almost nothing**, and its
 five controls exist because most of the ways it can be wrong are invisible from the panel.
@@ -778,6 +898,41 @@ is named in `CLAUDE.md`, which is why the invocation list lives there rather tha
 added later is asked by existing, and the falsification control is adding a tool without
 documenting it.
 
+**Its second row resolves the citations**, and it is one walk asking two questions because they
+are the same claim about two kinds of target. Every `docs/*.md` path has to exist, which is what
+holds the disclosure chain `CLAUDE.md` opens on together — delete one of the three documents and
+every pointer at it resolves to nothing while the tool stays green, and the control for that half
+is `mv docs/instruments.md /tmp` and a run. Every `web/….js` path has to exist too, and a
+`file:line` form fails when the file has fewer lines than the citation names. That half arrived
+with the browser bundle's split: `web/main.js` went from 15,449 lines to 13,206 with twelve
+modules beside it, and fourteen citations were left naming the bundle for code that had been
+carried out of it — eight of them one sentence about the unprojection copied around the suite.
+
+The **citing** set is every prose page this repo ships and every source file it ships, not
+`CLAUDE.md` and `tools/` alone, because the documents cite each other and the modules cite each
+other — a scan reading only the two files that point at `docs/` would have seen four of the
+thirty `web/` citations. The **question** is asked of the prose rather than of the whole file: a
+path in a string is data and a path in a comment is a citation, which is the same distinction
+`library-check`'s number scan draws when it refuses to read a declaration out of a debug message.
+That exclusion is load-bearing rather than tidy, and it was measured by taking it out — seven
+paths red on a clean tree, six of them the fixture paths `library-check` builds its probe tree
+out of and the seventh the module name this tool's own mutation table plants for being absent.
+
+Two controls, because the halves fail differently and a path that still resolves would answer for
+a line that does not. `--mutate web-citation-outlives-its-module` renames a module in `CLAUDE.md`'s
+own prose to something the tree does not hold; `--mutate line-citation-past-the-end` moves a line
+citation past the end of the file it names. Each reddens one row and nothing else. The floor was
+falsified by hand in the same round, by narrowing the pattern to match nothing: `nothing cites a
+web/ module, so this assertion passed on nothing`, one failed assertion.
+
+**What it cannot see is worth knowing before trusting it.** A citation is checked for resolving
+and never for being *right*, so a module cited for something that moved to a neighbouring file
+passes, and a line that has drifted into the middle of something else passes. `server/capture.js`
+records what that costs and answers it the only way that works — it cites `handleFrame` by name
+after the line it used to name had drifted nine hundred lines into the middle of a shader with
+nothing failing. Cite a function; the line form is checked here because it exists in the tree,
+not because it is a good idea.
+
 **Its third row is the `.knct` decoder specification**, the page at the top of
 `server/protocol.js` that issue #45 decided is a take's exit from this program instead of a
 point-cloud export. That makes it load-bearing in a way prose here usually is not: it is what
@@ -798,6 +953,279 @@ does not know both exit 2 rather than running, for the reason the exit-code sect
 Mutation-tested three ways beyond its own control: a numeric export added to `protocol.js` and
 left out of the table reddens it, the specification block deleted reddens it, and a number edited
 in the table while the code stays put reddens it.
+
+**`module-check`** needs nothing at all — no port, no server, no browser, no sensor and no
+install — and that is the point rather than a convenience. Every failure it is about is a
+failure to *boot*: an import cycle, a specifier naming a file that is not there, or a named
+import of a binding the other side does not export all stop the module graph before a line of
+anybody's body runs, and a module that throws while it evaluates publishes no
+`globalThis.__kinect`, so every tool in the suite reports DID NOT RUN with no assertion behind
+its exit code. An instrument that needs the page running cannot see any of them.
+
+It walks `web/` for `.js` modules and reads every `.html` page for its `<script type="module">`
+elements, so a module added later and a page that starts loading one are both asked by existing.
+`type="module"` is one exact spelling in the HTML specification, which is why there is no list to
+keep up with here — unlike the sixteen MIME essences that mean "classic script", which
+`library-check`'s grid scan had to copy out.
+
+**Exit codes.** 0 is a pass and 1 is a failed assertion, as everywhere. **2 is DID NOT RUN**, in
+three places: a `--root` that is not a checkout, a `--mutate` name it does not know, and a
+mutation whose anchor text no longer matches its file — the last being the important one, because
+a mutation that changed nothing comes back green and gets written down as the control passing.
+There is a fourth, and it is the one this tool needed that `syntax-check` does not: a mutation
+naming a file that nothing in the run read is also exit 2, since the substitution would otherwise
+be delivered nowhere and the clean run would be recorded as a catch.
+
+**Four rules, and the second one is narrower than it sounds.**
+
+*Rule 1, the graph is acyclic.* `web/scene.js` opens with the claim that "Nothing here imports
+back into this file, which is what keeps that order a fact rather than a convention", and until
+this tool that was a convention with a paragraph in front of it. `--mutate cycle-planted` puts
+exactly the forbidden import into the file the comment is at the top of.
+`--mutate cycle-through-a-second-spelling` writes the same ring the way `web/library.js` writes
+its imports, `/main.js` rather than `./main.js`, because `server/index.js` maps a root-relative
+URL onto `web/` with `join(WEB_DIR, urlPath)` and a resolver that folds the two spellings onto
+different nodes reports a ring as a tree. The pair discriminates and was measured doing it: with
+the root-relative branch taken out of the resolver, `cycle-planted` still reddens the cycle row
+and `cycle-through-a-second-spelling` leaves it green.
+
+*Rule 2, an import names something that will be there.* The rule as originally posed — no
+top-level statement reaches an imported binding before it is initialized — is **entailed by rule
+1** rather than a second question, because ES modules evaluate their dependencies to completion
+before the importer's body runs, so an acyclic graph cannot put an imported binding in its dead
+zone. Top-level `await` does not change that in an acyclic graph and a dynamic `import()`
+resolves against a module that has already finished. What is left, and what is asserted, is the
+part rule 1 does not imply: the specifier resolves, it does not escape `web/` (which this server
+answers 403 for), the named import is a name the target exports, and two spellings of one file
+are one node. `--mutate import-of-a-missing-file` and `--mutate import-names-a-missing-export`
+are its two controls and they fail differently.
+
+**What rule 2 does not cover, said in the tool's own output rather than left to be found.** The
+reach `web/main.js` has actually been bitten by twice — the comments above `groupRevealChanged`
+and `transportWriting` — is a top-level statement reaching a `const` declared further down *the
+same module*, through `params.reset()` to `params.set` to `spec.apply`. That is property
+dispatch, which is not statically decidable, so a check that followed only calls made through a
+name would redden on planted toys and stay green on the shape that has shipped. It is left to the
+post-boot state diff, which also sees the silent version of the same fault: `params.reset()`
+landing before the panel generator has filled its Maps writes every value into the registry,
+reaches no control, throws nothing, and leaves a page whose sliders show their markup defaults.
+
+*Rule 3, what crosses a boundary.* Two halves that fail independently. The shape of the export —
+a binding holding an object is state anybody importing it can write into, and needs an entry in
+the exemption table saying why that is the channel. And the use at the far end — no module writes
+a property or an element of a binding it imported. Measured on the tree as it stands, off a clean
+run: 35 exports, 6 primitive, 16 behaviour, 1 live `let`, 12 exempted, over 36 bindings across 6
+declarations swept. The write count is not a number the tool prints, so it was taken by running
+the widened sweep with the exemption table emptied — 17 sites across four bindings, `renderer` 5,
+`controls` 9, `freeCamera` 2 and `programCamera` 1, every one of them a three.js object being
+configured from `web/main.js`. `--mutate exported-mutable-object`
+and `--mutate imported-object-written-across-the-boundary` are its first two controls, and there
+are six more below, one per way the rule was found to be escapable.
+
+**The shape decides before the keyword does, and the order is the claim.** The first version
+asked what a binding was *declared* as before it asked what it *held*, so `export let x = {}`
+went into the live-let bucket without the shape ever being consulted — the sanctioned channel was
+one keyword wide. A live `let` is sanctioned because an importer cannot **assign** to what it
+imports; that says nothing about the object the binding currently holds, and writing a property
+on that object is the same fault under a different keyword. Measured: `export let SENSOR_STATE =
+{ frames: 0 }` in `web/format.js` plus `import * as m from './format.js'; m.SENSOR_STATE.frames =
+1` in another module passed both rows. `--mutate state-crosses-as-a-live-let` is the control, and
+reordering the ladder newly flagged exactly one binding in the tree — `web/scene.js::viewCamera`,
+a live `let` holding one of the two cameras beside it, which is why it now carries an entry
+saying so rather than a bucket that never looked.
+
+**The sweep ranges over the bindings an import makes, not the names it asks for.** `{ a as b }`
+names `a` over there and binds `b` here, `* as ns` binds one object whose properties are the
+other module's exports, and `import d from` binds the far side's default. Taking the exported
+spelling hands the sweep a name the importing file does not contain: measured, a renamed import,
+a namespace import and a default import each hid a write that the unaliased spelling of the same
+write reddens, and a page's inline module was skipped entirely because its body is not a file.
+`--mutate write-through-a-rename`, `--mutate write-through-a-namespace` and `--mutate
+write-from-a-page` are the three controls, and the row that used to print a floor over the edges
+it had silently dropped now prints one incremented where the sweeping happens.
+
+**Every `export` and every `import` keyword is claimed by a form, or it is a failed assertion.**
+Reading the two keywords with a list of regular expressions means a spelling the list does not
+carry contributes nothing and says nothing about it — `export default { … }` and an export list
+written without its semicolon both did exactly that, and nothing has to import a binding *by
+name* for it to be a channel, so no downstream row noticed. The keywords are enumerated first and
+classified second. A property may legally be called `export` (`web/main.js` has two), and brace
+depth is the exact discriminator, since a declaration is legal only at the top level of a module.
+`--mutate state-crosses-as-a-default` and `--mutate export-form-nothing-claims` are its controls,
+the second planting a destructuring export the scan refuses to take apart. A barrel — `export …
+from` in any spelling — is refused rather than followed, by `--mutate a-barrel-re-export`.
+
+**And the depth filter has a cross-check of its own, because it is a silent failure path.** If
+the brace counter ever drifts, every later top-level keyword in that file reads as nested and is
+skipped with no row — a quieter version of the fault the audit closes. Column zero is the
+discriminator on top of it: every top-level declaration in this tree is written there and no
+property key is, so a keyword at column zero that depth calls nested reddens a row naming the
+file. The arm is planted rather than argued about, and it uses the one case the lexer leaves
+ambiguous on purpose — a `/` after `}`, read as division, which scans the pattern's body as code
+and counts the `{` inside it. Probed by deleting the `depth--` from the closing brace: the row
+names `web/curve.js:194` and `web/scene.js:152`, which are the two `export { … }` lists that
+would otherwise have vanished.
+
+**The exemption table cannot rot, and both halves of that needed an arm.** Every entry has to
+still name something this tree exports *and* still cover something a rule flagged — an entry
+naming nothing is a list going stale, and an entry covering nothing is the standing filter
+`docs/instruments.md` warns about. `--mutate exemption-outlives-its-export` takes the `export`
+keyword off `POLLED_NODE_FIELDS`. It was first written as a *rename* and reddened two rows,
+because the renamed binding is then an exported object with no exemption of its own — a second red
+row about a second fact, which is the blast radius that stops a control saying which question it
+asked. The module-gone branch of the same row cannot be planted by a text edit and was probed by
+hand: pointing an entry at a module name that is not in the tree reports that module "is gone, so
+this entry is about a module that no longer exists". The name it was probed with is deliberately
+not written down here, because `syntax-check` resolves every `web/….js` this repo's prose spells
+and a name chosen for being absent would fail it. The `covers` half went without an arm for
+longer, and it was
+carrying more than its own weight — see `docs/instruments.md`, which measures what that cost.
+`--mutate exemption-covers-nothing` promotes an exempted control-point pair to the number it is
+made of, which leaves the entry naming a real export and covering nothing, in one row.
+
+**Three mechanisms cannot be falsified by the subject, and each gets a tree of its own.** The
+cycle detector is the first, since `web/` is acyclic and is meant to stay that way: a
+three-module ring, a self-loop, a ring spelled through the server root, a diamond that is *not* a
+ring, and a file whose only `import` lines are inside a comment and a template. The diamond earns
+its place — a depth-first search using a single `visited` set instead of separating "on the
+stack" from "finished" calls it a cycle. Probed by planting exactly that, which reddens the
+diamond row reporting `d3.js -> d4.js` as a ring and reddens the real tree's cycle row as well.
+The second is rule 2's two prohibitions: this tree holds no dynamic `import()` and no specifier
+that climbs out of `web/`, so both rows range over an empty population, and the probe carries one
+of each so the branch that decides them fires every run. The third is rule 3, where the subject
+is worst of all — every object `web/` exports is in the exemption table, so a plant aimed at one
+is answered by the table, and the tree imports nothing under a rename, a namespace or a default.
+Both classifiers now run over a tree carrying one of every spelling with their findings asserted
+as **exact sets**, so stubbing either reddens the clean run: `writesInto` returning nothing and
+`shapeOfInit` answering `primitive` were each measured green before this, with the exemption
+audit's `covers` forced true.
+
+**Comments have to be removed before the match, not tested after it.** The scan carries a small
+lexer for the same reason `numbersIn` in `library-check` does, and it needs a third state that
+one does not: a comment is blanked to spaces, a string *body* is kept. `web/main.js` carries a
+paragraph containing the word `import` a few lines above a real import declaration, and a regular
+expression reaching from the word in the prose to the `from` below it matches leftmost-first — so
+the match begins inside the comment, a mask consulted afterwards says "not code", and the
+declaration is skipped with its edge silently gone from the graph. Measured before it was fixed:
+`web/scene.js` and `web/curve.js` lost their edges and the run reported them as modules nothing
+loads, which reads as a finding about the tree.
+
+*Rule 4, a name crosses a boundary because both ends wanted it.* This is the rule the tool
+shipped without, and it shipped a green run on a tree that was wrong: **57 assertions, 0 failed,
+PASS** on a `web/main.js` carrying six imports nothing in the file used — `vertexShader` and
+`fragmentShader` from `./cloud-shader.js`, `BloomPass` from `./bloom-pass.js`, and `easeParam`,
+`easeAt` and `easeSlopeAt` from `./curve.js`, three of them dead since the branch point and three
+since the commit that moved their callers out. Every neighbouring question answers *yes* for a
+dead import — the file is reached, the specifier resolves, the name is exported, the module is not
+an orphan — so nothing in rules 1 to 3 could see one. Both halves are built out of what rule 2
+already had in hand, the edge list and `exportsByModule`, which is what made the hole cheap to
+close and embarrassing to have had.
+
+**One use question, asked once, feeding both halves.** Does the file that wrote a declaration
+read the name it binds? The search runs over the same scan the rest of the tool runs over, with
+every import declaration in the body blanked on top of it — all of them rather than the one under
+the question, because two declarations importing one name from two modules would otherwise each
+read as a use of the other, and a name moving between modules is exactly what this refactor does
+all day. The population is every declaration that carries a name across the edge of `web/`,
+wherever it is written: the in-tree edges, a page's inline module, the **bare-specifier
+declarations** (`three` is not a file under `web/`, but `OutputPass` going dead when a pass moves
+out is the same fault as `BloomPass` going dead when a constructor does), and the declarations in
+`server/`, `tools/` and `test/` that import out of `web/`. 173 name-level bindings on the current
+tree — 118 inside and 55 outside — and the row counts each of the three populations where it asks
+them rather than off a collection it might skip part of.
+
+A binding whose far-side name the target does not export is skipped here and left to rule 2's row,
+so `--mutate import-names-a-missing-export` still reddens one row and not two. `--mutate
+import-nothing-uses` adds a real export of `record-poll.js` to `main.js`'s import of it;
+`--mutate import-used-under-its-far-side-name` renames the binding so the file is full of the
+name the import *asks for* and holds no reference to the one it *makes* — the fault
+`docs/instruments.md` records against rule 3's sweep, planted here before it can be made again;
+`--mutate outside-consumer-imports-a-name-it-never-reads` plants the same thing in
+`tools/fake-grabber.mjs`, where the row used to have nothing to say; and `--mutate
+dead-bare-import` plants it on a package name, the half of the population that had no arm at all
+until forcing it out of the loop left the clean run green at 60 assertions with all twenty
+controls of the day still catching.
+
+**A dead import is not a consumer.** The two halves used to be computed in one run and never
+compared, so the same run could redden `web/main.js` for not reading `easeSlopeAt` and five lines
+later count that identical dead line as the reader keeping `web/curve.js`'s export of it alive.
+Measured at `883f070^` rather than forced: that is exactly what it printed, and the dead export
+only became findable because a person removed the import by hand first. Now a binding no line
+reads fails the import row **and** asks the far side for nothing, so the pair a name moved out of
+a module leaves behind cannot conceal each other. `--mutate dead-import-is-not-a-consumer` leaves
+`server/library.js`'s import of `POLLED_NODE_FIELDS` exactly where it is and stops the one line
+that reads it: before the join that run was green at every row, and it now reddens two — the dead
+import and the export it stopped holding up. Both sentences are true of one edit, and each of the
+two claims has a control of its own that reddens exactly one row.
+
+**No module exports a name nothing imports, and the consumer set is the checkout rather than
+`web/`.** Seven of this tree's exports have no importer inside `web/` at all: `server/library.js`
+imports `POLLED_NODE_FIELDS`, `tools/fake-grabber.mjs` and `tools/library-check.mjs` import
+`CAPTURE_FORMAT`, and `BLOOM_LEVELS`, `easeParam`, `easeAt`, `TOP_SPAN` and `MIN_VIEW_SEC` are
+held only by unit tests under `test/`. Measured by commenting the outside walk out: the row
+reddens naming all seven, which is a check that cries wolf on its first run and then gets deleted
+rather than fixed. So the walk is the whole checkout minus `node_modules`, `vendor`, `third_party`
+and `web/` itself, and the direction it is allowed to be wrong in is set deliberately — a
+directory it fails to walk costs a consumer and reddens a live export, which somebody sees, while
+a directory it walks that it should not manufactures a consumer and keeps a dead export green.
+`--mutate export-nothing-imports` plants a number nothing asks for, and `--mutate
+consumer-outside-web-drops-the-name` takes the name off `server/library.js`'s import while leaving
+the module imported, which separates a join done per name from one done per module: a check that
+marked every export consumed the moment anything imported the module reads that tree as unchanged.
+A row beside them asserts the outside walk is load-bearing rather than decorative — if no export
+ever depended on a reader outside `web/`, it says so, in the shape of `--mutate
+one-spelling-for-every-module`.
+
+**A namespace import asks for the names it reaches, not for all of them.** `test/clip-range.test.
+mjs` is the only one in the checkout, and taking `import * as clip` as a request for every export
+`web/clip-range.js` has switched the export row off for that whole module: measured, an added
+export nothing wants reddens the row when it is appended to `web/view-window.js` and did not when
+it was appended here. A dotted reach asks for that one name, a destructure off the binding asks
+for the names in its pattern, and **everything else is a reach this scan cannot name** — a
+catch-all rather than the computed-index case alone, because `Object.keys(ns)`, `{ ...ns }`,
+`for (const k in ns)` and handing the binding to a function all reach exports without naming one,
+and a narrowing that consumed nothing for those would redden every export of the module on a tree
+doing something legitimate. It consumes all of them, exactly as the old join did, and says so in a
+row of its own, so a module going blind costs an assertion instead of passing in silence.
+`--mutate namespace-hides-a-dead-export` is the arm for the narrowing and `--mutate
+namespace-reach-cannot-be-named` for the row.
+
+**What the use question gets wrong, and the two it no longer does.** It asks about a name and not
+about a scope, so a name written in code position that is not a reference reads as one. A hit
+inside a **quoted string body** used to be the first of those, because the blanking that removes
+comments keeps string bodies — the specifier of every import lives in one. The mask is asked
+instead of the text now: measured over the current tree, the strict reading takes hits off four
+names (`grade`, `afterimage`, `bloom`, `material`, words the quoted parameter ids say too) and
+leaves every swept name still read in code, so it closed the hole at no cost, with `--mutate
+import-used-only-in-a-string` as its arm. What is *not* true, and this page and the tool both said
+it was, is that a name mentioned only in a GLSL literal survived — template text is left at mask 0
+and blanked to spaces, so the twelve hundred lines of GLSL here were never a masking surface, and
+a plant named only inside a template literal is caught either way.
+
+A **property key** was the second, and it is decided by the two neighbours rather than by a
+lookahead: the nearest code character before the hit is `{` or `,` and the nearest after it is
+`:`, which is the object-literal key and the destructuring pattern key and nothing else. Measured,
+it takes no name off the swept set, which is what makes it free in the one file that is full of
+registries and menu tables; `--mutate import-used-only-as-an-object-key` is the arm. What is left
+open is the **method shorthand**, found by a control coming back NOT CAUGHT: `{ name(gl) { … } }`
+has no dot in front of it either, which is what `web/main.js:9860` is and what made an alias of
+`poll` look read. That one will not close with a lookahead, and the measurement says so rather
+than the argument — excluding a hit followed by `:` or by `(` at the head of a line calls twelve
+live imports unused, `writeClipRange`, `tiltQuaternion` and `pollRecordState` among them, because
+a call written as its own statement is at the head of a line too. Re-measured after the two
+closures above, the `poll` alias still comes back NOT CAUGHT, so the limitation is exactly this
+wide: it is a false negative, costing a dead import this row does not find rather than a clean
+tree it fails, and telling a definition from a reference needs a scope analysis rather than a
+search.
+
+**Its first catch was real, and it arrived one commit late.** On the tree as it stood after the
+six imports came off, the export half reddened `web/curve.js:66`: `easeSlopeAt` was let out
+through the trailing export list, its last importer was the dead import in `main.js`, and removing
+that one left an export with no consumer anywhere in the checkout. Fixed by taking the name off
+the list — `scalarSlopeAt` calls the function four lines down, so it is a name coming off a
+boundary rather than code being deleted. What the join says about that catch is that it depended
+on the hand edit: run the joined rule against `883f070^` and both rows redden in the same run,
+which is the version of this that does not need somebody to have removed the import first.
 
 **`prof-summary.mjs <profile> [warmup]`** reads `grabber --profile` output and flags any run
 under 29.5fps as contended, because the segment timings from a run that dropped frames are
@@ -856,6 +1284,33 @@ than 30.** So size fixtures by *frame count*, not duration: five minutes of its 
 1.38 GB where a real full-rate five-minute take is 4.42 GB. A fixture is the sample looped with
 rewritten monotonic stamps — real depth and real JPEGs, only the u64 at payload offset 8 moves.
 Say so whenever a number rests on one.
+
+**And no page can tell you which sample a checkout has, which is why two tools now refuse a
+take instead of assuming one.** `captures/` is gitignored, so every sentence written here about
+"the sample" describes a file the next machine may not hold — and they have already disagreed.
+The paragraph above says 9.3fps; `keyframe-check`'s header said 284 frames over 30.36s and its
+section 6d said 49.79s; the file in this tree is 284 frames over **9.42s at 30.03fps**. One
+frame count, four durations, all of them written down as facts.
+
+The damage is not the prose. `editor-check` seeks to 30s and `keyframe-check` retimes through
+source 20s, and on a 9.42s take every one of those clamps: **ten rows redden in `editor-check`
+and four in `keyframe-check` against a build with nothing wrong with it**, and — the half worth
+fearing — two more `keyframe-check` rows *pass*, because the key they drag has left the ruler
+and a gesture that never happened also never slid a key under its neighbour. Seven of the ten
+and all four of the four go green on a 75.6s fixture with nothing in `web/` changed.
+
+So both declare a `NEEDS_TAKE_SEC` and exit 2 naming the shortfall, in the same direction and
+for the same reason as `requireMutationDelivered`: a red row reads as a catch, so a fixture
+that cannot hold the gesture has to be the harness declining. The declaration is held against
+the file's own literal seek targets by a scan of its own source, so a row added later that
+seeks deeper cannot quietly fall outside it. **The control for both is `--take sample`**: exit
+2 with nothing asserted, where the same command used to run to the end and report failures.
+
+```
+node tools/make-fixture.js captures/sample.knct captures/fixture-1g.knct --loops 8
+node tools/editor-check.mjs   --url http://localhost:8080 --take fixture-1g --no-render
+node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g
+```
 
 **`fake-grabber` honours `--no-color` and `--no-low-light`, and reports any argument it does
 not know.** It ignored both for its whole life, which mattered because they are not the
