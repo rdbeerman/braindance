@@ -230,16 +230,36 @@ jobs:
       # `set -e` is right - a sentence that named the wrong mechanism while sitting above
       # code doing the correct one, which is the thing a reader checks instead of the code.
       #
-      # What the `if` cannot see is a miss that exits non-zero for its own reason, and this
-      # tool has none: `cpp-check` exits 2 when the compiler or the headers are absent and
-      # says so, and the step above it would already have failed on that.
+      # **The exit code is read three ways rather than two, because the tool has three
+      # answers and an `if` can only hear two.** `cpp-check` exits 1 for a failed assertion,
+      # 0 for a clean parse - and 2 for `cannotRun`, which is the tool declining: no
+      # compiler, no turbojpeg headers, or a mutation whose anchor has stopped matching
+      # exactly once. The last of those is the dangerous one and it is the one a bare `if`
+      # cannot see. An anchor rots when the source under it is edited, which is a normal
+      # thing to do to `grabber.cpp`, and a loop that folds 2 into "non-zero, so caught"
+      # then prints `caught` for a mutation that was never applied - all five falsification
+      # controls can go quiet together while this job stays green. That is CLAUDE.md's
+      # "count failed assertions, never exit codes" reaching the one place in CI that was
+      # still counting exit codes. An earlier version of this comment argued the tool had
+      # no such path; it has had one since it was written, at `cannotRun`.
+      #
+      # Still deliberately not `set -e`: caught is a non-zero exit here, so `set -e` would
+      # end the step on the first mutation that worked. The gate job below is the opposite
+      # convention and `set -e` is right there.
       - name: and it rejects the five ways the source could be wrong
         run: |
           set -uo pipefail
           for m in grabber-syntax-error grabber-type-error opencl-branch-broken \
                    opengl-branch-broken harness-syntax-error; do
-            if node tools/cpp-check.mjs --mutate "$m" > /dev/null 2>&1; then
+            node tools/cpp-check.mjs --mutate "$m" > /dev/null 2>&1
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
               echo "NOT CAUGHT: $m passed a check it must fail"
+              exit 1
+            fi
+            if [ "$rc" -ne 1 ]; then
+              echo "DID NOT RUN: $m exited $rc, which is cpp-check declining rather than a catch"
+              node tools/cpp-check.mjs --mutate "$m" 2>&1 | tail -5
               exit 1
             fi
             echo "caught: $m"

@@ -313,7 +313,26 @@ function manifestRefusal(take) {
       }
     }
   }
+  // **Checked per record rather than for being a list**, because the list is not what
+  // the gallery dereferences - `paintMarks` reads `m.sourceMs` off every entry to place a
+  // tick and `m.label ?? m.id` to title it, so a node answering `marks: [null]` throws
+  // inside the loop that paints the shelf and takes the whole library page down with it.
+  // A shelf is drawn from every node at once, so that is one peer costing every take its
+  // tile rather than costing itself one.
+  //
+  // The shape asked for is the one `resolveMarks` guarantees on this machine - a string
+  // id, a finite `at` to order by, a finite `sourceMs` to place, and no tombstone - so the
+  // manifest boundary admits exactly what a local read produces and there is one rule for
+  // a mark rather than one per origin. A label is optional and stays unchecked for what it
+  // says: `paintMarks` writes it through `textContent`, which is text from outside this
+  // page never becoming markup, and that is the door it goes through either way.
   if (!Array.isArray(take.marks)) return `has marks ${JSON.stringify(take.marks).slice(0, 40)}`;
+  for (const m of take.marks) {
+    if (!m || typeof m !== 'object' || Array.isArray(m) || typeof m.id !== 'string'
+      || !num(m.at) || !num(m.sourceMs) || m.deleted) {
+      return `carries a mark this build cannot draw: ${JSON.stringify(m).slice(0, 60)}`;
+    }
+  }
   return null;
 }
 
@@ -977,7 +996,14 @@ async function downloadToPath(node, take, dir, targetIn) {
         // breaks - the recorder writing the current shoot to the same disk is. The
         // hash check below would reject the file eventually; this rejects it before it
         // costs somebody else their footage.
-        if (take.bytes > 0 && progress.received > take.bytes) {
+        // **Zero is a bound like any other and used not to be**, which put the guard's
+        // own off switch on the wire: `manifestRefusal` admits `bytes: 0` because
+        // `nonNeg` does, so a node advertising a completed take at zero bytes disabled
+        // this comparison entirely and could then write until the volume was full. A
+        // take with nothing in it has nothing to send, so the first byte past zero is
+        // already past what it advertised and refusing there is the same rule, not a
+        // special case for it.
+        if (progress.received > take.bytes) {
           done(new Error(`${take.id} is still sending past the ${take.bytes} bytes it advertised`
             + ' - discarded rather than written on past the size the transfer was checked against'));
           return;

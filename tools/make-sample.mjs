@@ -500,13 +500,30 @@ const hello = JSON.stringify({
 });
 
 const stream = createWriteStream(OUT);
+// **One error handler for the stream rather than one per write.** A `once('error')` armed
+// inside `write` is only ever removed by an error, and the fast path resolves on
+// `stream.write` returning true without one arriving - so the default 284 frames armed 284
+// of them and node printed `MaxListenersExceededWarning` from the eleventh frame on. The
+// backpressured path leaks the same way, since only `drain` settles it. Latched here
+// instead: the failure is remembered, every write in flight is rejected, and every write
+// after it refuses before touching the stream. A plain `on('error')` with no rejection
+// would be worse than the leak it removes - it would turn a full disk from a loud failure
+// into a `drain` that never comes, which is this tool hanging with no output at all.
+let writeFailure = null;
+const waiting = new Set();
+stream.on('error', (err) => {
+  writeFailure = err;
+  for (const rej of waiting) rej(err);
+  waiting.clear();
+});
 const write = (buf) => new Promise((res, rej) => {
   // Awaited rather than fired and forgotten: a 138MB file written without watching the
   // drain buffers the whole thing in memory, and this tool is the one somebody runs on a
   // machine they have not sized for it.
-  if (stream.write(buf)) res();
-  else stream.once('drain', res);
-  stream.once('error', rej);
+  if (writeFailure) { rej(writeFailure); return; }
+  if (stream.write(buf)) { res(); return; }
+  waiting.add(rej);
+  stream.once('drain', () => { waiting.delete(rej); res(); });
 });
 
 await write(encodeMessage(TYPE_HELLO, Buffer.from(hello, 'utf8')));

@@ -237,10 +237,17 @@ async function main() {
     } catch { /* not listening yet */ }
     await new Promise((r) => setTimeout(r, 150));
   }
+  // **Thrown rather than exited, and that is about the child rather than about style.**
+  // `process.exit` here walked past `cleanup()`, so a server that was merely slow kept
+  // running with the temporary captures directory under it - and then held 8391, which
+  // makes every retry of this tool refuse itself as a foreign listener at the top of
+  // `main`. The outer `.catch` kills the child, removes the directory and prints the same
+  // `DID NOT RUN` verdict with exit 2, so the log tail travels inside the message: the
+  // catch prints `err.message` and nothing else, and that tail is the whole diagnostic
+  // this site exists for.
   if (!up) {
-    console.log(`[boot] DID NOT RUN - the server did not answer on ${PORT} within 30s`);
-    console.log(log.join('').split('\n').slice(-8).join('\n'));
-    process.exit(2);
+    throw new Error(`the server did not answer on ${PORT} within 30s\n${
+      log.join('').split('\n').slice(-8).join('\n')}`);
   }
 
   browser = await chromium.launch({
@@ -271,9 +278,11 @@ async function main() {
   await page.goto(`http://127.0.0.1:${PORT}${RECORDER_PATH}`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
 
+  // Thrown for the reason the readiness failure above is, and with a browser open by now
+  // there is a second resource to strand: the outer `.catch` closes it before `cleanup()`
+  // runs, and a bare exit here left a headless Chromium behind as well as the server.
   if (mutation && served === 0) {
-    console.log(`[boot] DID NOT RUN - ${MUTATE} was staged for ${mutation.file} and the page never requested it`);
-    process.exit(2);
+    throw new Error(`${MUTATE} was staged for ${mutation.file} and the page never requested it`);
   }
 
   // ------------------------------------------------------------------ 1. the population
