@@ -248,7 +248,13 @@ jobs:
       # convention and `set -e` is right there.
       - name: and it rejects the five ways the source could be wrong
         run: |
-          set -uo pipefail
+          # `set +e` for the reason the enumeration step above states at length: Actions runs
+          # a `run:` block as `bash -e {0}`, and `set -uo pipefail` does not unset `-e`. It
+          # did not matter while the tool ran inside an `if` condition, which errexit exempts;
+          # reading the exit code needs the command bare, and a bare command exiting 1 is
+          # exactly what this loop is here to see. Measured: without this line the step dies
+          # on the first mutation, which is the first one that *worked*.
+          set +e -uo pipefail
           for m in grabber-syntax-error grabber-type-error opencl-branch-broken \
                    opengl-branch-broken harness-syntax-error; do
             node tools/cpp-check.mjs --mutate "$m" > /dev/null 2>&1
