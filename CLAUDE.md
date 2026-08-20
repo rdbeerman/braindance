@@ -239,7 +239,11 @@ node tools/library-check.mjs --mutate extent-cache-ignores-the-range # ... and c
 node tools/library-check.mjs --mutate write-overwrites-builtin # ... and must FAIL
 node tools/library-check.mjs --mutate list-swallows-unreadable # ... and must FAIL
 node tools/library-check.mjs --mutate open-take-swallows-library # ... and must FAIL
-node tools/library-check.mjs --mutate one-refusal-for-older-versions # ... and must FAIL
+node tools/library-check.mjs --mutate one-refusal-for-older-versions # ... one sentence for every version, which
+                                                                   #     collapses the three bands `versionRefusal`
+                                                                   #     still keeps now the migration is gone:
+                                                                   #     older, later, and a version field that is
+                                                                   #     not a number at all
 node tools/library-check.mjs --mutate open-ignores-format          # ... the capture's generation, at all four doors at once
 node tools/library-check.mjs --mutate shipped-look-drops-a-value   # ... a shipped look with a hole in it, which is the last look staying under the next one
 node tools/library-check.mjs --mutate complete-look-drops-a-group  # ... and the definition those documents are written against, which is code where they are data
@@ -412,6 +416,13 @@ node tools/editor-check.mjs --mutate commit-ignores-null-baseline --no-render # 
                                                                        #     interactive with a null baseline. Reddens exactly
                                                                        #     two rows in section 13 - the press being recorded,
                                                                        #     and what it destroyed - so read the rows
+node tools/boot-check.mjs                                 # the post-boot state diff: every control shows the value the registry holds
+node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the shipped fault put back - the boot write landing
+                                                          #     before the panel generator has filled its Maps, which reaches
+                                                          #     no control, throws nothing, and leaves a page whose sliders
+                                                          #     are lying. Reddens exactly one row of nine and leaves the
+                                                          #     write-sweep row beside it green, because that one is about the
+                                                          #     live path and the fault is in the boot write - read the rows
 node tools/monitor-check.mjs                              # step 9: the monitor's decimation, the take it must not touch, and the picture it shows
 node tools/monitor-check.mjs --mutate decimate-reaches-recorder  # ... and must FAIL mutated
 node tools/monitor-check.mjs --mutate bind-ignores-grid          # ... and must FAIL mutated
@@ -487,17 +498,23 @@ node tools/module-check.mjs --mutate namespace-reach-cannot-be-named # ... and a
 ```
 
 `jobs-check` needs a GPU browser and ffprobe and renders one real job through
-`tools/render-worker.mjs`; `--no-render` drops that row. **Six spawn their own servers and need
-none running** — `guard-check` on 8321, `jobs-check` on 8231, `level-check` on 8377,
-`monitor-check` on 8341, `vcam-check` on 8361, and `library-check` across the span described
+`tools/render-worker.mjs`; `--no-render` drops that row. **Seven spawn their own servers and
+need none running** — `guard-check` on 8321, `jobs-check` on 8231, `level-check` on 8377,
+`monitor-check` on 8341, `vcam-check` on 8361, `boot-check` on 8391, and `library-check` across
+the span described
 below — so what each of those needs is a free port rather than a server, and the distinction is
 not bookkeeping: a tool that finds a stranger already listening on its port is answered by the
 stranger, and asserts against whatever fixture that process staged rather than the one this run
 staged, which is a green run proving nothing. `sensor-view-check` does both — it takes `--url`
 against a running server for most of its run and spawns a private one on 8131 for the section
-that needs its own capture. `library-check` is the only one of any of them that asks the kernel
-first and refuses, so everywhere else the `pgrep` below is the check. `export-check` needs
+that needs its own capture. `library-check` and `boot-check` are the two that ask the kernel
+first and refuse, so everywhere else the `pgrep` below is the check. `export-check` needs
 ffmpeg and ffprobe.
+**`boot-check` needs no capture and no sensor either** — it drives the recorder against a server
+spawned over an empty captures directory, which is the state a fresh clone is in, and that is
+the reason it is on that surface rather than on the editor: `/edit` with no take redirects to
+the gallery, so grading the panel there would cost a capture to ask a question the recorder
+answers for nothing.
 `level-check` needs neither a sensor nor a capture — it plants analytic planes straight into
 the depth texture, which is what lets it grade the plane fit against a normal it chose.
 **`module-check` needs nothing at all** — no port, no browser, no install — because every
@@ -585,12 +602,12 @@ And the ones that are not proof tools, listed because a tool nobody documented i
 nobody runs. **`syntax-check` enforces that list**: anything in `tools/` this file does not
 mention fails it, so a tool added next year is asked by existing. The arithmetic, written
 down because a count nobody adds up is how this list rotted the first time: `tools/` holds
-**30** files, of which **20** are `*-check` proof tools and **10** are the block below.
+**31** files, of which **21** are `*-check` proof tools and **10** are the block below.
 
 ```
-node tools/convert-presets.mjs presets projects jobs # version 3 documents -> version 4, in place
 node tools/build-native.mjs        # builds libfreenect2 into vendor/prefix, then the grabber
 node tools/fake-grabber.mjs        # a grabber that needs no sensor, for driving the server
+node tools/make-sample.mjs         # a synthetic capture, so a clone with no Kinect has one to loop
 node tools/make-fixture.js         # loops one short capture into an arbitrarily long one
 node tools/sweep-all.mjs           # every mutation of four tools; needs a server and hours
 node tools/settle-probe.mjs        # does settle()'s drain scale with the take or the ceiling
@@ -609,8 +626,27 @@ Their control is `--take sample`. The `--take fixture-1g` those two command line
 a checkout either — make it first, and the two of them are the only reason it is 8 loops:
 
 ```
+npm run fixtures      # make-sample, then make-fixture - both of the lines below
+node tools/make-sample.mjs captures/sample.knct
 node tools/make-fixture.js captures/sample.knct captures/fixture-1g.knct --loops 8
 ```
+
+**A clone with no Kinect can now make the first of those**, which it could not before: twelve
+tools root at `captures/sample.knct`, `make-fixture` loops a capture into a longer capture, and
+nothing in the tree produced the thing being looped. `make-sample` synthesises one — analytic
+geometry, a real JPEG per frame, no sensor and no ffmpeg — and it is **a stand-in rather than
+footage**, so say which sample a number came from. It carries no depth jitter, no confidence
+gate chattering on a flat wall and no dropped frames, and anything measuring those still needs
+the real capture. `docs/proof-tools.md` has what it does and does not answer.
+
+**It refuses to overwrite an existing capture and that is the important half of it**, because
+the path it is run at is where a machine with a sensor keeps real footage, and a capture is the
+one artifact here that cannot be shot again. Three spellings, because there are three things
+somebody means: bare **refuses** and names the size and date of what it declined to destroy,
+`--force` replaces, and `--if-missing` leaves an existing one alone and exits 0 — which is what
+`npm run fixtures` uses, so a machine holding real footage and no `fixture-1g` gets the loop
+built and the take untouched. `make-fixture` has no such guard and needs none: its output is
+derived and regenerating it is lossless.
 
 See `docs/proof-tools.md`.
 

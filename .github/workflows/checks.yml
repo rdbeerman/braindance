@@ -76,6 +76,69 @@ jobs:
       # It goes in this job rather than its own because the job is the checks that need
       # nothing, which is why the job's name is that rather than the parse it started as.
       - run: node tools/module-check.mjs
+      # Broken on purpose, thirty-three ways, every run - the same posture the two jobs
+      # below take, and it is late here for the reason `module-check` itself was late:
+      # both tools carry falsification controls that need no port, no browser, no install
+      # and no sensor, and neither had ever been run against one on a push. So a control
+      # could go stale against an anchor somebody moved, or a rule could quietly stop
+      # catching what it names, and the only thing that would have said so was a person
+      # running it by hand while leaning on it.
+      #
+      # **The names are enumerated off each tool's own refusal rather than written here.**
+      # A list in this file is a third copy of the two tables, and it is the copy nobody
+      # opens - `sweep-all` already takes its names this way and says why. So a mutation
+      # added next year is run by existing. The floor under the parse is what stops that
+      # becoming a way to test nothing: a parse yielding no names runs zero mutations and
+      # the step goes green, which is exactly what `syntax-check` refuses when it declines
+      # to pass on finding no files.
+      #
+      # **Neither loop below is the shape to copy here, and that was measured rather than
+      # reasoned about.** `module-check` prints `caught, as required` and `NOT CAUGHT` and
+      # exits **1 for both**, so the cpp job's "non-zero means caught" test scores a
+      # genuine miss as a catch - run against a stub that misses, it printed `caught` and
+      # exited 0. `syntax-check` has no verdict branch at all and exits `failed ? 1 : 0`,
+      # so a caught mutation exits 1 where a missed one exits 0, and the gate job's
+      # `set -e` would fail this step on all thirty-three of the runs that work. What
+      # discriminates on both is the number each already prints in its own summary line -
+      # `65 JavaScript files, 0 failed` and `[module] 61 assertions, 0 failed` - which is
+      # this repo's rule about counting failed assertions rather than exit codes, arriving
+      # in a workflow.
+      #
+      # Exit 2 is kept apart from a miss deliberately. A stale anchor, a name the tool does
+      # not know and a file nothing in the run read all answer 2 having asserted nothing,
+      # and folding those into "not caught" would report a control that never ran as a rule
+      # that has gone blind - which is the one confusion this whole step exists to refuse.
+      - name: and both of them reject every tree their own tables call broken
+        run: |
+          set -uo pipefail
+          bad=0
+          for tool in syntax module; do
+            names=$(node "tools/${tool}-check.mjs" --mutate 2>&1 \
+              | sed -n 's/.*this tool knows //p' | tr ',' '\n' | sed 's/[[:space:]]//g' | grep .)
+            count=$(printf '%s\n' "$names" | grep -c .)
+            if [ "$count" -eq 0 ]; then
+              echo "DID NOT RUN: ${tool}-check named no mutations, so this step asserted nothing"
+              exit 1
+            fi
+            echo "${tool}-check declares ${count} mutations"
+            for m in $names; do
+              out=$(node "tools/${tool}-check.mjs" --mutate "$m" 2>&1); code=$?
+              n=$(printf '%s\n' "$out" | sed -n 's/.*, \([0-9][0-9]*\) failed$/\1/p' | tail -1)
+              if [ "$code" -eq 2 ]; then
+                echo "DID NOT RUN: ${tool}-check --mutate ${m} refused the run - $(printf '%s' "$out" | head -1)"
+                bad=1
+              elif [ -z "$n" ]; then
+                echo "DID NOT RUN: ${tool}-check --mutate ${m} printed no assertion count, so it fell over before asserting"
+                bad=1
+              elif [ "$n" -eq 0 ]; then
+                echo "NOT CAUGHT: ${tool}-check --mutate ${m} left every assertion green"
+                bad=1
+              else
+                echo "  caught: ${tool}-check --mutate ${m} (${n} failed)"
+              fi
+            done
+          done
+          exit "$bad"
 
   unit:
     name: the scalar maths, called directly
@@ -148,9 +211,16 @@ jobs:
       # tick of unknown sensitivity. Two of the five are the ones that matter here, and
       # they are the branch pair: each plants a name that does not exist inside one
       # `#ifdef` arm, so a gate that had quietly collapsed to a single configuration
-      # would report one of them green. Caught is a non-zero exit for this tool, so
-      # `set -e` is what makes a miss fail the step instead of being overwritten by the
-      # next iteration.
+      # would report one of them green. Caught is a non-zero exit for this tool, which is
+      # why the loop is an explicit `if` and deliberately not `set -e`: `set -e` here would
+      # end the step on the first mutation that *worked*. This comment said the opposite
+      # for a while, having been copied off the gate job below where caught is exit 0 and
+      # `set -e` is right - a sentence that named the wrong mechanism while sitting above
+      # code doing the correct one, which is the thing a reader checks instead of the code.
+      #
+      # What the `if` cannot see is a miss that exits non-zero for its own reason, and this
+      # tool has none: `cpp-check` exits 2 when the compiler or the headers are absent and
+      # says so, and the step above it would already have failed on that.
       - name: and it rejects the five ways the source could be wrong
         run: |
           set -uo pipefail
@@ -200,8 +270,8 @@ jobs:
             node tools/release-gate-check.mjs --mutate "$m"
           done
 
-# Not run here, and what each would need. `tools/` holds 20 `*-check` proof tools; five run
-# above and the fifteen below are the rest, and the arithmetic is written down because a list
+# Not run here, and what each would need. `tools/` holds 21 `*-check` proof tools; five run
+# above and the sixteen below are the rest, and the arithmetic is written down because a list
 # nobody adds up is how this one came to be missing three of them at once - `module-check`,
 # which needed nothing and is now run, and the two directly below, which had been in neither
 # list since they were written.
@@ -210,6 +280,11 @@ jobs:
 #   jobs, sensor-view   a running server and a GPU browser; export also needs ffmpeg and
 #                       ffprobe, and jobs needs a real Chromium rather than the bundled
 #                       headless shell, which it refuses to substitute for
+#   boot-check          a GPU browser, and its own server on 8391. It needs no capture and
+#                       no sensor - it drives the recorder, which builds all 80 parameter
+#                       controls against a server with an empty captures directory - so a
+#                       runner with a browser could run it, and the browser is the only
+#                       reason it is down here rather than in the first job
 #   level-check         a GPU browser, but no server and no sensor - it spawns its own on
 #                       8377 and plants analytic planes straight into the depth texture,
 #                       which is what lets it grade the plane fit against a normal it chose

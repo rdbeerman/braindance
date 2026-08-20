@@ -1132,7 +1132,7 @@ const MUTATIONS = {
   // Every version older than this build gets one sentence again, so a document with no
   // conversion path is told the thing that is true of a document from the future.
   'one-refusal-for-older-versions': { file: 'web/format.js', edits: [[
-    '    : version === 1 || version === 2', '    : false',
+    '    : version > PROJECT_VERSION', '    : false',
   ]] },
   'skim-ignores-state': { file: 'web/library.js', edits: [[
     'const DIVISOR = { local: 1, both: 1, remote: 4 };',
@@ -5944,11 +5944,20 @@ async function runChecks() {
     check(refusedOld !== 'ACCEPTED' && refusedFuture !== 'ACCEPTED',
       'a preset from another format version is refused', `${refusedOld.slice(0, 40)} / ${refusedFuture.slice(0, 40)}`);
     check(/no path from here/.test(refusedOld) && !/later build/.test(refusedOld),
-      'a version this build has no conversion for says so rather than blaming the units',
+      'a version older than this build says so rather than blaming the units',
       refusedOld.slice(0, 130));
     check(/later build/.test(refusedFuture) && !/no path from here/.test(refusedFuture),
       'and a version from a later build gets its own answer rather than the older one\'s',
       refusedFuture.slice(0, 130));
+    // The third band, and it is here because the first draft of the two above had no
+    // guard on the comparison: `undefined > 5` is false, so a document with no version
+    // field at all fell into the older branch and was told something specific and untrue
+    // about its age. A malformed version is not a statement about old or new.
+    const refusedJunk = await refusalFor('\'not-a-version\'');
+    check(refusedJunk !== 'ACCEPTED' && /absent or is not a number/.test(refusedJunk)
+      && !/no path from here/.test(refusedJunk) && !/later build/.test(refusedJunk),
+      'and a version field that is not a number is placed as neither',
+      refusedJunk.slice(0, 130));
 
     check(errors.length === 0, 'the preset path raises no page errors', errors.slice(0, 2).join(' | '));
     await page.close();

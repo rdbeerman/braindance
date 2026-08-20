@@ -3168,3 +3168,149 @@ stays too, named in `CLAUDE.md` as one this suite does not catch - the same trea
 `bloom-reference-1080` already has, and for the same reason. A mutation quietly deleted is
 a question that gets asked again in a year; a mutation left in a list of things that must
 FAIL, that does not, is worse than either.
+
+## A census of exit codes that did not say what a miss exits
+
+`docs/proof-tools.md` opens on the rule this whole suite is built around - count failed
+assertions, never exit codes - and the census under it described its largest group as "seven
+exit non-zero on a catch and say `NOT CAUGHT` when they miss". Every word of that is true. What
+it does not say is what a *miss* exits, and the natural reading of the sentence is that a miss
+must therefore look like something else.
+
+It does not. Measured across all seven, plus `module-check` which had never been in the census
+at all: the `NOT CAUGHT` branch is `process.exit(1)` and the `caught, as required` branch beside
+it is `process.exit(1)`. Within that group the exit code carries **no information whatsoever**,
+and the printed sentence is the only thing separating a catch from the check being blind.
+
+**The cost was a round of this work.** Wiring `syntax-check` and `module-check`'s thirty-three
+mutations into CI needed a loop, and `module-check` was written up as a fifth shape of its own -
+"the worst of the set", with a paragraph about it - purely because the census's wording implied
+the other seven behaved differently. Reading their code took two minutes and the write-up was
+wrong. The correction is in the census now, stated as the miss exit rather than as the catch
+exit, because the thing a reader needs is the half that was missing.
+
+Two things generalise. **A census of behaviours has to state the behaviour that is dangerous,
+not the one that is interesting** - what a catch exits is the memorable fact and what a miss
+exits is the one a gate is written against. And **a group somebody has not measured is a group
+you are quoting**, which is the same rule this file states about counts in prose, arriving in a
+document whose entire subject is not trusting them.
+
+## Two loop shapes already in this repo, each of which scores a miss as a catch
+
+The step that runs those thirty-three had two obvious models sitting in the same workflow, and
+neither is usable, which was measured rather than argued by running both against a stub that
+misses on purpose:
+
+- **The `cpp-check` job's shape**, `if node ... ; then echo NOT CAUGHT; exit 1`, treats a zero
+  exit as the miss. Against the stub it printed `caught` and exited 0. That is right for
+  `cpp-check`, whose miss really is exit 0, and it is exactly backwards for the eight tools
+  above.
+- **The gate job's shape**, `set -e` with a bare invocation, treats a non-zero exit as the
+  miss. It fails on the stub - and it also fails on all thirty-three runs that *work*, because
+  a catch in both of these tools is a non-zero exit too.
+
+What discriminates on every tool is the number each already prints in its own summary line, so
+the step parses `, N failed$` and requires it above zero, with exit 2 kept apart from a miss
+because a stale anchor and a name the tool does not know both answer 2 having asserted nothing.
+
+**The loop has three falsification controls of its own**, and they are the shape this file
+recommends for a mechanism the subject cannot break: a probe tree of stub tools, one per
+failure branch. A tool enumerating no mutations fires the floor; a tool declaring one and
+missing it fires `NOT CAUGHT`; a tool refusing its own anchor fires `DID NOT RUN`. Each fails
+the step with its own sentence, and the identical loop text is run against them by `cd`-ing to
+the probe root, so what is graded is the shipped text rather than a copy of it.
+
+**What CI cannot claim, and it is worth stating beside the step.** The rule is "read which
+assertions fired", and a workflow cannot: a per-mutation row table in a YAML file is the
+hand-maintained list the enumeration exists to replace. Measured, so the bound is real rather
+than admitted: with `module-check`'s cycle detector stubbed out, `--mutate cycle-planted` still
+printed `caught, as required (1 assertion fired)` and exited 1 - off the probe tree's own row,
+not the row the mutation names. What catches *that* is the unmutated run in the same job, which
+the same stub reddens. The two steps are one claim in two halves and neither is worth much
+alone.
+
+## The registry was right and the controls were lying, so the obvious diff finds nothing
+
+The post-boot state diff had been deferred to by three documents and built by none, and the
+audit that asked for it sketched the comparison as "read every registry value back after first
+paint, compare against the registry's declared defaults". That cannot catch the fault it is for,
+and the reason is one line:
+
+    function writeControl(name, value) {
+      const el = panelControls.get(name);
+      if (!el) return;
+
+`params.reset()` landing before the panel generator has filled that map writes every value into
+the registry, reaches no control, and returns silently. So the registry ends up holding
+perfectly correct values - it is the *controls* that show what the markup left them at - and a
+diff against declared defaults compares defaults to defaults and reports nothing at all.
+Measured with the fault restored: **73 of 80 controls diverge and the registry is right about
+all 80.**
+
+**Ask which side of a comparison the fault actually moves.** This is the two-terms rule already
+in this file, arriving from the direction where the wrong term is the one that looks
+authoritative: the registry is the source of truth, so comparing against it feels like the
+strong check, and it is the half the bug leaves untouched.
+
+### And what an unwritten control reads is measured, not derived
+
+The coverage row beside it - which parameters the diff cannot separate, because their stored
+value equals whatever an unwritten control shows - was first written against `(min + max) / 2`,
+the value an HTML range input is commonly said to default to. That is wrong here on **75 of 75**
+range controls: `pointSize` spans 0.5 to 64, whose midpoint is 32.25, and the element reads
+50.5. The predicted blind set named thirteen parameters where the fault leaves seven, and the
+two lists overlap on two.
+
+The repair is to build a detached input carrying the same `min`, `max` and `step` and read its
+`value` - the browser answering the question instead of the check predicting it. It then agrees
+exactly with the set observed surviving the mutation, which is what says the two halves mean the
+same thing by "indistinguishable". **A number that reads like a measurement and is a picture of
+a formula is the failure this file keeps recording**; the tell was that it was computed rather
+than observed, in a check that had a browser open the whole time.
+
+## A one-way migration whose two gates cannot be told apart
+
+**Written in the past tense: `tools/convert-presets.mjs` was deleted the same week this was
+found, and nothing in this section can be re-run.** It is kept for the reason the floor-
+selection entry above is kept - the lesson is about gates that agree, not about migrations -
+and because the way it was found is the transferable part.
+
+That tool converted a document's undo history in two places: `convert`'s version 3 branch
+called `convertHistory` and then handed the result to `toVersion5`, which called it again. The
+tool's own comment called this out as costing a walk and changing nothing, and it was right.
+
+The consequence is that a version 3 project reached both, so neither could be falsified.
+Measured on a test written for it: removing `convert`'s call reddened nothing, removing
+`toVersion5`'s call reddened nothing, and only removing **both** reddened the row. That is the
+two-gates-that-agree shape this file already records against the rename route, found this time
+by mutation-testing a *new test* rather than by reviewing old code - which is the part worth
+carrying. **A test written against code nobody has broken on purpose has unknown sensitivity,
+and the cheapest way to find its blind spot is to break the subject six ways and read which
+rows move.** Five of the six reddened exactly the row they named; the sixth reddened nothing
+and that was the finding.
+
+The fixture that separated them was a *version 4* project carrying history, which skipped the
+version 3 branch entirely - so its history was converted by `toVersion5`'s call site alone.
+`convert`'s own call stayed genuinely unfalsifiable and was reported rather than repaired,
+because removing it was an edit to a tool whose successful outcome is destroying the original.
+The whole question then went away with the tool, which is the outcome a report makes possible
+and a quiet repair does not.
+
+## An export added where the rule does not look
+
+A plan that adds exports to a tool and expects `module-check`'s dead-export rule to keep them
+honest is relying on a scope the rule does not have, on the strength of its consumer walk being
+the whole checkout. The rule's **subject** is `web/` - it walks `web/` for modules and asks who
+imports what they export - while the whole-checkout walk is only the **consumer** side. An
+export added under `tools/`, `server/` or `test/` is in neither population, in either direction.
+
+Measured rather than reasoned about, and re-measured on a file that still exists: a dead export
+planted in `tools/make-sample.mjs` passes a clean run at 61 assertions, 0 failed. So an export
+outside `web/` carries no coverage from that rule at all, and saying so is the honest report -
+widening the subject set is separate work needing controls of its own, and it would be a change
+with a blast radius across every tool in the tree.
+
+**The general form: a rule with two populations has two scopes, and the wider one is the easier
+to remember.** "It reads every JavaScript file in the checkout" is true of `module-check` and is
+a sentence about its consumers, not about its subjects - and a plan built on the sentence rather
+than on the split gets a safety net that is not there.

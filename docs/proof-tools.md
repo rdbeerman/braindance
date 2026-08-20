@@ -12,9 +12,18 @@ For the method behind the suite, see `docs/instruments.md`.
 the disagreement runs the dangerous way, so read the assertion count and never the code.**
 Counted rather than recalled:
 
-- **Seven exit non-zero on a catch and say `NOT CAUGHT` when they miss**: `guard-check`,
+- **Eight exit non-zero on a catch and say `NOT CAUGHT` when they miss**: `guard-check`,
   `jobs-check`, `editor-check`, `monitor-check`, `sensor-view-check`, `level-check`,
-  `vcam-check`.
+  `vcam-check` and `module-check`.
+  **A miss exits 1 here as well, which this line did not say for a long time and which is
+  the whole reason to read the verdict.** Counted rather than recalled, across all eight:
+  the `NOT CAUGHT` branch is `process.exit(1)` and the `caught, as required` branch beside
+  it is `process.exit(1)`, so within this group the code carries **no information at all**
+  and only the printed sentence separates the two. The natural reading of the old wording —
+  that a non-zero exit is what a catch looks like, so a miss must look like something else —
+  is false for every member, and it is the reading anything gating on `!== 0` takes. It cost
+  a round here: `module-check` was written up as a fifth shape of its own on exactly that
+  misreading, before the other seven were measured and found to be doing the same thing.
 - **Four invert it**: `vendor-check`, `registration-check`, `registry-check` and
   `release-gate-check`, where caught is exit **0** with `caught, as required (N assertions
   fired)` and exit **1** is `NOT CAUGHT`.
@@ -34,15 +43,39 @@ Counted rather than recalled:
   It is the one tool in this census that carries mutations without appearing in the fourteen
   below, for the reason given there — so an agent who goes looking for it under Mutations and
   gives up reads it by the majority convention, which is backwards for exactly this tool.
-- **Four have no `NOT CAUGHT` branch at all** and simply exit on their failure count:
-  `timeline-check`, `export-check`, `keyframe-check`, `library-check`. **A mutation these four
-  fail to catch exits 0**, which reads as a clean pass rather than as the check being blind.
-  That is the same direction as the inverting group above and it is silent rather than merely
-  confusing, so it is the worse of the two shapes.
+- **Six have no `NOT CAUGHT` branch at all** and simply exit on their failure count:
+  `timeline-check`, `export-check`, `keyframe-check`, `library-check`, `syntax-check` and
+  `cpp-check`, the last two of which are `process.exit(failed ? 1 : 0)` and nothing else.
+  **A mutation these six fail to catch exits 0**, which reads as a clean pass rather than as
+  the check being blind. That is the same direction as the inverting group above and it is
+  silent rather than merely confusing, so it is the worse of the two shapes. The cpp job in
+  `.github/workflows/checks.yml` is written against exactly this: it treats a zero exit as
+  `NOT CAUGHT`, which is right for that shape and wrong for every other group here.
+
+**So the two groups that carry mutations without a browser fail in opposite directions, and a
+CI loop has to be written against both.** `module-check` is in the first group, where a miss
+and a catch are both exit 1; `syntax-check` and `cpp-check` are in the last, where a catch is 1
+and a miss is 0. Measured against a stub that misses: the cpp job's "non-zero means caught"
+test printed `caught` and exited 0, and the gate job's `set -e` fails on all thirty-three of
+the runs that work. Neither shape is portable, which is why the step that runs those thirty-three
+reads the failed count out of each tool's own summary line instead. `module-check`'s exit **2**
+is `DID NOT RUN` in four places, the fourth being a mutation naming a file nothing in the run
+read.
 
 Which is why the rule is worded the way it is: count failed assertions, never exit codes — and
 read *which* assertions fired, because a tool that counts its own crash as a failure reports a
 catch it never made.
+
+**And "read which assertions fired" is not advice you can put in a workflow**, which is the
+seam worth stating here rather than leaving somebody to find it. The step that now runs those
+thirty-three mutations on every push can only ask that the clean tree passes and each mutation
+reddens it — a per-mutation row table in CI would be the hand-maintained list the enumeration
+exists to replace. What that misses was measured rather than assumed: with the cycle detector
+stubbed out, `--mutate cycle-planted` still printed `caught, as required (1 assertion fired)`
+and exited 1 off the *probe tree's* own row rather than the row the mutation names. The thing
+that catches that is the unmutated run in the same job, which the same stub reddens at
+`61 assertions, 1 failed`. So the two steps are one claim in two halves, and neither is worth
+much alone.
 
 **Exit 2 means the harness did not run, or a claim went unproven.** `library-check` exits 2
 when the low-space refusal could not be tested — it needs a real small filesystem and only
@@ -96,14 +129,21 @@ vendor — and all of them refuse a mutation whose text they cannot find exactly
 replacement that silently matched nothing would run the unmutated page and be recorded as the
 check having missed a bug it was never shown.
 
-**That qualifier is load-bearing, because the exit-code census above has fifteen entries and
-this list has fourteen names.** `release-gate-check` is the difference, and it carries three
-mutations — `wrong-unit`, `no-gate` and `absent` — by a third mechanism: each is a whole
-`.npmrc`, written into a scratch directory npm is then asked to resolve a package from, so there
-is no source text to match and nothing for the refusal above to be about. Both numbers are
-right because they count different things, so do not reconcile them — a fifteenth name in this
-list would claim a delivery that tool does not use, and dropping it from the census leaves the
-tool whose convention is easiest to read backwards as the one nothing documents.
+**That qualifier is load-bearing, because the exit-code census above has eighteen entries and
+this list has fourteen names.** The four in the census and not here each carry mutations by a
+mechanism of their own, so there is no staged page and no rebuilt tree for the refusal above to
+be about. `release-gate-check` writes a whole `.npmrc` into a scratch directory npm is then
+asked to resolve a package from. `syntax-check` and `module-check` substitute their edit into
+the bytes they read, so a mutation never reaches disk at all. `cpp-check` templates its two
+generated headers and the mutated source into a scratch directory and compiles there. All four
+numbers are right because they count different things, so do not reconcile them — a name added
+to this list would claim a delivery that tool does not use, and dropping one from the census
+leaves the tools whose convention is easiest to read backwards as the ones nothing documents.
+
+**All four do refuse an anchor they cannot find, by their own route rather than by the one
+above.** `syntax-check` and `module-check` exit 2 naming the anchor and the file, and
+`module-check` exits 2 again for a mutation naming a file nothing in the run read — which is
+the half `syntax-check` has no need of, since it reads the whole tree either way.
 
 **A mutation is a piece of source text, so a mutation stops matching the moment the code it
 names is edited** — three of `timeline-check`'s nine had to be re-anchored when step 5 rewrote
@@ -585,10 +625,15 @@ that as the check having no opinion — a falsification control that falsifies n
 than not having one, because the whole of what it buys is a reader's trust in the assertion.
 
 Its three controls are run by hand, in the idiom the `tools/` and `docs/` blocks already use.
-This tool does carry a `--mutate` harness, but its table holds one entry and that entry belongs
-to the specification row below, so nothing here has a named mutation — which is worth stating
-rather than leaving to be inferred, since a reader who saw the flag would otherwise read a green
-`--mutate spec-drifts` as a control over these assertions too. Add a key to the grabber literal
+This tool does carry a `--mutate` harness, and its table holds **six** entries — one for the
+specification row, two for the shell rows and three for the citation walk. Not one of them is
+about the hello or the format constant, so nothing in *this* block has a named mutation, which
+is worth stating rather than leaving to be inferred: a reader who saw the flag and the six names
+would otherwise read a green mutation run as a control over these assertions too. The sentence
+here said "one entry" for as long as there was one, and went on saying it through five more —
+which is what a count in prose does to itself beside a table that grows, and is the same failure
+this page records against `jobs-check`'s mutation count two sections up. Take the names from the
+tool's own refusal, which is what `sweep-all` and the CI step both do for exactly this reason. Add a key to the grabber literal
 and not to the stanza; add one to the stanza the grabber does not emit; bump the constant in one
 language. Each must fail naming what it found — measured, in that order: `the grabber's hello
 emits exposure and docs/architecture.md's type 1 hello does not document it`,
@@ -954,6 +999,55 @@ Mutation-tested three ways beyond its own control: a numeric export added to `pr
 left out of the table reddens it, the specification block deleted reddens it, and a number edited
 in the table while the code stays put reddens it.
 
+**`boot-check`** is the post-boot state diff the other three documents deferred to, and it
+needs a GPU browser and a free port and nothing else — no capture, no sensor, no server
+already running. It spawns its own on 8391 against a temporary empty captures directory and
+exits 2 naming the port when something already holds it.
+
+**Its comparison is registry-versus-control, and the obvious one cannot catch the fault it
+is for.** The audit that asked for this sketched it as "read every registry value back after
+first paint and compare against the registry's declared defaults". In the fault the registry
+ends up holding perfectly correct values — `params.reset()` writes every one of them — and it
+is the *controls* that never hear about it, because `writeControl` opens
+`const el = panelControls.get(name); if (!el) return;` and the generator has not filled that
+map yet. A diff against declared defaults therefore compares defaults to defaults and reports
+nothing. Measured with the fault put back: 73 of 80 controls diverge and the registry is right
+about all 80.
+
+**What an unwritten control reads is measured rather than derived**, and the arithmetic that
+looks right is wrong. A range input the boot write never reached is commonly said to sit at
+`(min + max) / 2`; it does not. `pointSize` spans 0.5 to 64, whose midpoint is 32.25, and the
+control reads 50.5. Across all 75 range controls here the midpoint disagreed with the element
+on **75 of 75**, and a first version of the coverage row that predicted rather than measured
+named thirteen parameters as indistinguishable where the fault leaves seven, overlapping on
+two. The tool builds a detached input with the same `min`, `max` and `step` and reads its
+`value` — the browser answering instead of the check guessing.
+
+**It drives the recorder, and that is a claim about what it needs.** The panel is generated
+from the registry on both surfaces and the only `EDITING` gate inside the row loop is the
+keyframe diamond, so `/record` and `/edit` build the same 80 controls — measured on both,
+against the 81 the registry declares, the difference being `camera`, which is a pose and has
+no control by design. What separates them is the price of asking: `/edit` with no `?take=`
+redirects to `/gallery`, so the editor needs a capture to boot at all, while `/record` boots
+the full panel against a server with no grabber, no sensor and an empty captures directory.
+That is the state a fresh clone is in. Nothing here looks at `/edit`, so a fault reaching only
+the editor's own boot path would pass; the two surfaces share the generator and the reset, so
+there is no such path today and nothing asserting there is not.
+
+`--mutate reset-before-the-panel-generator` is the control and it is the shipped fault itself,
+restored by moving the boot write above the generator. **It reddens exactly one row of nine**
+and leaves the write-sweep row beside it green, which is the split that matters: the sweep
+writes a value through the registry after boot and asks the control to have followed, and by
+then `panelControls` is filled either way, so the two rows are different questions rather than
+one asked twice. Aiming it took some care — the obvious spelling risks the temporal dead zone
+the no-ops above the registry exist for, and a page that throws while evaluating publishes no
+`__kinect` at all, which `docs/instruments.md` files under "a mutation whose only effect is
+that the page refuses to boot is not a usable mutation". `tracks` is declared below both
+positions, so the move stays on the safe side; the mutated build boots both surfaces with zero
+page errors. Its four exit-2 refusals were each probed by hand: an unknown name, an anchor
+matching zero times, an anchor matching 221 times, and a mutation staged for a module the
+recorder never requests.
+
 **`module-check`** needs nothing at all — no port, no server, no browser, no sensor and no
 install — and that is the point rather than a convenience. Every failure it is about is a
 failure to *boot*: an import cycle, a specifier naming a file that is not there, or a named
@@ -1269,6 +1363,16 @@ they are a real regression or this machine under load — three reproductions on
 rig is not the clean control that question wants, and the honest state is that they were red
 before this work and red after it, at the same three rows with the same three readings.
 
+**Re-measured after the Phase C work, and the readings are byte-identical**: `530 assertions,
+3 failed` on `--take fixture-1g --no-render` at load average 9.31, against the same three rows
+— `1 fallbacks`, `3 keys left`, and `dragged from 0.3333 to 0.3333, against a neighbour at
+0.1667`. **The total moved from 514 to 530 and the reason is known**: the correctness pass
+before this one added rows to `tools/editor-check.mjs`, so the population grew while the red
+set did not. That is the comparison worth making — a total that moves with a diff that explains
+it, beside a red set that is identical in identity *and* in reading. It still says nothing
+about whether the three are a regression or the rig; what it says is that nothing since has
+touched them, and the clean control on an idle machine is still owed.
+
 ## `cpp-check`, and why one configuration would not have been a check
 
 **It needs a C++ compiler and turbojpeg's headers, and nothing else** — no libfreenect2
@@ -1415,15 +1519,51 @@ sit at 6.93%; a first capture of one static-ish scene managed 6.55%.
 
 **`captures/sample.knct` is not in the repository and a synthesised stand-in is not the
 same fixture.** It is gitignored like every other capture, so a fresh clone has none, and
-`library-check` needs one — every take it builds is cut out of it. A synthetic one is enough
-to run the whole suite and it is worth knowing exactly which rows it cannot answer: **a
-sample with no colour block fails the two decimation rows by construction** (`the colour
-block is carried through untouched` and `divisor 4 lands at the ~80KB`), because those
-measure a JPEG the stand-in does not contain, and a sample whose hello carries `startedAt`
-fails the file-date fallback row, because the fixture depends on some takes having no wall
-clock. Neither is a defect in the build. Say which sample a run used when reporting its
-verdict — a run against a stand-in fails the rows named above by construction, and reporting it
-as a pass or as unexplained failures without naming the fixture is wrong in both directions.
+`library-check` needs one — every take it builds is cut out of it.
+
+**`tools/make-sample.mjs` is the thing that decision was waiting for, and it is built to
+avoid the three rows this paragraph used to predict it would fail.** Each of those was a
+prediction about a stand-in nobody had written, and each turned out to be a property of how
+it is written rather than of it being synthetic:
+
+- **A sample with no colour block fails the two decimation rows.** So this one carries a
+  real JPEG per frame, encoded by the tool itself. Not by ffmpeg: a generator needing a
+  system package fails exactly the person it exists for, and one that used ffmpeg *when
+  present* would put different bytes on different machines, which is the gitignored-fixture
+  problem with the term varying per host. The size matters rather than the presence — one of
+  those rows asserts `colorBytes / total > 0.35` at divisor 4, where the decimated depth is
+  27,136 bytes, so anything under about 14.6KB fails it however valid the file is. Measured:
+  a flat synthetic room encoded to 13.7KB a frame and failed at 0.336; with per-pixel grain
+  it is **54.0KB against the real capture's 58.7KB**, at 0.671.
+- **A sample whose hello carries `startedAt` fails the file-date fallback row.** So this one
+  carries no `startedAt`, and no `format` either — a nine-key hello, which is what the
+  capture in this tree actually holds and therefore a generation-zero take, the thing every
+  take shot before that field existed is. That shape was read off the real file rather than
+  chosen.
+
+**Measured end to end rather than argued: `library-check --capture <synthetic>` comes back at
+481 assertions, none failed — the same verdict, at the same total, as the same tool against the
+real 138MB capture on the same machine.** Both decimation rows pass, and the second reports
+`80.5KB = 27KB depth + 54KB colour, so 21ms a position against 123ms a whole frame at
+3.8 MB/s`, which lands on the same ~80KB and 21ms the note beside that row was originally
+written against. So the three rows this paragraph used to promise a stand-in would fail are all
+green, and the sentence about which rows it cannot answer is now: none of them, on this suite.
+
+**The first synthetic run did not say that, and how it was settled is the point.** It ended at
+458 of 481 with one failure reading `the run did not finish: page.goto: Timeout 30000ms
+exceeded` on `/gallery` — a crash rather than a claim, with every row before it green, which is
+the shape this page already records for that section's neighbours. Re-run in the same
+conditions it came back 481 and none failed. That is the rule at the top of `CLAUDE.md` doing
+its job: a single red run against a new fixture is exactly where somebody concludes the fixture
+is at fault, and the control is the re-run, not the reasoning.
+
+What it still is not is footage. There is no depth jitter, no confidence gate chattering on a
+flat wall, no dropped frames and no colour camera halving its rate in dim light, so anything
+measuring those needs the sensor. It is deterministic — same arguments, byte-identical file,
+because `Math.random()` would make every checkout's fixture a different one — and it takes
+about 14s for 284 frames, landing at 139.0MB against the real 138.1MB and 9.47s against 9.42s.
+Say which sample a run used when reporting its verdict; a number taken against a stand-in that
+does not say so is wrong in both directions.
 
 **The total is not written down here any more, and that is deliberate.** This sentence used to
 carry one — "317 of 319" — and it was stale by twenty-eight the day it was next read, because

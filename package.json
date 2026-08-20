@@ -23,6 +23,7 @@
     "replay": "node server/index.js --replay captures/sample.knct",
     "record": "node server/index.js --record",
     "syntax": "node tools/syntax-check.mjs",
+    "fixtures": "node tools/make-sample.mjs captures/sample.knct --if-missing && node tools/make-fixture.js captures/sample.knct captures/fixture-1g.knct --loops 8",
     "test": "npm run test:offline",
     "test:unit": "node --test test/*.test.mjs",
     "test:offline": "node tools/syntax-check.mjs && node --test test/*.test.mjs && node tools/release-gate-check.mjs"
