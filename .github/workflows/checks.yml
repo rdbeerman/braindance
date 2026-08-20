@@ -110,7 +110,19 @@ jobs:
       # that has gone blind - which is the one confusion this whole step exists to refuse.
       - name: and both of them reject every tree their own tables call broken
         run: |
-          set -uo pipefail
+          # **`set +e` explicitly, and it is the whole reason this step failed its first
+          # push.** Actions runs a `run:` block as `bash -e {0}`, so errexit is already on
+          # before the first line - and every command here is *expected* to exit non-zero:
+          # the enumeration asks each tool for a name it does not know and reads the refusal,
+          # which is exit 2, and a caught mutation is exit 1. So the step died on its own
+          # first command with the tools working perfectly. `set -uo pipefail` does not
+          # unset `-e`, which is what made it look handled.
+          #
+          # It passed locally because a script run as `bash script.sh` has no errexit, so
+          # the shipped text had been run - just never under the shell CI uses. That is this
+          # repo's own rule about re-running in the conditions the failure happens in,
+          # arriving one layer out: the *text* was verified and the *shell* was not.
+          set +e -uo pipefail
           bad=0
           for tool in syntax module; do
             names=$(node "tools/${tool}-check.mjs" --mutate 2>&1 \
