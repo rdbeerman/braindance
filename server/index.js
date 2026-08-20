@@ -976,15 +976,44 @@ async function serveRemoteFrame(req, res, [id, n], query) {
     res.writeHead(502).end(`the node offered ${declared} bytes for one frame, past the ${MAX_PAYLOAD_BYTES} this format allows`);
     return;
   }
+  // **Read a chunk at a time and abandoned the moment it goes past, because the header
+  // above is a claim and this is the arithmetic.** `arrayBuffer()` buffers the whole reply
+  // before anything can look at its length, so a node that omits `Content-Length` or
+  // answers chunked walked straight past the declared-size refusal and the check below it
+  // alike: by the time `body.length` could be read the bytes were already in this
+  // process's heap, and a stream that never ends is a server that runs out of it. The
+  // declared check stays where it is - refusing on the header costs nothing and turns the
+  // ordinary case away before a socket is read - and this is the same limit reaching the
+  // case where there is no header to believe.
+  //
+  // `cancel()` rather than a `break`, so the node is told to stop rather than left
+  // sending into a socket nobody is draining. The caller's own signal is already on the
+  // fetch, so a gallery scrubbing across a shelf abandons these the same way it always
+  // did and this only adds the ceiling.
   let body;
   try {
-    body = Buffer.from(await upstream.arrayBuffer());
+    const reader = upstream.body?.getReader();
+    if (!reader) {
+      res.writeHead(502).end('the node answered that frame with no body at all');
+      return;
+    }
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_PAYLOAD_BYTES) {
+        await reader.cancel().catch(() => {});
+        res.writeHead(502).end(`the node sent past the ${MAX_PAYLOAD_BYTES} bytes this format allows for one frame,`
+          + ' and was cut off rather than buffered');
+        return;
+      }
+      chunks.push(value);
+    }
+    body = Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength)), total);
   } catch {
     if (!res.writableEnded) res.writeHead(502).end('the frame stopped arriving from the node');
-    return;
-  }
-  if (body.length > MAX_PAYLOAD_BYTES) {
-    res.writeHead(502).end(`the node sent ${body.length} bytes for one frame, past the ${MAX_PAYLOAD_BYTES} this format allows`);
     return;
   }
   res.writeHead(200, {

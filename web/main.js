@@ -4142,6 +4142,37 @@ function cameraPose(cam) {
 /** Apply a patch. Source side. */
 function applyProgramOut(patch) {
   if (!PROGRAM_OUT) return;
+  // **Normalised before a single field of this patch is applied, because a refusal after
+  // a mode switch is not a refusal.** The view check below used to sit at the foot, after
+  // `mode` had already been written and `setViewCamera` had already handed the renderer
+  // the free camera - so a patch carrying `mode: 'mirror'` and a bad pose refused the pose
+  // and kept the switch, and the source began drawing whatever stale position that camera
+  // was parked at. That is the one thing this mode must not do, said in as many words
+  // forty lines below and then done by the ordering.
+  //
+  // The effective mode is worked out here rather than read off `programOutMode`, since the
+  // question is which camera this patch leaves the source on rather than which one it
+  // found it on. Everything else in the patch waits behind this too: `size` and `params`
+  // used to land and stay whatever happened next, and a half-applied patch is a frame
+  // nobody sent. One refusal, nothing applied, the previous frame intact.
+  const mode = patch.mode === 'mirror' || patch.mode === 'camera' ? patch.mode : programOutMode;
+  let view = null;
+  if (patch.view && mode === 'mirror') {
+    // **Through the registry, exactly as `patch.params` below already is.** The two halves
+    // of this patch arrive over one socket from one place and only one of them was
+    // checked: a pose went straight onto the camera, so a non-unit quaternion or a
+    // non-finite position landed on the object the output frame is drawn with. That is a
+    // camera move nobody authored, rendered into a file, which is the failure
+    // `restoreProject` names in as many words about the same value arriving from disk -
+    // `params.normalise` is where that refusal lives and this is the one door that walked
+    // past it.
+    try {
+      view = params.normalise('camera', patch.view);
+    } catch (err) {
+      console.error(`[program-out] ${err.message}`);
+      return;
+    }
+  }
   if (patch.size && Number.isInteger(patch.size.w) && Number.isInteger(patch.size.h)
       && patch.size.w > 0 && patch.size.h > 0) {
     programOutSize = { w: patch.size.w, h: patch.size.h };
@@ -4166,27 +4197,10 @@ function applyProgramOut(patch) {
       }
     }
   }
-  if (patch.view && programOutMode === 'mirror') {
-    // **Through the registry, exactly as `patch.params` above already is.** The two halves
-    // of this patch arrive over one socket from one place and only one of them was
-    // checked: a pose went straight onto the camera, so a non-unit quaternion or a
-    // non-finite position landed on the object the output frame is drawn with. That is a
-    // camera move nobody authored, rendered into a file, which is the failure
-    // `restoreProject` names in as many words about the same value arriving from disk -
-    // `params.normalise` is where that refusal lives and this is the one door that walked
-    // past it.
-    //
-    // Refused loudly and the frame left as it was, rather than half-applied. A source
-    // silently drawing something other than what the operator is looking at is the one
-    // thing this mode must not do, which is the argument the parameter half makes for
-    // itself directly above.
-    let view;
-    try {
-      view = params.normalise('camera', patch.view);
-    } catch (err) {
-      console.error(`[program-out] ${err.message}`);
-      return;
-    }
+  // Refused loudly and the frame left as it was, rather than half-applied - which is now
+  // a statement the ordering supports rather than one it contradicts, since the refusal
+  // that would make it true happens at the top of this function and reaches nothing.
+  if (view) {
     freeCamera.position.fromArray(view.position);
     freeCamera.quaternion.fromArray(view.quaternion);
     if (freeCamera.fov !== view.fov) {

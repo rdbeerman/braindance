@@ -115,15 +115,18 @@ const MUTATIONS = {
   // `view` altogether would redden that one instead and would be a different defect.
   'pose-skips-the-registry': {
     file: 'web/main.js',
+    // Re-anchored when `applyProgramOut` was reordered so the refusal happens before any
+    // field of the patch lands - the declaration moved up out of the block and the mutation
+    // now assigns to it. Nothing about what this plants changed: the pose reaches the camera
+    // without passing the registry, which is the whole of the claim these rows are about.
     edits: [[
-      "    let view;\n"
-      + "    try {\n"
+      "    try {\n"
       + "      view = params.normalise('camera', patch.view);\n"
       + "    } catch (err) {\n"
       + "      console.error(`[program-out] ${err.message}`);\n"
       + "      return;\n"
       + "    }\n",
-      '    const view = patch.view;\n',
+      '    view = patch.view;\n',
     ]],
   },
 
