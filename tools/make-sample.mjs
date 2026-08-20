@@ -117,6 +117,33 @@ const FRAMES = Number(flag('--frames', '284'));
 const FPS = Number(flag('--fps', '30'));
 const QUALITY = Number(flag('--quality', '82'));
 
+// **Refused here rather than trusted to fail somewhere useful, because none of these fail
+// anywhere at all.** `Number('nope')` is NaN, `i < NaN` is false on the first test, and the
+// generation loop is skipped entirely - so `--frames nope` wrote a 162-byte file holding
+// only the hello, printed its ordinary success line and exited 0. Measured, on the shipped
+// build, before this was added.
+//
+// What makes that worth a refusal rather than a curiosity is the next command somebody
+// runs: `npm run fixtures` calls this with `--if-missing`, which leaves an existing capture
+// alone on purpose so a machine holding real footage keeps it. A zero-frame sample is an
+// existing capture, so the guard that protects footage protects this instead, and
+// `make-fixture` then loops nothing into a fixture and twelve tools root at it. The
+// failure surfaces as proof tools disagreeing about a build with nothing wrong with it.
+//
+// The output is not opened until this has passed, so a refused run leaves whatever was
+// already at that path untouched - which is the same promise the overwrite guard makes.
+for (const [name, value, ok, wants] of [
+  ['--frames', FRAMES, Number.isInteger(FRAMES) && FRAMES > 0, 'a whole number of frames above zero'],
+  ['--fps', FPS, Number.isFinite(FPS) && FPS > 0, 'a rate above zero'],
+  ['--quality', QUALITY, Number.isInteger(QUALITY) && QUALITY >= 1 && QUALITY <= 100, 'a JPEG quality from 1 to 100'],
+]) {
+  if (!ok) {
+    console.error(`[make-sample] ${name} needs ${wants}, and was given ${JSON.stringify(flag(name, ''))}`
+      + ` - which reads as ${value}. Nothing was written.`);
+    process.exit(2);
+  }
+}
+
 // The sensor's own intrinsics, taken from the capture this stands in for so that anything
 // reading `fx`/`cx` out of the hello gets numbers a real device produced. Hardcoded
 // intrinsics skew the cloud in a way that is hard to spot and hard to attribute, which is

@@ -291,6 +291,27 @@ function manifestRefusal(take) {
   }
   if (typeof take.openable !== 'boolean') return `has openable ${JSON.stringify(take.openable)}`;
   if (typeof take.recording !== 'boolean') return `has recording ${JSON.stringify(take.recording)}`;
+  // **The hash and `recording` are one claim rather than two fields**, and checked here
+  // rather than in the filter above because what is wrong with a settled take carrying no
+  // hash is not that it reaches a path - it is that the manifest contradicts itself. The
+  // filter is about `id` and `hash` being safe to put in a filename, which is why it lets
+  // null through; this is about the pair meaning what the gallery draws from it.
+  //
+  // Without it a take arriving as `recording: false, hash: null` listed as an ordinary
+  // remote take, `availability` gave it an enabled Download - that button is gated on
+  // `state === 'remote' && !recording` and on nothing else - and the press then failed in
+  // `downloadTake`, which asserts `VALID_HASH` before it opens anything. An action offered
+  // that cannot succeed is worse than one that is missing, because the operator reads the
+  // failure as the node being down.
+  //
+  // The rule is `describeTake`'s own, mirrored rather than invented: a take still being
+  // written reports null because its bytes are still moving, and every settled take
+  // carries the hash the streaming scan produced. So this refuses a manifest no build of
+  // this program emits, which is what keeps it a shape check and not a version gate.
+  if (take.recording ? take.hash !== null : !VALID_HASH.test(take.hash ?? '')) {
+    return `has hash ${JSON.stringify(take.hash)} on a take that is ${
+      take.recording ? 'still recording, which has no settled hash to advertise' : 'settled, which must have one'}`;
+  }
   // **The refusal list is checked for being one and never for what is in it**, and that
   // restraint is the design rather than a gap. A node one build *ahead* sends a key this
   // build has never heard of, and the gallery deliberately badges it with the key itself -
