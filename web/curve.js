@@ -296,7 +296,55 @@ function tangentAt(keys, i, axis) {
 }
 
 
+/**
+ * Whether a handle is one this evaluator can be asked to render, and why not if not.
+ *
+ * **The invariants exist in the drag handler that creates a value and existed nowhere in
+ * the loader that reads one back**, which is the shape of the gap this closes: a handle
+ * dragged in the editor is clamped as it is written, and a handle arriving in a file went
+ * through a check on its *shape* alone - an array of finite pairs, within the count
+ * ceiling - while the docstring above that check claimed handles "are checked when
+ * present, because a handle outside the unit box bends a curve back on itself". A
+ * document is a caller like any other and it was the one caller taken on trust.
+ *
+ * Both refusals are about silence rather than about crashes, which is why they are worth
+ * a door of their own. Descending abscissae break `easeParam`'s bisection without
+ * breaking it: the loop still terminates and still returns a `u` inside `[0, 1]`, so the
+ * take renders deterministically, repeatably, and at the wrong times. And y outside its
+ * bound sends `hermite` past the key on an axis that is already a fraction, so a camera
+ * sails through the pose it was keyed at and swings back to it.
+ *
+ * The y bound is a parameter rather than a constant here because it is not one number:
+ * a look scalar may legitimately overshoot - a value that swings past its key and comes
+ * back is an ordinary creative choice - while a pose and the retime may not, for reasons
+ * that read alike and are not the same. `web/main.js` owns that table and passes the
+ * bound in, so this stays a statement about curves and the two ends stay one rule.
+ *
+ * Returns null when there is nothing wrong, and a sentence naming the term when there is.
+ */
+function handleRefusal(points, loY, hiY) {
+  let previous = 0;
+  for (const [x, y] of points) {
+    if (!(x >= 0 && x <= 1)) {
+      return `a control point at x=${x}, outside the segment it shapes - the timing curve `
+        + 'is a function of time within the segment, so a point past either end makes it '
+        + 'fold back and run the value backwards through part of the move';
+    }
+    if (x < previous) {
+      return `control points at x=${previous} then x=${x}, which descend - a crossed pair `
+        + 'leaves the curve single-valued nowhere and the bisection that samples it still '
+        + 'terminates, so the move renders at the wrong times rather than failing';
+    }
+    previous = x;
+    if (!(y >= loY && y <= hiY)) {
+      return `a control point at y=${y}, outside the [${loY}, ${hiY}] this kind of track allows`;
+    }
+  }
+  return null;
+}
+
 export {
+  handleRefusal,
   EASE_OUT_LINEAR,
   EASE_IN_LINEAR,
   SEGMENT_POINT_CEILING,

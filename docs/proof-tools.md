@@ -1246,6 +1246,68 @@ need something
 the sweep does not currently arrange - a private server, a GPU browser, a built prefix - so
 wiring them is real work rather than a longer array.
 
+## `editor-check` is three rows red at `7cb273d`, and they are not yours
+
+Written down because the alternative is every later change being suspected of them, which is
+the trap `CLAUDE.md` names: **re-run the baseline in the conditions the failure happened in**,
+and a run nobody took a control for reads as a finding.
+
+Measured on `--take fixture-1g --no-render` against a server on 8080 with a warm index, on the
+Mac, with the tree at `7cb273d` and no local modifications — taken by copying the working
+copies outside the repo and `git checkout --`ing the two files, because a `git stash` in a
+worktree of this repo pushes onto a ref every worktree shares. **514 assertions, 3 failed:**
+
+- section 4, `and never falls back to a rebuild, which is what resized the drawing buffer` —
+  `1 fallbacks` on a ten-move lane drag.
+- section 5, `and a double click on a key removes it` — `3 keys left`.
+- section 5, `and it stops on the point before it rather than at the segment start` — `dragged
+  from 0.3333 to 0.3333, against a neighbour at 0.1667`.
+
+All three are pointer-gesture rows and all three are in sections that run before 13, so a
+change landing later in the file cannot reach them. What has *not* been established is whether
+they are a real regression or this machine under load — three reproductions on one contended
+rig is not the clean control that question wants, and the honest state is that they were red
+before this work and red after it, at the same three rows with the same three readings.
+
+## `cpp-check`, and why one configuration would not have been a check
+
+**It needs a C++ compiler and turbojpeg's headers, and nothing else** — no libfreenect2
+prefix, no sensor, no port, no install. `config.h` and `export.h` are the two headers CMake
+generates, and it templates both into a scratch directory rather than reading them out of a
+build, because a gate that needed `vendor/prefix` would need exactly the thing it exists to
+run without. `turbojpeg.h` is resolved through `pkg-config` first and then the two Homebrew
+keg-only paths, in the same order `native/CMakeLists.txt` resolves it, so the two cannot
+disagree about which headers the grabber is being checked against. Missing either is exit 2 —
+the harness did not run — rather than a failed claim.
+
+**Say what the tick means, because it is narrower than "the C++ is fine".** This parses and
+typechecks. It does not link and nothing runs, so a call to a function that is declared in the
+vendored headers and absent from the built library is as green here as a correct one. What it
+catches is the class that otherwise costs a rebuild on hardware to discover: a broken
+statement, an argument of the wrong type, a name that is not in the headers.
+
+**A single configuration would have been a coverage claim rather than a check.**
+`grabber.cpp` chooses its default pipeline off which processors the library was compiled with
+and branches per processor in three more places, so parsed with OpenCL alone — the macOS
+station's build, and the one the host would pick if the gate configured itself off the machine
+— every OpenGL arm is text the compiler never reads. A break in the Pi's branch would sit
+green here until somebody rebuilt on the Pi. So it runs the four combinations of the two
+macros the file branches on, and the control that says so is `--mutate opengl-branch-broken`:
+it plants a type name that does not exist inside that `#ifdef` arm, and **reddens two of the
+four grabber rows rather than all four**. Read the rows. A run where it reddened all four
+would mean the mutation had escaped its arm, and a run where it reddened none would mean the
+matrix had collapsed to one configuration.
+
+`--mutate grabber-type-error` is the row that separates this from a tokeniser, and it is worth
+keeping separate from the two syntax mutations for that reason alone: a gate that only
+tokenised would take `HdEncoder("high")` happily, and an argument in the wrong unit or a
+pointer where a value belongs is most of what a C++ mistake in this file actually looks like.
+
+The canary runs before any of it: a file with `int x = ;` in it is fed to the compiler and the
+run refuses to continue unless it comes back rejected. `syntax-check` buys the same thing for
+`node --check`, and it bought it after finding a tree state where `node --check` accepted a
+broken file in silence — so this is a lesson already paid for once rather than a precaution.
+
 ## The supply-chain gate
 
 **npm 12 is the version this repo uses.** CI installs `npm@12.0.2` explicitly in the gate job

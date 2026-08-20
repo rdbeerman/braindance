@@ -29,6 +29,7 @@ import {
 import {
   EASE_OUT_LINEAR, EASE_IN_LINEAR, SEGMENT_POINT_CEILING, copyHandle, easeAt, elevate, keyBefore,
   HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
+  handleRefusal,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
 import {
@@ -3342,10 +3343,23 @@ function serialiseProject() {
  * authored. The count is checked against the same ceiling the editor's own control
  * obeys, because a document is a caller like any other.
  */
-function restoreKey(owner, k) {
+function restoreKey(owner, k, kind) {
   if (!Number.isFinite(k?.t)) {
     throw new Error(`${owner} has a key at t=${JSON.stringify(k?.t)}: a key time has to be a finite number`);
   }
+  // **The bound read off the same table the drag handler reads, rather than restated.**
+  // `KINDS[kind].overshoots` is what decides whether a handle may leave the lane when
+  // somebody drags one, and there is no second answer to that question for a handle
+  // arriving in a file - a document is a caller like any other. The retime is named
+  // beside it for the reason `assertMonotonic` gives at length: its axis is source time,
+  // so a handle above the box is a reverse authored through the back door, and it is a
+  // reverse this renderer cannot play at all.
+  //
+  // The overshooting band is `[-1, 2]` and not unbounded, and that number is the drag's
+  // too: `h[1]` is a fraction of the *segment's* own value span, so a lane spanning
+  // little turns a nudge into an enormous handle - measured at y = -5.73 for a 20px drag.
+  // One segment-span each way keeps "past the key and back" and drops what nobody can aim.
+  const [loY, hiY] = kind === 'retime' || !KINDS[kind].overshoots ? [0, 1] : [-1, 2];
   const handle = (side, points, fallback) => {
     if (points === undefined) return copyHandle(fallback);
     const ok = Array.isArray(points)
@@ -3354,6 +3368,13 @@ function restoreKey(owner, k) {
     if (!ok) {
       throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle of ${JSON.stringify(points)}: it takes `
         + `1 to ${SEGMENT_POINT_CEILING} control points, each two finite numbers`);
+    }
+    // Shape first and then the invariants, because the second question is only askable
+    // of something with the first answer - and the two refusals say different things, so
+    // a document with a wrong-shaped handle should not be told its abscissae descend.
+    const why = handleRefusal(points, loY, hiY);
+    if (why) {
+      throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle with ${why}`);
     }
     return copyHandle(points);
   };
@@ -3555,7 +3576,7 @@ function restoreProject(project) {
     // that it is skipped for being empty rather than for being cheap to skip.
     if (keys.length === 0) continue;
     restoredLook.push([name, keys.map((k) => {
-      const key = restoreKey(`track ${name}`, k);
+      const key = restoreKey(`track ${name}`, k, params.spec(name).kind);
       key.value = params.normalise(name, key.value);
       return key;
     })]);
@@ -3577,13 +3598,13 @@ function restoreProject(project) {
   for (const name of Object.keys(project.look.params)) params.spec(name);
 
   const restoredCamera = project.composition.camera.map((k) => {
-    const key = restoreKey('track camera', k);
+    const key = restoreKey('track camera', k, params.spec('camera').kind);
     key.value = params.normalise('camera', key.value);
     return key;
   });
 
   const restoredRetime = project.composition.retime.keys.map((k) => {
-    const key = restoreKey('the retime curve', k);
+    const key = restoreKey('the retime curve', k, 'retime');
     if (!Number.isFinite(key.value)) {
       throw new Error(`the retime key at ${key.t}s maps to ${JSON.stringify(key.value)}: source time is a number`);
     }
@@ -3772,6 +3793,26 @@ const history = {
     // throws out of the keydown handler. It also stopped the auto-save writing a
     // project that names no take on every twitch of a live slider.
     if (!EDITING) return false;
+    // **And the same poisoning arrives on the editor by a different road, which the guard
+    // above cannot see.** `EDITING` is true for the whole life of `/edit`, but `begin` is
+    // the last thing `openTake` does - so every path where the open throws before it
+    // reaches there leaves this surface interactive with `baseline` still null. Those
+    // paths are deliberate: a take with no hello, unusable intrinsics, a capture
+    // generation this build refuses. The page is meant to stay up and say why.
+    //
+    // What it must not do is write. With a null baseline the first press pushes `null`
+    // onto the undo stack, and the auto-save below rewrites `__working__` with a project
+    // naming no take - which is worse than losing the press, because `offerWorkingDocument`
+    // joins the recovery slot back to a take on `take.hash`. The operator's actual work,
+    // on the take they had open before this one failed, is then in a slot that can never
+    // be offered for anything again, and the Cmd+Z after it hands `restoreProject` a null
+    // and throws out of the keydown handler.
+    //
+    // Asked as "is there a baseline" rather than as a flag about how the open went, for
+    // the reason the tools' `undoDepth` hook already relies on: a baseline existing *is*
+    // "the open is over", and any future road into this page that forgets to set a flag
+    // is asked by this one by existing.
+    if (this.baseline === null) return false;
     const now = this.snapshot();
     if (now === this.baseline) return false;
     this.stack.push(this.baseline);
@@ -4126,10 +4167,30 @@ function applyProgramOut(patch) {
     }
   }
   if (patch.view && programOutMode === 'mirror') {
-    freeCamera.position.fromArray(patch.view.position);
-    freeCamera.quaternion.fromArray(patch.view.quaternion);
-    if (freeCamera.fov !== patch.view.fov) {
-      freeCamera.fov = patch.view.fov;
+    // **Through the registry, exactly as `patch.params` above already is.** The two halves
+    // of this patch arrive over one socket from one place and only one of them was
+    // checked: a pose went straight onto the camera, so a non-unit quaternion or a
+    // non-finite position landed on the object the output frame is drawn with. That is a
+    // camera move nobody authored, rendered into a file, which is the failure
+    // `restoreProject` names in as many words about the same value arriving from disk -
+    // `params.normalise` is where that refusal lives and this is the one door that walked
+    // past it.
+    //
+    // Refused loudly and the frame left as it was, rather than half-applied. A source
+    // silently drawing something other than what the operator is looking at is the one
+    // thing this mode must not do, which is the argument the parameter half makes for
+    // itself directly above.
+    let view;
+    try {
+      view = params.normalise('camera', patch.view);
+    } catch (err) {
+      console.error(`[program-out] ${err.message}`);
+      return;
+    }
+    freeCamera.position.fromArray(view.position);
+    freeCamera.quaternion.fromArray(view.quaternion);
+    if (freeCamera.fov !== view.fov) {
+      freeCamera.fov = view.fov;
       freeCamera.updateProjectionMatrix();
     }
   }
@@ -7324,7 +7385,15 @@ for (const handle of [ui.in, ui.out]) {
 
 ui.play.addEventListener('click', () => {
   if (!timeline) return;
-  if (timeline.playing) timeline.pause();
+  // **`pauseTransport` rather than `timeline.pause()`, which is the one press on this
+  // surface that was pausing without taking the transport.** Every other pause here goes
+  // through that helper - the key, `goTo`, the rate gesture - and what it adds is
+  // `takeTransport()`, which moves the generation so a `play()` still in flight cannot
+  // resolve afterwards and start the clip again. That matters exactly during pre-roll: a
+  // play is several seconds of warming accumulators before anything moves, so the press
+  // that stops it is the press most likely to land inside one, and the button was the one
+  // control that lost it. The take carried on rolling with the button reading Play.
+  if (timeline.playing) pauseTransport();
   else timeline.play().catch(showTimelineError);
 });
 
@@ -9595,6 +9664,16 @@ function choosePicker(picker, name, { close = false } = {}) {
             ? `applied ${doc.name} · ${doc.rev.slice(7, 15)}`
             : `applied ${written} values from ${doc.name}, which names part of a look rather than the whole of one`);
         } catch (err) {
+          // **Put the picker back on the look the clip is actually wearing**, which is
+          // what the deliverable menu does forty lines away and this one did not.
+          // `applyStoredPreset` refuses a document before it has written anything, so on
+          // a refusal every look value on screen is still the previous preset's - and the
+          // picker was the one surface left naming the refused one. The two disagreeing is
+          // worse than either: the panel shows one look and the control names another, and
+          // a render afterwards carries the picture the panel showed under the name the
+          // menu is displaying. The refusal itself still goes to the note, so this is the
+          // refusal told once rather than contradicted in a second place.
+          showPickerChoice(picker, appliedPreset?.name ?? '');
           showTimelineError(err);
         }
       }));
@@ -13682,6 +13761,16 @@ globalThis.__kinect = {
   // Read off the stack the keyboard pops rather than off a counter kept beside it, for
   // `worldTilt`'s reason: a number computed correctly and never applied is one edit away
   // at all times.
+  // The source side of a program-out patch, exposed because it is the only way to put one
+  // on the wire that the operator's page cannot produce. The operator sends
+  // `cameraPose(freeCamera)`, and a camera object holds a rotation - `controls.update()`
+  // renormalises what you write onto it - so a probe that corrupted the operator's
+  // quaternion measured the operator rather than this. What arrives here is JSON from a
+  // socket, and JSON can hold four numbers that are not a rotation.
+  //
+  // The real handler rather than a copy of it: this is the function the socket's message
+  // calls, so a row driving it is asking the shipped path what it does with a bad patch.
+  applyProgramOut,
   undoDepth: () => history.depth,
   // Whether `openTake` has finished. `history.begin()` is the last thing it does that a
   // document can observe, so a baseline existing is "the open is over" - and a tool that

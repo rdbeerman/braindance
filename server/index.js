@@ -8,7 +8,7 @@ import { pipeline } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join, normalize, extname, sep, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
-import { MessageParser, encodeMessage, TYPE_HELLO, TYPE_FRAME, TYPE_COLOR } from './protocol.js';
+import { MessageParser, encodeMessage, TYPE_HELLO, TYPE_FRAME, TYPE_COLOR, MAX_PAYLOAD_BYTES } from './protocol.js';
 import { openCapture, withCapture, captureIdFor, openCaptureCount, decimatePayload, cloudExtent } from './capture.js';
 import { handleExportSocket, MAX_FRAME_BYTES } from './export.js';
 import {
@@ -19,7 +19,7 @@ import {
 import { Recorder } from './recorder.js';
 import { JobStore } from './jobs.js';
 import { Webcam } from './webcam.js';
-import { requireMutation, originAllowed } from './http-guard.js';
+import { requireMutation, originAllowed, sameOriginBrowser } from './http-guard.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -725,8 +725,20 @@ const untilCallerLeaves = (res) => {
 };
 
 async function serveLibrary(req, res) {
+  // A `ServerResponse` emits `close` exactly once, so **when this is called decides
+  // whether it can ever fire**. Bound after an await, it is a listener attached to an
+  // event that has already happened: the caller hung up during `localTakes()`, `close`
+  // fired against no listeners, and the signal this hands the node fetch stays unaborted
+  // for the life of that fetch. The window is not theoretical - `localTakes` is a walk of
+  // the captures directory, measured at 7m30s over 200 unindexed takes, and it is exactly
+  // the interval during which a browser that gave up is most likely to have given up.
+  //
+  // So every handler that ends in a node fetch takes its signal as its first statement,
+  // before anything is awaited. `serveDownload` was already written this way and is what
+  // the other three now match.
+  const left = untilCallerLeaves(res);
   const here = await localTakes();
-  const there = node ? await node.takes(untilCallerLeaves(res)) : null;
+  const there = node ? await node.takes(left) : null;
   const takes = reconcile(here.takes, there);
   sendJson(res, {
     here: HERE_NAME,
@@ -836,6 +848,9 @@ async function serveReveal(req, res, [id]) {
  * second copy exists rather than quietly doing a reclaim under the wrong name.
  */
 async function serveRemoval(req, res, [id], kind) {
+  // First, and ahead of `readBody` as well as of the directory walk - see the note in
+  // `serveLibrary`. This one has two awaits in front of the node fetch rather than one.
+  const left = untilCallerLeaves(res);
   const body = await readBody(req);
   const here = await localTakes();
   const mine = here.takes.find((t) => t.id === id);
@@ -847,7 +862,7 @@ async function serveRemoval(req, res, [id], kind) {
     sendJson(res, { error: `${id} is being recorded right now: stop the take before removing it` }, 409);
     return;
   }
-  const there = node ? await node.takes(untilCallerLeaves(res)) : null;
+  const there = node ? await node.takes(left) : null;
   const theirs = (there ?? []).find((t) => t.hash === (mine?.hash ?? body.hash));
 
   if (kind === 'reclaim') {
@@ -876,6 +891,12 @@ async function serveRemoval(req, res, [id], kind) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hash: theirs.hash, confirm: true, verifiedElsewhere: verified }),
+        // The same caller as the listing above it, and this is the half of the route
+        // that actually changes something on the other machine: a reclaim that hangs
+        // here has already decided to unlink the node's copy, so the request is on the
+        // wire and the answer is what nobody is left to hear. The node completes or
+        // refuses it on its own either way - what the signal ends is this side waiting.
+        signal: left,
       });
       sendJson(res, { reclaimed: done, keptHere: verified });
     } catch (err) {
@@ -925,12 +946,47 @@ async function serveRemoteFrame(req, res, [id, n], query) {
     res.writeHead(400).end('decimate must be a whole number from 1 to 16');
     return;
   }
-  const upstream = await fetch(`${node.url}/capture/${encodeURIComponent(id)}/frame/${n}?decimate=${divisor}`);
+  // **Bound before the fetch, for the reason `serveLibrary` states**, and this route is
+  // the one where the caller-left signal is unambiguously right: a frame is one poster
+  // for one tile, the gallery asks for a new one on every pointer move, and a scrub
+  // across a shelf abandons dozens of these. Without it each one holds a socket to the
+  // node until the node feels like answering.
+  let upstream;
+  try {
+    upstream = await fetch(`${node.url}/capture/${encodeURIComponent(id)}/frame/${n}?decimate=${divisor}`,
+      { signal: untilCallerLeaves(res) });
+  } catch {
+    // The caller going away is the ordinary case here rather than an error, so it is not
+    // logged and there is nobody left to write a status to.
+    if (!res.writableEnded) res.writeHead(502).end('the node did not answer for that frame');
+    return;
+  }
   if (!upstream.ok) {
     res.writeHead(upstream.status).end('the node could not serve that frame');
     return;
   }
-  const body = Buffer.from(await upstream.arrayBuffer());
+  // **The whole reply lands in heap here, so it is bounded by what the format allows a
+  // payload to be rather than by what a node happens to send.** `MAX_PAYLOAD_BYTES` is
+  // the wire format's own limit and the same number `server/capture.js` refuses a longer
+  // declared payload against, so this is that rule reaching the one door a frame comes
+  // in through from another machine. A real decimated frame is under 486KB; anything
+  // near this ceiling is a desync or a node that is not this program.
+  const declared = Number(upstream.headers.get('content-length') ?? NaN);
+  if (Number.isFinite(declared) && declared > MAX_PAYLOAD_BYTES) {
+    res.writeHead(502).end(`the node offered ${declared} bytes for one frame, past the ${MAX_PAYLOAD_BYTES} this format allows`);
+    return;
+  }
+  let body;
+  try {
+    body = Buffer.from(await upstream.arrayBuffer());
+  } catch {
+    if (!res.writableEnded) res.writeHead(502).end('the frame stopped arriving from the node');
+    return;
+  }
+  if (body.length > MAX_PAYLOAD_BYTES) {
+    res.writeHead(502).end(`the node sent ${body.length} bytes for one frame, past the ${MAX_PAYLOAD_BYTES} this format allows`);
+    return;
+  }
   res.writeHead(200, {
     'Content-Type': 'application/octet-stream',
     'Content-Length': body.length,
@@ -1020,6 +1076,10 @@ async function writeDocument(req, res, store, name) {
  * log arriving late.
  */
 async function serveMarkSync(req, res, [id]) {
+  // Bound before the refusals below as well as before the walk - see `serveLibrary`.
+  // Taking it after them would be correct today and would rot the moment one of them
+  // learns to await something, which is the shape this whole class of bug has.
+  const left = untilCallerLeaves(res);
   if (!node) {
     sendJson(res, { error: 'no capture node is linked' }, 409);
     return;
@@ -1036,13 +1096,13 @@ async function serveMarkSync(req, res, [id]) {
     // library is built to handle, so the one place that reached for a filename
     // would be the one place the design does not hold.
     const here = (await localTakes()).takes.find((t) => t.id === id);
-    const theirTakes = await node.takes(untilCallerLeaves(res));
+    const theirTakes = await node.takes(left);
     const match = here && (theirTakes ?? []).find((t) => t.hash === here.hash);
     if (!match) {
       sendJson(res, { merged: 0, marks: await readMarks(path), note: `${node.name} does not hold this take` });
       return;
     }
-    const theirs = await node.fetchJson(`/capture/${encodeURIComponent(match.id)}/marks/log`);
+    const theirs = await node.fetchJson(`/capture/${encodeURIComponent(match.id)}/marks/log`, { signal: left });
     const mine = await readMarkLog(path);
     // Appended rather than rewritten. Both logs stay whole, which is what makes
     // this safe to run twice and safe to run from both machines.
@@ -1578,7 +1638,12 @@ const ROUTES = [
   // carrying this flag, so the next route that serves live sensor bytes is covered by
   // declaring itself rather than by somebody remembering - the same move the table
   // already made for mutations.
-  { path: '/camera.mjpg', pattern: /^\/camera\.mjpg$/, live: true, read: (req, res) => webcam.attach(req, res) },
+  // **`embeddable`, and it is the one route that is.** The webcam stream exists to be
+  // consumed by another program - OBS opens it as a browser source, which is a top-level
+  // navigation and would pass anyway, but a media source and a plain `<img>` in somebody's
+  // own overlay page are the documented uses too and neither is same-origin. It keeps the
+  // `live` origin rule above it, which is the gate this one is not replacing.
+  { path: '/camera.mjpg', pattern: /^\/camera\.mjpg$/, live: true, embeddable: true, read: (req, res) => webcam.attach(req, res) },
 
   // ---- the sensor
   //
@@ -1680,6 +1745,27 @@ async function serveRoute(req, res, urlPath, query) {
       if (r.live && !originAllowed(req)) {
         sendJson(res, {
           error: `${req.headers.origin} is not this server, and this route serves what the sensor is seeing`,
+        }, 403);
+        return true;
+      }
+      // **The third gate, and it covers the reads the first two cannot see.** The
+      // `live` rule above asks `originAllowed`, which passes a request carrying no
+      // origin - correctly, because that is what the peer node and the render worker
+      // look like. An `<img>` from another page looks the same to it, and several of
+      // these reads are expensive enough that being able to start one from a page the
+      // operator merely visited is the whole finding: `/capture/:id/file` streams a
+      // multi-gigabyte take off the disk the recorder is writing to, `remote-frame`
+      // buffers a node's whole reply into heap, `extent` scans per query pair past a
+      // 32-entry cache, and take ids are guessable - they are the date and a number.
+      //
+      // **Default-refused rather than marked route by route**, which is the difference
+      // between closing the class and closing the six that were found. A read added next
+      // year is asked by existing; one that genuinely has to answer another origin says
+      // so in the table, where `library-check` walks it. `sec-fetch-site` absent still
+      // passes, so nothing that is not a browser is affected at all.
+      if (!r.embeddable && !sameOriginBrowser(req)) {
+        sendJson(res, {
+          error: `this route is not answered to a page on another origin (sec-fetch-site: ${req.headers['sec-fetch-site']})`,
         }, 403);
         return true;
       }

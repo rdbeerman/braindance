@@ -63,6 +63,23 @@ const vSayEl = document.getElementById('vSay');
 
 const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 const gb = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(0)} MB`);
+/**
+ * A count from a take record, on its way into markup.
+ *
+ * **Every other field beside these goes through arithmetic and these two did not.**
+ * `gb` divides, `mmss` and `stamp` compute - so a hostile value in `bytes` or
+ * `durationSec` comes out the far side as a number or as `NaN`, and neither is markup.
+ * `frames` and `marks.length` were interpolated as they arrived, into `innerHTML`, in a
+ * tile built from a *node's* manifest: plain HTTP, no authentication, a machine on the
+ * shoot network able to answer in the node's place. That is script inside this page's own
+ * origin, which can drive every mutating route including the loopback-only reveal.
+ *
+ * `server/library.js` refuses a manifest that is not the shape it should be, and that is
+ * where this is actually fixed - at the boundary rather than at the sink. This is the
+ * second half anyway, because the sink is where the rule is easy to forget: a count drawn
+ * into markup is put through the same coercion its neighbours have always had.
+ */
+const countOf = (v) => (Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : 0);
 // The wall clock the take was shot on, in the zone of whoever is reading the
 // gallery. `toISOString` was the first spelling of this and it is UTC by
 // definition, so every tile in a CEST room read two hours early - a take shot at
@@ -1016,10 +1033,10 @@ function buildTile(take) {
       <div class="facts">
         <span class="state ${take.state}"><i></i>${take.state === 'remote' ? 'node' : take.state}</span>
         <span>${gb(take.bytes)}</span>
-        <span>${shooting ? 'recording now' : `${take.frames} frames`}</span>
+        <span>${shooting ? 'recording now' : `${countOf(take.frames)} frames`}</span>
       </div>
       <div class="facts">
-        <span>${(take.marks ?? []).length ? `${take.marks.length} mark${take.marks.length === 1 ? '' : 's'}` : 'no marks'}</span>
+        <span>${countOf((take.marks ?? []).length) ? `${countOf(take.marks.length)} mark${countOf(take.marks.length) === 1 ? '' : 's'}` : 'no marks'}</span>
         <span>${stamp(take.capturedAt)}${take.dateSource === 'mtime' ? ' (file date)' : ''}</span>
       </div>
       <div class="acts"></div>
@@ -1105,6 +1122,19 @@ function buildTile(take) {
     pressX = null;
     if (tap) openViewer(take.hash ?? take.id);
   });
+  // **A captured pointer can end without a `pointerup`, and this page handled that in
+  // none of its four gestures where the editor handles it in nine.** The browser fires
+  // `pointercancel` instead when it takes the pointer back - a touch becoming a scroll or
+  // a browser gesture, a stylus leaving range, the capture being lost - and `pointerup`
+  // then never arrives. `pressX` stays set, so the *next* `pointermove` over this tile
+  // scrubs it with no button held, and a later tap anywhere on the strip is measured
+  // against a press from a gesture that ended minutes ago and opens the viewer.
+  //
+  // Beside `pointerleave` rather than folded into it: leaving is the pointer going
+  // somewhere else and cancelling is it ceasing to exist, and only one of those is a
+  // reason to put the poster back. Both end the press, which is what the shared handler
+  // below says once.
+  skimEl.addEventListener('pointercancel', () => { pressX = null; dragged = false; });
   skimEl.addEventListener('pointerleave', () => { pressX = null; skim.setIndex(0); });
   // **And a keyboard can reach it, which it could not.** Opening the viewer was a
   // `pointerup` on a `div` and nothing else, so the whole surface was unreachable
@@ -1279,7 +1309,7 @@ function askDelete(tile, take) {
   const body = document.getElementById('cBody');
   body.innerHTML =
     `<b class="tid"></b> · ${mmss(take.durationSec)} · ${gb(take.bytes)}`
-    + (take.marks?.length ? ` · ${take.marks.length} marks` : ' · no marks')
+    + (countOf(take.marks?.length) ? ` · ${countOf(take.marks.length)} marks` : ' · no marks')
     + `<br>on ${take.state === 'remote' ? library.node?.name : alsoOnNode ? `this ${library.here} and ${library.node?.name}` : `this ${library.here}`}.`;
   body.querySelector('.tid').textContent = take.id;
   document.getElementById('cWarn').textContent = alsoOnNode
@@ -1339,7 +1369,7 @@ let renaming = null;
 function askRename(tile, take) {
   renaming = { tile, take };
   const body = document.getElementById('nBody');
-  body.innerHTML = `Renaming <b class="tid"></b> · ${gb(take.bytes)} · ${take.frames} frames.<br>`
+  body.innerHTML = `Renaming <b class="tid"></b> · ${gb(take.bytes)} · ${countOf(take.frames)} frames.<br>`
     + 'The take keeps its content hash, so every project built on it still finds its footage.';
   body.querySelector('.tid').textContent = take.id;
   renameInput.value = take.id;
@@ -1569,6 +1599,9 @@ vStage.addEventListener('pointermove', (e) => {
   if (vPressX !== null || e.buttons) viewing?.skim.fromX(e.clientX, vStage);
 });
 vStage.addEventListener('pointerup', () => { vPressX = null; });
+// The viewer's half of the same rule. It captures the pointer on `pointerdown`, so a
+// cancel leaves `vPressX` held and the next move scrubs the take with nothing pressed.
+vStage.addEventListener('pointercancel', () => { vPressX = null; });
 vBar.addEventListener('pointerdown', (e) => {
   if (e.target.classList.contains('mk')) return;
   viewing?.skim.fromX(e.clientX, vBar);
@@ -1701,7 +1734,24 @@ function paint() {
 // page exists to get through would have been the case it refused.
 const LISTING_TIMEOUT_MS = 15000;
 
+/**
+ * Which listing is the newest one to have been asked for.
+ *
+ * **The poll's own overlap is guarded and two different callers racing is not**, which is
+ * the gap: `pollLibrary` will not ask again while its own request is out, and that rule
+ * says nothing about the refresh Delete, Rename and Reclaim each run when they finish. A
+ * poll refresh already on the wire when the operator presses Delete resolves *after* the
+ * action's own refresh, assigns the older body over the newer one, and paints the tile of
+ * a take that is no longer there - with a Delete button on it that now refuses, because
+ * the server is right and the grid is stale.
+ *
+ * The window is not small. A warm listing over 200 takes measures 145ms and a cold one is
+ * minutes, and the actions are exactly what somebody does while the grid is settling.
+ */
+let refreshGeneration = 0;
+
 async function refresh({ bound = false } = {}) {
+  const mine = ++refreshGeneration;
   const res = await fetch('/library/all', {
     signal: bound ? AbortSignal.timeout(LISTING_TIMEOUT_MS) : undefined,
   });
@@ -1722,6 +1772,12 @@ async function refresh({ bound = false } = {}) {
   if (!res.ok || !Array.isArray(body?.takes)) {
     throw new Error(body?.error ?? `the library could not be listed: HTTP ${res.status}`);
   }
+  // Checked after the refusal above rather than before it, deliberately: a listing that
+  // came back broken is worth throwing from whether or not it is the newest, because the
+  // caller that asked for it is the one that can say what to do about it - the poll
+  // counts a failed refresh as a transition still unseen, and a button says so on screen.
+  // Only the *assignment* is what a stale answer must not do.
+  if (mine !== refreshGeneration) return;
   library = body;
   paint();
 }

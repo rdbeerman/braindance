@@ -3091,3 +3091,80 @@ keeping because everything else about that mutation stays green: the ordinates a
 1, so the camera's *rate* still reaches zero at the key and every velocity assertion in the
 suite passes. What goes is only the degree, and with it the acceleration claim that was the
 whole reason for the second point.
+
+## A parse that only ever ran in one configuration
+
+`native/grabber.cpp` had no compile gate of any kind — 64 JavaScript files got `node --check`
+on two Node versions every push and the one file that writes the artifact this program exists
+to produce got a regex in a citation walk. So the first version of `cpp-check` was going to be
+one invocation of `c++ -fsyntax-only`, which is a real check and would have carried a claim it
+could not support.
+
+The file chooses its default pipeline off which processors libfreenect2 was compiled with, and
+branches per processor in three more places. Configure the gate off whatever the host has and
+the macOS station gives it OpenCL, so **every OpenGL arm is text the compiler never reads** —
+the Pi's `pipeline = new libfreenect2::OpenGLPacketPipeline()` and the two refusals beside it.
+A break there would sit green on every push until somebody rebuilt on the Pi, which is the
+machine that is hardest to get to and the one where a broken build costs a shoot. Worse, the
+coverage would move with the host: the same tool on a Linux box with no OpenCL would check the
+opposite half and report the same green.
+
+So the gate runs the four combinations of the two macros the file branches on, and the control
+that says it does is `--mutate opengl-branch-broken` — a type name that does not exist, planted
+inside that `#ifdef` arm. **It must redden two of the four grabber rows and not all four**, and
+both halves of that are the assertion: all four would mean the mutation escaped its arm and is
+really testing something else, none would mean the matrix had collapsed back to one
+configuration. The count is the reading, not the exit code.
+
+Two smaller things came out of building it, both of which are the same rule pointed at the
+instrument rather than at the subject. `--mutate grabber-type-error` is kept separate from the
+two syntax mutations because `-fsyntax-only` is a semantic pass and nothing was asserting that:
+a gate that merely tokenised would take `HdEncoder("high")` for `HdEncoder(int)`, and an
+argument in the wrong unit is most of what a C++ mistake in this file looks like. And the tool
+feeds the compiler `int x = ;` before it checks anything real, refusing to continue unless that
+comes back rejected — the same canary `syntax-check` grew after finding a tree state where
+`node --check` accepted a broken file in silence, which is a lesson this repository has now
+paid for twice and should not pay for a third time.
+
+## A row that passes on both builds, found by running the mutation rather than by reading it
+
+`pauseTransport` is `takeTransport()` and then `timeline.pause()`, and its docstring is
+unambiguous about why: a pause is a claim on the transport, and a resume queued behind an
+older gesture only asks whether anybody has claimed it since. Every pause on the editor
+went through it except the play button, which called `timeline.pause()` directly - so the
+fix is one word and the finding reads as obvious.
+
+The row written for it was not. Two presses of `#tPlay`, the second inside the first's
+pre-roll, then a wait past any pre-roll and an assertion that the take is stopped. It
+passed. It also passed against `--mutate play-button-skips-pausetransport`, which is the
+whole defect put back, and the tool still printed `caught, as required (3 assertions
+fired)` - because three unrelated rows are red on this tree and the verdict counts
+failures rather than reading them. **That is this repository's own rule catching its
+author**: count the failed assertions and read which ones fired.
+
+Two things came out of chasing it, and the second is the one that matters.
+
+**The window was measured with the driver in it.** From Playwright the transport reported
+`playing` 71ms after the click and the clip first moved at 92ms, which reads as a 21ms
+window to aim at. Both numbers are round trips: `page.locator().click()` does not return
+until the page has processed the event, so what was being timed was the driver. Read from
+inside the page, `playing` is true synchronously in the handler - the window opens at 0ms.
+`docs/measurement.md` already says a figure derived from how long the driver's own loop
+took is a measurement of the driver; this is that, one layer further in. The row now finds
+its window by state - the transport playing and the clip not yet moved - rather than by a
+number that is a fact about this machine.
+
+**And with the window found, the mutation still is not caught, because the defect may not
+be reachable through this control.** A pause pressed inside a play's *own* pre-roll holds
+on both builds: nothing else has claimed the transport, so there is no queued resume for
+the generation to invalidate. The cases the docstring names - a rate release, an undo, a
+seek from another gesture - all pause first, so at the moment their resume is queued
+`timeline.playing` is false and the button is a *play* rather than a pause. No sequence
+was found where the button is the pause and a foreign resume is pending.
+
+So the change stays and the claim shrinks to what was shown: it is consistency with the
+helper this file's own comment mandates, not a defect anybody has reproduced. The mutation
+stays too, named in `CLAUDE.md` as one this suite does not catch - the same treatment
+`bloom-reference-1080` already has, and for the same reason. A mutation quietly deleted is
+a question that gets asked again in a year; a mutation left in a list of things that must
+FAIL, that does not, is worse than either.

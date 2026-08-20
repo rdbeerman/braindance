@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <csignal>
 #include <cerrno>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <chrono>
@@ -179,6 +180,16 @@ class HdEncoder {
 public:
   explicit HdEncoder(int quality) : quality_(quality) {}
 
+  // **A joinable std::thread destroyed is `std::terminate`, not a leak**, and this class
+  // was one early `return` away from it the whole time: `main` calls `stop()` on the way
+  // out of the frame loop, but the corpus writer's `return 1` above it does not, so a
+  // full disk during `--dump-corpus` took the process out through an abort instead of
+  // through the exit code that says what happened. Idempotent, because `stop()` joins and
+  // a joined thread is no longer joinable - so the ordinary path still stops the encoder
+  // where it always did, at a point where the thread is quiescent rather than mid-encode,
+  // and this is only the net under the paths that never get there.
+  ~HdEncoder() { stop(); }
+
   void start() { thread_ = std::thread(&HdEncoder::run, this); }
 
   void stop() {
@@ -320,6 +331,48 @@ static void pollCommands(libfreenect2::Freenect2Device *dev, std::string &pendin
   }
 }
 
+/**
+ * Reads a flag given in metres, or refuses it.
+ *
+ * `std::strtof` rather than the `std::atof` this used to be, and the end pointer is the
+ * whole of the difference: `atof` has no way at all to say "that was not a number". It
+ * answers 0.0 for `x`, and - the one that actually destroys footage - it stops at the
+ * first character it cannot read and keeps what it had, so `--max-depth 4,5` typed on a
+ * keyboard whose decimal separator is a comma clips at 4.0m and the hello reports 4.000
+ * with complete confidence. Half a metre of the room is missing from a file that cannot
+ * be shot again, the frame rate is a healthy 30.0, and nothing downstream can tell.
+ *
+ * So the token has to be consumed entirely, and the value has to be one this pair can
+ * mean: `nan` and `inf` both parse cleanly through `strtof` and would reach libfreenect2
+ * as a clip plane, and zero or a negative distance is a plane at or behind the sensor.
+ * What is deliberately *not* refused is a large finite value - the u16 millimetre
+ * conversion already floors anything past 65.535m to "no reading", so a wide clip is
+ * permissive rather than wrong, and a ceiling invented here would be a number this file
+ * had an opinion about with nothing behind it.
+ *
+ * **Two edges of `strtof` measured rather than assumed**, by compiling this function on
+ * its own and running the cases through it. `" 4.5"` is accepted and `"4.5 "` is refused,
+ * because `strtof` consumes leading whitespace itself and leaves trailing whitespace for
+ * the end pointer to find. The asymmetry is stated rather than smoothed over: trimming
+ * would be repairing an argument, and everything else in this block refuses one instead.
+ * And `"0x10"` parses as 16 metres, because a hex float is a float - which is not a
+ * number anybody types for a distance, so it is recorded here rather than given a rule.
+ * Measured: 0.05, 9.0 and 4.5 accepted; `4,5`, `x`, empty, `6m`, `nan`, `inf`, `-inf`,
+ * `0`, `-1`, `1e40` and `1e-60` all refused.
+ */
+static bool read_metres(const char *text, float *out) {
+  if (!text || !*text) return false;
+  char *end = nullptr;
+  errno = 0;
+  const float v = std::strtof(text, &end);
+  if (end == text || *end != '\0') return false;
+  if (errno == ERANGE) return false;
+  if (!std::isfinite(v)) return false;
+  if (v <= 0.0f) return false;
+  *out = v;
+  return true;
+}
+
 int main(int argc, char **argv) {
   int jpegQuality = 80;
   bool wantColor = true;
@@ -367,6 +420,12 @@ int main(int argc, char **argv) {
   // read, so reporting the parsed int tells somebody who typed `--dump-every all`
   // that the problem is a '0' they never wrote, and sends them looking for it.
   const char *qualityRaw = nullptr, *dumpCountRaw = nullptr, *dumpEveryRaw = nullptr;
+  // The depth pair keeps only its text here and is parsed entirely below, which is the
+  // one place this differs from the three ints above. They can parse in the loop because
+  // `atoi` throws nothing away that a later range test cannot recover; `read_metres`
+  // refuses on what the *parse* saw - characters left over at the end of the token - and
+  // that evidence is gone by the time a float has been stored.
+  const char *minDepthRaw = nullptr, *maxDepthRaw = nullptr;
 
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -374,8 +433,8 @@ int main(int argc, char **argv) {
     else if (a == "--pipeline" && i + 1 < argc) pipelineName = argv[++i];
     else if (a == "--quality" && i + 1 < argc) jpegQuality = std::atoi(qualityRaw = argv[++i]);
     else if (a == "--log" && i + 1 < argc) logLevel = argv[++i];
-    else if (a == "--min-depth" && i + 1 < argc) minDepth = (float)std::atof(argv[++i]);
-    else if (a == "--max-depth" && i + 1 < argc) maxDepth = (float)std::atof(argv[++i]);
+    else if (a == "--min-depth" && i + 1 < argc) minDepthRaw = argv[++i];
+    else if (a == "--max-depth" && i + 1 < argc) maxDepthRaw = argv[++i];
     else if (a == "--no-low-light") lowLight = false;
     else if (a == "--profile") profile = true;
     else if (a == "--dump-corpus" && i + 1 < argc) dumpCorpus = argv[++i];
@@ -437,6 +496,23 @@ int main(int argc, char **argv) {
         pipelineName.c_str());
       return 0;
     }
+    // **Nothing falls through this loop, and until it did not there was no way to be
+    // told about a flag that never arrived.** Every arm above pairs a name with a value
+    // it needs, so a misspelling (`--max-dept 6`), a flag whose value was eaten by a
+    // shell, and a flag left last on the line with nothing after it all missed every arm
+    // and ran a completely ordinary session on defaults - which for these two flags in
+    // particular means an operator who typed a clip range watching footage recorded
+    // without one, with a hello that agrees with the defaults it actually used.
+    //
+    // Exit 2 for the same reason the three range refusals below use it: nothing was
+    // attempted, so there is nothing to retry or diagnose. On the server that lands in
+    // the backoff and eventually reads as `absent`, which is a misleading word for a
+    // rejected argument - but the alternative is the session that runs, and the argument
+    // is in `[server] starting grabber:` one line above the refusal.
+    else {
+      std::fprintf(stderr, "[grabber] unknown argument or missing value: '%s' - see --help\n", a.c_str());
+      return 2;
+    }
   }
 
   // The numeric flags are checked here rather than where they are parsed, because a
@@ -467,6 +543,33 @@ int main(int argc, char **argv) {
   }
   if (dumpCount < 1) {
     std::fprintf(stderr, "[grabber] --dump-count must be an integer 1 or greater, got '%s'\n", dumpCountRaw ? dumpCountRaw : "");
+    return 2;
+  }
+
+  // The two flags that decide what exists at all, and for most of this file's life the
+  // only numeric ones with no refusal to make. The three above are recoverable mistakes:
+  // a bad `--quality` produces an ugly take somebody can re-grade, a bad `--dump-count`
+  // wastes a corpus run. These clip on the GPU before a frame is assembled, so what a
+  // typo here removes is not in the file and cannot be put back - and it goes wrong
+  // quietly, because the hello faithfully reports whatever number was parsed at `%.3f`
+  // and every reader downstream believes it.
+  if (minDepthRaw && !read_metres(minDepthRaw, &minDepth)) {
+    std::fprintf(stderr, "[grabber] --min-depth must be a positive finite number of metres, got '%s'\n", minDepthRaw);
+    return 2;
+  }
+  if (maxDepthRaw && !read_metres(maxDepthRaw, &maxDepth)) {
+    std::fprintf(stderr, "[grabber] --max-depth must be a positive finite number of metres, got '%s'\n", maxDepthRaw);
+    return 2;
+  }
+  // Asked of the pair unconditionally rather than only when a flag was given, because it
+  // is a property of the two values that survived the loop rather than of the arguments
+  // that set them - and the shipped defaults, 0.05 and 9.0, are what it is calibrated not
+  // to refuse. Swapped, the range is empty and every frame is a grid of zeroes delivered
+  // at a perfectly healthy 30fps, which is this repo's own definition of the worst kind
+  // of failure: a wrong result that renders successfully and passes the health number.
+  if (!(minDepth < maxDepth)) {
+    std::fprintf(stderr, "[grabber] --min-depth %.3f must be less than --max-depth %.3f - "
+                 "a range that is empty or inverted clips every point away\n", minDepth, maxDepth);
     return 2;
   }
 
@@ -641,6 +744,14 @@ int main(int argc, char **argv) {
   bool hdFormatWarned = false;
   uint64_t frameCount = 0;
   uint64_t colorCount = 0;
+  // Frames libfreenect2 handed over having already marked its own solve as failed. They
+  // are counted rather than only dropped, because a drop that leaves no trace is
+  // indistinguishable from a frame that never arrived, and the two want opposite answers
+  // from whoever reads the log: one is a machine that cannot keep up with its GPU, the
+  // other is a USB link. Reported beside the frame count for the same reason the colour
+  // count is - it is the number that explains the picture.
+  uint64_t badDepth = 0;
+  uint64_t badColor = 0;
   int dumped = 0;
 
   // Records are buffered and dumped at exit rather than printed per frame, so
@@ -668,11 +779,42 @@ int main(int argc, char **argv) {
     if (wantColor && colorListener.hasNewFrame()) {
       if (haveColor) colorListener.release(colorFrames);
       haveColor = colorListener.waitForNewFrame(colorFrames, 1000);
-      if (haveColor) { colorCount++; newColor = true; }
+      // **`status` is libfreenect2 telling us this frame's own decode failed, and it
+      // hands the frame over regardless.** The JPEG processors set it and return the
+      // buffer with whatever the failure left in it, so a frame taken on trust here is
+      // registered into the depth frustum and encoded into the take as ordinary colour.
+      // Dropped back to no colour for this frame rather than reused: the previous good
+      // one was already released a line above, and painting the depth cloud with a
+      // failed decode is worse than painting it with nothing - the geometry is right
+      // either way, and the operator can see an untextured cloud.
+      if (haveColor && colorFrames[libfreenect2::Frame::Color]->status != 0) {
+        badColor++;
+        colorListener.release(colorFrames);
+        haveColor = false;
+      } else if (haveColor) { colorCount++; newColor = true; }
     }
 
     libfreenect2::Frame *depth = depthFrames[libfreenect2::Frame::Depth];
     libfreenect2::Frame *rgb = haveColor ? colorFrames[libfreenect2::Frame::Color] : nullptr;
+
+    // The same refusal on the half of the frame that cannot be re-derived. The OpenCL
+    // processor - the default wherever OpenCL is compiled in, which is this project's
+    // editing station - sets `status = 1` when the readback off the device fails and
+    // still delivers the frame, buffer holding whatever was in it. Taken as ordinary
+    // depth it becomes u16 millimetres, goes down the wire, and is written into a take
+    // that cannot be shot again, while `frameCount` keeps advancing and delivered fps
+    // stays at a flawless 30.0. That is the one shape this whole repository is built to
+    // reject: a wrong result that renders successfully and passes the health number.
+    //
+    // Skipped rather than repaired, and the frameset is released first because the next
+    // `waitForNewFrame` needs the slot back. `frameCount` deliberately does not advance,
+    // so a run losing frames reads as a rate below 30 - which is the honest reading, and
+    // `badDepth` beside it is what separates this cause from a degraded USB link.
+    if (depth->status != 0) {
+      badDepth++;
+      depthListener.release(depthFrames);
+      continue;
+    }
     uint64_t tAcquired = now_us();
 
     // The webcam's picture, handed off before registration rather than after, because
@@ -814,8 +956,9 @@ int main(int argc, char **argv) {
     // Colour lagging depth is normal in dim light and is the one number that
     // explains a washed-out or stale-looking image, so it is reported alongside.
     if (++frameCount % 150 == 0)
-      std::fprintf(stderr, "[grabber] %llu frames (%llu colour)\n",
-                   (unsigned long long)frameCount, (unsigned long long)colorCount);
+      std::fprintf(stderr, "[grabber] %llu frames (%llu colour, %llu bad depth, %llu bad colour)\n",
+                   (unsigned long long)frameCount, (unsigned long long)colorCount,
+                   (unsigned long long)badDepth, (unsigned long long)badColor);
   }
 
   // Stopped before the listener releases its frame and before the counters below are
@@ -850,6 +993,7 @@ int main(int argc, char **argv) {
   if (jpegCompressor) tjDestroy(jpegCompressor);
   dev->stop();
   dev->close();
-  std::fprintf(stderr, "[grabber] stopped after %llu frames\n", (unsigned long long)frameCount);
+  std::fprintf(stderr, "[grabber] stopped after %llu frames (%llu bad depth, %llu bad colour)\n",
+               (unsigned long long)frameCount, (unsigned long long)badDepth, (unsigned long long)badColor);
   return 0;
 }
