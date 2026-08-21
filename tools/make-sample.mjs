@@ -55,12 +55,44 @@
 // so - `docs/measurement.md`'s rule that a fixture is a term in the assertion applies to
 // this one hardest, because it is the one that looks most like footage.
 
-import { createWriteStream, existsSync, statSync } from 'node:fs';
+import { createWriteStream, existsSync, renameSync, rmSync, statSync } from 'node:fs';
 import { encodeMessage, TYPE_HELLO, TYPE_FRAME } from '../server/protocol.js';
 import { DEPTH_W, DEPTH_H } from '../web/format.js';
 
 const argv = process.argv.slice(2);
-const positional = argv.filter((a) => !a.startsWith('--'));
+
+// **The option names are a table rather than five string literals scattered down the
+// file, because a name this parser does not know used to be worth nothing at all.**
+// `--framse 10` put `10` into the positional list, left `--frames` on its default, and
+// wrote a perfectly valid 284-frame capture that was not the one anybody asked for -
+// and then `--if-missing` on the next `npm run fixtures` kept it, so the wrong fixture
+// became the permanent one and twelve tools rooted at it. A misspelling that produces a
+// plausible artifact is worse than one that produces nothing.
+//
+// Splitting the two kinds is what makes the positional count honest as well: a value
+// like the `40` in `--frames 40` is not a positional and the old `startsWith('--')`
+// filter counted it as one, so there was no way to notice a second path had been given.
+const VALUED = ['--frames', '--fps', '--quality'];
+const BOOLEAN = ['--force', '--if-missing'];
+
+const positional = [];
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (VALUED.includes(a)) { i++; continue; }
+  if (BOOLEAN.includes(a)) continue;
+  if (a.startsWith('-')) {
+    console.error(`[make-sample] ${a} is not an option this tool has`
+      + ` - it takes ${[...VALUED, ...BOOLEAN].join(', ')}. Nothing was written.`);
+    process.exit(2);
+  }
+  positional.push(a);
+}
+if (positional.length > 1) {
+  console.error(`[make-sample] one output path, and ${positional.length} were given:`
+    + ` ${positional.join(' ')}. Nothing was written.`);
+  process.exit(2);
+}
+
 const flag = (name, fallback) => {
   const i = argv.indexOf(name);
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : fallback;
@@ -526,7 +558,27 @@ const hello = JSON.stringify({
   color: true,
 });
 
-const stream = createWriteStream(OUT);
+// **Generated beside the target and renamed onto it, so a run that dies leaves nothing
+// that looks like a capture.** Opening `OUT` directly truncates it at the first byte and
+// keeps it open for the whole generation, so an interrupt, a full disk or a throw out of
+// the encoder left a short but perfectly well-formed `.knct` at the path - and the next
+// `npm run fixtures` passes `--if-missing`, sees a file, exits 0 and adopts the wreck
+// permanently. The rename is atomic within a directory, so the path holds either what was
+// there before or a complete capture and never a prefix of one.
+//
+// It also makes `--force` honest. That flag used to destroy the old capture the moment
+// the stream opened, before a single frame had been encoded, so a `--force` run that then
+// failed had taken the footage and produced nothing to replace it.
+const TEMP = `${OUT}.part`;
+const stream = createWriteStream(TEMP);
+// Removed on any failure, including the ones nothing here catches: an uncaught throw and
+// a SIGINT both leave the process without running another line of this file otherwise, and
+// a stray `.part` beside a real capture is the kind of litter somebody deletes the wrong
+// half of. `exit` covers the ordinary throw; the signals do not fire `exit` on their own.
+const discard = () => { try { rmSync(TEMP, { force: true }); } catch { /* going away anyway */ } };
+let installed = false;
+process.on('exit', () => { if (!installed) discard(); });
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { discard(); process.exit(130); });
 // **One error handler for the stream rather than one per write.** A `once('error')` armed
 // inside `write` is only ever removed by an error, and the fast path resolves on
 // `stream.write` returning true without one arriving - so the default 284 frames armed 284
@@ -581,6 +633,10 @@ for (let i = 0; i < FRAMES; i++) {
 }
 
 await new Promise((res) => stream.end(res));
+// The last thing that happens, and the only line that puts anything at `OUT`. Everything
+// above this point is reversible by deleting one temporary file.
+renameSync(TEMP, OUT);
+installed = true;
 console.log(`[make-sample] ${OUT}: ${FRAMES} frames at ${FPS}fps, `
   + `${(FRAMES / FPS).toFixed(2)}s, mean colour ${(colorTotal / FRAMES / 1024).toFixed(1)}KB a frame`);
 console.log('[make-sample] generation zero, no startedAt - a stand-in, not footage; say so when reporting a number from it');
