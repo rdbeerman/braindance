@@ -301,3 +301,7 @@ Behind those sit the working notes: [docs/measurement.md](docs/measurement.md) f
 rig is measured, [docs/instruments.md](docs/instruments.md) for every way a check here has
 claimed a property it was not testing, and [docs/proof-tools.md](docs/proof-tools.md) for
 what each tool needs before it will run.
+
+One document beside those is scaffolding rather than a record:
+[docs/glyph-field.md](docs/glyph-field.md) is a design that has been decided and not yet
+built, and it is deleted when the thing it describes works.
