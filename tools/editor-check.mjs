@@ -278,8 +278,41 @@ const MUTATIONS = {
   'play-button-skips-pausetransport': {
     file: 'web/main.js',
     edits: [[
+      '  if (timeline.playing || timeline.pendingPlay) pauseTransport();\n  else timeline.play().catch(showTimelineError);',
+      '  if (timeline.playing || timeline.pendingPlay) timeline.pause();\n  else timeline.play().catch(showTimelineError);',
+    ]],
+  },
+
+  // The toggle goes back to reading `playing` alone, which is how it shipped: a play
+  // warming up from a draft or an out-of-range playhead is awaiting an accurate seek,
+  // `playing` is deliberately false for that whole stretch, and a press inside it was
+  // taken as a second play rather than as the stop it meant - two plays in flight, both
+  // resolving into a rolling take.
+  //
+  // Must redden the pending-play outcome row and leave the pending-window row above it
+  // green, because the mutated build still enters the pending state - what it loses is
+  // the press that ends it. The second press calls `play()`, which stands down against
+  // `pendingPlay`, so the first play resolves unopposed.
+  'toggle-plays-over-a-pending-play': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (timeline.playing || timeline.pendingPlay) pauseTransport();\n  else timeline.play().catch(showTimelineError);',
       '  if (timeline.playing) pauseTransport();\n  else timeline.play().catch(showTimelineError);',
-      '  if (timeline.playing) timeline.pause();\n  else timeline.play().catch(showTimelineError);',
+    ]],
+  },
+
+  // The pending play stops asking whether a pause landed inside it, which is the other
+  // half of the same defect: the toggle can see the pending play and pause it, but a
+  // `play()` that never rechecks its generation after the awaited seek resolves sets
+  // `playing = true` over the top of that pause anyway.
+  //
+  // Must redden the pending-play outcome row alone, same as the toggle mutation - two
+  // ways to break one claim, and the claim needs both halves standing.
+  'play-resolves-past-its-pause': {
+    file: 'web/main.js',
+    edits: [[
+      '    if (gen !== this.playGen) {\n      this.paint();\n      return;\n    }\n',
+      '',
     ]],
   },
 
@@ -2021,7 +2054,9 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [[
       '      // Or the page scrolls under the strip.\n      e.preventDefault();\n'
-      + '      if (timeline.playing) pauseTransport();\n'
+      + '      // `pendingPlay` beside `playing` for the reason the play button\'s comment gives\n'
+      + '      // at length: a play warming up from a draft is a play this press means to stop.\n'
+      + '      if (timeline.playing || timeline.pendingPlay) pauseTransport();\n'
       + '      else timeline.play().catch(showTimelineError);\n      return;',
       '      // Or the page scrolls under the strip.\n      e.preventDefault();\n      return;',
     ]],
@@ -4107,6 +4142,46 @@ try {
     `playing ${afterPress.playing} at ${afterPress.programSec.toFixed(3)}s`);
   const glyph = await page.evaluate("document.getElementById('tPlay').getAttribute('aria-label')");
   check(glyph === 'Play', '  and the button says so, so the control and the transport agree about what is happening', String(glyph));
+
+  // ---- and the earlier stretch of the same pre-roll, where `playing` is still false
+  //
+  // A play from a drafted playhead is awaiting an accurate seek before it is a play at
+  // all, and `playing` is deliberately false for that whole stretch - the image is not
+  // yet true. So the window the rows above find by `playing` going true has an earlier
+  // half these rows are about: a second press inside it used to read as another play,
+  // and both plays resolved into a rolling take over the press that meant stop.
+  //
+  // Both presses happen in one page-side task, because the pending state is entered
+  // synchronously by the first click's handler and that is the only place a driver can
+  // be certain of still being inside it. The wait afterwards is for the transport's own
+  // chain to drain rather than a constant, because the seek's length is a fact about
+  // this machine and the mutated build only starts the clip *after* it resolves - a
+  // constant shorter than the seek would read the defect as a pass.
+  await page.evaluate('__kinect.timeline.transport().draft(4.0)');
+  const pendingPress = await page.evaluate(`(() => {
+    const t = __kinect.timeline.transport();
+    const button = document.getElementById('tPlay');
+    const before = { drafted: t.drafted, playing: t.playing };
+    button.click();
+    const within = { playing: t.playing, pending: t.pendingPlay };
+    button.click();
+    return { before, within };
+  })()`);
+  check(pendingPress.before.drafted && !pendingPress.within.playing && pendingPress.within.pending,
+    'the second press lands while the play is still pending - drafted start, playing still false - which is what makes the row below about the pending state rather than about a rolling take',
+    `drafted ${pendingPress.before.drafted}, playing ${pendingPress.within.playing}, pending ${pendingPress.within.pending}`);
+  const afterPending = await page.evaluate(`(async () => {
+    const t = __kinect.timeline.transport();
+    for (let i = 0; i < 2000; i++) {
+      if (!t.pendingPlay && !t.working) break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    return { playing: t.playing, pending: t.pendingPlay };
+  })()`);
+  check(!afterPending.playing && !afterPending.pending,
+    'a stop pressed inside the pending stretch leaves the take stopped once the seek resolves, rather than two plays resolving into a rolling take',
+    `playing ${afterPending.playing}, pending ${afterPending.pending}`);
 
   await page.evaluate('__kinect.timeline.transport().pause()');
   await settle();

@@ -5553,6 +5553,14 @@ class TimelineTransport {
     // nothing records.
     this.frame = 0;
     this.playing = false;
+    // A play that is still warming up - awaiting the accurate seek a draft or an
+    // out-of-range playhead forces - is a play the toggle has to be able to stop,
+    // and `playing` cannot say so because it is deliberately false until the image
+    // is true. The flag is what the play button reads; the generation is what
+    // `pause` bumps so the pending play stands down instead of resolving into
+    // `playing = true` over the top of the press that stopped it.
+    this.pendingPlay = false;
+    this.playGen = 0;
     this.nextDueMs = 0;
     // Raised by a draft, because a draft is deliberately not the true image.
     // Anything that has to be true - releasing the scrubber, pressing play -
@@ -6130,15 +6138,31 @@ class TimelineTransport {
   }
 
   async play() {
-    if (this.playing) return;
+    if (this.playing || this.pendingPlay) return;
     this.behindMs = 0;
-    // A draft is not the image playback would have produced, so playing on from
-    // one would start the afterimage off a picture that never existed.
-    if (this.drafted) await this.seek(this.programSec);
-    // Keep playback inside the clip's in/out points. Starting from outside the
-    // range snaps to the in point; reaching the out point stops.
-    if (this.programSec < this.clipInSec || this.programSec > this.clipOutSec) {
-      await this.seek(this.clipInSec);
+    // The stretch between here and `playing = true` is real time whenever either
+    // seek below has work to do, and a press landing inside it used to read as a
+    // second play: `playing` was still false, so the toggle started another one,
+    // and both resolved into a rolling take over the top of the press that meant
+    // stop. `pendingPlay` is how the toggle sees this stretch; the generation
+    // check after the awaits is how a pause landing inside it wins.
+    const gen = this.playGen;
+    this.pendingPlay = true;
+    try {
+      // A draft is not the image playback would have produced, so playing on from
+      // one would start the afterimage off a picture that never existed.
+      if (this.drafted) await this.seek(this.programSec);
+      // Keep playback inside the clip's in/out points. Starting from outside the
+      // range snaps to the in point; reaching the out point stops.
+      if (this.programSec < this.clipInSec || this.programSec > this.clipOutSec) {
+        await this.seek(this.clipInSec);
+      }
+    } finally {
+      this.pendingPlay = false;
+    }
+    if (gen !== this.playGen) {
+      this.paint();
+      return;
     }
     this.playing = true;
     this.nextDueMs = performance.now();
@@ -6146,6 +6170,10 @@ class TimelineTransport {
   }
 
   pause() {
+    // Bumped whether or not a play is pending, because a pause is a statement about
+    // the transport rather than about any one play call - the cost of bumping with
+    // nothing in flight is nothing.
+    this.playGen += 1;
     this.playing = false;
     this.paint();
   }
@@ -7439,7 +7467,14 @@ ui.play.addEventListener('click', () => {
   // play is several seconds of warming accumulators before anything moves, so the press
   // that stops it is the press most likely to land inside one, and the button was the one
   // control that lost it. The take carried on rolling with the button reading Play.
-  if (timeline.playing) pauseTransport();
+  //
+  // **And `pendingPlay` beside `playing`, because the pre-roll has an earlier stretch
+  // where `playing` is still false.** A play from a drafted or out-of-range playhead
+  // awaits an accurate seek before it is a play at all, so a second press inside that
+  // stretch read as another play rather than as the stop it meant - two plays in
+  // flight, both resolving into a rolling take. A pending play is a stoppable one, and
+  // the pause's generation bump inside the transport is what stands it down.
+  if (timeline.playing || timeline.pendingPlay) pauseTransport();
   else timeline.play().catch(showTimelineError);
 });
 
@@ -7580,7 +7615,9 @@ addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLElement && e.target.closest('button, [role=button]')) return;
       // Or the page scrolls under the strip.
       e.preventDefault();
-      if (timeline.playing) pauseTransport();
+      // `pendingPlay` beside `playing` for the reason the play button's comment gives
+      // at length: a play warming up from a draft is a play this press means to stop.
+      if (timeline.playing || timeline.pendingPlay) pauseTransport();
       else timeline.play().catch(showTimelineError);
       return;
     case 'ArrowRight': e.preventDefault(); step(e.shiftKey ? timeline.outputFps : 1); return;

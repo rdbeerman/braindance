@@ -3169,6 +3169,83 @@ stays too, named in `CLAUDE.md` as one this suite does not catch - the same trea
 a question that gets asked again in a year; a mutation left in a list of things that must
 FAIL, that does not, is worse than either.
 
+A round of review later, the same button *did* have a demonstrated defect - a different
+one, on the stretch this row's window opens after. The case below has it; the shrunken
+claim above was right to shrink, because what was eventually reproduced was not the
+generation guard failing but the toggle not seeing a pending play at all.
+
+## The window a row finds by `playing` opens after the stretch the defect lives in
+
+The row above finds its pre-roll window by state: the transport playing and the clip not
+yet moved. That window is real and the row is honest about it - and it begins where
+`play()` assigns `playing = true`, which on a drafted or out-of-range playhead is *after*
+an awaited accurate seek. The stretch before that assignment is also real time, `playing`
+reads false for the whole of it, and the toggle read `playing` alone: a second press
+inside that stretch was taken as another play rather than as the stop it meant. Neither
+pending invocation rechecked anything after its await, so both resolved into a rolling
+take over the top of the press. An external review found it by reading the proof arm: the
+second click waits for `t.playing` to go true, so the arm exercises only the later window
+and the earlier one was never driven.
+
+The fix is a `pendingPlay` flag the toggle reads beside `playing`, and a generation inside
+the transport that `pause()` bumps and `play()` rechecks after its awaits. The rows that
+hold it enter the pending state synchronously - `draft(4.0)`, then both clicks in one
+page-side task, because the first click's handler sets `pendingPlay` before its first
+await and the same task is the only place a driver is *certain* the state still holds. A
+precondition row reads `drafted`, `playing` and `pendingPlay` at the second click, or the
+outcome row passes vacuously on any build the moment the draft clears early.
+
+The wait after the presses is for the transport's chain to drain - `!pendingPlay &&
+!working`, then a beat - rather than a constant, and that choice is the mutation's doing:
+the mutated builds start the clip only *after* the pending seek resolves, so a constant
+shorter than the seek reads the defect as a pass. That is the same lesson the row above
+learned about windows measured with the driver in them, arriving one stage earlier.
+
+Two mutations guard it, `toggle-plays-over-a-pending-play` and
+`play-resolves-past-its-pause`, and they redden the same outcome row - two ways to break
+one claim that needs both halves standing. The toggle mutation leaves the pending-window
+row green, because the mutated build still enters the pending state; what it loses is the
+press that ends it.
+
+## An instrument asserting the sufficient condition pins the code to refusing legal states
+
+`restorekey-skips-handle-invariants` asserted, by name and fixture, that `easeOut
+[[0.8, 0], [0.2, 0]]` is refused for descending control x. Descending x is *sufficient*
+for a fold and never necessary, and with the default `easeIn` beside it that fixture's
+curve is single-valued - minimum dx/du +0.277. So the instrument was holding the loader to
+a rule that refuses legal documents: `elevate` produces crossed polygons out of ordinary
+handles (`easeOut [[0.9, 0.1]]` / `easeIn [[0.1, 0.9]]` elevates to x = 0.675, 0.5, curve
+unchanged), the editor saved them, and the next reload refused its own document. The same
+per-side rule was simultaneously too loose - `previous` reset to 0 per side, so a fold
+spanning the `easeOut`/`easeIn` join (`easeOut [[0.9, 0]]` / `easeIn [[0.05, 0.5],
+[0.1, 1]]`, ascending within each side, minimum dx/du -0.41) loaded and rendered the move
+at the wrong times, silently. One rule, wrong in both directions, and the instrument's
+fixture is what kept it that way: fixing the code meant rewriting what the mutation
+claimed to redden, which is why it went to the author rather than into a commit.
+
+The replacement asks the real question of the real object - `foldRefusal` in
+`web/curve.js`, whole-curve x-monotonicity once per segment with both handles in hand,
+decided exactly by convex-hull pruning and de Casteljau subdivision rather than by a
+sample count. The new fixture is the genuine fold above, the legal-crossed row beside it
+is the exact polygon `elevate` produces - the half that fails on the build this replaced -
+and `restore-skips-the-fold-check` reddens the fold row alone while the per-side rows
+stay green, which is the split that says the two checks are different claims.
+
+Two things came out of building it that the next check of this shape will want. **The
+drag needed the same rule, and a seeded search is what said so**: `handleSpan`'s
+neighbour clamp is the ordering rule again, and from the twice-elevated legal polygon an
+adversarial sequence of in-span drags reached a genuine fold in six moves - 7,005 folded
+states across the search, 1,184 of them ascending within each side, so no per-side
+reading of any strictness catches them. `foldFreeX` now slides a dragged x to the last
+fold-free point, and the search re-runs in `test/curve.test.mjs` with a wider adversary
+and a positive control - the unguarded run must fold, or the guarded run asking nothing
+would read as it holding. **And the exact decision procedure needs its tolerance on both
+tests, not one**: the strict hull test cannot terminate cheaply on a segment sitting
+exactly on the boundary - which is the state the clamp's own bisection produces - and one
+such call measured 1.4s against microseconds for every ordinary one. The hull bounds the
+curve from below by its least coefficient, so clearing -1e-9 everywhere is dx/du above
+-1e-9 everywhere: a plateau in every sense that renders, pruned in one look.
+
 ## A census of exit codes that did not say what a miss exits
 
 `docs/proof-tools.md` opens on the rule this whole suite is built around - count failed

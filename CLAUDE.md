@@ -392,6 +392,18 @@ node tools/editor-check.mjs --mutate play-button-skips-pausetransport --no-rende
                                                                        #     is consistency with the helper this file's own
                                                                        #     comment mandates, not a demonstrated defect -
                                                                        #     docs/instruments.md has the measurement
+node tools/editor-check.mjs --mutate toggle-plays-over-a-pending-play --no-render # ... the *demonstrated* defect on the same button:
+                                                                       #     the toggle reading `playing` alone, which is false
+                                                                       #     for the whole stretch a play spends awaiting the
+                                                                       #     accurate seek a draft forces, so the press that
+                                                                       #     meant stop started a second play. Reddens the
+                                                                       #     pending-outcome row and leaves the pending-window
+                                                                       #     row above it green - read the rows
+node tools/editor-check.mjs --mutate play-resolves-past-its-pause --no-render # ... and the transport's half of that claim: a pending
+                                                                       #     play that never rechecks its generation resolves
+                                                                       #     into `playing` over the pause that landed inside
+                                                                       #     it. Same row - two ways to break one claim, and it
+                                                                       #     needs both halves standing
 node tools/editor-check.mjs --mutate picker-keeps-a-refused-look --no-render # ... and the picker left naming a look the apply
                                                                        #     refused, which the deliverable menu forty lines
                                                                        #     away already reverts. The refusal itself is
