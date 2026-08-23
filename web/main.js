@@ -29,6 +29,7 @@ import {
 import {
   EASE_OUT_LINEAR, EASE_IN_LINEAR, SEGMENT_POINT_CEILING, copyHandle, easeAt, elevate, keyBefore,
   HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
+  handleRefusal, foldRefusal, foldFreeX,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
 import {
@@ -3342,10 +3343,23 @@ function serialiseProject() {
  * authored. The count is checked against the same ceiling the editor's own control
  * obeys, because a document is a caller like any other.
  */
-function restoreKey(owner, k) {
+function restoreKey(owner, k, kind) {
   if (!Number.isFinite(k?.t)) {
     throw new Error(`${owner} has a key at t=${JSON.stringify(k?.t)}: a key time has to be a finite number`);
   }
+  // **The bound read off the same table the drag handler reads, rather than restated.**
+  // `KINDS[kind].overshoots` is what decides whether a handle may leave the lane when
+  // somebody drags one, and there is no second answer to that question for a handle
+  // arriving in a file - a document is a caller like any other. The retime is named
+  // beside it for the reason `assertMonotonic` gives at length: its axis is source time,
+  // so a handle above the box is a reverse authored through the back door, and it is a
+  // reverse this renderer cannot play at all.
+  //
+  // The overshooting band is `[-1, 2]` and not unbounded, and that number is the drag's
+  // too: `h[1]` is a fraction of the *segment's* own value span, so a lane spanning
+  // little turns a nudge into an enormous handle - measured at y = -5.73 for a 20px drag.
+  // One segment-span each way keeps "past the key and back" and drops what nobody can aim.
+  const [loY, hiY] = kind === 'retime' || !KINDS[kind].overshoots ? [0, 1] : [-1, 2];
   const handle = (side, points, fallback) => {
     if (points === undefined) return copyHandle(fallback);
     const ok = Array.isArray(points)
@@ -3355,6 +3369,14 @@ function restoreKey(owner, k) {
       throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle of ${JSON.stringify(points)}: it takes `
         + `1 to ${SEGMENT_POINT_CEILING} control points, each two finite numbers`);
     }
+    // Shape first and then the invariants, because the second question is only askable
+    // of something with the first answer - and the two refusals say different things, so
+    // a document with a wrong-shaped handle should not be told a point sits outside
+    // the box.
+    const why = handleRefusal(points, loY, hiY);
+    if (why) {
+      throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle with ${why}`);
+    }
     return copyHandle(points);
   };
   return {
@@ -3363,6 +3385,46 @@ function restoreKey(owner, k) {
     easeOut: handle('easeOut', k.easeOut, EASE_OUT_LINEAR),
     easeIn: handle('easeIn', k.easeIn, EASE_IN_LINEAR),
   };
+}
+
+/**
+ * Refuses a restored track whose timing curve folds anywhere, asked once per segment
+ * with both handles in hand.
+ *
+ * This cannot live in `restoreKey`, and the reason is the shape of the invariant: a
+ * segment's curve is composed of the *leaving* key's `easeOut` and the *arriving* key's
+ * `easeIn`, so no single key holds both of its terms. The per-key check this replaced
+ * asked each side for ordered control x, which is sufficient for the curve and stricter
+ * than it - it refused the legal crossed polygons `elevate` produces, so the editor
+ * could save a document its own reload declined - and, reset at the join, it could not
+ * see a fold spanning the two sides at all. `foldRefusal` in `curve.js` asks the real
+ * question of the real curve.
+ *
+ * The walk asks a pair two questions, and order comes first because the fold question
+ * is not askable of a pair that is not a segment. Descending times are refused
+ * outright: every writer in this program sorts - a drag re-sorts the track, the
+ * serialiser writes what the track holds - so a document whose keys descend is
+ * hand-edited or damaged, and installing it unchanged hands `keyBefore`'s binary
+ * search an array its invariant does not hold on. That search still terminates and
+ * still returns an index, so the track renders values and camera poses nobody
+ * authored, silently - the same failure shape as the fold, one level down. A
+ * *coincident* pair is different and stays legal: it is what a key dragged onto
+ * another holds, `scalarAt` treats the zero span as a step and never evaluates the
+ * handles, so there is no curve there to ask about.
+ */
+function refuseFolds(owner, keys) {
+  for (let i = 0; i + 1 < keys.length; i++) {
+    if (keys[i + 1].t < keys[i].t) {
+      throw new Error(`${owner} holds a key at ${keys[i + 1].t}s after one at ${keys[i].t}s: keys are `
+        + 'stored ascending, and the binary search the evaluators run over this track answers '
+        + 'wrongly rather than failing on one that is not');
+    }
+    if (keys[i + 1].t === keys[i].t) continue;
+    const why = foldRefusal(keys[i].easeOut, keys[i + 1].easeIn);
+    if (why) {
+      throw new Error(`${owner}'s segment between ${keys[i].t}s and ${keys[i + 1].t}s has ${why}`);
+    }
+  }
 }
 
 /**
@@ -3554,11 +3616,13 @@ function restoreProject(project) {
     // An empty track is still nothing to restore, so it is still skipped. The change is
     // that it is skipped for being empty rather than for being cheap to skip.
     if (keys.length === 0) continue;
-    restoredLook.push([name, keys.map((k) => {
-      const key = restoreKey(`track ${name}`, k);
+    const restored = keys.map((k) => {
+      const key = restoreKey(`track ${name}`, k, params.spec(name).kind);
       key.value = params.normalise(name, key.value);
       return key;
-    })]);
+    });
+    refuseFolds(`track ${name}`, restored);
+    restoredLook.push([name, restored]);
   }
 
   // The same refusal for the parameter values, and for the same reason - but it has
@@ -3577,18 +3641,20 @@ function restoreProject(project) {
   for (const name of Object.keys(project.look.params)) params.spec(name);
 
   const restoredCamera = project.composition.camera.map((k) => {
-    const key = restoreKey('track camera', k);
+    const key = restoreKey('track camera', k, params.spec('camera').kind);
     key.value = params.normalise('camera', key.value);
     return key;
   });
+  refuseFolds('track camera', restoredCamera);
 
   const restoredRetime = project.composition.retime.keys.map((k) => {
-    const key = restoreKey('the retime curve', k);
+    const key = restoreKey('the retime curve', k, 'retime');
     if (!Number.isFinite(key.value)) {
       throw new Error(`the retime key at ${key.t}s maps to ${JSON.stringify(key.value)}: source time is a number`);
     }
     return key;
   });
+  refuseFolds('the retime curve', restoredRetime);
   // The fourth door onto the curve, and the one this step exists to close. The
   // other three are gestures inside a page that already vetted the curve; this is
   // the one a file arrives through, and a descending region does not merely fail -
@@ -3689,7 +3755,14 @@ function restoreProject(project) {
 
   if (project.history) {
     history.stack = [...project.history.stack];
-    history.baseline = project.history.baseline;
+    // A null baseline is a shape the check above deliberately accepts - it is what the
+    // recorder's surface holds before `begin` has run - but installing one on an editor
+    // that is up and interactive would turn `commit`'s null-baseline guard from a fence
+    // around a failed open into a padlock on a healthy one: every later edit would
+    // return false, enter no undo and reach no auto-save, on a page whose controls all
+    // still work. The document just restored is the truth the stack was built against,
+    // so its own snapshot is the baseline a null one means.
+    history.baseline = project.history.baseline ?? history.snapshot();
   }
 }
 
@@ -3772,6 +3845,26 @@ const history = {
     // throws out of the keydown handler. It also stopped the auto-save writing a
     // project that names no take on every twitch of a live slider.
     if (!EDITING) return false;
+    // **And the same poisoning arrives on the editor by a different road, which the guard
+    // above cannot see.** `EDITING` is true for the whole life of `/edit`, but `begin` is
+    // the last thing `openTake` does - so every path where the open throws before it
+    // reaches there leaves this surface interactive with `baseline` still null. Those
+    // paths are deliberate: a take with no hello, unusable intrinsics, a capture
+    // generation this build refuses. The page is meant to stay up and say why.
+    //
+    // What it must not do is write. With a null baseline the first press pushes `null`
+    // onto the undo stack, and the auto-save below rewrites `__working__` with a project
+    // naming no take - which is worse than losing the press, because `offerWorkingDocument`
+    // joins the recovery slot back to a take on `take.hash`. The operator's actual work,
+    // on the take they had open before this one failed, is then in a slot that can never
+    // be offered for anything again, and the Cmd+Z after it hands `restoreProject` a null
+    // and throws out of the keydown handler.
+    //
+    // Asked as "is there a baseline" rather than as a flag about how the open went, for
+    // the reason the tools' `undoDepth` hook already relies on: a baseline existing *is*
+    // "the open is over", and any future road into this page that forgets to set a flag
+    // is asked by this one by existing.
+    if (this.baseline === null) return false;
     const now = this.snapshot();
     if (now === this.baseline) return false;
     this.stack.push(this.baseline);
@@ -4101,6 +4194,54 @@ function cameraPose(cam) {
 /** Apply a patch. Source side. */
 function applyProgramOut(patch) {
   if (!PROGRAM_OUT) return;
+  // **Normalised before a single field of this patch is applied, because a refusal after
+  // a mode switch is not a refusal.** The view check below used to sit at the foot, after
+  // `mode` had already been written and `setViewCamera` had already handed the renderer
+  // the free camera - so a patch carrying `mode: 'mirror'` and a bad pose refused the pose
+  // and kept the switch, and the source began drawing whatever stale position that camera
+  // was parked at. That is the one thing this mode must not do, said in as many words
+  // forty lines below and then done by the ordering.
+  //
+  // The effective mode is worked out here rather than read off `programOutMode`, since the
+  // question is which camera this patch leaves the source on rather than which one it
+  // found it on. Everything else in the patch waits behind this too: `size` and `params`
+  // used to land and stay whatever happened next, and a half-applied patch is a frame
+  // nobody sent. One refusal, nothing applied, the previous frame intact.
+  const mode = patch.mode === 'mirror' || patch.mode === 'camera' ? patch.mode : programOutMode;
+  let view = null;
+  if (patch.view && mode === 'mirror') {
+    // **Through the registry, exactly as `patch.params` below already is.** The two halves
+    // of this patch arrive over one socket from one place and only one of them was
+    // checked: a pose went straight onto the camera, so a non-unit quaternion or a
+    // non-finite position landed on the object the output frame is drawn with. That is a
+    // camera move nobody authored, rendered into a file, which is the failure
+    // `restoreProject` names in as many words about the same value arriving from disk -
+    // `params.normalise` is where that refusal lives and this is the one door that walked
+    // past it.
+    try {
+      view = params.normalise('camera', patch.view);
+    } catch (err) {
+      console.error(`[program-out] ${err.message}`);
+      return;
+    }
+  }
+  // **The parameter half held to the same rule as the pose, because the reordering
+  // above was only half of it.** The old foot walked `patch.params` through
+  // `params.set` one name at a time with a catch per entry, after `size` and `mode`
+  // had already landed - so a patch from a mismatched build refused one name, kept
+  // the rest, and recorded a frame combining the new mode with whatever stale value
+  // the refused parameter was parked at. `params.apply` checks the whole object
+  // before writing any of it, which is the same all-or-nothing `restoreProject`
+  // reads a document through - one refusal, nothing applied, the previous frame
+  // intact, exactly as the paragraph above promises.
+  if (patch.params) {
+    try {
+      params.apply(patch.params);
+    } catch (err) {
+      console.error(`[program-out] ${err.message}`);
+      return;
+    }
+  }
   if (patch.size && Number.isInteger(patch.size.w) && Number.isInteger(patch.size.h)
       && patch.size.w > 0 && patch.size.h > 0) {
     programOutSize = { w: patch.size.w, h: patch.size.h };
@@ -4111,25 +4252,14 @@ function applyProgramOut(patch) {
     programOutMode = patch.mode;
     setViewCamera(programOutMode === 'mirror' ? freeCamera : programCamera);
   }
-  if (patch.params) {
-    // Through the registry's own write path, so a value arriving over a socket is
-    // normalised, clamped and applied exactly as one typed into a slider would be.
-    // A refused name throws rather than being ignored - a source silently dropping a
-    // parameter it did not recognise is a source drawing something other than what
-    // the operator is looking at, which is the one thing this mode must not do.
-    for (const [name, value] of Object.entries(patch.params)) {
-      try {
-        params.set(name, value);
-      } catch (err) {
-        console.error(`[program-out] ${err.message}`);
-      }
-    }
-  }
-  if (patch.view && programOutMode === 'mirror') {
-    freeCamera.position.fromArray(patch.view.position);
-    freeCamera.quaternion.fromArray(patch.view.quaternion);
-    if (freeCamera.fov !== patch.view.fov) {
-      freeCamera.fov = patch.view.fov;
+  // Refused loudly and the frame left as it was, rather than half-applied - which is now
+  // a statement the ordering supports rather than one it contradicts, since the refusal
+  // that would make it true happens at the top of this function and reaches nothing.
+  if (view) {
+    freeCamera.position.fromArray(view.position);
+    freeCamera.quaternion.fromArray(view.quaternion);
+    if (freeCamera.fov !== view.fov) {
+      freeCamera.fov = view.fov;
       freeCamera.updateProjectionMatrix();
     }
   }
@@ -5446,6 +5576,14 @@ class TimelineTransport {
     // nothing records.
     this.frame = 0;
     this.playing = false;
+    // A play that is still warming up - awaiting the accurate seek a draft or an
+    // out-of-range playhead forces - is a play the toggle has to be able to stop,
+    // and `playing` cannot say so because it is deliberately false until the image
+    // is true. The flag is what the play button reads; the generation is what
+    // `pause` bumps so the pending play stands down instead of resolving into
+    // `playing = true` over the top of the press that stopped it.
+    this.pendingPlay = false;
+    this.playGen = 0;
     this.nextDueMs = 0;
     // Raised by a draft, because a draft is deliberately not the true image.
     // Anything that has to be true - releasing the scrubber, pressing play -
@@ -6023,15 +6161,31 @@ class TimelineTransport {
   }
 
   async play() {
-    if (this.playing) return;
+    if (this.playing || this.pendingPlay) return;
     this.behindMs = 0;
-    // A draft is not the image playback would have produced, so playing on from
-    // one would start the afterimage off a picture that never existed.
-    if (this.drafted) await this.seek(this.programSec);
-    // Keep playback inside the clip's in/out points. Starting from outside the
-    // range snaps to the in point; reaching the out point stops.
-    if (this.programSec < this.clipInSec || this.programSec > this.clipOutSec) {
-      await this.seek(this.clipInSec);
+    // The stretch between here and `playing = true` is real time whenever either
+    // seek below has work to do, and a press landing inside it used to read as a
+    // second play: `playing` was still false, so the toggle started another one,
+    // and both resolved into a rolling take over the top of the press that meant
+    // stop. `pendingPlay` is how the toggle sees this stretch; the generation
+    // check after the awaits is how a pause landing inside it wins.
+    const gen = this.playGen;
+    this.pendingPlay = true;
+    try {
+      // A draft is not the image playback would have produced, so playing on from
+      // one would start the afterimage off a picture that never existed.
+      if (this.drafted) await this.seek(this.programSec);
+      // Keep playback inside the clip's in/out points. Starting from outside the
+      // range snaps to the in point; reaching the out point stops.
+      if (this.programSec < this.clipInSec || this.programSec > this.clipOutSec) {
+        await this.seek(this.clipInSec);
+      }
+    } finally {
+      this.pendingPlay = false;
+    }
+    if (gen !== this.playGen) {
+      this.paint();
+      return;
     }
     this.playing = true;
     this.nextDueMs = performance.now();
@@ -6039,6 +6193,10 @@ class TimelineTransport {
   }
 
   pause() {
+    // Bumped whether or not a play is pending, because a pause is a statement about
+    // the transport rather than about any one play call - the cost of bumping with
+    // nothing in flight is nothing.
+    this.playGen += 1;
     this.playing = false;
     this.paint();
   }
@@ -7324,7 +7482,22 @@ for (const handle of [ui.in, ui.out]) {
 
 ui.play.addEventListener('click', () => {
   if (!timeline) return;
-  if (timeline.playing) timeline.pause();
+  // **`pauseTransport` rather than `timeline.pause()`, which is the one press on this
+  // surface that was pausing without taking the transport.** Every other pause here goes
+  // through that helper - the key, `goTo`, the rate gesture - and what it adds is
+  // `takeTransport()`, which moves the generation so a `play()` still in flight cannot
+  // resolve afterwards and start the clip again. That matters exactly during pre-roll: a
+  // play is several seconds of warming accumulators before anything moves, so the press
+  // that stops it is the press most likely to land inside one, and the button was the one
+  // control that lost it. The take carried on rolling with the button reading Play.
+  //
+  // **And `pendingPlay` beside `playing`, because the pre-roll has an earlier stretch
+  // where `playing` is still false.** A play from a drafted or out-of-range playhead
+  // awaits an accurate seek before it is a play at all, so a second press inside that
+  // stretch read as another play rather than as the stop it meant - two plays in
+  // flight, both resolving into a rolling take. A pending play is a stoppable one, and
+  // the pause's generation bump inside the transport is what stands it down.
+  if (timeline.playing || timeline.pendingPlay) pauseTransport();
   else timeline.play().catch(showTimelineError);
 });
 
@@ -7465,7 +7638,9 @@ addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLElement && e.target.closest('button, [role=button]')) return;
       // Or the page scrolls under the strip.
       e.preventDefault();
-      if (timeline.playing) pauseTransport();
+      // `pendingPlay` beside `playing` for the reason the play button's comment gives
+      // at length: a play warming up from a draft is a play this press means to stop.
+      if (timeline.playing || timeline.pendingPlay) pauseTransport();
       else timeline.play().catch(showTimelineError);
       return;
     case 'ArrowRight': e.preventDefault(); step(e.shiftKey ? timeline.outputFps : 1); return;
@@ -9595,6 +9770,16 @@ function choosePicker(picker, name, { close = false } = {}) {
             ? `applied ${doc.name} · ${doc.rev.slice(7, 15)}`
             : `applied ${written} values from ${doc.name}, which names part of a look rather than the whole of one`);
         } catch (err) {
+          // **Put the picker back on the look the clip is actually wearing**, which is
+          // what the deliverable menu does forty lines away and this one did not.
+          // `applyStoredPreset` refuses a document before it has written anything, so on
+          // a refusal every look value on screen is still the previous preset's - and the
+          // picker was the one surface left naming the refused one. The two disagreeing is
+          // worse than either: the panel shows one look and the control names another, and
+          // a render afterwards carries the picture the panel showed under the name the
+          // menu is displaying. The refusal itself still goes to the note, so this is the
+          // refusal told once rather than contradicted in a second place.
+          showPickerChoice(picker, appliedPreset?.name ?? '');
           showTimelineError(err);
         }
       }));
@@ -10037,7 +10222,16 @@ ui.beds.addEventListener('pointermove', (e) => {
     // a side, "either end" means the neighbouring control points rather than the
     // segment's own - see `handleSpan`, where the two readings are one rule.
     const span = handleSpan(keys, laneDrag.seg, laneDrag.side, laneDrag.index);
-    h[0] = Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt));
+    // The span first and the curve last. The neighbour span is the ordering rule, and
+    // ordering is sufficient only when the polygon starts ordered - from the legal
+    // crossed states `elevate` produces, a sequence of drags each inside its span can
+    // still fold the curve, measured at six drags from the twice-elevated pair. So the
+    // final clamp asks the curve itself: `foldFreeX` slides x to the last fold-free
+    // point, which is the curve resisting the way `clampRetimeKey` resists, and it is
+    // what keeps every state this handler can produce a state the loader will accept
+    // back.
+    h[0] = foldFreeX(a.easeOut, b.easeIn, laneDrag.side, laneDrag.index, h[0],
+      Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt)));
     // `dv` is non-zero by construction - a handle only exists where
     // `segmentHasShape` said there was a shape, and a handle drag moves no key
     // value - so this is a backstop against writing NaN into the document rather
@@ -13682,6 +13876,16 @@ globalThis.__kinect = {
   // Read off the stack the keyboard pops rather than off a counter kept beside it, for
   // `worldTilt`'s reason: a number computed correctly and never applied is one edit away
   // at all times.
+  // The source side of a program-out patch, exposed because it is the only way to put one
+  // on the wire that the operator's page cannot produce. The operator sends
+  // `cameraPose(freeCamera)`, and a camera object holds a rotation - `controls.update()`
+  // renormalises what you write onto it - so a probe that corrupted the operator's
+  // quaternion measured the operator rather than this. What arrives here is JSON from a
+  // socket, and JSON can hold four numbers that are not a rotation.
+  //
+  // The real handler rather than a copy of it: this is the function the socket's message
+  // calls, so a row driving it is asking the shipped path what it does with a bad patch.
+  applyProgramOut,
   undoDepth: () => history.depth,
   // Whether `openTake` has finished. `history.begin()` is the last thing it does that a
   // document can observe, so a baseline existing is "the open is over" - and a tool that

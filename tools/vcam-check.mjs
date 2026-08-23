@@ -105,6 +105,63 @@ const LAN = Object.values(networkInterfaces()).flat()
   .find((i) => i && i.family === 'IPv4' && !i.internal)?.address ?? null;
 
 const MUTATIONS = {
+  // The pose goes back onto the camera without passing the registry, which is how it
+  // shipped: the `params` half of one socket patch is normalised and the `view` half was
+  // not. Every other row in this section stays green - mirror mode still works, the size
+  // still follows, the parameter still forwards - and what changes is that four numbers
+  // that are not a rotation are drawn with.
+  //
+  // Must redden the refusal row and leave the row under it green: a build that dropped
+  // `view` altogether would redden that one instead and would be a different defect.
+  'pose-skips-the-registry': {
+    file: 'web/main.js',
+    // Re-anchored when `applyProgramOut` was reordered so the refusal happens before any
+    // field of the patch lands - the declaration moved up out of the block and the mutation
+    // now assigns to it. Nothing about what this plants changed: the pose reaches the camera
+    // without passing the registry, which is the whole of the claim these rows are about.
+    edits: [[
+      "    try {\n"
+      + "      view = params.normalise('camera', patch.view);\n"
+      + "    } catch (err) {\n"
+      + "      console.error(`[program-out] ${err.message}`);\n"
+      + "      return;\n"
+      + "    }\n",
+      '    view = patch.view;\n',
+    ]],
+  },
+
+  // The parameter half of the patch goes back to landing one name at a time with a
+  // catch per entry, which is how it shipped: a refused name logged and the loop
+  // carried on, so a patch from a mismatched build applied its good half and the
+  // source drew the new mode against whatever stale value the refused parameter was
+  // parked at. `params.apply` checks the whole object before writing any of it; this
+  // puts the per-entry walk back.
+  //
+  // Must redden the half-right-patch row alone and leave the whole-patch twin and the
+  // pose rows green, because a wholly valid patch lands identically either way.
+  'patch-params-applied-one-at-a-time': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (patch.params) {\n'
+      + '    try {\n'
+      + '      params.apply(patch.params);\n'
+      + '    } catch (err) {\n'
+      + '      console.error(`[program-out] ${err.message}`);\n'
+      + '      return;\n'
+      + '    }\n'
+      + '  }\n',
+      '  if (patch.params) {\n'
+      + '    for (const [name, value] of Object.entries(patch.params)) {\n'
+      + '      try {\n'
+      + '        params.set(name, value);\n'
+      + '      } catch (err) {\n'
+      + '        console.error(`[program-out] ${err.message}`);\n'
+      + '      }\n'
+      + '    }\n'
+      + '  }\n',
+    ]],
+  },
+
   // **The control for claim 2.** The endpoint serves the registered colour scaled up
   // to 1080p instead of the colour camera's own frame - the plausible wrong
   // implementation, and the one somebody would reach for to avoid a second encode.
@@ -697,6 +754,74 @@ try {
       await page.waitForTimeout(1200);
       const forwarded = await page.evaluate('__kinect.params.get("pointSize")');
       ok('and a parameter write reaches it through the registry', forwarded === 4.2, String(forwarded));
+
+      // **A patch that is half right applies as nothing at all.** The old foot walked
+      // `patch.params` through `params.set` one name at a time with a catch per entry,
+      // so a patch from a mismatched build refused one name, kept the rest, and the
+      // source recorded a frame combining the applied half with whatever stale value
+      // the refused parameter was parked at. Driven at the source's own handler with a
+      // name no registry holds beside a value the registry does, and read back off the
+      // half that would have landed.
+      const bloomHeld = await page.evaluate('__kinect.params.get("bloom")');
+      await page.evaluate(`__kinect.applyProgramOut({ params: {
+        bloom: ${JSON.stringify(bloomHeld === 0.25 ? 0.75 : 0.25)}, "a-parameter-no-build-has": 1,
+      } })`);
+      await page.waitForTimeout(300);
+      const bloomAfterBad = await page.evaluate('__kinect.params.get("bloom")');
+      ok('a patch carrying one refused parameter applies none of them, so the source never draws half of a frame nobody sent',
+        bloomAfterBad === bloomHeld, `bloom ${bloomAfterBad}, held at ${bloomHeld}`);
+      // The positive twin, for the same reason the pose rows below carry one: refused
+      // and ignored have to be told apart, or this gate is indistinguishable from the
+      // params half of the patch being dropped.
+      const bloomTarget = bloomHeld === 0.25 ? 0.75 : 0.25;
+      await page.evaluate(`__kinect.applyProgramOut({ params: { bloom: ${JSON.stringify(bloomTarget)} } })`);
+      await page.waitForTimeout(300);
+      const bloomAfterGood = await page.evaluate('__kinect.params.get("bloom")');
+      ok('  while a patch that is whole still lands through the registry',
+        bloomAfterGood === bloomTarget, `bloom ${bloomAfterGood}, sent ${bloomTarget}`);
+      await page.evaluate(`__kinect.applyProgramOut({ params: { bloom: ${JSON.stringify(bloomHeld)} } })`);
+
+      // **The other half of the same patch, which took a different road.** `params` goes
+      // through the registry's write path and is normalised, clamped and refused there;
+      // `view` was written straight onto the camera the output frame is drawn with. Four
+      // finite numbers are not a rotation - three renormalises a non-unit quaternion on
+      // some paths and not on others, and slerping between one unit and one non-unit is
+      // not the rotation either of them names - so a pose arriving this way rendered a
+      // camera move nobody authored, into a file, with nothing in the console saying so.
+      // `normalise` already refuses exactly this from a project on disk; the socket was
+      // the one door that walked past it.
+      // **Driven at the source's own handler rather than through the operator's camera,
+      // and the first version of this row measured the wrong thing.** It corrupted the
+      // operator's quaternion and waited - but a camera object holds a rotation and
+      // `controls.update()` renormalises whatever is written onto it, so what went down
+      // the socket was a perfectly good pose and both builds read length 1.000000. The
+      // row passed on the mutated build, which is a row proving nothing while looking
+      // like a pass. What actually arrives here is JSON, and JSON can hold four numbers
+      // that are not a rotation.
+      const poseBefore = await page.evaluate('__kinect.freeCamera.quaternion.toArray()');
+      await page.evaluate(`__kinect.applyProgramOut({ view: {
+        position: [9, 9, 9], quaternion: [0, 0, 0, 5], fov: 60,
+      } })`);
+      await page.waitForTimeout(300);
+      const poseAfter = await page.evaluate(`(() => ({
+        q: __kinect.freeCamera.quaternion.toArray(),
+        p: __kinect.freeCamera.position.toArray(),
+      }))()`);
+      const len = Math.hypot(...poseAfter.q);
+      ok('a pose that is not a rotation is refused at the source rather than drawn with',
+        Math.abs(len - 1) < 1e-3 && Math.abs(poseAfter.p[0] - 9) > 1e-6,
+        `quaternion length ${len.toFixed(6)} (was ${Math.hypot(...poseBefore).toFixed(6)}), position ${poseAfter.p.map((v) => v.toFixed(2)).join(', ')}`);
+      // The positive twin: a build that ignored `view` entirely would pass the row above
+      // while breaking the whole mirror mode, which is what this mode is for. Refused and
+      // ignored have to be told apart or the gate is indistinguishable from the feature
+      // being off.
+      await page.evaluate(`__kinect.applyProgramOut({ view: {
+        position: [1.5, 0.25, 2.5], quaternion: [0, 0, 0, 1], fov: 60,
+      } })`);
+      await page.waitForTimeout(300);
+      const moved = await page.evaluate('__kinect.freeCamera.position.toArray()');
+      ok('while a pose that is one still reaches it, so the refusal is a gate rather than the mirror switched off',
+        Math.abs(moved[0] - 1.5) < 1e-3 && Math.abs(moved[2] - 2.5) < 1e-3, moved.map((v) => v.toFixed(3)).join(', '));
 
       await browser.close();
       await stopAll();

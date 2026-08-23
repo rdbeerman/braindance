@@ -248,6 +248,172 @@ const MUTATIONS = {
     ]],
   },
 
+  // The recovery slot of the take that *was* open, overwritten by a take that never
+  // opened. `history.commit` guards `!EDITING`, which is a claim about the surface and
+  // true for the whole life of `/edit`; what it cannot see is that `begin()` is the last
+  // thing `openTake` does, so every failed open leaves this page interactive with a null
+  // baseline. Removed, the first press on a look control pushes `null` onto the undo
+  // stack and rewrites `__working__` with a project naming no take - and because
+  // `offerWorkingDocument` joins the slot back to a take on `take.hash`, the operator's
+  // actual work is then in a slot nothing can ever be offered.
+  //
+  // Must redden the two slot rows in section 13 and nothing else: the depth row, which
+  // is the press being recorded at all, and the stamp row, which is what it destroyed.
+  // A build that reddened the whole section would be taking the page down rather than
+  // being this.
+  'commit-ignores-null-baseline': {
+    file: 'web/main.js',
+    edits: [['    if (this.baseline === null) return false;\n', '']],
+  },
+
+  // The play button goes back to pausing without taking the transport, which is how it
+  // shipped: every other pause on this surface goes through `pauseTransport` and this one
+  // called `timeline.pause()` directly. Nothing changes for a press against a take that is
+  // already rolling - what is lost is the press made during pre-roll, where the `play()`
+  // still in flight resolves afterwards and starts the clip behind a button reading Play.
+  //
+  // Must redden the two pre-roll rows and leave the space-bar rows above them green: the
+  // key was never the control that was wrong, and a build that had broken pausing at large
+  // would take those with it.
+  'play-button-skips-pausetransport': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (timeline.playing || timeline.pendingPlay) pauseTransport();\n  else timeline.play().catch(showTimelineError);',
+      '  if (timeline.playing || timeline.pendingPlay) timeline.pause();\n  else timeline.play().catch(showTimelineError);',
+    ]],
+  },
+
+  // The toggle goes back to reading `playing` alone, which is how it shipped: a play
+  // warming up from a draft or an out-of-range playhead is awaiting an accurate seek,
+  // `playing` is deliberately false for that whole stretch, and a press inside it was
+  // taken as a second play rather than as the stop it meant - two plays in flight, both
+  // resolving into a rolling take.
+  //
+  // Must redden the pending-play outcome row and leave the pending-window row above it
+  // green, because the mutated build still enters the pending state - what it loses is
+  // the press that ends it. The second press calls `play()`, which stands down against
+  // `pendingPlay`, so the first play resolves unopposed.
+  'toggle-plays-over-a-pending-play': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (timeline.playing || timeline.pendingPlay) pauseTransport();\n  else timeline.play().catch(showTimelineError);',
+      '  if (timeline.playing) pauseTransport();\n  else timeline.play().catch(showTimelineError);',
+    ]],
+  },
+
+  // The pending play stops asking whether a pause landed inside it, which is the other
+  // half of the same defect: the toggle can see the pending play and pause it, but a
+  // `play()` that never rechecks its generation after the awaited seek resolves sets
+  // `playing = true` over the top of that pause anyway.
+  //
+  // Must redden the pending-play outcome row alone, same as the toggle mutation - two
+  // ways to break one claim, and the claim needs both halves standing.
+  'play-resolves-past-its-pause': {
+    file: 'web/main.js',
+    edits: [[
+      '    if (gen !== this.playGen) {\n      this.paint();\n      return;\n    }\n',
+      '',
+    ]],
+  },
+
+  // The preset picker goes back to keeping the name of a look the apply refused, while the
+  // panel, the readout and the render all still describe the previous one. The refusal is
+  // still printed - this is not a swallowed error, it is an error told in one place and
+  // contradicted in a second.
+  //
+  // Must redden the revert row and leave the row above it green, since the refusal itself
+  // is unchanged.
+  'picker-keeps-a-refused-look': {
+    file: 'web/main.js',
+    edits: [["          showPickerChoice(picker, appliedPreset?.name ?? '');\n", '']],
+  },
+
+  // The loader stops asking what a handle's numbers mean and goes back to asking only
+  // what shape they are, which is what shipped: `restoreKey` checked an array of finite
+  // pairs inside the count ceiling while the docstring above it claimed the invariants.
+  // The drag handler still clamps, so nothing an operator can do changes - what changes
+  // is the one caller that was taken on trust, a document.
+  //
+  // Must redden the two per-side refusal rows - a point outside the segment, a camera
+  // handle above the box - and leave the overshoot row green: a build that had simply
+  // stopped accepting handles would redden all three, and that is a different defect
+  // wearing the same colour. The fold row stays green too, because the fold refusal is
+  // the segment's own check in `refuseFolds` rather than this per-key one, and that
+  // split is what the mutation below is for. Read the two red rows for *why* they
+  // fired, though, because they differ: the camera row is a genuine acceptance, while
+  // the past-the-end fixture is still refused on the mutated build - x=1.4 folds the
+  // curve, so `refuseFolds` catches it - and its row reddens on the sentence naming
+  // the wrong term rather than on a document getting through.
+  'restorekey-skips-handle-invariants': {
+    file: 'web/main.js',
+    edits: [[
+      '    const why = handleRefusal(points, loY, hiY);\n'
+      + '    if (why) {\n'
+      + "      throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle with ${why}`);\n"
+      + '    }\n',
+      '',
+    ]],
+  },
+
+  // The loader stops asking whether the composed segment folds, which is the defect the
+  // per-side ordering rule was hiding: a polygon can ascend within each side and still
+  // run backwards across the join, and `easeParam`'s bisection renders that curve
+  // deterministically at the wrong times rather than failing. All three tracks lose the
+  // walk at once, because the shipped build had it nowhere.
+  //
+  // Must redden the fold row alone and leave the per-side rows and the legal-crossed
+  // row green: the per-key invariants still stand, and a mutated build that reddened
+  // those too would be refusing handles at large rather than being this.
+  'restore-skips-the-fold-check': {
+    file: 'web/main.js',
+    edits: [
+      ['    refuseFolds(`track ${name}`, restored);\n', ''],
+      ["  refuseFolds('track camera', restoredCamera);\n", ''],
+      ["  refuseFolds('the retime curve', restoredRetime);\n", ''],
+    ],
+  },
+
+  // The order refusal collapses back to the fold walk's first shape: a pair whose
+  // times descend is skipped as though it were merely coincident, so a hand-edited or
+  // damaged track installs unsorted and `keyBefore`'s binary search - which still
+  // terminates and still returns an index - selects segments nobody authored, silently.
+  //
+  // Must redden the descending-times row alone and leave the fold and legal-crossed
+  // rows green, because the two questions the walk asks are separable and this takes
+  // out exactly one of them.
+  'restore-admits-descending-times': {
+    file: 'web/main.js',
+    edits: [[
+      '    if (keys[i + 1].t < keys[i].t) {\n'
+      + '      throw new Error(`${owner} holds a key at ${keys[i + 1].t}s after one at ${keys[i].t}s: keys are `\n'
+      + "        + 'stored ascending, and the binary search the evaluators run over this track answers '\n"
+      + "        + 'wrongly rather than failing on one that is not');\n"
+      + '    }\n'
+      + '    if (keys[i + 1].t === keys[i].t) continue;\n',
+      '    if (!(keys[i + 1].t > keys[i].t)) continue;\n',
+    ]],
+  },
+
+  // The orbit's home pose goes back to whatever the constructor happened to capture,
+  // which is the state this has shipped in since it was first built: `target0` a fresh
+  // `(0, 0, 0)` taken before the target is written, and nothing carrying it across a
+  // rebuild. Reset then returns the camera to the right place aiming at the world origin
+  // instead of the cloud, so the frame after the press looks right and every orbit after
+  // it turns about a point 2.2m in front of the subject.
+  //
+  // Must redden the two pivot rows and leave `Default camera position reaches
+  // OrbitControls reset` green - that split is the assertion, because the position half
+  // was never broken and reading it alone is exactly what let this sit here.
+  'reset-forgets-the-pivot': {
+    file: 'web/scene.js',
+    edits: [
+      ['    controls.target0.copy(previous.target0);\n'
+       + '    controls.position0.copy(previous.position0);\n'
+       + '    controls.zoom0 = previous.zoom0;\n', ''],
+      ['    controls.saveState();\n', ''],
+    ],
+  },
+
   // The falsification control for section 1, and the only one that is not a bug being
   // put back. A button nobody has taught this file to drive must be a failure rather
   // than a control that quietly went unswept, or "every control was tested" is a
@@ -1909,7 +2075,9 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [[
       '      // Or the page scrolls under the strip.\n      e.preventDefault();\n'
-      + '      if (timeline.playing) pauseTransport();\n'
+      + '      // `pendingPlay` beside `playing` for the reason the play button\'s comment gives\n'
+      + '      // at length: a play warming up from a draft is a play this press means to stop.\n'
+      + '      if (timeline.playing || timeline.pendingPlay) pauseTransport();\n'
       + '      else timeline.play().catch(showTimelineError);\n      return;',
       '      // Or the page scrolls under the strip.\n      e.preventDefault();\n      return;',
     ]],
@@ -2067,8 +2235,8 @@ const MUTATIONS = {
   'handle-clamped-to-the-segment': {
     file: 'web/main.js',
     edits: [[
-      `    const span = handleSpan(keys, laneDrag.seg, laneDrag.side, laneDrag.index);
-    h[0] = Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt));`,
+      `    h[0] = foldFreeX(a.easeOut, b.easeIn, laneDrag.side, laneDrag.index, h[0],
+      Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt)));`,
       '    h[0] = Math.min(1, Math.max(0, (laneProgramAt(e.clientX) - a.t) / dt));',
     ]],
   },
@@ -3737,6 +3905,52 @@ try {
   check(cameraReset.every((value, i) => Math.abs(value - cameraBefore[i]) < 1e-6),
     'Default camera position reaches OrbitControls reset', `${cameraBefore.join(',')} -> ${cameraReset.join(',')}`);
 
+  // **And the pivot, which the row above cannot see and which had never been restored.**
+  // `OrbitControls` captures `target0` in its constructor, and `buildControls` copies the
+  // target in afterwards - so the home aim was a fresh `(0, 0, 0)` while the cloud sits at
+  // `(0, 0, -2.2)`. Reading the position alone agrees with that build, because the
+  // position *is* restored: the two aims differ by about two degrees, so the frame right
+  // after the press looks correct and everything after it does not. The orbit then turns
+  // about a point 2.2m in front of the subject, swinging it across the frame instead of
+  // turning around it, and on the Pi's collapsed-panel touchscreen the dock's centre
+  // button is the only recentre control there is.
+  const pivot = await page.evaluate('__kinect.controls.target.toArray()');
+  check(Math.hypot(pivot[0] - 0, pivot[1] - 0, pivot[2] - (-2.2)) < 1e-6,
+    '  and the orbit pivot comes back with it, rather than the world origin the constructor captured before the target was written',
+    `target ${pivot.map((v) => v.toFixed(4)).join(', ')} against the cloud's 0, 0, -2.2`);
+
+  // **The other half, and it is the one levelling reaches every time.** Navigation's up
+  // vector cannot be reassigned - `OrbitControls` resolves its orbit axis in the
+  // constructor and never looks again - so `setNavigationUp` rebuilds the object, and a
+  // rebuild that did not carry the home state over would re-home Reset on wherever the
+  // camera happened to be at that instant. Levelling a canted mount is the first thing
+  // the README tells an editor to do, so this is the ordinary path: level the room, press
+  // Reset, and land where you were standing when you moved the slider.
+  const movedTo = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    k.freeCamera.position.set(3, 2, 4);
+    k.controls.update();
+    // Through the parameter rather than by calling the rebuild directly, because what has
+    // to survive is the rebuild an operator actually causes.
+    k.params.set('tilt', 12);
+    k.controls.update();
+    return k.freeCamera.position.toArray();
+  })()`);
+  await settle();
+  await page.locator('#viewMenuButton').click();
+  await page.locator('#menuCameraReset').click();
+  const afterRebuild = await page.evaluate(`(() => ({
+    target: __kinect.controls.target.toArray(),
+    position: __kinect.freeCamera.position.toArray(),
+  }))()`);
+  check(Math.hypot(afterRebuild.target[0], afterRebuild.target[1], afterRebuild.target[2] + 2.2) < 1e-6
+    && afterRebuild.position.every((v, i) => Math.abs(v - cameraBefore[i]) < 1e-6),
+    '  and a rebuild of the controls carries the home pose across, so levelling the room does not re-home Reset on wherever the camera was standing',
+    `moved to ${movedTo.map((v) => v.toFixed(2)).join(', ')}, reset to `
+    + `${afterRebuild.position.map((v) => v.toFixed(4)).join(', ')} aiming ${afterRebuild.target.map((v) => v.toFixed(4)).join(', ')}`);
+  await page.evaluate("__kinect.params.set('tilt', 0)");
+  await settle();
+
   // The strip's look-through-the-program-camera toggle. It arrived with the rework as a
   // second control for an action the panel already had - both call `toggleCameraView` -
   // and it was the one control on the whole editor with nothing driving it, which is
@@ -3895,6 +4109,101 @@ try {
   await page.keyboard.press(' ');
   await new Promise((r) => setTimeout(r, 400));
   check(!(await read()).playing, 'and space stops it again - the toggle is driven both ways');
+
+  // ---- and the button, which was pausing without taking the transport
+  //
+  // **A press during pre-roll is the press this loses, and it is the likeliest one.**
+  // `play()` warms the accumulators before anything moves, so there is a stretch of real
+  // time between the press that starts a take and the take starting - and the press an
+  // operator makes to stop it is most often inside that stretch. Every other pause on this
+  // surface goes through `pauseTransport`, which bumps the generation so a `play()` still
+  // in flight resolves into nothing; the button called `timeline.pause()` directly, so the
+  // pre-roll finished afterwards and started the clip with the button reading Play.
+  //
+  // Driven through the button rather than the key, because the key was never the one that
+  // was wrong - and read off the transport rather than off the glyph, because the glyph is
+  // what agrees with the defect.
+  await page.evaluate('__kinect.timeline.transport().seek(6)');
+  await settle();
+  // **The window is found rather than timed, because timing it missed.** Measured on this
+  // rig with `fixture-1g`: after the press the transport reports `playing` at 71ms and the
+  // clip first moves at 92ms, so the stretch where a pause has a queued resume to cancel
+  // is about twenty milliseconds wide. The first draft of this row waited 60ms in the
+  // driver and then clicked - two round trips later the pre-roll had finished, the take
+  // was genuinely rolling, and a plain `timeline.pause()` handles that on any build. It
+  // passed on the mutated build, which is a row proving nothing while looking like a pass.
+  //
+  // So both presses happen inside the page, and the second waits for the state that
+  // defines the window - the transport playing and the clip not yet moved - rather than
+  // for a number of milliseconds that is a fact about this machine. Real clicks on the
+  // real button either way: what a driver cannot do here is be fast enough, not be honest.
+  const pressedInPreRoll = await page.evaluate(`(async () => {
+    const t = __kinect.timeline.transport();
+    const button = document.getElementById('tPlay');
+    const at = t.programSec;
+    button.click();
+    for (let i = 0; i < 500; i++) {
+      if (t.playing && Math.abs(t.programSec - at) < 1e-6) {
+        button.click();
+        return { found: true, waited: i * 2 };
+      }
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    return { found: false, waited: 1000 };
+  })()`);
+  check(pressedInPreRoll.found,
+    'the pause is pressed while the pre-roll is genuinely in flight, which is what makes the row below about the guard rather than about a take that had already started',
+    `found the window ${pressedInPreRoll.waited}ms after the play press`);
+  // And now longer than any pre-roll, which is where the build without the guard starts
+  // playing again behind a button that reads Play.
+  await new Promise((r) => setTimeout(r, 3000));
+  const afterPress = await read();
+  check(!afterPress.playing,
+    'a pause pressed while the pre-roll is still running leaves the take stopped, rather than the play resuming behind the button',
+    `playing ${afterPress.playing} at ${afterPress.programSec.toFixed(3)}s`);
+  const glyph = await page.evaluate("document.getElementById('tPlay').getAttribute('aria-label')");
+  check(glyph === 'Play', '  and the button says so, so the control and the transport agree about what is happening', String(glyph));
+
+  // ---- and the earlier stretch of the same pre-roll, where `playing` is still false
+  //
+  // A play from a drafted playhead is awaiting an accurate seek before it is a play at
+  // all, and `playing` is deliberately false for that whole stretch - the image is not
+  // yet true. So the window the rows above find by `playing` going true has an earlier
+  // half these rows are about: a second press inside it used to read as another play,
+  // and both plays resolved into a rolling take over the press that meant stop.
+  //
+  // Both presses happen in one page-side task, because the pending state is entered
+  // synchronously by the first click's handler and that is the only place a driver can
+  // be certain of still being inside it. The wait afterwards is for the transport's own
+  // chain to drain rather than a constant, because the seek's length is a fact about
+  // this machine and the mutated build only starts the clip *after* it resolves - a
+  // constant shorter than the seek would read the defect as a pass.
+  await page.evaluate('__kinect.timeline.transport().draft(4.0)');
+  const pendingPress = await page.evaluate(`(() => {
+    const t = __kinect.timeline.transport();
+    const button = document.getElementById('tPlay');
+    const before = { drafted: t.drafted, playing: t.playing };
+    button.click();
+    const within = { playing: t.playing, pending: t.pendingPlay };
+    button.click();
+    return { before, within };
+  })()`);
+  check(pendingPress.before.drafted && !pendingPress.within.playing && pendingPress.within.pending,
+    'the second press lands while the play is still pending - drafted start, playing still false - which is what makes the row below about the pending state rather than about a rolling take',
+    `drafted ${pendingPress.before.drafted}, playing ${pendingPress.within.playing}, pending ${pendingPress.within.pending}`);
+  const afterPending = await page.evaluate(`(async () => {
+    const t = __kinect.timeline.transport();
+    for (let i = 0; i < 2000; i++) {
+      if (!t.pendingPlay && !t.working) break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    return { playing: t.playing, pending: t.pendingPlay };
+  })()`);
+  check(!afterPending.playing && !afterPending.pending,
+    'a stop pressed inside the pending stretch leaves the take stopped once the seek resolves, rather than two plays resolving into a rolling take',
+    `playing ${afterPending.playing}, pending ${afterPending.pending}`);
+
   await page.evaluate('__kinect.timeline.transport().pause()');
   await settle();
 
@@ -8320,6 +8629,47 @@ try {
     check(!landedStray,
       'and it never reached the library either, because the envelope is read before the store is touched',
       landedStray ? `${NAME_STRAY_KEY} is in /presets` : `${NAME_STRAY_KEY} is absent from /presets`);
+
+    // ---- and the picker, on a look the apply refuses
+    //
+    // **The deliverable menu forty lines away in `main.js` already does this and the
+    // preset picker did not.** `applyStoredPreset` refuses a document before it has
+    // written anything, so on a refusal every look value on screen is still the previous
+    // preset's - and the picker was the one surface left naming the refused one. The two
+    // disagreeing is worse than either: the panel shows one look, the control names
+    // another, and a render afterwards carries the picture under the name in the menu.
+    //
+    // Refused at the fetch rather than by writing a bad file, because the store's own
+    // envelope check - the rows directly above - would refuse it before it could ever be
+    // picked. What has to be staged is a document that *is* in the library and that the
+    // apply refuses, which is the state a hand-edited file on disk produces.
+    const appliedBefore = await page.evaluate('globalThis.__kinect.library.appliedPreset()');
+    const pickedBefore = await page.evaluate("document.getElementById('tPreset').value");
+    await page.route(`**/presets/${NAME_EDITED}`, (route) => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        name: NAME_EDITED,
+        rev: `sha256:${'ab'.repeat(32)}`,
+        body: { version: PROJECT_VERSION, values: { pointSize: 'as big as it goes' } },
+      }),
+    }));
+    await page.click('#tPreset');
+    await page.waitForFunction("document.getElementById('tPresetList').hidden === false",
+      null, { timeout: 10000 });
+    await page.click(`#tPresetList .pickeroption[data-name=${JSON.stringify(NAME_EDITED)}]`);
+    await settle();
+    await page.unroute(`**/presets/${NAME_EDITED}`);
+    const refusedNote = await text('#tNote');
+    const pickedAfter = await page.evaluate("document.getElementById('tPreset').value");
+    const appliedAfter = await page.evaluate('globalThis.__kinect.library.appliedPreset()');
+    check(/pointSize/.test(refusedNote),
+      'a look the apply refuses says so by name, which is what makes the row below about the control rather than about a fetch that quietly worked',
+      `"${refusedNote.slice(0, 110)}"`);
+    check(pickedAfter === (appliedBefore?.name ?? ''),
+      '  and the picker goes back to naming the look the clip is actually wearing, rather than the one that was refused',
+      `picker read ${JSON.stringify(pickedBefore)} before, ${JSON.stringify(pickedAfter)} after, `
+      + `clip on ${JSON.stringify(appliedAfter?.name ?? null)}`);
   } finally {
     // In a `finally` rather than after the last row, because a section that threw is
     // exactly when the library is most likely to be left with a fixture in it.
@@ -9028,6 +9378,97 @@ try {
 
     check(errors.length === errorsBefore, 'none of it raises a page error',
       errors.slice(errorsBefore, errorsBefore + 2).join(' | '));
+
+    // ---- a take that fails to open must not be able to spend the recovery slot
+    //
+    // **The one door into `__working__` that is not an edit**, and it is open on a page
+    // that is deliberately still standing. `openTake` throws on a take with no hello,
+    // unusable intrinsics or a capture generation this build refuses, and the page is
+    // meant to stay up and say why - `showTimelineError` is called and nothing is torn
+    // down. What that leaves is a surface with `EDITING` true, an inspector panel still
+    // drawn, and `history.baseline` still null, because `begin()` is the last thing the
+    // open does.
+    //
+    // **Measured rather than assumed, and the measurement narrowed the claim.** The three
+    // refusals named above all throw before `ui.root.hidden = false`, so the timeline
+    // strip is gone and the shape buttons are behind a dialog whose menu is
+    // `display: none` - none of which is pressable. The panel is not: `#panel` comes back
+    // `display: flex` and `#panelTabs` `display: grid` on a 404'd take, so the look
+    // controls are there, enabled, and wired straight to `history.commit()` on `change`.
+    // That is the reachable press, and it is the one this pair of rows drives.
+    //
+    // Read off the store rather than off the page, because the failure is a write that
+    // already happened: a page-side reading of `history.baseline` would say the guard
+    // exists, which is the `export-name-not-taken` mistake - a field read straight back
+    // proves only that a variable holds what was put in it. So the slot is planted
+    // through the real route, stamped with the take that was genuinely open, and read
+    // back through the real route after the press.
+    await putDoc(WORKING, workingBody({ id: openId, hash: openHash }, false));
+    const slotBefore = await (await fetch(`${URL_BASE}/projects/${WORKING}`)).json();
+    await page.goto(`${URL_BASE}${EDITOR_PATH}?take=take-that-does-not-exist`, { waitUntil: 'load' });
+    // Waited for by the state that decides, not by a timeout: the open has to have got
+    // far enough to have failed, and `takeOpened` reading false on a page that has not
+    // started yet is the same false.
+    await page.waitForFunction(
+      "document.getElementById('tNote')?.textContent?.includes('take-that-does-not-exist')",
+      null, { timeout: 30000 }).catch(() => {});
+    const failedOpen = await page.evaluate(`(() => ({
+      opened: __kinect.takeOpened(),
+      depth: __kinect.undoDepth(),
+      note: document.getElementById('tNote')?.textContent ?? '',
+      panel: getComputedStyle(document.getElementById('panel')).display,
+      crop: (() => { const el = document.getElementById('crop');
+        return el ? { there: true, disabled: el.disabled, visible: el.offsetParent !== null } : { there: false }; })(),
+    }))()`);
+    // The two rows that make the pair below mean something. Without them a build that
+    // simply failed to draw the panel would pass the slot rows by having nothing to
+    // press, which is coverage evaporating rather than a guard holding.
+    check(!failedOpen.opened && /take-that-does-not-exist/.test(failedOpen.note),
+      'a take that does not exist fails to open and the page says so rather than going dark',
+      `opened ${failedOpen.opened}, note "${failedOpen.note.slice(0, 80)}"`);
+    check(failedOpen.panel !== 'none' && failedOpen.crop.there
+      && !failedOpen.crop.disabled && failedOpen.crop.visible,
+      'and the inspector is still drawn with its controls live, so there is genuinely a press to make',
+      `panel ${failedOpen.panel}, crop ${JSON.stringify(failedOpen.crop)}`);
+
+    await page.click('#crop');
+    // The auto-save is fire-and-forget, so the write it would make is a round trip away
+    // from the press. Waited on the store rather than on the clock: a fixed sleep that
+    // was too short would report the clobber as absent, which is the one result nobody
+    // re-checks because it looks like the guard working.
+    const slotAfter = await page.evaluate(`(async () => {
+      for (let i = 0; i < 40; i++) {
+        const res = await fetch('/projects/${WORKING}');
+        const doc = await res.json();
+        if (doc.rev !== ${JSON.stringify(slotBefore.rev)}) return doc;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return await (await fetch('/projects/${WORKING}')).json();
+    })()`);
+    check(await page.evaluate('__kinect.undoDepth()') === 0,
+      'a press on a live control of a take that never opened is not recorded as an edit, because there is no baseline for it to be an edit against',
+      `undo depth ${await page.evaluate('__kinect.undoDepth()')}`);
+    check(slotAfter.rev === slotBefore.rev
+      && slotAfter.body?.take?.hash === openHash && slotAfter.body?.take?.id === openId,
+      'and the recovery slot still holds the document of the take that was open before, rather than one naming no take at all',
+      `stamped ${JSON.stringify(slotAfter.body?.take)}, rev ${slotAfter.rev === slotBefore.rev ? 'unchanged' : 'rewritten'}`);
+    // Back onto the take the rest of this run is about. `reopen` reloads whatever is in
+    // the address bar, which is the take that does not exist, so this is a `goto`.
+    await page.goto(`${URL_BASE}${EDITOR_PATH}?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
+    await page.waitForFunction('globalThis.__kinect?.library?.opened() === true', null, { timeout: 30000 });
+    await settle();
+    await dropDoc(WORKING);
+
+    // **This block asks for a 404 and gets one, so "no errors" is the wrong claim to
+    // make about it** - and the row above already made the right one about everything
+    // before it. What is worth asserting here is narrower and says more: every error the
+    // block produced is the refusal it asked for. An error that named something else
+    // would be this block breaking a neighbour on its way past, which is the failure a
+    // blanket count would report as the same thing.
+    const mine = errors.slice(errorsBefore);
+    check(mine.length > 0 && mine.every((e) => /take-that-does-not-exist|404/.test(String(e))),
+      'and every error this block raised is the refusal it went looking for, rather than something it broke on the way',
+      `${mine.length}: ${mine.slice(0, 2).join(' | ')}`);
   }
 
 
@@ -9260,6 +9701,112 @@ try {
     check(cleaned.threw === null && !cleaned.tracks.includes('renderScale'),
       '  and the document this section handed over is put back, carrying neither track it planted',
       cleaned.threw ? `the restore threw "${cleaned.threw}"` : `tracks: ${cleaned.tracks.join(', ') || 'none'}`);
+
+    // ---- the handle a file arrives with, checked the way the drag that makes one is
+    //
+    // **The invariants lived in the drag handler and nowhere in the loader**, while the
+    // docstring over the loader's own check claimed them: `restoreKey` asked whether a
+    // handle was an array of finite pairs inside the count ceiling, and asked nothing
+    // about what the numbers meant. The retime alone had closed this, through
+    // `assertMonotonic`; look and camera tracks reached `restoreKey` and stopped there.
+    //
+    // Both failures are silent, which is why they are worth a door. A folding curve
+    // breaks `easeParam`'s bisection without breaking it - it terminates and returns a
+    // value inside the range, so the take renders deterministically at the wrong times -
+    // and a pose handle above the box asks `hermite` for a fraction past 1, so the camera
+    // sails through the pose it was keyed at and swings back.
+    const withHandle = (where, handle, arriving) => page.evaluate(`(() => {
+      const body = JSON.parse(${JSON.stringify(original)});
+      const handle = ${JSON.stringify(handle)};
+      const arriving = ${JSON.stringify(arriving ?? null)};
+      if (${JSON.stringify(where)} === 'camera') {
+        // The pose comes from the registry rather than from the document, because the
+        // document reaching this section has no camera keys in it - the first draft read
+        // body.composition.camera[0], found nothing, and returned a message that made the
+        // row read 'it was accepted' on a build that had never been asked anything.
+        // params.get('camera') is the pose the page is holding, which is a real one.
+        const seed = __kinect.params.get('camera');
+        body.composition.camera = [{ t: 0, value: seed, easeOut: handle }, { t: 4, value: seed }];
+        if (arriving) body.composition.camera[1].easeIn = arriving;
+      } else {
+        body.look.tracks.bloom = [{ t: 0, value: 0.4, easeOut: handle }, { t: 4, value: 0.8 }];
+        if (arriving) body.look.tracks.bloom[1].easeIn = arriving;
+      }
+      try {
+        __kinect.library.restoreProject(body);
+        return { threw: false, message: null };
+      } catch (err) {
+        return { threw: true, message: String(err?.message ?? err) };
+      }
+    })()`);
+
+    // **The fixture is a genuine fold, and being one takes both handles.** The old row
+    // here planted `easeOut [[0.8, 0], [0.2, 0]]` and asked for a refusal of descending
+    // control x - a rule that is sufficient for a fold and stricter than one, so it
+    // refused the legal crossed polygons `elevate` produces (the editor could save a
+    // document its own reload declined) and, asked one side at a time, it could not see
+    // a fold spanning the join at all. This pair ascends within each side and its x(u)
+    // runs backwards over roughly 30% of the segment: minimum dx/du is -0.41.
+    const folded = await withHandle('look', [[0.9, 0]], [[0.05, 0.5], [0.1, 1]]);
+    check(folded.threw && /folds/.test(folded.message ?? ''),
+      'a segment whose composed timing curve folds is refused by name, rather than rendering the move at the wrong times',
+      folded.threw ? `"${String(folded.message).slice(0, 110)}"` : 'it was accepted');
+
+    // The other half of the same claim, and the row that fails on the build this
+    // replaced: the exact polygon `elevate` makes out of the ordinary
+    // `easeOut [[0.9, 0.1]]` / `easeIn [[0.1, 0.9]]` pair, control points and all.
+    // Its control x descend, 0.675 then 0.5, and its curve is single-valued the whole
+    // way - minimum dx/du 0.15 - so a loader still refusing on the polygon takes this
+    // document away from the editor that saved it.
+    const crossedLegal = await withHandle('look', [[0.675, 0.075], [0.5, 0.5]], [[0.325, 0.925]]);
+    check(!crossedLegal.threw,
+      '  while the legal crossed polygon elevate produces still loads, because the curve is single-valued however its polygon crosses',
+      crossedLegal.threw ? `"${String(crossedLegal.message).slice(0, 110)}"` : 'accepted');
+
+    // The same walk's other question, one level down: a track whose key *times*
+    // descend. Every writer in the program sorts, so this only arrives hand-edited or
+    // damaged - and installed unchanged it hands `keyBefore`'s binary search an array
+    // its invariant does not hold on, which still terminates, still returns an index,
+    // and renders values nobody authored. The first shape of the fold walk skipped
+    // such a pair as though it were merely coincident, which is a refusal that was
+    // never written anywhere.
+    const descending = await page.evaluate(`(() => {
+      const body = JSON.parse(${JSON.stringify(original)});
+      body.look.tracks.bloom = [{ t: 4, value: 0.4 }, { t: 0, value: 0.8 }];
+      try {
+        __kinect.library.restoreProject(body);
+        return { threw: false, message: null };
+      } catch (err) {
+        return { threw: true, message: String(err?.message ?? err) };
+      }
+    })()`);
+    check(descending.threw && /ascending/.test(descending.message ?? ''),
+      'a track whose key times descend is refused by name, rather than handing the evaluators a track their binary search answers wrongly over',
+      descending.threw ? `"${String(descending.message).slice(0, 110)}"` : 'it was accepted');
+
+    const pastTheEnd = await withHandle('look', [[1.4, 0]]);
+    check(pastTheEnd.threw && /outside the segment/.test(pastTheEnd.message ?? ''),
+      '  and so is one whose point sits outside the segment it shapes',
+      pastTheEnd.threw ? `"${String(pastTheEnd.message).slice(0, 110)}"` : 'it was accepted');
+
+    const poseOver = await withHandle('camera', [[0.5, 1.4]]);
+    check(poseOver.threw && /\[0, 1\]/.test(poseOver.message ?? ''),
+      '  and a camera handle above the unit box, which sends the camera past the pose it was keyed at',
+      poseOver.threw ? `"${String(poseOver.message).slice(0, 110)}"` : 'it was accepted');
+
+    // **The row that makes the one above about the kind rather than about handles.** A
+    // look scalar may overshoot - a value that swings past its key and comes back is an
+    // ordinary creative choice, and the drag handler allows it - so a build that simply
+    // refused every handle outside the box would pass all three rows above and take a
+    // control away from the operator. The bound is read off `KINDS` at both ends, which
+    // is what keeps the loader and the drag one rule.
+    const scalarOver = await withHandle('look', [[0.5, 1.4]]);
+    check(!scalarOver.threw,
+      '  while a look handle that overshoots still loads, because overshoot is a choice on an axis that is a value',
+      scalarOver.threw ? `"${String(scalarOver.message).slice(0, 110)}"` : 'accepted');
+
+    await page.evaluate(`__kinect.library.restoreProject(JSON.parse(${JSON.stringify(original)}))`);
+    await settle();
   }
 
   // ================================ 16. a panel group is open because the clip says so

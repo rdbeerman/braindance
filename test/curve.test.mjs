@@ -22,6 +22,7 @@ import assert from 'node:assert/strict';
 import {
   EASE_OUT_LINEAR, EASE_IN_LINEAR, SEGMENT_POINT_CEILING, easeAt, easeParam, elevate,
   keyBefore, HOLD_ENDS, EXTEND_ENDS, scalarAt, scalarSlopeAt, stepAt, hermite, tangentAt,
+  foldRefusal, foldFreeX,
 } from '../web/curve.js';
 
 /** A key as the tracks build one: a time, a value, and the two handles around it. */
@@ -284,4 +285,103 @@ test('an eased u traverses the same points, so shaping the timing cannot move th
     `a smooth ease left the quarter point where linear put it: ${eased(0.25)}`);
   assert.ok(near(eased(0.5), raw(0.5), 1e-9),
     'and the midpoint of a symmetric ease is where it started, which is why it is not the probe');
+});
+
+// ------------------------------------------------------- whether a segment folds
+
+test('foldRefusal accepts the legal crossed polygon elevate produces, and its source', () => {
+  // The pair the loader once refused: `elevate` of `easeOut [[0.9, 0.1]]` /
+  // `easeIn [[0.1, 0.9]]` puts descending control x on the outgoing side - 0.675 then
+  // 0.5 - while the curve underneath is single-valued the whole way, its dx/du
+  // bottoming out at 0.15. A rule about the polygon refuses it; a rule about the
+  // curve must not, or the editor saves documents its own reload declines.
+  assert.equal(foldRefusal([[0.9, 0.1]], [[0.1, 0.9]]), null);
+  const el = elevate([[0.9, 0.1]], [[0.1, 0.9]], 'easeOut');
+  assert.equal(foldRefusal(el.easeOut, el.easeIn), null);
+});
+
+test('foldRefusal refuses a fold that ascends within each side, which per-side ordering cannot see', () => {
+  // Each side's x ascend - 0.9 alone, then 0.05 to 0.1 - and the composed curve runs
+  // backwards over roughly 30% of the segment, minimum dx/du -0.41. This is the fold
+  // the old per-side check was blind to by construction: `previous` reset to 0 at the
+  // join, so descent across it was never compared.
+  const why = foldRefusal([[0.9, 0]], [[0.05, 0.5], [0.1, 1]]);
+  assert.ok(why !== null && /folds/.test(why), `expected a fold refusal, got ${why}`);
+});
+
+test('foldRefusal accepts a plateau, because a stall is a hold rather than a fold', () => {
+  // Two coincident control x make dx/du touch zero without crossing it. `easeSlopeAt`
+  // names the vertical tangent a legitimate placement, and the bisection lands inside
+  // a plateau rather than beside it - so the question is strictly "does x run
+  // backwards", never "does it pause".
+  assert.equal(foldRefusal([[0.5, 0.2], [0.5, 0.8]], EASE_IN_LINEAR), null);
+  assert.equal(foldRefusal(EASE_OUT_LINEAR, EASE_IN_LINEAR), null);
+});
+
+test('elevation never turns an accepted segment into a refused one', () => {
+  // `+pt` is degree elevation and the curve does not move through it, so a loader
+  // that accepts a segment must accept every elevation of it - this is exactly the
+  // save-then-refuse defect, asked as arithmetic. Walked to the ceiling on both
+  // sides, from the pair whose elevation is maximally crossed.
+  let a = [[0.9, 0.1]];
+  let b = [[0.1, 0.9]];
+  while (a.length < SEGMENT_POINT_CEILING && b.length < SEGMENT_POINT_CEILING) {
+    const side = a.length <= b.length ? 'easeOut' : 'easeIn';
+    ({ easeOut: a, easeIn: b } = elevate(a, b, side));
+    assert.equal(foldRefusal(a, b), null,
+      `elevation to ${a.length}+${b.length} control points turned a legal segment into a refused one`);
+  }
+});
+
+test('foldFreeX holds the line a drag cannot: no sequence of clamped moves folds a segment', () => {
+  // The drag's neighbour span is an ordering rule, and ordering is sufficient only
+  // when the polygon starts ordered - from the legal crossed states `elevate`
+  // produces, a seeded search found folds within six in-span drags. This replays
+  // that search through `foldFreeX` with a *wider* adversary: every move proposes an
+  // arbitrary x in the unit range, not merely one inside its span, so what passes
+  // here is stronger than what the drag handler can ask for.
+  let seed = 0x2f6e2b1;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  const clone = (h) => h.map((p) => [p[0], p[1]]);
+  let el = elevate([[0.9, 0.1]], [[0.1, 0.9]], 'easeOut');
+  el = elevate(el.easeOut, el.easeIn, 'easeIn');
+  const starts = [
+    { out: [EASE_OUT_LINEAR[0]], inn: [EASE_IN_LINEAR[0]] },
+    { out: [[0.9, 0.1]], inn: [[0.1, 0.9]] },
+    { out: clone(el.easeOut), inn: clone(el.easeIn) },
+  ];
+  // The positive control first, because a search that cannot find a fold proves
+  // nothing about a clamp that prevents them: the same adversary writing its
+  // proposals straight through must fold, or the assertion below is vacuous.
+  let unguarded = 0;
+  for (let trial = 0; trial < 200 && !unguarded; trial++) {
+    const out = clone(starts[2].out);
+    const inn = clone(starts[2].inn);
+    for (let step = 0; step < 40; step++) {
+      const onOut = rnd() < 0.5;
+      const list = onOut ? out : inn;
+      const index = Math.floor(rnd() * list.length);
+      list[index][0] = rnd();
+      if (foldRefusal(out, inn)) { unguarded++; break; }
+    }
+  }
+  assert.ok(unguarded > 0, 'the unguarded adversary never folded, so the guarded run below asks nothing');
+  for (const start of starts) {
+    for (let trial = 0; trial < 300; trial++) {
+      const out = clone(start.out);
+      const inn = clone(start.inn);
+      for (let step = 0; step < 40; step++) {
+        const onOut = rnd() < 0.5;
+        const side = onOut ? 'easeOut' : 'easeIn';
+        const list = onOut ? out : inn;
+        const index = Math.floor(rnd() * list.length);
+        list[index][0] = foldFreeX(out, inn, side, index, list[index][0], rnd());
+        assert.equal(foldRefusal(out, inn), null,
+          `a clamped move folded the segment: ${JSON.stringify({ out, inn })}`);
+      }
+    }
+  }
 });

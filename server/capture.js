@@ -367,6 +367,8 @@ export class Capture {
     // it. Nothing can reach it again, so the last lease to be released is the only
     // thing left that can close it - see `forgetCapture`.
     this.doomed = false;
+    // Set by `close()`. See the comment there for why this is separate from `doomed`.
+    this.closed = false;
   }
 
   get frameCount() {
@@ -490,6 +492,12 @@ export class Capture {
   }
 
   close() {
+    // Recorded, because "this descriptor is gone" is a question `withCapture` has to be
+    // able to ask and `doomed` is not that question - a capture can be doomed and still
+    // perfectly readable, which is the ordinary case for a read that was already in
+    // flight when a delete or a rename landed. Only a capture that has actually been
+    // closed is one nothing may read through.
+    this.closed = true;
     return this.handle.close();
   }
 }
@@ -798,8 +806,50 @@ const pendingValue = (pending) => settledValue.get(pending) ?? null;
  * and a lease never released is the unbounded map this replaced.
  */
 export async function withCapture(capturePath, fn) {
-  const capture = await openCapture(capturePath);
-  capture.leases++;
+  const pending = openCapture(capturePath);
+  // **The lease is taken in this turn when there is anything to take it on, because an
+  // `await` on an already-resolved promise is still a microtask somebody else can run
+  // in.** `evictIdle` runs synchronously out of `openCapture`, so one request opening a
+  // twenty-fifth capture sweeps while this one is between the handle it was given and
+  // the lease it is about to take - and a capture used before has `usedAt > 0` and
+  // `leases === 0`, which is the front of that queue. It gets closed into the read it
+  // was handed over for, and the read surfaces as a 500. `forgetCapture` reaches the
+  // same window from a delete or a rename, and does not consult `usedAt` at all.
+  //
+  // The carve-out in `evictIdle` covers the other half and only the other half: a
+  // capture that has *just* resolved has `usedAt === 0` and is not a candidate, which is
+  // what makes the `await` below safe for the open this call started. So the two
+  // branches are the two states, and neither is left leaning on the caller being quick.
+  const already = pendingValue(pending);
+  let capture;
+  if (already) {
+    already.leases++;
+    capture = already;
+  } else {
+    capture = await pending;
+    capture.leases++;
+  }
+  // Asked after the lease rather than before it, because `forgetCapture` does not check
+  // `usedAt`: a delete landing during the open above dooms and closes a capture whose
+  // lease count was still zero, and reading on through it would be reading a deleted
+  // take out of a closed descriptor. Said rather than surfaced as a handle error, which
+  // is the difference between "that take was removed" and a 500 nobody can attribute.
+  //
+  // **Both, and the pair is narrower than `doomed` alone on purpose.** `forgetCapture`
+  // runs on a rename as well as on a delete, and a rename is the operation this program
+  // promises carries a take rather than losing it - the capture keeps its inode, so a read
+  // already holding the handle goes on returning the take's own bytes and always has.
+  // Refusing on `doomed` alone would have turned that into an error for a race nobody
+  // asked about, on the one path the architecture doc singles out as safe. What is
+  // genuinely unreadable is a capture whose descriptor was closed in the window above, and
+  // that only happens when the lease count was still zero when `forgetCapture` looked.
+  //
+  // After the lease there is no second window: `forgetCapture` closes only at zero leases,
+  // and this one is held from here to the `finally`.
+  if (capture.doomed && capture.closed) {
+    capture.leases--;
+    throw new Error(`${capturePath} was removed or renamed while it was being opened`);
+  }
   capture.usedAt = ++useClock;
   try {
     return await fn(capture);

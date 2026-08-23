@@ -85,9 +85,32 @@ function buildControls() {
     controls.target.copy(previous.target);
     controls.autoRotate = previous.autoRotate;
     controls.enabled = previous.enabled;
+    // **The home pose is part of what the old object carried**, and it is the one thing
+    // this copy used to leave behind. `OrbitControls` captures `target0`, `position0` and
+    // `zoom0` in its constructor and never again, so a rebuild silently re-homes Reset on
+    // wherever the camera happened to be when the up vector changed, aimed at the world
+    // origin. Levelling a canted mount is the first thing the README tells an editor to
+    // do, so that is the ordinary path rather than a corner: level the room, then press
+    // Reset, and the camera goes to where you were standing when you moved the slider.
+    // Carried across rather than re-saved, because a rebuild is meant to be invisible.
+    controls.target0.copy(previous.target0);
+    controls.position0.copy(previous.position0);
+    controls.zoom0 = previous.zoom0;
     previous.dispose();
   } else {
     controls.target.copy(ORBIT_TARGET);
+    // **And on the first construction the home has to be taken after the target is
+    // written**, which is the half that has been wrong since this was first built. The
+    // constructor clones `target` into `target0` before this line runs, so `reset()`
+    // restored a pivot of `(0, 0, 0)` rather than the `(0, 0, -2.2)` the cloud sits at.
+    //
+    // It survived because it reads as working: the two aims differ by about 2 degrees, so
+    // the frame immediately after the press looks right. What is wrong is everything
+    // after - the orbit now turns about a point 2.2m in front of the subject, so dragging
+    // swings the cloud across the frame instead of turning around it. On the Pi's
+    // collapsed-panel touchscreen the dock's centre button is the only recentre there is,
+    // so the one control for getting un-lost was the one leaving the camera lost.
+    controls.saveState();
   }
   for (const [type, listener] of navListeners) controls.addEventListener(type, listener);
 }

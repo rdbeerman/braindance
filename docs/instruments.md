@@ -3091,3 +3091,303 @@ keeping because everything else about that mutation stays green: the ordinates a
 1, so the camera's *rate* still reaches zero at the key and every velocity assertion in the
 suite passes. What goes is only the degree, and with it the acceleration claim that was the
 whole reason for the second point.
+
+## A parse that only ever ran in one configuration
+
+`native/grabber.cpp` had no compile gate of any kind — 64 JavaScript files got `node --check`
+on two Node versions every push and the one file that writes the artifact this program exists
+to produce got a regex in a citation walk. So the first version of `cpp-check` was going to be
+one invocation of `c++ -fsyntax-only`, which is a real check and would have carried a claim it
+could not support.
+
+The file chooses its default pipeline off which processors libfreenect2 was compiled with, and
+branches per processor in three more places. Configure the gate off whatever the host has and
+the macOS station gives it OpenCL, so **every OpenGL arm is text the compiler never reads** —
+the Pi's `pipeline = new libfreenect2::OpenGLPacketPipeline()` and the two refusals beside it.
+A break there would sit green on every push until somebody rebuilt on the Pi, which is the
+machine that is hardest to get to and the one where a broken build costs a shoot. Worse, the
+coverage would move with the host: the same tool on a Linux box with no OpenCL would check the
+opposite half and report the same green.
+
+So the gate runs the four combinations of the two macros the file branches on, and the control
+that says it does is `--mutate opengl-branch-broken` — a type name that does not exist, planted
+inside that `#ifdef` arm. **It must redden two of the four grabber rows and not all four**, and
+both halves of that are the assertion: all four would mean the mutation escaped its arm and is
+really testing something else, none would mean the matrix had collapsed back to one
+configuration. The count is the reading, not the exit code.
+
+Two smaller things came out of building it, both of which are the same rule pointed at the
+instrument rather than at the subject. `--mutate grabber-type-error` is kept separate from the
+two syntax mutations because `-fsyntax-only` is a semantic pass and nothing was asserting that:
+a gate that merely tokenised would take `HdEncoder("high")` for `HdEncoder(int)`, and an
+argument in the wrong unit is most of what a C++ mistake in this file looks like. And the tool
+feeds the compiler `int x = ;` before it checks anything real, refusing to continue unless that
+comes back rejected — the same canary `syntax-check` grew after finding a tree state where
+`node --check` accepted a broken file in silence, which is a lesson this repository has now
+paid for twice and should not pay for a third time.
+
+## A row that passes on both builds, found by running the mutation rather than by reading it
+
+`pauseTransport` is `takeTransport()` and then `timeline.pause()`, and its docstring is
+unambiguous about why: a pause is a claim on the transport, and a resume queued behind an
+older gesture only asks whether anybody has claimed it since. Every pause on the editor
+went through it except the play button, which called `timeline.pause()` directly - so the
+fix is one word and the finding reads as obvious.
+
+The row written for it was not. Two presses of `#tPlay`, the second inside the first's
+pre-roll, then a wait past any pre-roll and an assertion that the take is stopped. It
+passed. It also passed against `--mutate play-button-skips-pausetransport`, which is the
+whole defect put back, and the tool still printed `caught, as required (3 assertions
+fired)` - because three unrelated rows are red on this tree and the verdict counts
+failures rather than reading them. **That is this repository's own rule catching its
+author**: count the failed assertions and read which ones fired.
+
+Two things came out of chasing it, and the second is the one that matters.
+
+**The window was measured with the driver in it.** From Playwright the transport reported
+`playing` 71ms after the click and the clip first moved at 92ms, which reads as a 21ms
+window to aim at. Both numbers are round trips: `page.locator().click()` does not return
+until the page has processed the event, so what was being timed was the driver. Read from
+inside the page, `playing` is true synchronously in the handler - the window opens at 0ms.
+`docs/measurement.md` already says a figure derived from how long the driver's own loop
+took is a measurement of the driver; this is that, one layer further in. The row now finds
+its window by state - the transport playing and the clip not yet moved - rather than by a
+number that is a fact about this machine.
+
+**And with the window found, the mutation still is not caught, because the defect may not
+be reachable through this control.** A pause pressed inside a play's *own* pre-roll holds
+on both builds: nothing else has claimed the transport, so there is no queued resume for
+the generation to invalidate. The cases the docstring names - a rate release, an undo, a
+seek from another gesture - all pause first, so at the moment their resume is queued
+`timeline.playing` is false and the button is a *play* rather than a pause. No sequence
+was found where the button is the pause and a foreign resume is pending.
+
+So the change stays and the claim shrinks to what was shown: it is consistency with the
+helper this file's own comment mandates, not a defect anybody has reproduced. The mutation
+stays too, named in `CLAUDE.md` as one this suite does not catch - the same treatment
+`bloom-reference-1080` already has, and for the same reason. A mutation quietly deleted is
+a question that gets asked again in a year; a mutation left in a list of things that must
+FAIL, that does not, is worse than either.
+
+A round of review later, the same button *did* have a demonstrated defect - a different
+one, on the stretch this row's window opens after. The case below has it; the shrunken
+claim above was right to shrink, because what was eventually reproduced was not the
+generation guard failing but the toggle not seeing a pending play at all.
+
+## The window a row finds by `playing` opens after the stretch the defect lives in
+
+The row above finds its pre-roll window by state: the transport playing and the clip not
+yet moved. That window is real and the row is honest about it - and it begins where
+`play()` assigns `playing = true`, which on a drafted or out-of-range playhead is *after*
+an awaited accurate seek. The stretch before that assignment is also real time, `playing`
+reads false for the whole of it, and the toggle read `playing` alone: a second press
+inside that stretch was taken as another play rather than as the stop it meant. Neither
+pending invocation rechecked anything after its await, so both resolved into a rolling
+take over the top of the press. An external review found it by reading the proof arm: the
+second click waits for `t.playing` to go true, so the arm exercises only the later window
+and the earlier one was never driven.
+
+The fix is a `pendingPlay` flag the toggle reads beside `playing`, and a generation inside
+the transport that `pause()` bumps and `play()` rechecks after its awaits. The rows that
+hold it enter the pending state synchronously - `draft(4.0)`, then both clicks in one
+page-side task, because the first click's handler sets `pendingPlay` before its first
+await and the same task is the only place a driver is *certain* the state still holds. A
+precondition row reads `drafted`, `playing` and `pendingPlay` at the second click, or the
+outcome row passes vacuously on any build the moment the draft clears early.
+
+The wait after the presses is for the transport's chain to drain - `!pendingPlay &&
+!working`, then a beat - rather than a constant, and that choice is the mutation's doing:
+the mutated builds start the clip only *after* the pending seek resolves, so a constant
+shorter than the seek reads the defect as a pass. That is the same lesson the row above
+learned about windows measured with the driver in them, arriving one stage earlier.
+
+Two mutations guard it, `toggle-plays-over-a-pending-play` and
+`play-resolves-past-its-pause`, and they redden the same outcome row - two ways to break
+one claim that needs both halves standing. The toggle mutation leaves the pending-window
+row green, because the mutated build still enters the pending state; what it loses is the
+press that ends it.
+
+## An instrument asserting the sufficient condition pins the code to refusing legal states
+
+`restorekey-skips-handle-invariants` asserted, by name and fixture, that `easeOut
+[[0.8, 0], [0.2, 0]]` is refused for descending control x. Descending x is *sufficient*
+for a fold and never necessary, and with the default `easeIn` beside it that fixture's
+curve is single-valued - minimum dx/du +0.277. So the instrument was holding the loader to
+a rule that refuses legal documents: `elevate` produces crossed polygons out of ordinary
+handles (`easeOut [[0.9, 0.1]]` / `easeIn [[0.1, 0.9]]` elevates to x = 0.675, 0.5, curve
+unchanged), the editor saved them, and the next reload refused its own document. The same
+per-side rule was simultaneously too loose - `previous` reset to 0 per side, so a fold
+spanning the `easeOut`/`easeIn` join (`easeOut [[0.9, 0]]` / `easeIn [[0.05, 0.5],
+[0.1, 1]]`, ascending within each side, minimum dx/du -0.41) loaded and rendered the move
+at the wrong times, silently. One rule, wrong in both directions, and the instrument's
+fixture is what kept it that way: fixing the code meant rewriting what the mutation
+claimed to redden, which is why it went to the author rather than into a commit.
+
+The replacement asks the real question of the real object - `foldRefusal` in
+`web/curve.js`, whole-curve x-monotonicity once per segment with both handles in hand,
+decided exactly by convex-hull pruning and de Casteljau subdivision rather than by a
+sample count. The new fixture is the genuine fold above, the legal-crossed row beside it
+is the exact polygon `elevate` produces - the half that fails on the build this replaced -
+and `restore-skips-the-fold-check` reddens the fold row alone while the per-side rows
+stay green, which is the split that says the two checks are different claims.
+
+Two things came out of building it that the next check of this shape will want. **The
+drag needed the same rule, and a seeded search is what said so**: `handleSpan`'s
+neighbour clamp is the ordering rule again, and from the twice-elevated legal polygon an
+adversarial sequence of in-span drags reached a genuine fold in six moves - 7,005 folded
+states across the search, 1,184 of them ascending within each side, so no per-side
+reading of any strictness catches them. `foldFreeX` now slides a dragged x to the last
+fold-free point, and the search re-runs in `test/curve.test.mjs` with a wider adversary
+and a positive control - the unguarded run must fold, or the guarded run asking nothing
+would read as it holding. **And the exact decision procedure needs its tolerance on both
+tests, not one**: the strict hull test cannot terminate cheaply on a segment sitting
+exactly on the boundary - which is the state the clamp's own bisection produces - and one
+such call measured 1.4s against microseconds for every ordinary one. The hull bounds the
+curve from below by its least coefficient, so clearing -1e-9 everywhere is dx/du above
+-1e-9 everywhere: a plateau in every sense that renders, pruned in one look.
+
+## A census of exit codes that did not say what a miss exits
+
+`docs/proof-tools.md` opens on the rule this whole suite is built around - count failed
+assertions, never exit codes - and the census under it described its largest group as "seven
+exit non-zero on a catch and say `NOT CAUGHT` when they miss". Every word of that is true. What
+it does not say is what a *miss* exits, and the natural reading of the sentence is that a miss
+must therefore look like something else.
+
+It does not. Measured across all seven, plus `module-check` which had never been in the census
+at all: the `NOT CAUGHT` branch is `process.exit(1)` and the `caught, as required` branch beside
+it is `process.exit(1)`. Within that group the exit code carries **no information whatsoever**,
+and the printed sentence is the only thing separating a catch from the check being blind.
+
+**The cost was a round of this work.** Wiring `syntax-check` and `module-check`'s thirty-three
+mutations into CI needed a loop, and `module-check` was written up as a fifth shape of its own -
+"the worst of the set", with a paragraph about it - purely because the census's wording implied
+the other seven behaved differently. Reading their code took two minutes and the write-up was
+wrong. The correction is in the census now, stated as the miss exit rather than as the catch
+exit, because the thing a reader needs is the half that was missing.
+
+Two things generalise. **A census of behaviours has to state the behaviour that is dangerous,
+not the one that is interesting** - what a catch exits is the memorable fact and what a miss
+exits is the one a gate is written against. And **a group somebody has not measured is a group
+you are quoting**, which is the same rule this file states about counts in prose, arriving in a
+document whose entire subject is not trusting them.
+
+## Two loop shapes already in this repo, each of which scores a miss as a catch
+
+The step that runs those thirty-three had two obvious models sitting in the same workflow, and
+neither is usable, which was measured rather than argued by running both against a stub that
+misses on purpose:
+
+- **The `cpp-check` job's shape**, `if node ... ; then echo NOT CAUGHT; exit 1`, treats a zero
+  exit as the miss. Against the stub it printed `caught` and exited 0. That is right for
+  `cpp-check`, whose miss really is exit 0, and it is exactly backwards for the eight tools
+  above.
+- **The gate job's shape**, `set -e` with a bare invocation, treats a non-zero exit as the
+  miss. It fails on the stub - and it also fails on all thirty-three runs that *work*, because
+  a catch in both of these tools is a non-zero exit too.
+
+What discriminates on every tool is the number each already prints in its own summary line, so
+the step parses `, N failed$` and requires it above zero, with exit 2 kept apart from a miss
+because a stale anchor and a name the tool does not know both answer 2 having asserted nothing.
+
+**The loop has three falsification controls of its own**, and they are the shape this file
+recommends for a mechanism the subject cannot break: a probe tree of stub tools, one per
+failure branch. A tool enumerating no mutations fires the floor; a tool declaring one and
+missing it fires `NOT CAUGHT`; a tool refusing its own anchor fires `DID NOT RUN`. Each fails
+the step with its own sentence, and the identical loop text is run against them by `cd`-ing to
+the probe root, so what is graded is the shipped text rather than a copy of it.
+
+**What CI cannot claim, and it is worth stating beside the step.** The rule is "read which
+assertions fired", and a workflow cannot: a per-mutation row table in a YAML file is the
+hand-maintained list the enumeration exists to replace. Measured, so the bound is real rather
+than admitted: with `module-check`'s cycle detector stubbed out, `--mutate cycle-planted` still
+printed `caught, as required (1 assertion fired)` and exited 1 - off the probe tree's own row,
+not the row the mutation names. What catches *that* is the unmutated run in the same job, which
+the same stub reddens. The two steps are one claim in two halves and neither is worth much
+alone.
+
+## The registry was right and the controls were lying, so the obvious diff finds nothing
+
+The post-boot state diff had been deferred to by three documents and built by none, and the
+audit that asked for it sketched the comparison as "read every registry value back after first
+paint, compare against the registry's declared defaults". That cannot catch the fault it is for,
+and the reason is one line:
+
+    function writeControl(name, value) {
+      const el = panelControls.get(name);
+      if (!el) return;
+
+`params.reset()` landing before the panel generator has filled that map writes every value into
+the registry, reaches no control, and returns silently. So the registry ends up holding
+perfectly correct values - it is the *controls* that show what the markup left them at - and a
+diff against declared defaults compares defaults to defaults and reports nothing at all.
+Measured with the fault restored: **73 of 80 controls diverge and the registry is right about
+all 80.**
+
+**Ask which side of a comparison the fault actually moves.** This is the two-terms rule already
+in this file, arriving from the direction where the wrong term is the one that looks
+authoritative: the registry is the source of truth, so comparing against it feels like the
+strong check, and it is the half the bug leaves untouched.
+
+### And what an unwritten control reads is measured, not derived
+
+The coverage row beside it - which parameters the diff cannot separate, because their stored
+value equals whatever an unwritten control shows - was first written against `(min + max) / 2`,
+the value an HTML range input is commonly said to default to. That is wrong here on **75 of 75**
+range controls: `pointSize` spans 0.5 to 64, whose midpoint is 32.25, and the element reads
+50.5. The predicted blind set named thirteen parameters where the fault leaves seven, and the
+two lists overlap on two.
+
+The repair is to build a detached input carrying the same `min`, `max` and `step` and read its
+`value` - the browser answering the question instead of the check predicting it. It then agrees
+exactly with the set observed surviving the mutation, which is what says the two halves mean the
+same thing by "indistinguishable". **A number that reads like a measurement and is a picture of
+a formula is the failure this file keeps recording**; the tell was that it was computed rather
+than observed, in a check that had a browser open the whole time.
+
+## A one-way migration whose two gates cannot be told apart
+
+**Written in the past tense: `tools/convert-presets.mjs` was deleted the same week this was
+found, and nothing in this section can be re-run.** It is kept for the reason the floor-
+selection entry above is kept - the lesson is about gates that agree, not about migrations -
+and because the way it was found is the transferable part.
+
+That tool converted a document's undo history in two places: `convert`'s version 3 branch
+called `convertHistory` and then handed the result to `toVersion5`, which called it again. The
+tool's own comment called this out as costing a walk and changing nothing, and it was right.
+
+The consequence is that a version 3 project reached both, so neither could be falsified.
+Measured on a test written for it: removing `convert`'s call reddened nothing, removing
+`toVersion5`'s call reddened nothing, and only removing **both** reddened the row. That is the
+two-gates-that-agree shape this file already records against the rename route, found this time
+by mutation-testing a *new test* rather than by reviewing old code - which is the part worth
+carrying. **A test written against code nobody has broken on purpose has unknown sensitivity,
+and the cheapest way to find its blind spot is to break the subject six ways and read which
+rows move.** Five of the six reddened exactly the row they named; the sixth reddened nothing
+and that was the finding.
+
+The fixture that separated them was a *version 4* project carrying history, which skipped the
+version 3 branch entirely - so its history was converted by `toVersion5`'s call site alone.
+`convert`'s own call stayed genuinely unfalsifiable and was reported rather than repaired,
+because removing it was an edit to a tool whose successful outcome is destroying the original.
+The whole question then went away with the tool, which is the outcome a report makes possible
+and a quiet repair does not.
+
+## An export added where the rule does not look
+
+A plan that adds exports to a tool and expects `module-check`'s dead-export rule to keep them
+honest is relying on a scope the rule does not have, on the strength of its consumer walk being
+the whole checkout. The rule's **subject** is `web/` - it walks `web/` for modules and asks who
+imports what they export - while the whole-checkout walk is only the **consumer** side. An
+export added under `tools/`, `server/` or `test/` is in neither population, in either direction.
+
+Measured rather than reasoned about, and re-measured on a file that still exists: a dead export
+planted in `tools/make-sample.mjs` passes a clean run at 61 assertions, 0 failed. So an export
+outside `web/` carries no coverage from that rule at all, and saying so is the honest report -
+widening the subject set is separate work needing controls of its own, and it would be a change
+with a blast radius across every tool in the tree.
+
+**The general form: a rule with two populations has two scopes, and the wider one is the easier
+to remember.** "It reads every JavaScript file in the checkout" is true of `module-check` and is
+a sentence about its consumers, not about its subjects - and a plan built on the sentence rather
+than on the split gets a safety net that is not there.

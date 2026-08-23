@@ -19,8 +19,14 @@ keyframe editor with a retime curve, and a render queue that exports through ffm
 Depth and colour are captured on separate listeners: the colour camera halves to 15fps in
 dim light while depth stays at 30, and a synced listener would throw away every other depth
 frame waiting for it. Depth runs at its own rate and reuses the most recent colour, at worst
-one interval stale. The grabber logs both counts (`600 frames (293 colour)`), because a
-lagging colour rate is the one thing that explains a stale-looking image.
+one interval stale. The grabber logs both counts, and beside them the frames libfreenect2
+handed over having already marked its own solve as failed —
+`600 frames (293 colour, 0 bad depth, 0 bad colour)`. A lagging colour rate is the one thing
+that explains a stale-looking image, and the two refusal counts are the one thing that
+separates a machine whose GPU readback is failing from a degraded USB link: a refused depth
+frame does not advance the frame count, so the rate drops either way and only these say which.
+They are printed whether or not they are zero, because a build that has stopped counting and a
+run with nothing to count would otherwise read identically.
 
 ## The four surfaces
 

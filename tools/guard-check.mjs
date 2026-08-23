@@ -43,6 +43,22 @@ const WORK = join(REPO, '.guard-check');
 // everything cannot tell you which assertion is load-bearing - the same reason
 // step 6 split its cumulative grade table into one row per term.
 const MUTATIONS = {
+  // The reads go back to answering a page on another origin. `originAllowed` is
+  // untouched and every row above it stays green, which is the separation: an `<img>`
+  // carries no `Origin` at all, so the guard that has always been here cannot see it and
+  // the one this stages is the only thing that can.
+  //
+  // Must redden the cross-origin read row and leave the same-origin, absent and
+  // navigation rows green - a build that simply refused everything would redden those
+  // instead, and it would be a different defect wearing the same colour.
+  'reads-answer-any-page': {
+    file: 'server/index.js',
+    edits: [[
+      '      if (!r.embeddable && !sameOriginBrowser(req)) {',
+      '      if (!r.embeddable && false) {',
+    ]],
+  },
+
   // The control for the whole guard: the upgrade stops asking.
   'upgrade-skips-origin': { file: 'server/index.js', edits: [[
     `  if (!originAllowed(req)) {
@@ -213,6 +229,9 @@ const reachable = (host) => new Promise((resolve) => {
 const LAN = Object.values(networkInterfaces()).flat()
   .find((i) => i && i.family === 'IPv4' && !i.internal)?.address ?? null;
 const SAMPLE = join(REPO, 'captures', 'sample.knct');
+// The take id the server lists that capture under, which is its basename without the
+// extension - the same derivation `server/capture.js` makes.
+const SAMPLE_ID = 'sample';
 
 try {
   console.log(`[guard] ${MUTATE ? `MUTATED: ${MUTATE} (${MUTATIONS[MUTATE].file})` : 'unmutated tree'}`);
@@ -297,6 +316,46 @@ try {
   ]);
   ok('while an address literal, IPv6 loopback, `localhost` and an mDNS name all still open - the rule discriminates by the kind of authority, and a guard that refused everything would fail here rather than pass quietly',
     stillReachable.every((r) => r === 'open'), stillReachable.join(', '));
+
+  // **The reads, and the header that is the only thing able to tell them apart.** Every
+  // row above is about `Origin`, which a cross-origin `<img>` does not send at all - so
+  // `originAllowed` passes it, correctly, because a request with no origin is exactly
+  // what the capture node and the render worker look like. Several of these reads are
+  // expensive: `/capture/:id/file` streams a whole take off the disk the recorder is
+  // writing to, `remote-frame` buffers a node's reply into heap, `extent` scans past its
+  // cache - and take ids are the date and a number, so they are guessable.
+  //
+  // `sec-fetch-site` is set by the browser and cannot be set by a page. Absent must pass
+  // or the peer link stops working, which is the row that keeps this from being a guard
+  // that refuses everything.
+  const read = (site, path = `/capture/${SAMPLE_ID}/hello`) => fetch(`http://127.0.0.1:${PORT}${path}`, {
+    headers: site === null ? {} : { 'sec-fetch-site': site },
+  }).then((r) => r.status).catch(() => 'threw');
+  const sameOrigin = await read('same-origin');
+  const absent = await read(null);
+  ok('a read from the page this server served is answered, which is every read the product makes',
+    sameOrigin === 200, `same-origin -> ${sameOrigin}`);
+  ok('and one with no fetch metadata at all is answered too - that is the capture node, the render worker and curl, and refusing it would take the link off',
+    absent === 200, `absent -> ${absent}`);
+  const crossSite = await read('cross-site');
+  const sameSite = await read('same-site');
+  ok('while a read a page on another origin started is refused, which is the `<img src=…/capture/…/file>` an operator only has to visit a page to run',
+    crossSite === 403 && sameSite === 403, `cross-site -> ${crossSite}, same-site -> ${sameSite}`);
+  const navigation = await read('none');
+  ok('and a top-level navigation is not refused, because typing the URL is not an attack and OBS opening a browser source is one of these',
+    navigation === 200, `none -> ${navigation}`);
+  // Route-by-route would have closed the six that were found; the table's default is what
+  // closes the seventh. The webcam is the one entry that opts out, and it says so.
+  const expensive = await Promise.all([
+    read('cross-site', `/capture/${SAMPLE_ID}/extent?near=0.5&far=6`),
+    read('cross-site', '/library/all'),
+    read('cross-site', `/capture/${SAMPLE_ID}/index`),
+  ]);
+  ok('every read is refused by default rather than the ones somebody thought of, so a route added later is asked by existing',
+    expensive.every((r) => r === 403), expensive.join(', '));
+  const webcam = await read('cross-site', '/camera.mjpg');
+  ok('and the one route that declares itself embeddable still answers, because it exists to be consumed by another program',
+    webcam !== 403, `camera.mjpg -> ${webcam}`);
 
   console.log('\n[guard] nothing is on the network unless somebody typed a flag');
   ok('the server is up on loopback', await reachable('127.0.0.1'));

@@ -406,9 +406,7 @@ string fails at the key that is wrong instead of writing a plausible-looking loo
 validates, so `editor-check` section 12 drives the round trip in a browser, with
 `import-skips-normalise` as the mutation that must break it.
 
-Documents from before the readings are version 3 and will not open. The conversion is total
-and lossless, so it is a one-shot over files:
-
-```
-node tools/convert-presets.mjs presets projects jobs
-```
+Documents from before the readings are version 3 and will not open, and there is nothing to
+run: the one-shot conversion this repo used to ship was deleted once every document it could
+act on had already been converted. A version 3 or 4 file is refused, naming its own version,
+and stays refused.

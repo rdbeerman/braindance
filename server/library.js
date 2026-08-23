@@ -223,6 +223,140 @@ const refusal = (key, ...args) => ({ key, why: OPEN_REFUSALS[key](...args) });
  * `openable`, `hasHello` and `frames` and left every surface to derive the sentence,
  * which is the derivation this design removed.
  */
+/**
+ * Whether a take from another machine is one this one will put on a shelf, and why not.
+ *
+ * **The link is plain HTTP with no authentication, so a node's manifest is the widest
+ * thing this program trusts and it was checked on two fields.** `id` and `hash` were
+ * filtered because those two reach a *path* on this side; every other field was spread
+ * verbatim into `/library/all` and drawn. Two of them reach the gallery's markup without
+ * passing through the numeric coercion their neighbours get - `${take.frames}` and
+ * `take.marks.length` - so a machine answering in the node's place on a shoot network
+ * gets script running inside the editing station's own page origin, which can drive every
+ * mutating route the origin gate exists to protect, the loopback-only reveal included.
+ *
+ * Refused at the boundary rather than escaped at the sink, and the whole manifest rather
+ * than take by take, for the reason `takes()` already gives about an older build: a shelf
+ * that quietly drops the unreadable ones looks complete, and "some of that node's takes
+ * are missing" is the failure a link is supposed to make impossible to have silently.
+ * There is one place a manifest from another machine arrives, so it is the one place that
+ * can say so.
+ *
+ * Written against `describeTake`'s two returns - the settled take and the one being shot -
+ * because those are what a node of this build actually sends. A field this rejects that
+ * a later build starts emitting is a refusal naming the field, which is the version gate
+ * `takes()` already has working in the other direction.
+ */
+// A refusal key as a *shape* rather than as a member of this build's table, so a node one
+// build ahead keeps badging. Short and identifier-like is all a badge needs it to be.
+//
+// **A leading underscore is admitted on purpose, and the first version of this refused
+// it.** `__proto__` is a key this suite plants deliberately - `badges-inherit-from-object`
+// is the control for a build that reads a refusal list off `Object.prototype` instead of
+// off the manifest, and the whole point of that fixture is that the key reaches the page
+// and badges as itself. A schema that refused it would have closed a hole by breaking the
+// test for a different one, which is why this is a character class rather than a table.
+// What it still excludes is what a badge cannot be: markup, quotes, whitespace, and
+// anything long enough to be a sentence.
+const REFUSAL_KEY = /^[A-Za-z_][A-Za-z0-9_-]{0,40}$/;
+const num = (v) => typeof v === 'number' && Number.isFinite(v);
+const nonNeg = (v) => num(v) && v >= 0;
+const count = (v) => v === null || (Number.isInteger(v) && v >= 0);
+function manifestRefusal(take) {
+  if (!take || typeof take !== 'object' || Array.isArray(take)) return 'is not an object';
+  if (typeof take.file !== 'string' || take.file.length > 255) return 'has no usable file name';
+  if (!nonNeg(take.bytes)) return `has bytes ${JSON.stringify(take.bytes)}`;
+  if (!count(take.frames)) return `has frames ${JSON.stringify(take.frames)}`;
+  if (!nonNeg(take.durationSec)) return `has durationSec ${JSON.stringify(take.durationSec)}`;
+  if (!num(take.capturedAt)) return `has capturedAt ${JSON.stringify(take.capturedAt)}`;
+  if (take.dateSource !== 'hello' && take.dateSource !== 'mtime') {
+    return `has dateSource ${JSON.stringify(take.dateSource)}`;
+  }
+  if (typeof take.truncated !== 'boolean') return `has truncated ${JSON.stringify(take.truncated)}`;
+  if (take.hasHello !== null && typeof take.hasHello !== 'boolean') {
+    return `has hasHello ${JSON.stringify(take.hasHello)}`;
+  }
+  // **Absent is the version gate's business and wrong-type is this one's**, which is the
+  // line this schema is drawn on. `format` arrived after the refusal list did, so a node
+  // that carries `openRefusals` and no `format` is a build in between - and refusing it
+  // here would be a second version gate, sitting beside `carriesRefusals` below and
+  // disagreeing with it about which builds are admissible. What must not pass is a
+  // `format` that is *there* and is not a generation number.
+  if (take.format !== undefined && !count(take.format)) return `has format ${JSON.stringify(take.format)}`;
+  if (take.hello !== null) {
+    const h = take.hello;
+    if (!h || typeof h !== 'object' || !['fx', 'fy', 'cx', 'cy'].every((k) => num(h[k]))) {
+      return 'has a hello that is not the four intrinsics';
+    }
+  }
+  if (typeof take.openable !== 'boolean') return `has openable ${JSON.stringify(take.openable)}`;
+  if (typeof take.recording !== 'boolean') return `has recording ${JSON.stringify(take.recording)}`;
+  // **The hash and `recording` are one claim rather than two fields**, and checked here
+  // rather than in the filter above because what is wrong with a settled take carrying no
+  // hash is not that it reaches a path - it is that the manifest contradicts itself. The
+  // filter is about `id` and `hash` being safe to put in a filename, which is why it lets
+  // null through; this is about the pair meaning what the gallery draws from it.
+  //
+  // Without it a take arriving as `recording: false, hash: null` listed as an ordinary
+  // remote take, `availability` gave it an enabled Download - that button is gated on
+  // `state === 'remote' && !recording` and on nothing else - and the press then failed in
+  // `downloadTake`, which asserts `VALID_HASH` before it opens anything. An action offered
+  // that cannot succeed is worse than one that is missing, because the operator reads the
+  // failure as the node being down.
+  //
+  // The rule is `describeTake`'s own, mirrored rather than invented: a take still being
+  // written reports null because its bytes are still moving, and every settled take
+  // carries the hash the streaming scan produced. So this refuses a manifest no build of
+  // this program emits, which is what keeps it a shape check and not a version gate.
+  if (take.recording ? take.hash !== null : !VALID_HASH.test(take.hash ?? '')) {
+    return `has hash ${JSON.stringify(take.hash)} on a take that is ${
+      take.recording ? 'still recording, which has no settled hash to advertise' : 'settled, which must have one'}`;
+  }
+  // **The refusal list is checked for being one and never for what is in it**, and that
+  // restraint is the design rather than a gap. A node one build *ahead* sends a key this
+  // build has never heard of, and the gallery deliberately badges it with the key itself -
+  // `badges-inherit-from-object` is the control that keeps that working. A schema that
+  // held the key to this build's own table would turn a node that is merely newer into a
+  // node whose whole library vanishes, which is the failure the version gate below exists
+  // to make legible rather than one to add.
+  //
+  // So what is asked is only what the page needs in order to print it safely: an entry is
+  // an object, its key is a short identifier rather than a sentence or markup, and its
+  // reason is a string of a length a badge can hold. Absent altogether is the version
+  // gate's business, exactly as `format` above is - `carriesRefusals` reads that and says
+  // so by name, and reaching it requires not throwing here first.
+  if (take.openRefusals !== undefined) {
+    if (!Array.isArray(take.openRefusals)) return 'has an open-refusal list that is not a list';
+    for (const r of take.openRefusals) {
+      if (!r || typeof r !== 'object' || typeof r.key !== 'string' || !REFUSAL_KEY.test(r.key)
+        || typeof r.why !== 'string' || r.why.length > 400) {
+        return `carries an open refusal this build cannot read: ${JSON.stringify(r).slice(0, 60)}`;
+      }
+    }
+  }
+  // **Checked per record rather than for being a list**, because the list is not what
+  // the gallery dereferences - `paintMarks` reads `m.sourceMs` off every entry to place a
+  // tick and `m.label ?? m.id` to title it, so a node answering `marks: [null]` throws
+  // inside the loop that paints the shelf and takes the whole library page down with it.
+  // A shelf is drawn from every node at once, so that is one peer costing every take its
+  // tile rather than costing itself one.
+  //
+  // The shape asked for is the one `resolveMarks` guarantees on this machine - a string
+  // id, a finite `at` to order by, a finite `sourceMs` to place, and no tombstone - so the
+  // manifest boundary admits exactly what a local read produces and there is one rule for
+  // a mark rather than one per origin. A label is optional and stays unchecked for what it
+  // says: `paintMarks` writes it through `textContent`, which is text from outside this
+  // page never becoming markup, and that is the door it goes through either way.
+  if (!Array.isArray(take.marks)) return `has marks ${JSON.stringify(take.marks).slice(0, 40)}`;
+  for (const m of take.marks) {
+    if (!m || typeof m !== 'object' || Array.isArray(m) || typeof m.id !== 'string'
+      || !num(m.at) || !num(m.sourceMs) || m.deleted) {
+      return `carries a mark this build cannot draw: ${JSON.stringify(m).slice(0, 60)}`;
+    }
+  }
+  return null;
+}
+
 const carriesRefusals = (take) => Array.isArray(take.openRefusals)
   && take.openRefusals.every((r) => r && typeof r.key === 'string' && typeof r.why === 'string' && r.why !== '');
 
@@ -486,6 +620,17 @@ export class NodeLink {
       // side and name - so null is a take the gallery has to be able to list and
       // refuse to download. What must not pass is a string that is not a hash.
       const takes = body.takes.filter((t) => VALID_ID.test(t.id) && (t.hash === null || VALID_HASH.test(t.hash)));
+      // Ahead of the build gate below, because a manifest that is not this shape is not a
+      // manifest whose *version* can be judged - `carriesRefusals` reads a field off it.
+      for (const t of takes) {
+        const why = manifestRefusal(t);
+        if (why) {
+          this.lastError = `its take manifest ${why}, so nothing it holds can be listed here `
+            + `- ${t?.id ?? 'a take'} arrived that way. A node's manifest is drawn on this `
+            + 'machine, so one this build cannot read is refused whole rather than in part.';
+          return null;
+        }
+      }
       const older = takes.find((t) => !carriesRefusals(t));
       if (older) {
         this.lastError = 'it is running an older build whose take manifest carries no open-refusal reasons, '
@@ -705,6 +850,60 @@ export const downloadsInFlight = new Map();
  */
 const downloadClaims = new Set();
 
+/**
+ * How long a transfer may make no progress before it is given up on.
+ *
+ * **A stall bound rather than a total timeout, and the difference is the whole reason
+ * this can exist at all.** A take is gigabytes over a link that is sometimes wifi, and
+ * `docs/measurement.md` records a cold node taking 7m30s just to answer a listing - so
+ * any total bound short enough to catch a dead node is short enough to kill the case the
+ * link exists for. What can be stated safely is the shape of the actual failure: a node
+ * that accepts the connection and then goes quiet, mid-reboot or on a link that dropped,
+ * moves no bytes at all. That is a question about progress rather than about elapsed
+ * time, and progress is already being counted for the readout.
+ *
+ * Not the caller's own `close` either, which is the other obvious bound and is wrong
+ * here: the browser holds one request open for the whole transfer, so tying the download
+ * to it means closing the gallery tab three gigabytes into a four-gigabyte copy discards
+ * all of it. The listing routes take the caller-left signal because they are seconds
+ * long and nobody is served by finishing one; this one is minutes long and the operator
+ * walking away is not a reason to throw the work out.
+ */
+const STALL_MS = 30_000;
+
+/**
+ * The bound on the marks log, which is small enough for elapsed time to mean something.
+ * Generous against a node that is busy writing a take rather than tight against a fast
+ * one, because the take is already installed by the time this runs and losing its marks
+ * to an impatient bound would be trading the whole reason for the round trip.
+ */
+const MARKS_MS = 20_000;
+
+/**
+ * A signal that aborts once `readSoFar` has answered the same number twice in a row.
+ *
+ * Detection therefore lands somewhere between one and two intervals, which is stated
+ * rather than tuned away: the alternative is a timestamp per chunk on a path that takes
+ * a chunk every few milliseconds for several minutes, to sharpen a bound whose whole
+ * purpose is to be far longer than any real pause.
+ */
+function untilItStalls(readSoFar) {
+  const ctl = new AbortController();
+  let last = readSoFar();
+  const timer = setInterval(() => {
+    const now = readSoFar();
+    if (now === last) {
+      ctl.abort(new Error(`no bytes for ${(STALL_MS * 2) / 1000}s`));
+      clearInterval(timer);
+    }
+    last = now;
+  }, STALL_MS);
+  // Unreferenced, so a transfer that somehow outlives its own guard cannot be the
+  // reason this process refuses to exit.
+  timer.unref?.();
+  return { signal: ctl.signal, stop: () => clearInterval(timer) };
+}
+
 export async function downloadTake(node, take, dir) {
   if (!VALID_ID.test(take.id)) throw new Error(`the node offered an unusable id: ${take.id}`);
   // Asserted here rather than filtered, unlike the manifest's: the hash goes into a
@@ -784,17 +983,67 @@ async function downloadClaimed(node, take, dir) {
 async function downloadToPath(node, take, dir, targetIn) {
   let target = targetIn;
   const temp = `${target}.part`;
-  const res = await fetch(`${node.url}/capture/${encodeURIComponent(take.id)}/file`);
-  if (!res.ok) throw new Error(`downloading ${take.id}: ${res.status} ${res.statusText}`);
+  // **Refused against the volume before a byte moves, because the byte ceiling below
+  // only holds the node to its claim.** A node telling the truth about a take larger
+  // than the free space walked straight past every guard here: the transfer wrote
+  // until `ENOSPC`, tidied its own `.part` away - and the recorder writing the current
+  // shoot to the same volume is the thing that actually broke, before this copy ever
+  // failed. The margin is a minute of recording at the rate `remaining` already
+  // reports space in, because the disk this must not fill is the one a take may be
+  // landing on right now, and a transfer that fits to the last byte fills it just as
+  // surely as one that does not fit at all.
+  const space = await remaining(dir);
+  if (take.bytes > space.freeBytes - space.bytesPerSec * 60) {
+    throw new Error(`downloading ${take.id}: it advertises ${take.bytes} bytes and the volume under `
+      + `${dir} has ${space.freeBytes} free - refused before a byte moved, keeping a minute of `
+      + 'recording headroom for the shoot this disk may be carrying');
+  }
+  // Declared before the fetch, because the first thing that can hang is the fetch: a
+  // node that completes the TCP handshake and never sends a status line leaves this
+  // `await` parked forever, and with it the handler, the socket, and both entries in
+  // `downloadClaims` - which are released in `finally` blocks a hung await never
+  // reaches, so every later download of this take is refused until the server restarts.
+  // Zero bytes twice running is exactly that state.
+  const progress = { id: take.id, phase: 'transferring', received: 0, bytes: take.bytes, startedAt: Date.now() };
+  const stall = untilItStalls(() => progress.received);
+  let res;
+  try {
+    res = await fetch(`${node.url}/capture/${encodeURIComponent(take.id)}/file`, { signal: stall.signal });
+  } catch (err) {
+    stall.stop();
+    throw new Error(`downloading ${take.id}: ${err.message}`);
+  }
+  if (!res.ok) {
+    stall.stop();
+    throw new Error(`downloading ${take.id}: ${res.status} ${res.statusText}`);
+  }
 
   // Registered only once the node has actually answered, so a transfer that was
   // refused never appears as one that stalled at zero.
-  const progress = { id: take.id, phase: 'transferring', received: 0, bytes: take.bytes, startedAt: Date.now() };
   downloadsInFlight.set(take.id, progress);
   try {
     const counted = new Transform({
       transform(chunk, _enc, done) {
         progress.received += chunk.length;
+        // **Bounded on the size the node advertised**, which is the same number the
+        // claim, the progress readout and the disk-space refusal are all written
+        // against. Without it a node answering a chunked stream that never ends writes
+        // until the volume is full, and the take being copied is not the thing that
+        // breaks - the recorder writing the current shoot to the same disk is. The
+        // hash check below would reject the file eventually; this rejects it before it
+        // costs somebody else their footage.
+        // **Zero is a bound like any other and used not to be**, which put the guard's
+        // own off switch on the wire: `manifestRefusal` admits `bytes: 0` because
+        // `nonNeg` does, so a node advertising a completed take at zero bytes disabled
+        // this comparison entirely and could then write until the volume was full. A
+        // take with nothing in it has nothing to send, so the first byte past zero is
+        // already past what it advertised and refusing there is the same rule, not a
+        // special case for it.
+        if (progress.received > take.bytes) {
+          done(new Error(`${take.id} is still sending past the ${take.bytes} bytes it advertised`
+            + ' - discarded rather than written on past the size the transfer was checked against'));
+          return;
+        }
         done(null, chunk);
       },
     });
@@ -904,6 +1153,10 @@ async function downloadToPath(node, take, dir, targetIn) {
     // In a `finally` because a failed download must not leave the gallery showing a
     // transfer that is no longer happening - and the hash mismatch above throws.
     downloadsInFlight.delete(take.id);
+    // And the guard goes with it. An interval left running would keep reading a counter
+    // nothing moves any more and abort a signal nobody is listening to, once, forever -
+    // untidy on its own and a leak per download over a shoot.
+    stall.stop();
   }
 
   // Marks come with the take. They are outside the hash by design - mutable, and
@@ -929,7 +1182,15 @@ async function downloadToPath(node, take, dir, targetIn) {
   // thing this path must not do.
   const installed = await stat(target).catch(() => null);
   try {
-    const log = await node.fetchJson(`/capture/${encodeURIComponent(take.id)}/marks/log`);
+    // **A flat timeout here, where the take's bytes get a stall bound, and the two are
+    // different questions rather than an inconsistency.** A marks log is a few kilobytes
+    // of JSON off an open file: a node that can answer it answers it immediately, so
+    // elapsed time is a fair statement about this request in a way it is not about a
+    // four-gigabyte copy. Without one, the take is already installed and verified and
+    // this hangs anyway, holding the handler and both claims open on the one call that
+    // is not carrying any of the footage.
+    const log = await node.fetchJson(`/capture/${encodeURIComponent(take.id)}/marks/log`,
+      { signal: AbortSignal.timeout(MARKS_MS) });
     const stillThere = await stat(target).catch(() => null);
     const same = installed !== null && stillThere !== null
       && stillThere.dev === installed.dev && stillThere.ino === installed.ino;

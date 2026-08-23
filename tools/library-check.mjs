@@ -696,11 +696,17 @@ const MUTATIONS = {
   // more useful-sounding claim: that build strands on a refusal that parses and survives
   // one that does not. What the mutation stages is the guard's absence, which is the
   // thing under test.
+  //
+  // **Re-anchored when `refresh` grew a generation guard**, which put a line between the
+  // refusal and the assignment. The mutation still takes out exactly the refusal and
+  // leaves the guard standing, because the two are separate claims: this one is about a
+  // body that parses and is not a library, and the guard is about a body that is a
+  // library and is out of date.
   'listing-takes-a-refusal-as-a-library': { file: 'web/library.js', edits: [[
     '  if (!res.ok || !Array.isArray(body?.takes)) {\n'
     + '    throw new Error(body?.error ?? `the library could not be listed: HTTP ${res.status}`);\n'
-    + '  }\n  library = body;',
-    '  library = body;',
+    + '  }\n',
+    '',
   ]] },
 
   // The cancellation goes back to watching the request rather than the response. Every
@@ -718,10 +724,125 @@ const MUTATIONS = {
     "  res.req.on('close', () => ctl.abort());",
   ]] },
 
+  // The node's manifest goes back to being trusted on two fields. `id` and `hash` are
+  // still filtered, because those two reach a path here - everything else is spread
+  // verbatim into `/library/all` and drawn, which is what shipped and is what puts a
+  // peer's string into this page's markup.
+  //
+  // Must redden the field row and leave the two build-gate rows either side of it green:
+  // this is about what a manifest *is*, and those are about which build sent it.
+  'manifest-trusted-past-id-and-hash': { file: 'server/library.js', edits: [[
+    '      for (const t of takes) {\n'
+    + '        const why = manifestRefusal(t);\n',
+    '      for (const t of []) {\n'
+    + '        const why = manifestRefusal(t);\n',
+  ]] },
+
+  // The gallery goes back to ending a press only on `pointerup`, which is how it shipped:
+  // the editor handles `pointercancel` in nine places and this page handled it in zero. A
+  // captured pointer the browser reclaims - a touch that became a scroll, a stylus out of
+  // range - leaves `pressX` set, and the next move over the tile scrubs it with nothing
+  // held while a later tap is measured against a gesture that ended minutes ago.
+  //
+  // Must redden the cancelled-press row and leave the tap row after it green, since
+  // opening a take by tapping it is unchanged.
+  'press-survives-a-cancelled-gesture': { file: 'web/library.js', edits: [[
+    "  skimEl.addEventListener('pointercancel', () => { pressX = null; dragged = false; });\n",
+    '',
+  ]] },
+
+  // The gallery goes back to assigning whatever listing comes back last. Every guard the
+  // poll has against itself stays in place, which is the separation: a poll that will not
+  // ask twice says nothing about a poll and a Delete asking once each. Must redden the
+  // two-caller row and the superseded-outcome row beside it - with the guard gone the
+  // stale body paints *and* its caller resolves on its own authority, which is both
+  // claims at once - and leave the three poll-overlap rows above them green.
+  'refresh-paints-a-stale-listing': { file: 'web/library.js', edits: [[
+    '  if (mine !== refreshGeneration) return newestRefresh;\n',
+    '',
+  ]] },
+
+  // The superseded caller goes back to reporting success on its own authority, which is
+  // how the generation guard first shipped: the stale body is still discarded, but the
+  // caller that asked is told the grid is current. The one caller that acts on that
+  // sentence is the poll - it records the tick as seen - so when the newer refresh then
+  // fails, nobody has painted, the fingerprint has moved on, and the transition is
+  // never offered again.
+  //
+  // Must redden the superseded-outcome row alone and leave the two-caller row and the
+  // three poll-overlap rows green, because the discard itself is unchanged - what moves
+  // is only which sentence the discarded caller is told.
+  'superseded-refresh-reports-success': { file: 'web/library.js', edits: [[
+    '  if (mine !== refreshGeneration) return newestRefresh;\n',
+    '  if (mine !== refreshGeneration) return undefined;\n',
+  ]] },
+
+  // The download stops asking the volume and goes back to asking only the node, which
+  // is how it shipped: the byte ceiling holds the node to its advertised size and says
+  // nothing about whether that size fits, so a truthful take larger than the free space
+  // writes to ENOSPC and the shoot recording to the same disk is what actually breaks.
+  //
+  // Must redden the volume-refusal row alone - its message becomes the node stub's
+  // connection failure instead of the free-space sentence - and leave the fits-twin row
+  // green, because that one was always answered by the stub.
+  'download-ignores-the-volume': { file: 'server/library.js', edits: [[
+    '  const space = await remaining(dir);\n'
+    + '  if (take.bytes > space.freeBytes - space.bytesPerSec * 60) {\n'
+    + '    throw new Error(`downloading ${take.id}: it advertises ${take.bytes} bytes and the volume under `\n'
+    + '      + `${dir} has ${space.freeBytes} free - refused before a byte moved, keeping a minute of `\n'
+    + "      + 'recording headroom for the shoot this disk may be carrying');\n"
+    + '  }\n',
+    '',
+  ]] },
+
+  // The signal put back where it shipped: after the directory walk rather than before it.
+  //
+  // **Every call site still passes one and the presence sweep still reads clean**, which
+  // is the point of having this as its own control. A `ServerResponse` emits `close`
+  // once, so a listener attached after the caller already hung up during
+  // `await localTakes()` can never fire, and the signal handed to the node fetch is inert
+  // for its whole life. Three of the four routes shipped exactly like this underneath a
+  // row that said they were all signalled.
+  //
+  // **Aimed at `serveMarkSync` rather than at `serveLibrary`, and the reason is a lesson
+  // about this suite rather than about the routes.** The first version moved
+  // `serveLibrary`'s binding, which is the route the deaf-node section actually drives -
+  // so the mutated build genuinely hung a listing, the row for that reddened, and the
+  // hang then took the browser down with it: 458 assertions instead of 477, the run
+  // ending on `Target page, context or browser has been closed` before section 14 ran at
+  // all. The behavioural half was proved and the static row it was written for was never
+  // reached, which is a mutation that reports as caught while the thing under test sits
+  // unexercised. `listing-ignores-client-abort` already covers `serveLibrary`
+  // behaviourally; this one takes a route no timing row drives, so what it reddens is
+  // the source rule and only the source rule.
+  //
+  // Must redden exactly one row - the ordering one - and leave the presence row green,
+  // because the call site is untouched and still passes `left`.
+  'signal-bound-after-an-await': { file: 'server/index.js', edits: [
+    [
+      '  const left = untilCallerLeaves(res);\n  if (!node) {\n'
+      + "    sendJson(res, { error: 'no capture node is linked' }, 409);",
+      '  if (!node) {\n'
+      + "    sendJson(res, { error: 'no capture node is linked' }, 409);",
+    ],
+    [
+      '    const here = (await localTakes()).takes.find((t) => t.id === id);\n',
+      '    const here = (await localTakes()).takes.find((t) => t.id === id);\n'
+      + '    const left = untilCallerLeaves(res);\n',
+    ],
+  ] },
+
   // The listing route stops telling the node that its caller has gone, so a browser that
   // gave up leaves the outbound fetch running here.
+  //
+  // **Re-anchored when the signal moved to the top of the handler.** It used to be
+  // created inline in the argument - `node.takes(untilCallerLeaves(res))` - which is the
+  // form that could never fire on this route, because `await localTakes()` runs first and
+  // a `ServerResponse` emits `close` once. The binding is now the handler's first
+  // statement and the argument is the name it bound, so the anchor is the name. What the
+  // mutation stages is unchanged: the node is not told its caller left.
   'listing-ignores-client-abort': { file: 'server/index.js', edits: [[
-    'await node.takes(untilCallerLeaves(res)) : null;\n  const takes = reconcile(',
+    'await node.takes(left) : null;\n  const takes = reconcile(',
     'await node.takes() : null;\n  const takes = reconcile(',
   ]] },
 
@@ -1046,7 +1167,7 @@ const MUTATIONS = {
   // Every version older than this build gets one sentence again, so a document with no
   // conversion path is told the thing that is true of a document from the future.
   'one-refusal-for-older-versions': { file: 'web/format.js', edits: [[
-    '    : version === 1 || version === 2', '    : false',
+    '    : version > PROJECT_VERSION', '    : false',
   ]] },
   'skim-ignores-state': { file: 'web/library.js', edits: [[
     'const DIVISOR = { local: 1, both: 1, remote: 4 };',
@@ -3178,6 +3299,33 @@ async function runChecks() {
       openRefusals: [],
     };
 
+    // **A manifest with markup where a count belongs**, which is the widest thing this
+    // program trusts and was checked on two fields. `id` and `hash` were filtered because
+    // those two reach a *path* on this side; everything else was spread verbatim into
+    // `/library/all` and drawn, and two of the fields reach the gallery's markup without
+    // the numeric coercion their neighbours get. The link is plain HTTP with no
+    // authentication, so a machine on the shoot network answering in the node's place
+    // gets script running inside the editing station's own page origin - which can drive
+    // every mutating route the origin gate exists for, the loopback-only reveal included.
+    //
+    // Refused whole rather than take by take, and that is the same rule the older-build
+    // gate above keeps: a shelf that quietly drops the unreadable ones looks complete,
+    // and "some of that node's takes are missing" is what a link must never do silently.
+    const scriptish = '<img src=x onerror="globalThis.__owned = true">';
+    const hostileShapes = [
+      ['frames', { ...openableShape, id: 'markup-in-frames', frames: scriptish }],
+      ['marks', { ...openableShape, id: 'markup-in-marks', marks: { length: scriptish } }],
+      ['durationSec', { ...openableShape, id: 'markup-in-duration', durationSec: scriptish }],
+      ['dateSource', { ...openableShape, id: 'a-date-source-that-is-not-one', dateSource: scriptish }],
+      ['hello', { ...openableShape, id: 'a-hello-that-is-not-intrinsics', hello: { fx: scriptish, fy: 1, cx: 1, cy: 1 } }],
+      // The key as markup rather than as a key this build has not heard of - a node one
+      // build ahead sends the latter on purpose and the gallery badges it, which
+      // `badges-inherit-from-object` keeps true. What must not pass is a key that is not
+      // an identifier at all, and a reason longer than anything a badge could hold.
+      ['open refusal', { ...openableShape, id: 'a-refusal-key-that-is-markup', openRefusals: [{ key: scriptish, why: 'x' }] }],
+      ['open-refusal list', { ...openableShape, id: 'a-refusal-list-that-is-not-one', openRefusals: { length: scriptish } }],
+    ];
+
     const old = await stub([oldShape]);
     const current = await stub([newShape, openableShape]);
     try {
@@ -3204,6 +3352,25 @@ async function runChecks() {
       check(currentTakes?.some((t) => t.id === 'openable-on-this-build' && t.openRefusals.length === 0),
         'and an openable take, whose refusal list is correctly empty, is not read as a manifest with none',
         currentTakes === null ? `the whole manifest was refused: ${currentLink.lastError}` : 'it came through');
+
+      // ---- and the fields nothing was asking about at all
+      //
+      // The row above says a healthy manifest passes, which is what makes these mean
+      // something: a gate that refused every node would satisfy all of them and take the
+      // link off. Each shape below is `openableShape` with exactly one field replaced, so
+      // what a red row names is the field rather than "a manifest".
+      const admitted = [];
+      for (const [field, shape] of hostileShapes) {
+        const link = new NodeLink((await stub([shape])).url, `hostile-${field}`);
+        const got = await link.takes();
+        if (got !== null) admitted.push(`${field} came through`);
+        else if (!new RegExp(field).test(link.lastError ?? '')) {
+          admitted.push(`${field} was refused without being named: ${link.lastError}`);
+        }
+      }
+      check(admitted.length === 0,
+        'a node manifest is refused whole when any field is not the thing it is meant to be, and the refusal names the field',
+        admitted.length ? admitted.join('; ') : `${hostileShapes.length} fields, each refused by name`);
 
       // What the operator gets, which is the half a boundary test cannot see: the
       // gallery still paints, the local shelf is all there, and the line under the
@@ -4807,6 +4974,53 @@ async function runChecks() {
       await page.evaluate('globalThis.__library.viewer.close()');
     }
 
+    // ---- 6d-bis. a press the browser takes back
+    //
+    // **Last in this section on purpose.** The mutated build leaves the viewer open on
+    // the cancelled press, and with this block written before the viewer rows that open
+    // viewer reddened the magnification row too - the stage's canvas read where the
+    // tile's should have. Two findings printed for one bug, and the second one names a
+    // claim that is not broken. Placed after everything it could disturb, the mutation
+    // reddens the row it is for and nothing else.
+    // **A gesture the browser takes back has to end the press, and this page ended it in
+    // none of its four.** A captured pointer stops with `pointercancel` rather than
+    // `pointerup` whenever the browser reclaims it - a touch becoming a scroll, a stylus
+    // leaving range, the capture lost - and the editor handles that in nine places while
+    // the gallery handled it in zero. `pressX` stayed set, so the next move over the tile
+    // scrubbed it with nothing held, and a later tap was measured against a press from a
+    // gesture that had ended and opened the viewer nobody asked for.
+    //
+    // Driven as the browser drives it: a real `pointerdown` through the mouse, then the
+    // cancel dispatched at the element the way the browser delivers it, then a move.
+    await page.mouse.move(posterBox.x, posterBox.y);
+    await page.mouse.down();
+    await page.evaluate(`(() => {
+      const sel = '.tile[data-hash="' + CSS.escape(${JSON.stringify(clipHash2)}) + '"] .skim';
+      document.querySelector(sel).dispatchEvent(new PointerEvent('pointercancel', {
+        bubbles: true, pointerId: 1, pointerType: 'mouse',
+      }));
+    })()`);
+    await page.mouse.up();
+    await page.mouse.move(posterBox.x + 40, posterBox.y);
+    await page.mouse.move(posterBox.x, posterBox.y);
+    const openedByCancel = await page.evaluate('globalThis.__library.viewer.isOpen()');
+    check(openedByCancel === false,
+      'a press the browser cancels leaves no press behind it, so a later move over the tile is not a drag and does not open the take',
+      `viewer ${openedByCancel ? 'opened' : 'stayed shut'}`);
+    // Put back if the mutated build opened it, so what this row catches stays this row's.
+    // A viewer left standing eats the keys the section after this one presses, and a
+    // mutation whose damage leaks forward reports two findings for one bug.
+    if (openedByCancel) {
+      // The page's own close rather than Escape, which needs the viewer to hold focus and
+      // did not close it on the mutated build - so the viewer stayed up and the row after
+      // this one read the stage's canvas instead of the tile's and reddened for a reason
+      // that was this block's fault rather than the mutation's. A mutation whose damage
+      // leaks forward reports two findings for one bug.
+      await page.evaluate('globalThis.__library.viewer.close()');
+      await page.waitForFunction('globalThis.__library.viewer.isOpen() === false', null, { timeout: 5000 })
+        .catch(() => {});
+    }
+
     // ---- 6e. every control the gallery renders is one this file drives
     //
     // **Enumerated rather than listed**, which is the shape `editor-check` needed
@@ -5765,11 +5979,20 @@ async function runChecks() {
     check(refusedOld !== 'ACCEPTED' && refusedFuture !== 'ACCEPTED',
       'a preset from another format version is refused', `${refusedOld.slice(0, 40)} / ${refusedFuture.slice(0, 40)}`);
     check(/no path from here/.test(refusedOld) && !/later build/.test(refusedOld),
-      'a version this build has no conversion for says so rather than blaming the units',
+      'a version older than this build says so rather than blaming the units',
       refusedOld.slice(0, 130));
     check(/later build/.test(refusedFuture) && !/no path from here/.test(refusedFuture),
       'and a version from a later build gets its own answer rather than the older one\'s',
       refusedFuture.slice(0, 130));
+    // The third band, and it is here because the first draft of the two above had no
+    // guard on the comparison: `undefined > 5` is false, so a document with no version
+    // field at all fell into the older branch and was told something specific and untrue
+    // about its age. A malformed version is not a statement about old or new.
+    const refusedJunk = await refusalFor('\'not-a-version\'');
+    check(refusedJunk !== 'ACCEPTED' && /absent or is not a number/.test(refusedJunk)
+      && !/no path from here/.test(refusedJunk) && !/later build/.test(refusedJunk),
+      'and a version field that is not a number is placed as neither',
+      refusedJunk.slice(0, 130));
 
     check(errors.length === 0, 'the preset path raises no page errors', errors.slice(0, 2).join(' | '));
     await page.close();
@@ -5897,6 +6120,33 @@ async function runChecks() {
       `landed as ${pulled.downloaded}`);
     check(pulled.downloaded !== 'same-name.knct' && /same-name-[0-9a-f]{8}\.knct/.test(pulled.downloaded),
       'the collision takes the hash into the name, which is what the join was already saying');
+
+    // **Refused against the volume before a byte moves, driven at the function with a
+    // take too large to land.** The byte ceiling inside the transfer holds the node to
+    // its claim and says nothing about the disk: a truthful take larger than the free
+    // space started writing, reached ENOSPC, tidied its own `.part` away - and the
+    // recorder writing the current shoot to the same volume was what actually broke.
+    // Driven at `downloadTake` directly with a fabricated manifest entry, because a
+    // take genuinely larger than this machine's free space is not a fixture anybody
+    // can stage - and imported from the staged tree for the reason the rename race
+    // gives. The node stub is never contacted: the refusal has to come before the
+    // fetch, and a fetch against a port nobody holds is what the twin below reads as
+    // *its* answer.
+    const stagedLib = await import(pathToFileURL(join(root, 'server/library.js')).href);
+    const { freeBytes } = await stagedLib.remaining(macCaps);
+    const tooBig = await stagedLib.downloadTake({ url: 'http://127.0.0.1:9' },
+      { id: 'a-take-too-big-to-land', bytes: freeBytes * 2, hash: `sha256:${'ab'.repeat(32)}` }, macCaps)
+      .then(() => null, (err) => String(err.message));
+    check(tooBig !== null && /free/.test(tooBig)
+      && !existsSync(join(macCaps, 'a-take-too-big-to-land.knct.part')),
+      'a download that cannot fit on the capture volume is refused before a byte moves, with the recording headroom kept out of it',
+      (tooBig ?? 'IT DOWNLOADED').slice(0, 90));
+    const fits = await stagedLib.downloadTake({ url: 'http://127.0.0.1:9' },
+      { id: 'a-take-that-fits', bytes: 1024, hash: `sha256:${'cd'.repeat(32)}` }, macCaps)
+      .then(() => null, (err) => String(err.message));
+    check(fits !== null && !/free/.test(fits),
+      '  while one that fits is stopped only by the node stub being unreachable, so the gate is a gate rather than downloads switched off',
+      (fits ?? 'IT DOWNLOADED').slice(0, 90));
 
     // The marks came with it, merged rather than replaced, with the tombstone
     // holding: n1 and n2 survive, n3 does not.
@@ -7871,6 +8121,110 @@ async function runChecks() {
     for (const route of heldForever) await route.abort('connectionfailed').catch(() => {});
     await hung.close();
 
+    // ---- two callers, one grid: a slow listing must not paint over a newer one
+    //
+    // **The three rows above pin the poll against itself, and that is a different
+    // question from the poll against everything else.** `pollLibrary` will not ask again
+    // while its own request is out; it has no opinion at all about the refresh that
+    // Delete, Rename and Reclaim each run when they finish. So a cadence listing already
+    // on the wire when the operator presses Delete resolves *after* the action's own
+    // refresh, assigns the older body over the newer one, and redraws the tile of a take
+    // that is not there any more - with buttons on it that now refuse, because the server
+    // is right and the grid is a second old. A warm listing over 200 takes measures 145ms
+    // and a cold one is minutes, which is the whole time an operator is most likely to be
+    // pressing something.
+    //
+    // Staged rather than raced: the older listing is *held* and then answered with a body
+    // carrying a take id nothing else can produce, so what the row reads is unambiguous.
+    // A real race would pass on a slow machine for the wrong reason.
+    const racer = await browser.newPage();
+    const STALE_MARK = 'stale-listing-that-must-not-paint';
+    let raceListings = 0;
+    const heldOld = [];
+    let realBody = null;
+    await racer.route('**/library/all', async (route) => {
+      raceListings++;
+      if (raceListings === 1) {
+        // The page's own load, kept so there is a painted grid, and kept *as text* so
+        // the held listing below can be answered with a genuine library body rather than
+        // a hand-built one that might be refused by the guard this is not testing.
+        const answered = await route.fetch();
+        realBody = await answered.text();
+        await route.fulfill({ status: answered.status(), body: realBody, headers: answered.headers() });
+        return;
+      }
+      if (raceListings === 2) { heldOld.push(route); return; }
+      await route.continue();
+    });
+    await racer.goto(galleryPage(macUrl), { waitUntil: 'domcontentloaded' });
+    await racer.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
+    // The older caller. Held at the route, so it is genuinely in flight.
+    const older = racer.evaluate('__library.refresh()').catch(() => {});
+    for (let i = 0; i < 40 && heldOld.length === 0; i++) await new Promise((d) => { setTimeout(d, 50); });
+    check(heldOld.length === 1,
+      'an older listing is genuinely in flight, which is what makes the newer one below a second caller rather than a sequence',
+      `${heldOld.length} held, ${raceListings} listings so far`);
+    // The newer caller, which answers normally and is the state the grid must end on.
+    await racer.evaluate('__library.refresh()');
+    const idsAfterNew = await racer.evaluate('__library.state().takes.map((t) => t.id ?? t.local?.id ?? t.remote?.id)');
+    // And now the older one comes back, carrying a library that has a take in it the
+    // newer one does not. Assigning this is the defect; discarding it is the fix.
+    const stale = JSON.parse(realBody);
+    stale.takes = [...stale.takes, { id: STALE_MARK, hash: `sha256:${'cd'.repeat(32)}`, local: null, remote: null }];
+    await heldOld[0].fulfill({
+      status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify(stale),
+    });
+    await older;
+    await new Promise((done) => { setTimeout(done, 800); });
+    const grid = await racer.evaluate('JSON.stringify(__library.state().takes.map((t) => t.id ?? t.local?.id ?? t.remote?.id))');
+    check(!grid.includes(STALE_MARK),
+      'and a listing that resolves after a newer one is discarded rather than painted, because two callers refreshing is not the same question as the poll refreshing twice',
+      `${idsAfterNew.length} takes after the newer listing, and the grid holds ${grid.slice(0, 90)}`);
+    await racer.close();
+
+    // ---- and the superseded caller is told the newer one's answer, not a success of its own
+    //
+    // The row above proves the stale body is discarded; this one asks what the caller
+    // holding that body was *told*. The guard's first draft resolved it as a success
+    // while discarding it, and the one caller that acts on that sentence is the poll:
+    // it records the tick as seen and moves its fingerprint on. When the newer refresh
+    // then fails - a node dropping out mid-listing is enough - nobody has painted, the
+    // fingerprint has advanced past the transition, and every unchanged tick after
+    // that offers nothing. So a listing is held, the refresh that supersedes it is
+    // answered with a refusal, and the row reads which sentence the held caller heard:
+    // the newer one's failure, or a success nothing earned.
+    const chained = await browser.newPage();
+    let chainListings = 0;
+    const heldChain = [];
+    await chained.route('**/library/all', async (route) => {
+      chainListings++;
+      if (chainListings === 1) { await route.continue(); return; }
+      if (chainListings === 2) { heldChain.push(route); return; }
+      await route.fulfill({
+        status: 500, headers: { 'content-type': 'application/json' },
+        body: '{"error":"the linked node dropped out mid-listing"}',
+      });
+    });
+    await chained.goto(galleryPage(macUrl), { waitUntil: 'domcontentloaded' });
+    await chained.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
+    const olderOutcome = chained.evaluate(
+      '__library.refresh().then(() => "resolved", (err) => `rejected: ${err.message}`)');
+    for (let i = 0; i < 40 && heldChain.length === 0; i++) await new Promise((d) => { setTimeout(d, 50); });
+    const newerOutcome = await chained.evaluate(
+      '__library.refresh().then(() => "resolved", (err) => `rejected: ${err.message}`)');
+    // Only now does the held listing come back, valid and out of date - after the
+    // refresh that superseded it has already failed.
+    if (heldChain.length === 1) {
+      await heldChain[0].fulfill({
+        status: 200, headers: { 'content-type': 'application/json' }, body: realBody,
+      });
+    }
+    const olderSaid = heldChain.length === 1 ? await olderOutcome : 'the listing was never held';
+    check(heldChain.length === 1 && newerOutcome.startsWith('rejected') && olderSaid.startsWith('rejected'),
+      'a superseded refresh reports the newer one\'s failure rather than a success of its own, so the poll leaves the transition unseen and offers it again',
+      `held ${heldChain.length}; the newer caller was told "${newerOutcome.slice(0, 55)}" and the held one "${olderSaid.slice(0, 55)}"`);
+    await chained.close();
+
     // **The other way into the same poll, which the guard above nearly closed.** The
     // cadence wants to be skipped while a tick runs; the record button wants the
     // opposite. It awaits the poll after its own POST so the surface repaints from the
@@ -8105,12 +8459,65 @@ async function runChecks() {
     // close at any point. Read off the source so a route added later is asked by
     // existing, rather than off the four that were found.
     const indexSrc = readFileSync(join(root, 'server/index.js'), 'utf8');
-    const nodeCalls = [...indexSrc.matchAll(/await node\.takes\(([^)]*)\)/g)].map((m) => m[1]);
-    const unsignalled = nodeCalls.filter((args) => !/untilCallerLeaves|signal/.test(args));
-    check(nodeCalls.length >= 4 && unsignalled.length === 0,
+    // **Asked per handler rather than per call, because both halves of this rule are
+    // about the handler.** Whether a call carries a signal and whether that signal could
+    // ever fire are one question about one function body, and the first draft asked the
+    // first half of the file at large - so it matched the argument text
+    // `untilCallerLeaves(res)` and nothing else. Naming the signal so it could be bound
+    // early then read as a call passing nothing, on the four routes that had just been
+    // fixed. A sweep that recognises only one spelling of the right answer is a sweep
+    // that argues with the fix.
+    //
+    // Widened from `node.takes(` to every way this file reaches the other machine, too:
+    // `fetchJson` is the same unbounded fetch under a helper's name, and the reclaim
+    // route uses it to ask the node to *unlink a take*, so the sweep meant to close the
+    // class was scoped to the one method where the leak happened to be noticed.
+    const handlers = (() => {
+      const found = [];
+      const heads = [...indexSrc.matchAll(/\n(?:async function|const) (\w+)\s*(?:=\s*async\s*)?\(/g)];
+      for (let i = 0; i < heads.length; i++) {
+        const to = i + 1 < heads.length ? heads[i + 1].index : indexSrc.length;
+        found.push({ name: heads[i][1], body: indexSrc.slice(heads[i].index, to) });
+      }
+      return found;
+    })();
+    const CALL = /await node\.(?:takes|fetchJson)\(((?:[^()]|\([^()]*\))*)\)/gs;
+    const reaching = handlers.filter((h) => { CALL.lastIndex = 0; return CALL.test(h.body); });
+    const unsignalled = [];
+    const late = [];
+    let nodeCalls = 0;
+    for (const h of reaching) {
+      // The name this handler gave its signal, so a call passing that name counts as a
+      // call passing the signal. Both spellings are legitimate and one of them has to
+      // be: binding it early is the whole of the fix, and a bound value has a name.
+      const bound = /const (\w+) = untilCallerLeaves\(/.exec(h.body)?.[1] ?? null;
+      const names = new RegExp(`untilCallerLeaves|signal${bound ? `|\\b${bound}\\b` : ''}`);
+      for (const m of h.body.matchAll(CALL)) {
+        nodeCalls++;
+        if (!names.test(m[1])) unsignalled.push(`${h.name} passes ${JSON.stringify(m[1].trim().slice(0, 24))}`);
+      }
+      // **And a signal present at the call says nothing about when it was created**,
+      // which is why the second row is a second row rather than a tightening of the
+      // first. A `ServerResponse` emits `close` exactly once, so a binding taken after
+      // `await localTakes()` is a listener attached to an event that already fired, and
+      // the fetch it guards runs unabortable for its whole life. Three of the four routes
+      // shipped that way while the presence row read clean on all four.
+      //
+      // The binding's own statement is excluded deliberately:
+      // `node.takes(untilCallerLeaves(res))` is correct, because an argument evaluates
+      // before the await suspends, and that is the form `serveDownload` has always had.
+      const at = h.body.indexOf('untilCallerLeaves(');
+      if (at < 0) { late.push(`${h.name} binds none`); continue; }
+      const stmt = Math.max(h.body.lastIndexOf(';', at), h.body.lastIndexOf('{', at));
+      if (/\bawait\b/.test(h.body.slice(0, stmt < 0 ? at : stmt))) late.push(`${h.name} binds after an await`);
+    }
+    check(nodeCalls >= 6 && unsignalled.length === 0,
       'and every route that awaits the node hands it the caller it is waiting for, so the next one written inherits the rule rather than being outside a list',
-      unsignalled.length ? `${unsignalled.length} of ${nodeCalls.length} pass nothing`
-        : `${nodeCalls.length} calls, all signalled`);
+      unsignalled.length ? `${unsignalled.length} of ${nodeCalls}: ${unsignalled.join(', ')}`
+        : `${nodeCalls} calls over ${reaching.length} handlers, all signalled`);
+    check(reaching.length >= 4 && late.length === 0,
+      'and it is bound before anything is awaited, because a response emits close once and a listener attached after the caller left can never fire',
+      late.length ? late.join(', ') : `${reaching.length} handlers, all bound ahead of their first await`);
   }
 
   // ------------------------- 15. one token, three declarations, one shared stylesheet

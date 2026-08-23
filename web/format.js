@@ -55,9 +55,10 @@
  * `params.apply` would write every one of them without complaint, and the reading
  * would simply be missing - leaving whatever the previous document happened to
  * select. A file that renders as somebody else's shading, silently, is worse than one
- * that fails to open. `tools/convert-presets.mjs` is the way across, and it is a
- * one-shot over files on disk rather than a path inside the program, because a loader
- * that could read both shapes is the second implementation this design keeps refusing.
+ * that fails to open. There is no way across: the conversion this repo used to ship was
+ * deleted once every document it could act on had already been converted, so the gate is
+ * a refusal and nothing else. A loader that could read both shapes was never on the table
+ * either - that is the second implementation this design keeps refusing.
  *
  * **Version 5 makes an ease handle a list of control points.** A version 4 key carried
  * one pair per side - `easeOut: [0.42, 0]` - and a version 5 key carries a list of them,
@@ -72,7 +73,8 @@
  * and so is `[[0.2, 0], [0.4, 0]]` - so a build that guessed would read a quintic's
  * first control point as an entire cubic and render a move nobody authored, silently and
  * at every key at once. There is no sniff that separates them and deliberately none is
- * attempted: `tools/convert-presets.mjs` is the way across, as it was from 3.
+ * attempted, and with the converter gone there is no way across either - a version 4
+ * document is refused and stays refused.
  *
  * **Only a project changes shape here, and a preset is bumped without being rewritten.**
  * A preset is `{version, values}` and holds no keys at all - see `refusePresetBody` -
@@ -88,56 +90,58 @@ export const PROJECT_VERSION = 5;
  * The sentence a document from the wrong version gets, in one place because the two
  * doors were saying different things about the same file - and one of them was false.
  *
- * The refusal used to be two branches: version 3 was told to run the converter, and
- * *everything else* was told that point size was pixels at the drawing buffer before
- * version 1, so its look could not be reconstructed. That is only true of a document
- * from before the version field existed, and the history above says there are none -
- * so a version 1 or 2 project, whose point sizes are already 1080p and perfectly
- * recoverable, was sent looking for a scale factor that is not its problem, and a
- * document from a *later* build was told something about a format that predates it by
- * four versions. A refusal that diagnoses the wrong thing is worse than one that says
- * only "no", because it is followed.
+ * **This build carries no migration, and the refusal says so rather than sending anybody
+ * looking for one.** There used to be a one-shot rewriter under `tools/` that converted
+ * documents on disk, and four bands here that told a version 3 or 4 document which steps
+ * stood between it and this one. Both are gone: every document this project has ever held
+ * is version 5, so the converter was a one-way rewriter of authored work that nothing
+ * could exercise - the most dangerous shape a piece of untested code can have, since its
+ * *successful* outcome is that the original is gone. Deleting it is the greenfield call,
+ * and the cost is stated rather than hidden: a version 3 or 4 document, if one exists
+ * anywhere, is now unopenable and stays that way.
  *
- * Four bands, which is what the shipped conversion actually distinguishes - two of them
- * convertible, because there are two migration steps and a document is told about the
- * ones between it and this build rather than about all of them.
- * `convert-presets.mjs` is the only migration this repo has and it starts at 3, so 1
- * and 2 are honestly "known, and there is no path from here" rather than either
- * "convertible" or "unreadable units". Everything else - a later version, a version
- * field that is absent or is not a number - collapses into one sentence because the
- * true statement about all of them is the same: nothing here knows what the document
- * means, and guessing is the failure the version field exists to prevent.
+ * **The gate itself stays, and it is not the same question.** A version field is not
+ * about old documents - it is about *any* document this build cannot faithfully read,
+ * and the live case is a file from a *later* build, which is the one nobody can migrate
+ * from in advance. A version 3 document read by a build that had no gate would parse
+ * perfectly: its values are all still parameters this registry knows, `params.apply`
+ * would write every one without complaint, and only the reading would be missing, leaving
+ * whatever the previous document happened to select. A file that renders as somebody
+ * else's shading, silently, is worse than one that fails to open. That argument does not
+ * weaken when the converter goes; it is the whole reason the field exists.
  *
- * **The convertible band is every version the converter can chain from, not the one
- * immediately below.** It was `PROJECT_VERSION - 1` while there was a single step to
- * take, and that spelling quietly stopped being true the moment a second one existed:
- * with the handle-list bump, `PROJECT_VERSION - 1` is 4, so a version 3 document - which
- * the converter still carries all the way across, through 4 and on to 5 - would have
- * been told that nothing in this build knows what it means. The band is written as the
- * versions themselves so that adding a step means adding the number here, in the
- * sentence that sends somebody to the tool that gained it.
+ * **Two bands rather than four, and the two that survive are the two that were never about
+ * a conversion.** The four used to be a version 4 document, a version 3 document, versions
+ * 1 and 2, and everything else - and the first three existed to name which migration steps
+ * stood between the file and this build, so they went with the migration. What is left is
+ * the distinction a reader can still *act* on: a document older than anything this build
+ * reads is a file to leave alone, and a document from a later build is a build to upgrade
+ * to. Those are different next steps, and collapsing them would be the failure the
+ * paragraph above this one describes - a refusal that diagnoses the wrong thing is worse
+ * than one that says only "no", because it is followed.
  *
- * **And it is two sentences rather than one, because a convertible document is told what
- * moved under *it*.** The first draft of this band said both things to both versions, so
- * a version 4 file was told about the shading mode that version 4 already has - true of
- * the conversion as a whole and not true of that file, which is the shape the paragraph
- * above spent four sentences removing the first time. A reader with a version 4 document
- * needs one fact, that handles became lists; a version 3 reader needs both, because both
- * steps really are between them and this build.
+ * **Three, once a malformed version is counted, and the third is here because the first
+ * draft of this got it wrong.** A comparison is the natural way to split older from newer,
+ * and `undefined > 5` is `false` - so a document with no version field at all, or one
+ * carrying a string, falls to whichever side the comparison defaults to and is told
+ * something specific and untrue about its age. That draft's own comment claimed it tested
+ * for a number first; the code did not, which is the shape `docs/instruments.md` names as
+ * worse than no comment, because the comment is the thing a reader checks instead of the
+ * line. A version that is not a finite number is its own answer now, and it is the honest
+ * one: the field is missing or is not a version, which says nothing about old or new.
+ *
+ * The version is quoted rather than described so that a file from a later build reports its
+ * own number instead of being told something about a format that predates it.
  */
 export function versionRefusal(what, version) {
-  const across = version === 4
-    ? `version ${PROJECT_VERSION} carries ease handles as lists of control points where 4 carried `
-      + 'one pair a side, so run tools/convert-presets.mjs over the directory it is in to bring it across'
-    : version === 3
-      ? `version ${PROJECT_VERSION} carries ease handles as lists of control points and version 4 `
-        + 'carries five reading weights where 3 carried a shading mode, so run '
-        + 'tools/convert-presets.mjs over the directory it is in to take it across both'
-      : version === 1 || version === 2
-        ? 'versions 1 and 2 predate the split into look and composition and the deliverable store, '
-          + `and the conversion this repo ships starts at 3, so there is no path from here to ${PROJECT_VERSION}`
-        : `nothing in this build knows what a version ${JSON.stringify(version)} document means - it is `
-          + 'either from a later build or was never one of these - so it is refused rather than guessed at';
+  const across = !Number.isFinite(version)
+    ? 'its version field is absent or is not a number, so it is not a document this build can '
+      + 'place at all - which says nothing about whether it is older or newer'
+    : version > PROJECT_VERSION
+      ? 'it is from a later build than this one, so nothing here knows what it means - this build is '
+        + 'the thing to move, not the document'
+      : `nothing in this build reads a document that old and there is no path from here to `
+        + `${PROJECT_VERSION}, because this repo ships no conversion`;
   return `${what} is version ${JSON.stringify(version)} and this build reads version ${PROJECT_VERSION}: ${across}`;
 }
 

@@ -167,6 +167,38 @@ const JSON_TYPE = /^application\/json\s*(?:;|$)/i;
  * **Call this before reading the body.** A request that is going to be refused
  * should not first be allowed to stream four megabytes into this process.
  */
+/**
+ * Whether this request came from a browser that was somewhere else.
+ *
+ * **`originAllowed` cannot answer this and it is not a flaw in it**, which is the whole
+ * reason a second question exists. An `Origin` header is sent on a cross-origin `fetch`
+ * and on a form post; it is *not* sent on an `<img>`, a `<script>` or a `<link>`, and
+ * `originAllowed` deliberately passes a request with no origin because that is what a
+ * non-browser caller looks like - the peer node, `curl`, the render worker. So a hostile
+ * page embedding `<img src="http://the-editing-station:8080/capture/2026-08-02-take1/file">`
+ * arrives with no origin at all and is indistinguishable, to that guard, from the node.
+ *
+ * `Sec-Fetch-Site` is what separates them, because the browser sets it and a page cannot.
+ * Measured on this rig with chromium, one server embedding the other:
+ *
+ *     cross-origin <img>       origin absent           sec-fetch-site: same-site
+ *     cross-origin fetch()     origin http://…         sec-fetch-site: same-site
+ *     the page's own fetch     origin absent           sec-fetch-site: same-origin
+ *     peer node, curl          origin absent           sec-fetch-site: absent
+ *
+ * So the rule is: refuse when the header is *present* and is not `same-origin`. Absent
+ * has to pass, and that is the honest limit rather than an oversight - a browser too old
+ * to send Fetch Metadata is still a vector here, exactly as it is for every other
+ * same-origin defence, and the loopback bind is what stands behind it. `none`, which is a
+ * top-level navigation, passes too: typing the URL is not an attack and OBS opening a
+ * browser source is a navigation.
+ */
+export function sameOriginBrowser(req) {
+  const site = req.headers['sec-fetch-site'];
+  if (typeof site !== 'string' || site === '') return true;
+  return site === 'same-origin' || site === 'none';
+}
+
 export function requireMutation(req, res, methods) {
   // Origin first, so a request from another page gets one answer whatever it asked
   // for rather than being told which method would have worked.
