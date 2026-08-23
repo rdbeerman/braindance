@@ -99,9 +99,9 @@ blackwall, ghost rim, ghost fill, bands, thickness, wall sweep, scan, rim, therm
 edges — each carry a slider and a value.](media/look.png)
 
 `blackwall`, `contour`, `depth`, `ghost` and `rgb` ship in `presets-builtin/` and cannot be
-overwritten, and beside them ship four graded looks — `ember`, `grille`, `voxel` and
-`tearline` — which are Blackwall with somebody's grade already on it rather than a place to
-start. **save** writes yours to `presets/`, and **export** and **import** move them
+overwritten, and beside them ship five graded looks — `ember`, `grille`, `voxel`, `tearline`
+and `cascade` — which are one reading with somebody's grade already on it rather than a place
+to start. **save** writes yours to `presets/`, and **export** and **import** move them
 between machines as JSON. Every scalar underneath is still yours to move, and a row you have
 changed grows a **↺** that puts just that one back.
 
@@ -301,7 +301,3 @@ Behind those sit the working notes: [docs/measurement.md](docs/measurement.md) f
 rig is measured, [docs/instruments.md](docs/instruments.md) for every way a check here has
 claimed a property it was not testing, and [docs/proof-tools.md](docs/proof-tools.md) for
 what each tool needs before it will run.
-
-One document beside those is scaffolding rather than a record:
-[docs/glyph-field.md](docs/glyph-field.md) is a design that has been decided and not yet
-built, and it is deleted when the thing it describes works.

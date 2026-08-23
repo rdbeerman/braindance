@@ -133,6 +133,14 @@ export function buildPointCloud(sourceCells) {
     // Written by `resize` in `web/main.js` and by nothing else, so the one place the
     // buffer can change is also the one place this can.
     bufferHeight: { value: 1080 },
+    // What this hardware will rasterise a point sprite at, which is the ceiling the glyph
+    // field's grown sprite is clamped to instead of the literal 64 the old path keeps.
+    // Written once at boot in `web/main.js` out of ALIASED_POINT_SIZE_RANGE, and not a
+    // registry parameter: it is a bound on the machine rather than a value anybody chose,
+    // it has nothing to keyframe into, and a preset naming it would carry one GPU's limit
+    // to another. The 64 here is the literal it stands in for, so a frame reached before
+    // that write draws what the shipped clamp always drew.
+    pointCeiling: { value: 64 },
     pointSize: { value: 9 },
     opacity: { value: 1 },
     exposure: { value: 1.15 },
@@ -178,6 +186,35 @@ export function buildPointCloud(sourceCells) {
     noiseSpeed: { value: 0.7 },
     lattice: { value: 0 },
     latticeCell: { value: 0.05 },
+    // The glyph field, which draws a character where the lattice above put a point - and
+    // it rides that lattice rather than carrying a grid of its own, because two
+    // independent world-cell quantisers in one shader is the second path this design keeps
+    // refusing. The master blends the mark from the round splat toward the character and
+    // grows the sprite into the cell as it goes, so at a lattice of 1 and a glyph of 0 the
+    // picture is the voxel look that ships today.
+    //
+    // The three keys sum into one index and wrap, which is what lets each of them mean how
+    // far it moves the character while a weight at zero contributes exactly nothing.
+    // `glyphHash` defaults to 1 rather than to 0, following the ceilings under the glitch
+    // master: it is a setting under a master and its default is the identity the probe
+    // shipped, which is the character belonging to the cell and to nothing else. The other
+    // three default to 0, `glyph` because it is the master and gates the whole thing.
+    glyph: { value: 0 },
+    glyphTone: { value: 0 },
+    glyphHash: { value: 1 },
+    glyphRain: { value: 0 },
+    // The falling wave. One scalar per point out of world height and program time, driving
+    // brightness in the fragment stage - and the glyph field's rain key reads the same
+    // scalar to scramble the character, which is the arrangement the duotone already has:
+    // one source, two consumers. The three lengths under the master are metres and metres
+    // per second of the room, so none of them owes the 1080p reference the screen-space
+    // terms do, and each defaults to the value the probe's clips were shot at rather than
+    // to zero - a span of zero is a degenerate divisor protected only by the master, which
+    // is the shape every other family here avoids.
+    rain: { value: 0 },
+    rainSpeed: { value: 0.55 },
+    rainSpan: { value: 1.3 },
+    rainTrail: { value: 0.45 },
     // One region, three uses. Centre, half-extents, corner radius and falloff width are
     // metres in the sensor frame; the three effects below are what read it.
     regionCentre: { value: new THREE.Vector3(0, 0, -2) },
@@ -214,6 +251,15 @@ export function buildPointCloud(sourceCells) {
     // keyframes it can be stopped and started.
     glitchRate: { value: 7 },
     time: { value: 0 },
+    // Program time again, in a cell of its own, and the duplication is what makes one
+    // falsification control possible rather than being an oversight. The rain has to be a
+    // pure function of program time or a seek lands where playback never would, and the
+    // mutation that holds that claim - `timeline-check --mutate rain-accumulates` - has to
+    // integrate exactly one line. Pointed at `time` it would redden the ripple, the glitch
+    // and the raster along with the rain, and a control that fails everything cannot say
+    // which claim is load-bearing. Written beside `time` in the same statement pair, so the
+    // two cannot come apart.
+    rainPhase: { value: 0 },
     // The five readings of the take, as weights rather than as a mode. Each one is a
     // complete answer to "what colour is this point", and the fragment stage mixes
     // whichever are non-zero - so colour and range compose instead of excluding one

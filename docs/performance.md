@@ -342,6 +342,84 @@ whatever frame it happened to be on. Every seek here is checked against the posi
 for and retried, and the count of stand-downs comes back with the numbers - one per run at
 these loads.
 
+### The glyph field is unmeasured, and this is what that means
+
+**There is no frame rate for the glyph field anywhere, and nothing on this page prices it.**
+It is written down as a hole rather than left to be inferred from the silence, because a term
+absent from the cost table above reads as a term that came in under the floor, and this one is
+absent for the opposite reason. `wake` is the page's other unmeasured term and says so in its
+own paragraph; this is the second.
+
+The arithmetic that says it will not be cheap is arithmetic and not a measurement. At full
+`glyph` the sprite grows from `pointSize` to the size of a lattice cell on screen, which is
+`latticeCell * projectionMatrix[1][1] * 540.0 / dist` reference pixels — for `cascade`'s 5.5cm
+cell under the default 50-degree camera, **63.7 pixels at one metre against the 8.1 that same
+document names for `pointSize`**, so about 62 times the fill per point at that distance. That is
+over 217,088 rays, and over 434,176 drawn slots whenever `fade` is up, per the draw-range figure
+above. On
+top of the fill each fragment inside a grown sprite computes a wrapped index out of three keys
+and looks a bit out of a 64-entry table of `uvec2`. The field of view keyframes, so 63.7 is the
+default camera's number rather than a constant.
+
+**The deleted design document said twenty-two times, and there are two errors under that
+number**, which is worth recording because the figure was quoted onward. It stated the cell as
+`63.7 / z` reference pixels in two places and "about 42 pixels" in a third, and the cost
+paragraph was built on the third: `(42 / 9)²` is 21.8 where `(63.7 / 9)²` is 50.1. The second
+error is the 9, which is the registry's default `pointSize` and not the one this look ships —
+`cascade` names 8.1, and `(63.7 / 8.1)²` is the 61.8 the paragraph above rounds to 62. Neither
+of the document's numbers is `cascade`'s, and a ratio quoted for a shipped look has to be taken
+at the value that look names. The shipped shader's comment beside the clamp carries 64, and the
+projection expression above is what the code actually evaluates.
+
+**The nearest measured thing on this page is a neighbour rather than a bound.** The
+`pointSize` 9 to 48 arm is 28x the fill where a cell-sized sprite at a metre is about 62x —
+each against its own point size, the arm's 9 and `cascade`'s 8.1 — and
+it costs +0.230 ms batch at 0.851 Mpx, +0.583 at 1.915, and +0.841 on the paced clock. It is a
+neighbour in one term only: the glyph branch adds per-fragment index arithmetic and a table
+lookup the point-size arm has none of, and it changes what fraction of the sprite survives the
+discard, so the two are not the same experiment at two sizes.
+
+**What is measured is that it draws, and that is a correctness result rather than a cost one.**
+Driven in a real browser on `/edit` and `/record` with zero console errors, over `fixture-1g` on
+a 1280x800 page with a planted look — `lattice` 1 on the 5.5cm cell, `glyph` 1, a depth reading
+clipped to 0.4 and 4.5 metres — characters render at cell size in the near room and crossfade
+back to round splats at range, and the rain's pattern moves between program times 12.000 and
+13.000. None of those runs counted a frame. Those observations predate the crossfade reading
+the drawn buffer, and every buffer in them was shorter than 1080 — so their far fields sit on
+the fallback, not the look. A character-coverage figure for the shipped look has to come from a
+buffer at least 1080 tall; the 1920x1080 render taken after the change is the first one that
+qualifies.
+
+**One thing that run looked like it proved, it does not, and the correction belongs here rather
+than in a commit message.** Taking the hash key to zero collapses every cell to the same mark,
+and this paragraph read that as saying the character is chosen per cell rather than per point.
+It says nothing of the kind. A zero coefficient deletes its own seed whichever thing the seed
+was keyed on, so a build hashing the *point* collapses to one mark under it just as tidily —
+the observation is satisfied by both implementations, which makes it no discriminator at all.
+What separates them is `registry-check`'s `one cell, one character` section: thinning a planted
+wall to a quarter of its points leaves the two frames bit-identical, hash for hash, because a
+mark that belongs to the cell cannot depend on how many points landed in that cell, where a
+build reading the point's own texel draws whichever of its four hundred occupants arrived first
+and thinning changes which one that is. Its control is the same thinning at `glyph` 0, where the
+splat's falloff is a gradient rather than a bit, so the point count reaches the pixels and the
+two frames have to differ — which is what says the equality above it is not a fixture nothing
+can reach. The digests themselves stay in the run rather than on this page: they are identifiers
+for one build's output, they move on any shader edit, and what the row claims is that two of
+them match rather than which two. **A screenshot that agrees with the intended implementation is
+not evidence against the other one**, and that is the whole of the error being corrected.
+
+**Closing this is two measurements rather than one, and the design document collapsed them
+into one.** It said the cost could not be answered offline and wanted `grabber --profile` on
+the sensor, which is right about half of it. The render cost is answerable here and by the
+instrument this section already runs: `cascade` against the same document at `glyph` 0, paced,
+paired, on the GPU's own timer query, with the arm order flipped every round. Nothing stops
+that but nobody having run it. What the editor genuinely cannot answer is whether a grown
+sprite costs the *recorder* anything, because the recorder's number is delivered fps and a
+burst of renders on that surface starves the socket the sensor delivers on — the shape the
+crop-box measurement above had to move to the editor to escape. That half is
+`grabber --profile` on the sensor with `prof-summary` reading the contention, and it is
+deferred. Until both are run the honest statement is the one at the top of this subsection.
+
 ## What did not work, measured rather than assumed
 
 A negative result nobody wrote down is one somebody re-derives. All on a fixed 40-45s window

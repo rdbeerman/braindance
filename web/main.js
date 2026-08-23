@@ -194,6 +194,36 @@ buildSurfaceMemory();
 // line.
 buildPointCloud(sourceCells);
 
+// And the one cell in that table the hardware fills rather than the registry or the
+// transport. `ALIASED_POINT_SIZE_RANGE` is what this GPU will actually rasterise a point
+// sprite at - [1, 511] on the machine this was written on - and the glyph field's grown
+// sprite is clamped to its top rather than to the literal 64 the old path keeps, because a
+// cell-sized sprite reaches 64 pixels at a metre and that is where a person stands.
+//
+// **Written here rather than in `resize()`, which is where the other hardware-shaped
+// uniform is written.** The range is a property of the context and does not change when
+// the drawing buffer does, so a write per resize would be a second answer to a question
+// with one, and it would sit on the line `export-check` anchors its `scale-by-width`
+// control on. Read through the raw context because three's `capabilities` does not carry
+// it, the way `web/surface-memory.js` reaches for its float-buffer extension.
+//
+// The fallback is the table's own default and not a second literal: a context that answers
+// nothing here leaves the 64 that has always been the clamp, which is the value this
+// replaces rather than a guess about what a silent driver meant.
+{
+  const gl = renderer.getContext();
+  const pointRange = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE);
+  // **One rather than zero, because the clamp underneath this has a floor of its own.** The
+  // shader asks for `clamp(size, 1.0, pointCeiling)`, and a clamp whose ceiling is below its
+  // floor is undefined in GLSL rather than an error - so a context answering a positive
+  // maximum under one pixel would not be caught by a test against zero and would hand every
+  // sprite in the cloud to whatever the driver felt like returning. A maximum of exactly 1
+  // is legal and means a renderer that can only draw single-pixel points, which this build
+  // can honour; anything under it is a range this shader cannot express, and the 64 the
+  // fallback keeps is the value that has always been the clamp.
+  if (pointRange && pointRange[1] >= 1) uniforms.pointCeiling.value = pointRange[1];
+}
+
 // ------------------------------------------------------------ levelling the world
 
 // A sensor is a thing somebody bolted to something, and nothing measures the angle it
@@ -927,6 +957,15 @@ const PANEL_GROUPS = [
   // for each. Everything that stylises the image lives here, and the tuning params
   // reveal naturally when their parent effect is enabled because they share a group.
   { key: 'style', label: 'Style', tab: 'look', lookgroup: true, collapses: true },
+  // The rain gets a group of its own beside `Style`, following the precedent the raster
+  // set: a term that grows sub-controls gets a group rather than crowding the group it
+  // started in, and `Style` already carries about fifteen controls. It is here rather than
+  // next to `Glyph` because these groups are stages of the pipeline and not subject
+  // headings - the rain decides what colour a point takes, which is what `Style` is about,
+  // and it works over round splats, so its home must not depend on glyphs being switched
+  // on. Filing it with the glyph field because the two were designed together is exactly
+  // the grouping this panel has refused twice.
+  { key: 'rain', label: 'Rain', tab: 'look', lookgroup: true, collapses: true },
   // Framing: what you can see, and where you are seeing it from. `sensor view` is
   // navigation and writes nothing - distinct from `look through it` in the camera
   // group, which adopts the program camera whose pose is document state.
@@ -993,6 +1032,13 @@ const PANEL_GROUPS = [
   // enum could not keyframe and these sliders can.
   { key: 'region', label: 'Region (metres)', tab: 'region', lookgroup: true, collapses: true },
   { key: 'points', label: 'Points', tab: 'look', lookgroup: true, collapses: true },
+  // And the glyph field immediately under `Points`, on the raster's precedent and at the
+  // stage it belongs to: it decides what mark gets drawn, which is what `Points` is about.
+  // The cost this and `Rain` above accept together is that the falling-code look is
+  // authored in two places on the panel, which is worth watching - the reason `Glitch` left
+  // `Displacement` was that nobody stylising an image thought to look for it there - but
+  // both are groups named after what they do, so neither is hidden inside something else.
+  { key: 'glyph', label: 'Glyph', tab: 'look', lookgroup: true, collapses: true },
   // The three terms that accumulate across frames, together. Fade and wake are the
   // surface memory and trails is the afterimage buffer; they were two groups apart
   // while doing one thing, which is how a look gets tuned twice.
@@ -1039,6 +1085,49 @@ const PARAMS = {
     apply: (v) => { uniforms.exposure.value = v; } },
   additive: { def: false, kind: 'step', tag: 'look',
     group: 'points', label: 'additive glow', apply: setAdditive },
+
+  // The glyph field: every point drawn as a character rather than as a round splat, on the
+  // grid `lattice` and `latticeCell` already cut. There is no cell size here and no second
+  // snap, deliberately - the shader's own comment carries why - so this family costs the
+  // presets four values rather than six and nothing has to be kept in step with a grid.
+  //
+  // The master crossfades the mark and grows the sprite into the cell as it rises, rather
+  // than switching. Blending is what every other master in this registry does: `lattice`
+  // blends, the five readings blend, `glitch` fades, and a control with two states would be
+  // a checkbox wearing a slider and could not keyframe into anything. The composition falls
+  // out for free - at `lattice` 1.0 with this at 0 the picture is the `voxel` look that
+  // ships today, and raising it turns those dots into characters without moving one of
+  // them. Nothing gates it on the lattice, because a control that refuses to work until you
+  // find its partner is the failure `Glitch` sitting inside `Displacement` already was; at
+  // `lattice` 0 with this at 1 every one of 217,088 points draws a cell-sized character at
+  // its own unquantised position and the picture is mush, which is authoring rather than a
+  // defect.
+  glyph: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+    group: 'glyph', label: 'glyph',
+    apply: (v) => { uniforms.glyph.value = v; } },
+  // The three keys, which add into one index and wrap. Each is how far that reading moves
+  // the character, and each contributes exactly nothing at zero.
+  //
+  // `tone` reads the luminance of the colour the cell is about to draw, so with `readDepth`
+  // up it is a depth band without a second control existing to do that - which is why there
+  // is no fourth key for depth. `hash` is the cell's own identity and holds still, so the
+  // characters belong to the room and a subject walks through them. `rain` is the falling
+  // counter passing through the cell, which is the one of the three that moves on its own.
+  //
+  // **`hash` defaults to 1 and the other two to 0**, on the convention the glitch ceilings
+  // set: a setting under a master defaults to the literal it replaces, and the probe this
+  // came from had exactly one key, the cell's. So raising `glyph` alone draws the field the
+  // probe drew rather than sixty-four copies of one character, which is what a default of 0
+  // across all three would give.
+  glyphTone: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+    group: 'glyph', label: 'tone key',
+    apply: (v) => { uniforms.glyphTone.value = v; } },
+  glyphHash: { def: 1, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+    group: 'glyph', label: 'hash key',
+    apply: (v) => { uniforms.glyphHash.value = v; } },
+  glyphRain: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+    group: 'glyph', label: 'rain key',
+    apply: (v) => { uniforms.glyphRain.value = v; } },
 
   // The mount's cant, in degrees. Document state rather than view, because the angle
   // belongs to the take and every project on it wants the same answer - see the long
@@ -1486,6 +1575,44 @@ const PARAMS = {
   duotoneMotion: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'style', label: 'duotone motion',
     apply: (v) => { uniforms.duotoneMotion.value = v; } },
+
+  // The rain: repeating drop heads descending each column of the room, brightening what
+  // they pass. It is a term of its own rather than a setting inside the glyph field because
+  // the brightness is the effect - the glyph field's `rain` key reads the same scalar to
+  // scramble a character, which is the arrangement `duotone` already has, one source and
+  // two consumers. Filed inside the glyph field, a wave descending through a room would
+  // have been unreachable for any look that was not drawing text, including `voxel`, which
+  // now gets it for nothing.
+  //
+  // **No accumulated state anywhere in it.** The value is a pure function of program time
+  // and world position, so a seek lands on exactly the frame playback would have drawn
+  // there; `timeline-check` is the instrument that holds that, and a rain integrated frame
+  // to frame would fail it.
+  //
+  // **A repeating drop rather than one that wraps**, which is the first of three things
+  // the probe had to settle by rendering them. A single head running down four metres
+  // spends half its cycle below the floor with the room dark behind it; a head every
+  // `span` metres means a column always has two or three running. And the trail sits
+  // *above* the head, which is what makes it read as falling rather than as a band sliding
+  // through.
+  rain: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+    group: 'rain', label: 'rain',
+    apply: (v) => { uniforms.rain.value = v; } },
+  // The three lengths under it, in metres and metres per second of the room, so unlike the
+  // screen-space terms none of them owes anything to the 1080p reference and the same look
+  // draws the same wave at any output size. Each defaults to the value the reference clips
+  // were shot at rather than to zero: they are settings under a master on the glitch
+  // ceilings' convention, and a span of zero in particular is a degenerate divisor with
+  // nothing but the master standing over it.
+  rainSpeed: { def: 0.55, min: 0.05, max: 3, step: 0.01, kind: 'scalar', tag: 'look',
+    group: 'rain', label: 'fall m/s',
+    apply: (v) => { uniforms.rainSpeed.value = v; } },
+  rainSpan: { def: 1.3, min: 0.2, max: 4, step: 0.01, kind: 'scalar', tag: 'look',
+    group: 'rain', label: 'head gap m',
+    apply: (v) => { uniforms.rainSpan.value = v; } },
+  rainTrail: { def: 0.45, min: 0.05, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
+    group: 'rain', label: 'trail m',
+    apply: (v) => { uniforms.rainTrail.value = v; } },
   // Each post pass costs a full-screen read and write whether or not it changes
   // anything, so a zero value switches its pass off rather than running it as a
   // no-op. The three grade terms share one pass, so they gate it together.
@@ -5045,6 +5172,14 @@ function renderProgramFrame(t) {
     uniforms.spanSec.value = frame.spanSec;
     uniforms.time.value = t;
     grade.uniforms.time.value = t;
+    // The rain's clock, which is the same program time and a second cell holding it. The
+    // duplication is what makes one falsification control possible: the rain has to be a
+    // pure function of program time or a seek lands where playback never would, and
+    // `timeline-check --mutate rain-accumulates` has to be able to integrate exactly this
+    // line. Aimed at `uniforms.time` instead it would redden the ripple, the glitch and the
+    // raster along with the rain, and a control that fails everything cannot say which
+    // claim is load-bearing. Written here so the two cannot come apart.
+    uniforms.rainPhase.value = t;
 
     // Every track, look and camera alike, written through the registry rather than
     // onto the uniforms and the camera object. That is what makes the camera a

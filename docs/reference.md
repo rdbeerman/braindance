@@ -139,6 +139,89 @@ rather than with the bracket: level a canted mount afterwards and the grid does 
 The cell is metres in the room like the other displacements, so a look gives the same grid at
 any export size.
 
+**`glyph`** draws every point as a character rather than as a round splat, and it has no grid
+of its own — it rides `lattice` and `latticeCell`, which already cut the room into cubes and
+move each point to the centre of the cube it falls in. One cell draws one character, so the
+characters stand in the room at the size the room gives them and recede with it, which is
+what a pass stamping text onto the finished frame could not draw at all. The master
+crossfades the mark rather than switching it: at 0.5 every cell is a dot with a character
+glowing inside it, and the sprite grows from `pointSize` to cell-sized along the same blend,
+so one character comes to stand for one cube of room.
+
+**Riding the lattice is why glyphs read as characters only near `lattice` 1.0.** The lattice
+is a blend from the measured surface to the reconstructed one rather than a switch, so at 0.5
+each point sits halfway to its cell centre and you get several copies of one character
+smeared along that path. At `lattice` 1.0 with `glyph` 0 you have the `voxel` recipe fully
+engaged — every point on its cell centre, drawn as a round splat — and raising `glyph` turns
+those dots into characters without moving one of them. The shipped `voxel` document is not that
+picture, and the difference is worth knowing before you reach for it as a reference: it names
+`lattice` 0.55 on a 3.5cm cell, halfway along the blend this paragraph opened on, so it keeps
+some of the smear deliberately.
+**At `lattice` 0 with `glyph` 1 the picture is mush**, because every one of the 217,088 points
+draws a cell-sized character at its own unquantised position — that is authoring rather than a
+defect, and nothing gates one control on the other.
+
+**Three keys decide which character a cell draws, and they add and wrap rather than mixing.**
+`tone key` reads the luminance the cell is about to draw at, `hash key` reads a hash of the
+cell itself, and `rain key` reads the falling counter passing through it; the three weights
+sum into one index into a table of sixty-four 8x8 bitmasks and wrap. They sum rather than
+blend the way the five readings do because character indices do not average — character 3
+half-and-half with character 9 is character 6, an unrelated symbol rather than anything
+between the two. All three are weights from 0 to 1, and `hash key` is the only one of them
+that defaults to 1 rather than to 0 — so raising `glyph` on its own gives the field one key,
+the cell's, which is the reading the reference frames have. It reaches nothing while `glyph`
+is 0.
+
+**The table is sorted by ink**, punctuation at the sparse end and dense kana at the other, so
+the tone key reads it as a tone ramp and the hash key reads the same table as noise with
+neither having to choose. What that costs is a latin ramp: a luminance sweep runs through
+kana, so the picture is ASCII art drawn in an alphabet that is not ASCII. There is no depth
+key because the readings already have one — put `readDepth` up and the colour ramp is
+distance, which the tone key then reads as a depth band.
+
+**The mark crossfades back to the round splat at whichever floor it hits first: the look's own,
+between sixteen and eight reference pixels, or what the buffer can actually resolve**, so the
+near room is text and the far room is texture. At full `glyph` on `cascade`'s 5.5cm cell the
+look's band is 4.0 to 8.0 metres out, the same metres at 1080p and in a 4K export; a buffer
+shorter than 1080 pulls the boundary nearer because eight framebuffer pixels stop existing
+sooner, which is the buffer being honest about what it can draw rather than the look changing.
+The reason the floor exists at all is that an 8x8 bitmask sampled
+across eight pixels is a different random set of bits every time the camera moves rather than a
+small character, which bloom then amplifies. Clamping the
+sprite to a legible minimum instead would keep far cells readable and stop them being
+cell-sized, which collapses the recession at depth into the flat screen grid a cell-per-cube
+was chosen over. A keyed camera `fov` sweeps the band the same way walking closer does — a
+zoom makes characters resolve out of texture mid-clip — and that is the recession being true
+rather than a defect: the marks are objects in the room at a size the room gives them, and a
+narrower field gives every object more pixels.
+
+**`rain`** is a term of its own rather than a setting inside the glyph field, and it works
+over round splats. It computes one scalar per point out of world height and program time,
+brightens what a drop head passes, and the glyph field's `rain key` reads that same scalar to
+scramble the character — one source and two consumers, the arrangement `duotone` already has,
+so a wave descending through a room is reachable for any look that is not drawing text and
+`voxel` gets it for nothing. `fall m/s` is how fast a head descends, `head gap m` how many
+metres of column separate one head from the next, and `trail m` how many metres of afterglow
+sit above it: 0.55, 1.3 and 0.45 by default. Only `trail m` belongs to `rain` alone — `fall
+m/s` and `head gap m` shape the drop coordinate *both* consumers read, so with `rain` at 0 and
+`glyph` and `rain key` up they still move the picture, by changing which character the passing
+counter scrambles a cell to. With both masters at 0 none of the three reaches a pixel, which
+is what keeps a look that never asked for any of this rendering the frame it always did. A head
+every `head gap` metres rather than one head that wraps is what keeps two or three running in
+a column at once, and the trail sitting *above* the head is what makes it read as falling
+rather than as a band sliding through. Nothing in it accumulates — the value is a pure
+function of program time and world position, so a seek lands on exactly the frame playback
+would have drawn there, which `timeline-check` holds.
+
+**The two groups sit at the two stages they belong to rather than together.** `Glyph` is
+immediately after `Points`, because what mark gets drawn is what `Points` is about, and `Rain`
+is beside `Style`, because what colour a point takes is what `Style` is about — so the rain's
+home does not depend on glyphs being switched on. The cost that accepts is that the
+falling-code look is authored in two places on the panel, and `cascade` is the shipped
+document that holds it: the lattice at 1.0 on a 5.5cm cell, `glyph` at 1.0, the hash key full
+and the rain key at 0.6, the rain at 0.8 falling 0.55 m/s with heads 1.3m apart, over a depth
+reading with a green duotone, a toe and bloom on top.
+
 **`ripple`** is the region read a fourth way, after displacing, scrambling and masking: a wave
 travelling out along the radius, in metres at a full weight, so the volume breathes where
 `push` only swells it. `ripple per m` is its spacing and `ripple hz` its speed — and the wave
@@ -358,24 +441,25 @@ rows it emitted are not the parameters that were declared.
 Selecting Blackwall used to apply twelve post-chain values with it. They are separate now: a
 preset is look values and nothing else, so applying one never moves your camera.
 
-A preset is `{ version, values }`, and the keys it names are its scope. Nine ship read-only
+A preset is `{ version, values }`, and the keys it names are its scope. Ten ship read-only
 from `presets-builtin/` and are marked `·` in the picker. Five of them — `rgb`, `depth`,
 `ghost`, `contour` and `blackwall` — are one per reading and differ in little else, so they
 are where a grade starts, with `blackwall.json` carrying the twelve values the old mode
-wrote. The other four — `ember`, `grille`, `voxel` and `tearline` — are graded looks in
-their own right: each reads Blackwall and spends a duotone, a raster and a toe on top of it,
-so applying one takes a finished grade rather than clearing the desk. Nothing in the format
-marks the difference and nothing should — they are all documents, and the split is
-editorial. A preset naming two values is equally valid, and applying it leaves everything
-else where the grade left it.
+wrote. The other five — `ember`, `grille`, `voxel`, `tearline` and `cascade` — are graded
+looks in their own right: the first four read Blackwall and `cascade` reads depth, and each
+spends a duotone, a raster and a toe on top of that reading, so applying one takes a finished
+grade rather than clearing the desk.
+Nothing in the format marks the difference and nothing should — they are all documents, and
+the split is editorial. A preset naming two values is equally valid, and applying it leaves
+everything else where the grade left it.
 
-**All nine name the whole look**, which is the 68 look values outside the framing group, so
+**All ten name the whole look**, which is the 77 look values outside the framing group, so
 picking one gives you that look whatever was on screen before it. Framing — levelling, the
 clip planes, the crop box — is the shot rather than the look, so no shipped document names
 it and picking one never reframes what you framed. `none` is the one entry that does reach
-the framing, because it is the way back to the defaults rather than a tenth look.
+the framing, because it is the way back to the defaults rather than an eleventh look.
 `library-check` holds the rule against the registry, so a look parameter added later fails
-all nine until each of them names it.
+all ten until each of them names it.
 
 Saving and exporting both ask which values go in, every box ticked, so a sparse preset takes
 deliberate effort. The boxes derive from the registry, so a parameter added later appears
@@ -388,7 +472,7 @@ that is not about the reading, which is fine. `refusePresetBody` refuses everyth
 between.
 
 **A partial preset does not stamp the clip**, because the stamp answers "what look is this
-clip wearing" and three of sixty-eight values did not answer it. The two surfaces that report
+clip wearing" and three of seventy-seven values did not answer it. The two surfaces that report
 an apply say which of the two happened, and a document naming the whole look stamps whether
 it also names the framing or not — the framing is not part of the answer.
 

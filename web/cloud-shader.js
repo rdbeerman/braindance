@@ -14,8 +14,8 @@
 // in `main.js`, and nothing enforces that in either direction. A uniform with no key is
 // silent: three.js simply never writes it, the shader reads zero, and the look is subtly
 // wrong with nothing on the console. A key with no uniform is dead weight that costs a
-// slider's write on every frame it is animated. Measured across the split: 76 declared
-// here, 76 keys there, and the two sets are equal both ways. That equality is a fact
+// slider's write on every frame it is animated. Measured across the split: 86 declared
+// here, 86 keys there, and the two sets are equal both ways. That equality is a fact
 // about today rather than something this file can hold, so a term added to one side
 // belongs in the same commit as the other.
 
@@ -27,10 +27,37 @@ uniform usampler2D depthPrev, depthCurr;
 uniform sampler2D stateTex;
 uniform vec2 focal, center, resolution;
 uniform float bufferHeight;
+// What this hardware will actually rasterise a point sprite at, which is a bound rather
+// than a look value and so is not a registry parameter: it has no default anybody chose,
+// it cannot be keyframed into anything, and a preset naming it would be a document
+// carrying one machine's limit to another. Written once at boot out of
+// ALIASED_POINT_SIZE_RANGE in web/main.js, beside the point cloud it is built with,
+// rather than in resize() where bufferHeight is written - the range is a property of
+// the context and does not change when the window does. The table's own default is the
+// old literal 64, so a build that somehow reached a frame before that write draws what
+// the shipped clamp always drew.
+uniform float pointCeiling;
 uniform float pointSize, nearClip, farClip, time, edgeTol;
 uniform float cropL, cropR, cropB, cropT, cropOn, cropOutside;
 uniform float noise, noiseScale, noiseSpeed;
 uniform float lattice, latticeCell;
+// The glyph field's master, which this stage needs for one thing only - growing the
+// sprite into the cell the lattice already cut. Which character gets drawn is decided in
+// the fragment stage, because it keys on a luminance that does not exist until the colour
+// is built, so the other three weights are declared there and not here.
+uniform float glyph;
+// The rain, which is a colour term rather than a property of the alphabet and so has its
+// own four parameters. Three of them are read here because the scalar the whole thing
+// rests on is a function of world height, which only this stage knows; rainTrail shapes
+// the brightness and is read in the fragment stage beside the colour it lifts.
+uniform float rain, rainSpeed, rainSpan;
+// Program time again, and it is a second cell holding the same number rather than a reuse
+// of time on purpose. The rain has to be a pure function of program time or a seek lands
+// where playback never would, and the control that holds that claim -
+// timeline-check --mutate rain-accumulates - has to be able to integrate exactly one
+// line. Mutating time itself would redden the ripple, the glitch and the raster along
+// with it, and a control that fails everything cannot say which claim is load-bearing.
+uniform float rainPhase;
 uniform vec3 regionCentre, regionHalf;
 uniform float regionRound, regionSoft, regionPush, regionNoise, regionMask;
 uniform float ripple, rippleFreq, rippleSpeed;
@@ -46,10 +73,14 @@ out float vDepth;
 out float vEdge;
 out float vGlitch;
 out float vSize;
+out float vLegiblePx;
 out float vGhost;
 out float vFade;
 out float vMask;
 out float vSpeed;
+out float vCellSeed;
+out float vRain;
+out float vCellNorm;
 
 float depthAt(usampler2D tex, ivec2 p) {
   return float(texelFetch(tex, p, 0).r);
@@ -157,6 +188,31 @@ void main() {
   // register. A shed point would come out carrying the speed of whichever live point
   // shared its warp.
   vSpeed = 0.0;
+  // The glyph field's three, initialised here under exactly the rule above rather than
+  // where they are computed, which is hundreds of lines below the early returns.
+  //
+  // **What leaves them unwritten is the gate and not the ghost**, and the correction is
+  // recorded rather than quietly made, because the wrong reason stood here for a while and
+  // reads as authoritative. This paragraph used to say a ghost never reaches the cell
+  // arithmetic. A *live* ghost reaches it exactly the way a live point does - it falls
+  // through the same lines - and a dead one leaves at the early return above with a point
+  // size of zero, so it rasterises nothing and could not draw a wrong character if it
+  // wanted to. What actually skips the block is the block's own guard: it is gated on the
+  // two masters together, so at every look drawing no characters and no rain - which is
+  // nine of the ten shipped ones - nothing down there runs at all. The fragment stage
+  // still takes the fraction of vRain on every fragment, unguarded and deliberately so,
+  // and a rain
+  // of 0 is no protection: the multiplier that makes the term inert is applied to the
+  // result, and zero times whatever an undefined register holds is not reliably zero.
+  //
+  // The identity each one is initialised to is the value that makes its consumer inert:
+  // seed and rain at zero name the first character and the top of a drop, and the cell
+  // normalisation at one is a multiply that changes no alpha. That third one is written
+  // unconditionally further down rather than under a gate, so what its initialisation
+  // covers is the early returns alone.
+  vCellSeed = 0.0;
+  vRain = 0.0;
+  vCellNorm = 1.0;
 
   if (aSlot > 0.5) {
     // The ghost: what the ray used to be looking at. A hard swap earns a longer
@@ -320,6 +376,47 @@ void main() {
     ? regionWeight(p0)
     : 0.0;
 
+  // Which cell of the room this point belongs to, and where it stands in the falling
+  // pattern. Both are read at the *undisplaced* position for the reason the region above
+  // is, and the consequence here is sharper than a crawling edge: a character's identity
+  // has to be a fact about the room, so that turbulence pushes points through a field of
+  // characters that stay where they are. Hashed off the running pos instead, the whole
+  // field boils the moment noise, the ripple or the region push leaves zero - and with all
+  // of them at zero, which is where a drop-one sweep leaves them, the picture is
+  // bit-identical to the correct one.
+  //
+  // **The grid is the lattice's own and there is deliberately not a second one.**
+  // latticeCell already names the cube the room is cut into, and a glyph field carrying
+  // a cell size of its own would be two independent world-cell quantisers in one shader
+  // with nothing holding their reasoning together. It is read here whatever lattice
+  // itself is, because the rain rides these same columns and works over round splats, so
+  // this cannot sit inside the snap's own guard.
+  //
+  // mat3(modelMatrix) rather than a rotation derived beside it, for the reason the snap
+  // below gives at length: the cloud carries the world tilt as its only transform, so this
+  // is exactly the sensor-to-levelled rotation and cannot come apart from the one the snap
+  // uses. Gated on the two masters together because neither consumer exists below them and
+  // the block is a mat3 multiply and two hashes on every point in the frame.
+  if (glyph > 0.0 || rain > 0.0) {
+    vec3 room = mat3(modelMatrix) * p0;
+    vec3 wc = floor(room / latticeCell + 0.5);
+    vCellSeed = hash(dot(wc, vec3(127.1, 311.7, 74.7)));
+    // Counted in whole drops rather than wrapped into one, so that the fragment stage can
+    // read both halves of the same number off one varying: the fraction is how far above
+    // the last head this point sits, which is the brightness, and the integer is how many
+    // heads have already gone past it, which is the scramble. Wrapping here would throw
+    // the counter away and cost a second varying to get it back.
+    //
+    // Heads descend, so world height enters with the same sign program time does and a
+    // point standing still watches the coordinate climb. One head every rainSpan metres
+    // down each column rather than a single head wrapping over the whole room: a column
+    // always has two or three running, where one head spends half its cycle below the
+    // floor with the room dark behind it. The per-column offset is a hash of the cell's
+    // own x and z, so neighbouring columns are out of step and the room does not pulse as
+    // a single plane.
+    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));
+  }
+
   // Gated because it is the most expensive thing in this shader: eight hashes of three
   // sines each, against the six the old sine field cost. A look with no turbulence pays
   // none of it, which is the same bargain the ghost half of the geometry makes.
@@ -473,13 +570,88 @@ void main() {
   // points closer than about a quarter of a metre - and a check comparing two
   // output sizes has to keep out of that band rather than pretend it is not there.
   float k = bufferHeight / 1080.0;
-  gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);
+  // How big one lattice cell is on screen at this point's distance, in the same reference
+  // pixels vSize below is carried in, and it is derived from the projection rather than
+  // from a baked field of view because the fov is part of the camera pose and keyframes: a
+  // constant worked out at fifty degrees is wrong the moment a clip animates it.
+  // projectionMatrix[1][1] is cot(fov/2), so a world length L at view distance d spans
+  // L * P11 / d of clip space and half the frame is 540 reference pixels.
+  //
+  // max(0.15, -mv.z) is written out a second time rather than hoisted into the clamp
+  // below it, and that is deliberate: the clamp's exact text is what export-check's
+  // pointsize-absolute anchors on, so putting a local in the middle of it would take the
+  // control off rather than move it.
+  float dist = max(0.15, -mv.z);
+  float cellPx = latticeCell * projectionMatrix[1][1] * 540.0 / dist;
+  // **The sprite grows into its cell as the master rises**, so one character stands for one
+  // cube of room, which is the whole reading the cube variant of this was chosen for. A
+  // 5.5cm cell a metre away is about 64 reference pixels where pointSize 9 is 9, so the
+  // two are nowhere near each other and something had to give; blending rather than
+  // switching is what keeps pointSize meaning something at every value in between.
+  //
+  // **The ceiling on the glyph branch is the hardware's and not the literal 64**, because a
+  // cell-sized sprite reaches 64 pixels at a metre and that is where a person stands. Past
+  // that the sprite would stop growing while the cell kept growing, so characters would
+  // stop filling their cells, the tiling would open up, and spriteWorld / cell would stop
+  // being 1 at full glyph - which is the property the energy compensation in the fragment
+  // stage rests on. The clamp is in framebuffer pixels, so that failure moves with output
+  // size: the same look that opens gaps at a metre on screen opens them at two metres in a
+  // 4K export, which is exactly the drift the 1080p reference unit exists to stop.
+  //
+  // **The old statement survives verbatim on the else branch, and that departs from the
+  // design document on purpose.** The document replaces the literal 64 outright. It is kept
+  // here because no shipped look reaches it - pointSize tops out at 9 across all nine, so
+  // 64 needs a subject 14cm from the sensor, nearer than a Kinect v2 will range - and
+  // because leaving the statement textually alone is what keeps the old path byte-identical
+  // across output sizes and keeps export-check's anchor alive. What the document is right
+  // about is the case it was written for, which is the grown sprite, and that case is the
+  // branch above.
+  if (glyph > 0.0) {
+    float base = clamp(pointSize * k / dist, 1.0, 64.0);
+    gl_PointSize = clamp(mix(base, cellPx * k, glyph), 1.0, pointCeiling);
+  } else {
+    gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);
+  }
   // Carried in reference pixels rather than framebuffer ones, because the fragment
   // shader normalises a splat's additive energy against its area. For the same
   // image at twice the size each point covers four times the pixels, so it has to
   // keep the same alpha - normalising against the drawn size instead would make
   // the identical look sum four times too bright at twice the resolution.
   vSize = gl_PointSize / k;
+
+  // **What the lattice does to additive brightness, cancelled here rather than in the
+  // fragment stage.** The normalisation down there divides a splat's alpha by its own area,
+  // on the assumption that sources are spread at the sprite's scale - and the lattice
+  // breaks that assumption by collapsing them onto cells. Pulling points a fraction L of
+  // the way to their cell centre leaves a cluster spanning cell * (1 - L), so brightness
+  // runs up as one over that squared until the cluster is smaller than the sprite, after
+  // which it saturates at the fully coincident case. voxel.json has been in exactly that
+  // state since it shipped: lattice 0.55, additive on, and a pointSize of 6.5 well under
+  // its 3.5cm cell.
+  //
+  // **It is computed here because two of the three things it needs do not exist in the
+  // fragment stage.** The view distance and the projection are vertex-stage quantities, so
+  // the design document's single fragment-stage expression cannot be written where it puts
+  // it; crossing the finished factor is one varying where crossing its inputs would be
+  // three, and it puts the arithmetic where its inputs are. vSize is the sprite that was
+  // actually rasterised - taken after both clamps - so wherever the ceiling bites,
+  // brightness stays correct and only the tiling degrades.
+  //
+  // **The min bounding the sprite term is a correction to the document and not a
+  // transcription of it.** As written there the factor is max((1-L)^2, (sprite/cell)^2),
+  // which at lattice 0 is 1 only while the sprite is no bigger than the cell - and
+  // pointSize reaches 64 against a cell that bottoms out at 5mm, so the region where it
+  // exceeds 1 is reachable through the sliders and the factor would then *brighten*, in
+  // contradiction of the document's own "exactly 1 at lattice 0". Bounded, it is exactly 1
+  // at lattice 0, exactly (sprite/cell)^2 at lattice 1, and exactly 1 again at full glyph
+  // where the sprite *is* the cell - which is the property that makes the compensation and
+  // the glyph field not interact at all at full strength.
+  //
+  // Straight through with no guard, following the flare's measurement in the fragment
+  // stage: multiplying by the computed 1.0 is exact in IEEE, where a branch dropped into a
+  // common path costs the compiler contractions across the lines either side of it.
+  float spriteCells = vSize / cellPx;
+  vCellNorm = max((1.0 - lattice) * (1.0 - lattice), min(1.0, spriteCells * spriteCells));
 
   // Cut-away points draw at half the size, and **this has to come after vSize or it
   // undoes the dimming it is meant to help.** The fragment stage normalises a splat's
@@ -494,6 +666,38 @@ void main() {
   // order-dependently. A quarter of the footprint is a quarter of the occlusion, and it
   // reads as dust instead of as surface.
   if (outsideCrop) gl_PointSize *= 0.5;
+
+  // **The size the legibility crossfade reads, and it is the lesser of two readings rather
+  // than either one of them.** This is a third screen-space quantity and the file now
+  // carries three references rather than two, so it is worth stating what each is for. The
+  // 1080p reference is the unit every *look* value is expressed in, so that a document
+  // grades the same picture at any output size. Bloom's chain is frozen at 600 because
+  // UnrealBloomPass bakes its tap count in at construction and has no parameter to
+  // express. And this one is neither: the mark falls back to a splat at whichever limit is
+  // reached first, the look's own floor in reference pixels or what the buffer can actually
+  // resolve.
+  //
+  // **Both halves are load-bearing and each one alone is a defect.** Read purely in
+  // reference pixels the crossfade inverts at small buffers: the lower clamp lifts a
+  // sub-pixel sprite to one framebuffer pixel, which divides back into 15 reference pixels
+  // at a 128x72 export, so the far cloud the fallback exists for was reported as nearly
+  // legible and drew one arbitrary bit of a character per point instead of a dot. Read
+  // purely in framebuffer pixels the boundary between text and texture moves with the
+  // output size: the same document that turns to splats past four metres at 1080p holds
+  // characters to eight at 4K, which is a different picture rather than the same one at
+  // higher fidelity - and renderScale, which is a view parameter and keyframes nothing,
+  // would move the look. Dividing by max(k, 1) takes the smaller of the two: below 1080
+  // the divisor is 1 and this is the drawn sprite, at 1080 the two units coincide exactly,
+  // and above it this is the drawn sprite back in reference pixels.
+  //
+  // Taken here because this is the last line in the file that can move gl_PointSize, and
+  // the halving above it is inside the reading on purpose - a cut-away cell drawn at half
+  // its pixels has half the texels to resolve on, whatever the look asked for.
+  //
+  // vSize is a different quantity and stays one: it is what the additive normalisation
+  // divides by, it is taken before the halving, and it is in reference pixels always,
+  // because brightness has to be invariant to output size where legibility cannot be.
+  vLegiblePx = gl_PointSize / max(k, 1.0);
 }
 `;
 
@@ -507,6 +711,15 @@ uniform float duotoneDepth, duotoneHue, duotoneSplit, duotoneSpan, duotoneMotion
 uniform float readRgb, readDepth, readGhost, readContour, readBlackwall;
 uniform float rgbSaturation, depthGamma, ghostRim, ghostFill;
 uniform float contourBands, contourLo, contourHi, blackwallSweep;
+// The glyph field's master and its three keys. The master is declared in both stages
+// because it does two things that belong at two stages - it grows the sprite up there and
+// it crossfades the mark here - and the three keys are here alone, because the character
+// index is decided beside the colour it reads.
+uniform float glyph, glyphTone, glyphHash, glyphRain;
+// The rain's brightness and the two lengths that shape it. The speed is not here: how fast
+// a head falls only enters through the scalar the vertex stage already computed, where the
+// world height it is a rate against lives.
+uniform float rain, rainSpan, rainTrail;
 uniform int hasColor, softEdge;
 
 in vec2 vUv;
@@ -514,12 +727,120 @@ in float vDepth;
 in float vEdge;
 in float vGlitch;
 in float vSize;
+in float vLegiblePx;
 in float vGhost;
 in float vFade;
 in float vMask;
 in float vSpeed;
+in float vCellSeed;
+in float vRain;
+in float vCellNorm;
 
 out vec4 fragColor;
+
+// The alphabet, as sixty-four 8x8 bitmasks held in the shader source.
+//
+// **There is no atlas, no texture and no fetch, and that is a decision about boot rather
+// than about memory.** This renderer loads no static image: every texture it binds is built
+// out of frame bytes in web/gpu-textures.js, so an atlas would be the first file the render
+// path ever went and got - a route on the server to serve it, a load order to get right, a
+// question about what the shader draws in the frames before it arrives, and the same
+// question again inside the headless browser tools/render-worker.mjs drives, where a missing
+// asset is a deliverable with no characters in it rather than a visible error. A table in
+// the source has none of those states, because it is there the moment the shader compiles.
+// The other thing it buys is that the alphabet is reviewable: a bitmask is a diff a person
+// can read, where an atlas is a binary nobody looks inside.
+//
+// 8x8 rather than the 5x6 the probe drew, and the size is the whole reason for it. 5x6
+// draws latin, digits and symbols and cannot draw kana, which would put the reference
+// look's own alphabet permanently out of reach. 8x8 is what the home computers of the
+// eighties drew kana at, so it is the smallest grid that keeps the option, and two
+// unsigned ints carry one character exactly.
+//
+// **Sorted by ink, sparsest first, which is what lets three keys share one table.** A
+// luminance ramp is ASCII art and only works if the index means ink, so that a bright cell
+// draws a dense character and a dark one draws a sparse one; a hash and a rain counter want
+// the index to mean nothing, because looking like noise is their whole job. Sorting by ink
+// dissolves that rather than resolving it - the tone key reads the table as tone and the
+// hash key reads the same table as noise, and both readings are true of it at once - so no
+// parameter has to choose between them, which matters because a chooser would be an enum
+// and this registry has refused those since the region's shape control, on the grounds that
+// an enum cannot keyframe and a slider can. What it costs is a latin tone ramp: a luminance
+// sweep now runs through kana, so the picture is ASCII art drawn in an alphabet that is not
+// ASCII.
+//
+// Packed with x holding rows 0 to 3 and y holding rows 4 to 7, row 0 at the top, and within
+// a word the bit at row * 8 + col with column 0 on the left. **Column 7 and row 7 are clear
+// in every one of the sixty-four**, and that is where the margin between neighbouring cells
+// comes from rather than from a parameter: an 8x8 character does not fill its own 8x8 box,
+// so cells tile while the marks inside them do not touch, which is how the reference frames
+// actually look - characters with dark between them rather than a solid wall of ink.
+const uvec2 GLYPHS[64] = uvec2[64](
+  uvec2(0x00080800u, 0x00000000u), // '  apostrophe  ink 2
+  uvec2(0x00000000u, 0x000c0c00u), // .  period  ink 4
+  uvec2(0x00141400u, 0x00000000u), // "  quote  ink 4
+  uvec2(0x04081000u, 0x00001008u), // <  less-than  ink 5
+  uvec2(0x10080400u, 0x00000408u), // >  greater-than  ink 5
+  uvec2(0x3e000000u, 0x00000000u), // -  hyphen  ink 5
+  uvec2(0x00000000u, 0x00060c0cu), // ,  comma  ink 6
+  uvec2(0x00000000u, 0x007f0000u), // _  underscore  ink 7
+  uvec2(0x08040201u, 0x00402010u), // \  backslash  ink 7
+  uvec2(0x08080808u, 0x00080808u), // |  vertical bar  ink 7
+  uvec2(0x08102040u, 0x00010204u), // /  slash  ink 7
+  uvec2(0x10204300u, 0x00000408u), // ン  katakana N  ink 7
+  uvec2(0x000c0c00u, 0x00000c0cu), // :  colon  ink 8
+  uvec2(0x0c081020u, 0x0008080au), // イ  katakana I  ink 9
+  uvec2(0x10204442u, 0x00020408u), // ソ  katakana SO  ink 9
+  uvec2(0x3e080800u, 0x00000808u), // +  plus  ink 9
+  uvec2(0x000c0c00u, 0x00060c0cu), // ;  semicolon  ink 10
+  uvec2(0x003e0000u, 0x0000003eu), // =  equals  ink 10
+  uvec2(0x08080c08u, 0x001c0808u), // 1  digit one  ink 10
+  uvec2(0x10204a0au, 0x00020408u), // ツ  katakana TSU  ink 10
+  uvec2(0x14240404u, 0x0004040cu), // ト  katakana TO  ink 10
+  uvec2(0x23400300u, 0x00060810u), // シ  katakana SHI  ink 10
+  uvec2(0x003c0000u, 0x00007f00u), // ニ  katakana NI  ink 11
+  uvec2(0x02020202u, 0x003e0202u), // L  latin L  ink 11
+  uvec2(0x0808081cu, 0x001c0808u), // I  latin I  ink 11
+  uvec2(0x0808083eu, 0x00080808u), // T  latin T  ink 11
+  uvec2(0x0810203eu, 0x00040404u), // 7  digit seven  ink 11
+  uvec2(0x1c2a0800u, 0x0000082au), // *  asterisk  ink 11
+  uvec2(0x10107f00u, 0x00081010u), // ナ  katakana NA  ink 12
+  uvec2(0x1020223eu, 0x00020408u), // ク  katakana KU  ink 12
+  uvec2(0x2020407eu, 0x00040810u), // フ  katakana FU  ink 12
+  uvec2(0x22222222u, 0x000c1020u), // リ  katakana RI  ink 12
+  uvec2(0x22420202u, 0x00060a12u), // レ  katakana RE  ink 12
+  uvec2(0x44242800u, 0x00414242u), // ハ  katakana HA  ink 12
+  uvec2(0x0202221cu, 0x001c2202u), // C  latin C  ink 13
+  uvec2(0x2040427eu, 0x00040810u), // ワ  katakana WA  ink 13
+  uvec2(0x20427e08u, 0x00040810u), // ウ  katakana U  ink 13
+  uvec2(0x040c1424u, 0x007c0404u), // ヒ  katakana HI  ink 14
+  uvec2(0x0c08103eu, 0x00402112u), // ス  katakana SU  ink 14
+  uvec2(0x1020221cu, 0x003e0408u), // 2  digit two  ink 14
+  uvec2(0x1810201eu, 0x001c2220u), // 3  digit three  ink 14
+  uvec2(0x1e02023eu, 0x00020202u), // F  latin F  ink 14
+  uvec2(0x20203e00u, 0x003e2020u), // コ  katakana KO  ink 14
+  uvec2(0x24247e00u, 0x00020c10u), // ア  katakana A  ink 14
+  uvec2(0x2c20223eu, 0x00040810u), // タ  katakana TA  ink 14
+  uvec2(0x0810203eu, 0x003e0204u), // Z  latin Z  ink 15
+  uvec2(0x087f003cu, 0x00040808u), // テ  katakana TE  ink 15
+  uvec2(0x0e10207fu, 0x00101008u), // マ  katakana MA  ink 15
+  uvec2(0x107f1212u, 0x00081010u), // サ  katakana SA  ink 15
+  uvec2(0x22242424u, 0x00612122u), // ル  katakana RU  ink 15
+  uvec2(0x22242830u, 0x0020203eu), // 4  digit four  ink 15
+  uvec2(0x08083e00u, 0x007f0808u), // エ  katakana E  ink 16
+  uvec2(0x207f003cu, 0x00060810u), // ラ  katakana RA  ink 16
+  uvec2(0x2222221cu, 0x001c2222u), // 0  digit zero  ink 16
+  uvec2(0x201e023eu, 0x001c2220u), // 5  digit five  ink 17
+  uvec2(0x3c22221cu, 0x001c2220u), // 9  digit nine  ink 17
+  uvec2(0x4244447cu, 0x00011922u), // カ  katakana KA  ink 17
+  uvec2(0x18107f10u, 0x00191214u), // オ  katakana O  ink 18
+  uvec2(0x1e02023eu, 0x003e0202u), // E  latin E  ink 18
+  uvec2(0x2a2a3622u, 0x00222222u), // M  latin M  ink 18
+  uvec2(0x3c20203eu, 0x003e2020u), // ヨ  katakana YO  ink 18
+  uvec2(0x7f107f10u, 0x00040808u), // キ  katakana KI  ink 19
+  uvec2(0x1c087f08u, 0x00084936u), // ホ  katakana HO  ink 20
+  uvec2(0x2222223eu, 0x003e2222u)  // ロ  katakana RO  ink 20
+);
 
 // Black through red and orange to white, the palette a thermal camera writes rather
 // than the cool-to-warm one depthRamp uses - the two are deliberately different, so
@@ -572,13 +893,49 @@ void main() {
   vec2 d = gl_PointCoord - 0.5;
   float r2 = dot(d, d);
 
+  // How much of the mark is a character rather than a round splat, worked out here
+  // because the discard below has to know about it and finished a long way down, where the
+  // luminance the character index keys on finally exists.
+  //
+  // **The distance term multiplies into the master rather than clamping the sprite**, and
+  // that is what protects the recession. A cell four metres from the sensor projects to
+  // about six pixels, and an 8x8 bitmask sampled across six pixels is not a small
+  // character - it is a different random set of bits every time the camera moves, which
+  // bloom then amplifies. Clamping the sprite to a legible minimum would keep every cell
+  // readable at any range, but far cells would stop being cell-sized and start
+  // overlapping, which collapses the perspective recession at depth into exactly the flat
+  // screen grid this design was chosen over. So the mark stops trying to be legible and
+  // the geometry never stops being true, and it does it by reusing the blend the master
+  // already is rather than adding a mechanism that could go out of step with it.
+  //
+  // The two ends are the font's own sampling limits: at 8 the 8x8 grid gets one pixel per
+  // font cell, which is where the bits start aliasing into speckle, and at 16 it gets two
+  // and the character resolves. The design document says the fallback is somewhere below
+  // about ten pixels, which is inside this band rather than at either end of it.
+  //
+  // **What the two numbers are pixels *of* is the whole of what the vertex stage works out
+  // above**, and it is neither of this renderer's two existing references on its own. Below
+  // 1080 they are framebuffer pixels, because aliasing is a fact about the samples that
+  // exist and a mark cannot resolve on texels it does not have. At and above 1080 they are
+  // reference pixels, because the boundary between text and texture is a property of the
+  // look and a 4K export has to draw the same picture the grade was made on. The band is
+  // therefore stated once and read against whichever limit is nearer.
+  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);
+
   // Additive mode shapes the sprite purely with alpha falloff. Skipping the
   // discard keeps Apple's tile-based hidden-surface removal working.
+  //
+  // **The disc the hard-edged branch cuts would take the corners off a character**, so it
+  // is asked about the glyph first. At a glyphMix of exactly zero - which is every value of
+  // every look that does not draw characters, because the master multiplies - the condition
+  // collapses to the test that has always been here and the executed path is literally the
+  // old one, discard and then smoothstep. Above zero the sprite keeps its corners, and what
+  // shapes it is the bitmask rather than the disc.
   float falloff;
   if (softEdge == 1) {
     falloff = exp(-r2 * 9.0);
   } else {
-    if (r2 > 0.25) discard;
+    if (glyphMix <= 0.0 && r2 > 0.25) discard;
     falloff = smoothstep(0.25, 0.02, r2);
   }
 
@@ -917,6 +1274,92 @@ void main() {
   // than reasoning about what a branch did to the contractions around it.
   col += vec3(0.2, 0.9, 1.0) * vGlitch;
 
+  // **The rain, which is a colour term rather than a property of the alphabet.** It sits
+  // here for the reason thermal, the edges and the duotone above it do - a term written
+  // into one reading is inert in every other one - and it is a term of its own rather than
+  // a setting inside the glyph field because the brightness *is* the effect. What the
+  // reference clips show carrying the picture is a drop head descending a column with a
+  // trail of afterglow above it; scrambling on its own is invisible, since which character
+  // a cell draws is noise either way. Filed inside the glyph field, a wave descending
+  // through the room would have been unreachable for any look that was not drawing text -
+  // including voxel, which now gets it for nothing.
+  //
+  // It is below the flare rather than above it so that the line the flare's own comment
+  // measured keeps the neighbours it was measured beside, and because a torn band is
+  // emitted light: the rain lifts what the cell actually draws, flare included, and the
+  // tone key one block down reads the same colour the frame gets.
+  //
+  // vRain counts whole drops, so its fraction is how far above the last head this point
+  // stands as a share of the span, and the trail arrives in metres and is converted into
+  // that same share. **The trail sits above the head and not below it**, which is what
+  // makes the wave read as falling rather than as a band sliding through: the lift is 1 at
+  // the head and decays upward over rainTrail metres, and a point just under a head is a
+  // whole span below the next one and so is dark.
+  //
+  // Unconditional and written straight through, on the flare's own measurement above: at a
+  // rain of 0 the multiplier is exactly 1.0 whether or not the compiler contracts it, where
+  // a branch dropped into this path costs contractions across the lines either side of it.
+  float rainLift = 1.0 - smoothstep(0.0, rainTrail / rainSpan, fract(vRain));
+  col *= 1.0 + rain * rainLift;
+
+  // **Which character this cell draws.** Decided here rather than in the vertex stage
+  // because one of the three keys does not exist up there: the tone key is the luminance of
+  // the colour the cell is about to draw, which is the line above this one. Nothing is lost
+  // by the move - the cell seed and the rain coordinate are both constant across a sprite,
+  // so the character is too.
+  //
+  // **The three keys add and wrap rather than mixing the way the five readings do**, and
+  // the difference is forced rather than stylistic: character indices do not average.
+  // Character 3 blended half and half with character 9 is character 6, which is an
+  // unrelated symbol rather than anything between the two. A sum wrapped into the table is
+  // the only composition that leaves each weight meaning how far it moves the character,
+  // and it keeps the property the readings have, that a weight at zero contributes exactly
+  // nothing.
+  //
+  // **The tone key is scaled by 63/64 where the other two keep the pure wrap**, and that
+  // departs from the design document, which writes all three the same. Luminance is the one
+  // key with a direction: the table is sorted by ink, so a tone ramp is only a ramp if full
+  // luminance lands on the densest character. Unscaled it lands on fract(1.0), which is 0
+  // and therefore the sparsest, so the brightest point in the picture would draw an
+  // apostrophe and the top of the ramp would read as a hole in it. The hash and the rain
+  // are not scaled, because wrapping is exactly what makes them look like noise.
+  //
+  // The luminance is clamped for the same reason the scaling exists. col can leave the unit
+  // interval - the readings sum, the flare adds, and a duotone pole is hot - and an
+  // unclamped tone term would carry the top of the ramp round to the sparse end again.
+  //
+  // The rain key reads whole heads gone past rather than the continuous coordinate, because
+  // a character index that blends is a character nobody wrote. It is multiplied by the
+  // golden ratio rather than used raw, and that is not decoration: at a weight of 1 an
+  // integer counter contributes exactly nothing, since the fract of a whole number is zero,
+  // so the one setting where the key should be strongest is the one where it would be
+  // inert. An irrational step walks the table without repeating, which is what a scramble
+  // has to do.
+  if (glyphMix > 0.0) {
+    float lum = clamp(dot(col, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+    float rainStep = floor(vRain) * 0.6180339887498949;
+    float f = fract(glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);
+    // Guarded rather than trusted. fract is below 1 by definition, but a value arriving at
+    // exactly 1.0 through a rounding would index one past the end of the table, and reading
+    // a constant array out of range in GLSL is undefined rather than an error - so the one
+    // way this could go wrong is also the way nothing would report it.
+    int idx = min(int(f * 64.0), 63);
+    uvec2 g = GLYPHS[idx];
+    // gl_PointCoord runs from the sprite's upper left, which is where row 0 and column 0 of
+    // the bitmask are, so the two grids line up without a flip anywhere. Sampled across the
+    // whole 8x8 box rather than across the ink: the clear eighth row and column are the
+    // margin, and cropping to the ink would be a parameter for something the font already
+    // says.
+    uint gc = uint(clamp(gl_PointCoord.x * 8.0, 0.0, 7.0));
+    uint gr = uint(clamp(gl_PointCoord.y * 8.0, 0.0, 7.0));
+    uint bits = gr < 4u ? g.x >> (gr * 8u + gc) : g.y >> ((gr - 4u) * 8u + gc);
+    // A hard cut rather than an antialiased one, and the crossfade above is why it can be.
+    // The mark is already blending back toward the round falloff wherever it is too small
+    // to resolve, so softening the bits as well would be a second legibility mechanism
+    // doing the first one's job - and the two would then have to be kept in step.
+    falloff = mix(falloff, (bits & 1u) == 1u ? 1.0 : 0.0, glyphMix);
+  }
+
   // Cross-fade. A dying point thins out where it stood instead of blinking off,
   // and its replacement comes up over the same window.
   alpha *= vFade;
@@ -935,8 +1378,74 @@ void main() {
   // satisfies it is 36 * 1.8^2. Leaving it at 36 would have moved the distance at
   // which the normalisation starts biting from 0.75m out to 1.35m - a look change
   // wearing a resolution fix's clothes.
-  if (softEdge == 1) alpha *= clamp(116.64 / (vSize * vSize), 0.05, 1.0);
+  //
+  // **The floor is gone, and growing the sprite to a cell is what took it away.** The 0.05
+  // looked harmless while a sprite was pointSize-sized: at 9 it only reaches a vSize of 48,
+  // where the floor takes over, within 19cm - nearer than a Kinect v2 will range. A
+  // cell-sized sprite moves the same threshold out by a factor of seven, to about 1.32m,
+  // which is where a person stands - and past it the normalisation has stopped scaling
+  // while the point count keeps climbing, so a subject walking toward the sensor blows out.
+  // The number that mattered was never the floor's value; it was the sprite size the floor
+  // is measured against. The ceiling at the other end bites below a vSize of about 11,
+  // which is 5.9m and past the far clip, and the fallback to dots covers it anyway.
+  //
+  // vCellNorm is the other half of the same idea and the vertex stage carries the argument
+  // for it: the term above normalises against the sprite, and the lattice breaks that by
+  // collapsing sources onto cells. It is exactly 1 wherever the lattice is 0, which is
+  // eight of the ten shipped looks, so multiplying by it there is exact and those eight
+  // render the frames they always did - asserted with hashes rather than argued, because
+  // this line is in the shared fragment path the flare's measurement is about.
+  if (softEdge == 1) alpha *= min(116.64 / (vSize * vSize), 1.0) * vCellNorm;
 
+  // **A fragment carrying no colour still writes depth, and most of a character is
+  // margin.** The hard-edged path draws with depthWrite on and there is no alphaTest
+  // anywhere, so every off bit of every bitmask - and every corner of the square the disc
+  // used to cut away - was a piece of invisible geometry standing in front of whatever the
+  // room had behind it. The crop's own comment up in the vertex stage already states the
+  // rule this rests on, that alpha alone is not enough because a faint point occludes at
+  // full strength; this is the same fact arriving where the alpha is exactly zero rather
+  // than merely low, and it is worse there, because a point you cannot see is a point
+  // nobody looks for. Measured at a glyph of 1 **on the build that had this defect** - the
+  // branch before the repair, and before the crossfade moved onto the drawn size, which
+  // matters because a reader running the same probe today gets zeroes: the four shipped
+  // looks that ship with additive off lost 4.3% to 5.0% of their pixels to it, and the same
+  // look with no lattice and a pointSize of 40 hid 43% of the lit frame and 38% of its
+  // light. Against the build these lines are in, that probe reads 0 differing pixels on
+  // four of those five arms and 1 on the fifth, which is the repair rather than the
+  // measurement going away.
+  //
+  // **The first term is the path and it is not tidiness.** The additive branch shapes its
+  // sprite with falloff alone and takes no discard at all, so that Apple's tile-based
+  // hidden-surface removal keeps working - the comment above that branch says so - and it
+  // draws with depthWrite off, so a zero-alpha fragment there occludes nothing and there
+  // is nothing here to repair. Measured rather than assumed: with this discard ungated,
+  // both additive controls came back at exactly zero differing pixels, so the gate costs
+  // no correction and keeps the tiler.
+  //
+  // **The second term is the crossfade, and it is here because the wider version moved
+  // four shipped looks.** Written as the path alone this discard also reaches the
+  // zero-alpha fragments that have nothing to do with characters - a point born this frame
+  // carries a fade of exactly 0 while its sprite is rasterised, and the disc's own rim
+  // lands falloff on exactly 0 - and those have been writing depth on the hard-edged path
+  // since long before this branch. Measured: against nine of the ten shipped looks - the
+  // pinned fixture that grades this comparison does not render cascade - rendered at
+  // 572x322, the ungated form left contour, depth, ghost and
+  // rgb differing at 12 of 15 positions each, which is exactly the four documents that
+  // ship with additive off, and left the five additive ones byte-identical. With the
+  // crossfade in the condition all nine are byte-identical. So the two halves are
+  // separable and this one is the branch's own: what the glyph field introduced is a
+  // *suppressed* disc test, and this puts back what that suppression removed. The older
+  // half is real, is reported rather than fixed here, and is worth its own change - it is
+  // a look change for four documents, which is not a thing to ship inside a repair.
+  //
+  // The product is written out twice rather than hoisted into a local, following the
+  // distance term in the vertex stage: this file has already measured that handing a value
+  // through a variable licenses a contraction the inline expression does not get, and the
+  // line below it is in the shared fragment path the flare's measurement is about. That
+  // the branch itself costs no contraction is measured rather than argued, and it is the
+  // same reading as above: the four non-additive looks are byte-identical with this line
+  // present and its condition short-circuiting.
+  if (softEdge == 0 && glyphMix > 0.0 && alpha * falloff <= 0.0) discard;
   fragColor = vec4(col * exposure, alpha * falloff);
 }
 `;

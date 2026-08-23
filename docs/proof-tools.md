@@ -1,10 +1,548 @@
 # The proof-tool suite in detail
 
-`CLAUDE.md` carries the invocation list — what exists and how to run it. This file is what
-each tool needs, what its exit codes mean, and the per-tool facts that are only worth having
-when you are about to run or edit that tool.
+This is the whole of the suite: how to run each tool, every `--mutate` control it must FAIL
+under, what it needs before it will run, what its exit codes mean, and the per-tool facts that
+are only worth having when you are about to run or edit that tool. `CLAUDE.md` carries the index
+— one line per tool, what it proves and what it needs — and sends you here for the rest.
 
 For the method behind the suite, see `docs/instruments.md`.
+
+## The invocation list
+
+**Every tool, how to run it, and every `--mutate` control it must FAIL under.** This list used
+to live in `CLAUDE.md`, which is loaded into every session; it is here now because it is
+reference read on a condition rather than a rule anybody needs in their head. `CLAUDE.md` keeps
+the index — which tool proves what, and what it needs before it will run — and `syntax-check`
+still enforces that every tool in `tools/` is named there.
+
+```
+node tools/determinism-check.mjs                    # step 1: same program time, same image
+node tools/determinism-check.mjs --clock --before HEAD~1
+node tools/index-check.mjs --url http://localhost:8123   # step 2: index, hash, frame API
+node tools/registry-check.mjs --url http://localhost:8080 # step 3: one registry, sliders as views
+node tools/registry-check.mjs --mutate mix-ignores-normalisation  # ... and must FAIL mutated
+node tools/registry-check.mjs --mutate rgb-contributes-no-alpha   # ... and must FAIL mutated
+node tools/registry-check.mjs --mutate duotone-ignored            # ... the tonal transform the rest of the look sits on
+node tools/registry-check.mjs --mutate duotone-ignores-depth      # ... and that it is keyed on depth, which is the whole claim
+node tools/registry-check.mjs --mutate duotone-span-ignored       # ... the width of that key, promoted back to the literal it replaced
+node tools/registry-check.mjs --mutate duotone-span-against-a-frozen-range # ... and that the width is metres, which only two clip ranges at once can see
+node tools/registry-check.mjs --mutate duotone-hue-in-degrees     # ... a unit no picture comparison can see the shape of
+node tools/registry-check.mjs --mutate vspeed-ignored             # ... the motion half of the same transform, and the speed it keys on
+node tools/registry-check.mjs --mutate vspeed-unnormalised        # ... that the speed is a rate, which only two planted spans can see
+node tools/registry-check.mjs --mutate vspeed-ignores-the-gate    # ... and that a jump past the snap threshold is a surface, not motion
+node tools/registry-check.mjs --mutate vspeed-reads-one-texel     # ... and that it is a value per point, which a uniformly moving plant cannot see
+node tools/registry-check.mjs --mutate motion-leaks-at-zero       # ... the default, which is the one place this term has to be exactly absent
+node tools/registry-check.mjs --mutate spansec-nominal            # ... the gap it is divided by, taken off the transport rather than assumed
+node tools/registry-check.mjs --mutate crush-ignored              # ... the toe, promoted to the literal it defaults to
+node tools/registry-check.mjs --mutate crush-gates-the-grade      # ... and the one term in that pass that must not gate it
+node tools/registry-check.mjs --mutate raster-recomputes-the-default # ... the raster's default path reached rather than recomputed, at the value the shipped look names
+node tools/registry-check.mjs --mutate raster-ignores-angle       # ... the axis a raster runs along
+node tools/registry-check.mjs --mutate raster-pitch-fixed         # ... its line frequency, promoted from the literal it defaults to
+node tools/registry-check.mjs --mutate raster-hard-ignored        # ... and the duty cycle, without which an angle only buys rotated softness
+node tools/registry-check.mjs --mutate glitch-axis-ignored        # ... the axis a tear's bands are cut along
+node tools/registry-check.mjs --mutate lattice-ignored            # ... the grid the volume is rebuilt on
+node tools/registry-check.mjs --mutate ripple-ignored             # ... the region's fourth reading
+node tools/registry-check.mjs --mutate ripple-outside-the-gate    # ... and the gate that decides whether it is inert, which the sweep cannot see
+node tools/registry-check.mjs --mutate ripple-clock-continuous    # ... its clock, which steps rather than breathes
+node tools/registry-check.mjs --mutate streak-ignored             # ... the bleed, and whether it reaches a pixel at all
+node tools/registry-check.mjs --mutate streak-ignores-angle       # ... and which way it runs, which the drop-one sweep cannot see
+node tools/registry-check.mjs --mutate streak-angle-in-degrees    # ... in the unit no picture comparison can see the shape of
+node tools/registry-check.mjs --mutate glyph-ignored              # ... the mark the room is drawn out of, switched off at both
+                                                                  #     of the stages it gates - one anchor leaves the characters
+                                                                  #     still being drawn at the old sprite size
+node tools/registry-check.mjs --mutate glyph-hash-per-point       # ... a character keyed on the point rather than on the cell it
+                                                                  #     fell in, which draws characters either way and is the
+                                                                  #     difference between a room made of code and a fog of it
+node tools/registry-check.mjs --mutate glyph-hash-on-the-displaced-point # ... and read after the turbulence moved the point, which
+                                                                  #     is the defect the probe this came out of shipped and which
+                                                                  #     is bit-identical to the fix wherever nothing is displacing
+node tools/registry-check.mjs --mutate glyph-hash-after-the-region # ... and read after the other two displacements, which run
+                                                                  #     before the turbulence and sat at zero in every arm - so
+                                                                  #     the one above cannot see it. Both are inlined together,
+                                                                  #     because the pair share a radial direction and a build
+                                                                  #     hashing after them hashes the drawn position exactly
+node tools/registry-check.mjs --mutate crossfade-reads-the-reference # ... the legibility band counted in reference pixels alone,
+                                                                  #     which is the unit every other glyph arm agrees with and
+                                                                  #     so the one none of them can refuse
+node tools/registry-check.mjs --mutate crossfade-before-the-halving # ... and the same reading taken one line early, so a cut-away
+                                                                  #     cell drawn at half its pixels is crossfaded as though it
+                                                                  #     had all of them
+node tools/registry-check.mjs --mutate crossfade-ignores-the-buffer-scale # ... and the same band counted in the buffer's pixels
+                                                                  #     alone, which no arm below 1080 can refuse and which lets
+                                                                  #     a view parameter move the graded look
+node tools/registry-check.mjs --mutate rain-key-counts-whole-drops # ... the drop counter handed to the index raw, which is inert
+                                                                  #     at exactly the weight the key should be loudest at
+node tools/registry-check.mjs --mutate glyph-index-averages       # ... the three keys mixed rather than summed, caught on scale
+                                                                  #     rather than on the character - the document's own
+                                                                  #     discriminator is the same number under both compositions
+node tools/registry-check.mjs --mutate glyph-tone-ignored         # ... the tonal key, and the ink ordering under it that no
+                                                                  #     comparison of two pictures can see
+node tools/registry-check.mjs --mutate rain-ignored               # ... the falling wave, at the lift and at the counter both
+node tools/registry-check.mjs --mutate rain-trail-below-the-head  # ... and which side of the head its afterglow sits on, without
+                                                                  #     which the wave reads as rising
+node tools/registry-check.mjs --mutate rain-climbs                # ... and which way the whole pattern travels, which is a
+                                                                  #     different claim from that one and which no single frame
+                                                                  #     holds - the trail is still above a head going the wrong way
+node tools/registry-check.mjs --mutate rain-span-in-frames        # ... its head gap in metres of room rather than in frames of
+                                                                  #     whatever the link is doing, which only two link speeds see
+node tools/registry-check.mjs --mutate normalisation-floor-restored # ... the pile-up fix, planted because no shipped look reaches
+                                                                  #     the band - a sprite grown to a cell moves the floor from
+                                                                  #     19cm out to where a person stands
+node tools/registry-check.mjs --mutate glyph-leaks-at-zero        # ... and the master exactly absent at 0, which is what nine of
+                                                                  #     the ten shipped looks rest on - cascade is the tenth and
+                                                                  #     the only one that draws a character at all. The eight-of-ten
+                                                                  #     population next door is a different set: that one is the
+                                                                  #     lattice-zero looks the compensation has to leave alone
+node tools/registry-check.mjs --mutate rain-leaks-at-zero         # ... the other master, on the same terms
+node tools/registry-check.mjs --mutate compensation-leaks-at-lattice-zero # ... and the energy correction, which rides no master at
+                                                                  #     all and so is excused by neither
+node tools/registry-check.mjs --mutate glyph-margins-occlude      # ... the off bits of a character writing depth, which is a
+                                                                  #     square of invisible geometry per point on the hard-edged
+                                                                  #     path. Its section is the only one here standing two
+                                                                  #     surfaces up: every other plants one wall coincident with
+                                                                  #     itself, where nothing is behind anything to be hidden
+node tools/timeline-check.mjs --url http://localhost:8080 # step 4: seek equals playback
+node tools/timeline-check.mjs --mutate preroll-constant   # ... and must FAIL mutated
+node tools/timeline-check.mjs --mutate draft-always-resets # ... and must FAIL mutated
+node tools/timeline-check.mjs --mutate reading-write-skips-repaint # ... and must FAIL mutated
+node tools/timeline-check.mjs --mutate rain-accumulates   # ... the rain integrated frame to frame, so a seek lands
+                                                          #     where playback never would. Its section applies a
+                                                          #     rain-raised look of its own, because every other arm
+                                                          #     in that file renders the term completely inert
+node tools/timeline-check.mjs --mutate rain-phase-unread  # ... and the same clock written correctly and read by
+                                                          #     nothing, which both arms agree about perfectly. It is
+                                                          #     the control for the guard rather than for the claim:
+                                                          #     what reddens is the row that moves the clock alone
+                                                          #     under a still frame
+node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, retime curve, undo
+node tools/keyframe-check.mjs --mutate pose-linear        # ... and must FAIL mutated
+node tools/keyframe-check.mjs --mutate pose-ignores-ease  # ... the camera's handles, which shape when it arrives and never
+                                                          #     where it goes. Separable from `pose-linear` on purpose and the
+                                                          #     counts are how you tell: 4 rows here against that one's 6, and
+                                                          #     every route row stays green, because a camera ignoring its
+                                                          #     handles still travels the same curve at the wrong times
+node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, export, the file
+node tools/export-check.mjs --mutate pointsize-absolute   # ... and must FAIL mutated
+node tools/export-check.mjs --mutate cropoutside-reaches-the-export # ... the crop box's faint pass, one edit from being in a deliverable
+node tools/export-check.mjs --mutate faint-survives-at-zero # ... and a cut point kept at alpha zero, invisible and still occluding
+node tools/export-check.mjs --mutate bloom-buffer-sized   # ... the glow's chain following the buffer, which is the only live catcher
+                                                          #     in this suite for the reference the chain is frozen at. Its sibling
+                                                          #     `bloom-reference-1080` is NOT caught by anything here and is not a
+                                                          #     regression - `test/bloom-chain.test.mjs` is what holds that half,
+                                                          #     and docs/instruments.md has the measurement
+node tools/library-check.mjs                              # step 7: library, recorder, routes
+node tools/library-check.mjs --mutate plant-open-take     # ... and must FAIL
+node tools/library-check.mjs --mutate open-decides-its-own-reason  # ... one take, one refusal, whichever surface asks
+node tools/library-check.mjs --mutate menu-decides-its-own-reason  # ... and the menu is a surface too
+node tools/library-check.mjs --mutate refusal-without-a-badge      # ... a reason the server declares and no page can badge
+node tools/library-check.mjs --mutate refusal-declared-but-never-pushed # ... and one nothing can ever earn
+node tools/library-check.mjs --mutate openable-recomputes-the-band # ... and a band that decides for itself beside the table
+node tools/library-check.mjs --mutate recording-decides-openable-itself # ... and the take being written, which answered twice
+node tools/library-check.mjs --mutate node-admits-an-old-manifest  # ... a node one build behind, refused at the link
+node tools/library-check.mjs --mutate node-admits-an-old-record-state # ... and behind on the other route, whose absent field is not an idle recorder
+node tools/library-check.mjs --mutate badges-inherit-from-object   # ... and one build ahead, whose reason still badges
+node tools/library-check.mjs --mutate refusals-must-be-nonempty    # ... and a healthy node not refused for being healthy
+                                                                   #     (wide: takes the link off, so it stops at 125 of 392 -
+                                                                   #      read the rows, not the total. docs/instruments.md says why)
+node tools/library-check.mjs --mutate grid-declared-twice          # ... and the sensor grid stated once
+node tools/library-check.mjs --mutate grid-declared-in-another-spelling # ... whatever notation the second one is in
+node tools/library-check.mjs --mutate grid-declared-with-a-leading-dot # ... including the one with no leading digit
+node tools/library-check.mjs --mutate grid-loses-a-dimension       # ... both halves of it, each asked for on its own
+node tools/library-check.mjs --mutate tile-height-follows-content  # ... the gallery's geometry
+node tools/library-check.mjs --mutate poster-height-in-js          # ... and its poster's box
+node tools/library-check.mjs --mutate viewer-splat-one             # ... and the viewer's density
+node tools/library-check.mjs --mutate gallery-has-no-way-back      # ... the way out
+node tools/library-check.mjs --mutate plant-unswept-menu-item      # ... every control has a driver
+node tools/library-check.mjs --mutate rename-ignores-hash          # ... rename, one term per mutation
+node tools/library-check.mjs --mutate rename-orphans-marks         # ...
+node tools/library-check.mjs --mutate rename-during-a-shoot        # ...
+node tools/library-check.mjs --mutate rename-clobbers-under-a-race  # ... and two at once
+node tools/library-check.mjs --mutate viewer-decides-for-itself    # ... one take, one set of actions, whichever surface
+node tools/library-check.mjs --mutate viewer-drops-focus-on-rebuild # ... the arrows survive the rebuild they cause
+node tools/library-check.mjs --mutate menu-close-strands-focus     # ... and a menu selection
+node tools/library-check.mjs --mutate run-strands-focus            # ... and an action that held the surface down
+node tools/library-check.mjs --mutate reveal-drops-the-path        # ... what the file manager was told
+node tools/library-check.mjs --mutate reveal-answers-any-caller    # ... and who may start a process
+node tools/library-check.mjs --mutate poll-refreshes-every-tick     # ... the gallery follows the recorder rather than the page load
+node tools/library-check.mjs --mutate pulse-ignores-the-node        # ... and the recorder it follows is the one holding the sensor
+node tools/library-check.mjs --mutate health-answers-beside-the-table # ... a route answering outside the table is one no sweep can see
+node tools/library-check.mjs --mutate empty-window-keeps-its-start  # ... a window with no frames in it still closes
+node tools/library-check.mjs --mutate respawns-count-a-colour-toggle # ... and a restart somebody asked for is not the sensor flapping
+node tools/library-check.mjs --mutate respawns-dip-before-the-spawn  # ... and the count does not read low while that restart is in flight
+node tools/library-check.mjs --mutate openpath-drops-at-the-stop     # ... a take is the recorder's until its index exists, not until it stops
+node tools/library-check.mjs --mutate poll-first-tick-is-blind       # ... and the first tick answers against the grid already painted
+node tools/library-check.mjs --mutate poll-forgets-a-failed-refresh  # ... and a refresh that failed leaves its transition unseen
+node tools/library-check.mjs --mutate poll-ticks-overlap             # ... while one that has not come back is not asked again
+node tools/library-check.mjs --mutate press-survives-a-cancelled-gesture # ... a press the browser took back, ended - the
+                                                                     #     editor handles `pointercancel` in nine places and
+                                                                     #     the gallery handled it in none. The tap row after
+                                                                     #     it stays green
+node tools/library-check.mjs --mutate manifest-trusted-past-id-and-hash # ... a peer's manifest checked on every field rather
+                                                                     #     than on the two that reach a path, because the rest
+                                                                     #     are spread into the listing and drawn. Reddens the
+                                                                     #     field row and leaves the two build-gate rows green
+node tools/library-check.mjs --mutate refresh-paints-a-stale-listing # ... and a slow listing does not paint over a newer one,
+                                                                     #     which is a second caller rather than the poll twice -
+                                                                     #     the three rows above it stay green, and that is the split
+node tools/library-check.mjs --mutate superseded-refresh-reports-success # ... and the discarded caller is told the newer one's
+                                                                     #     answer rather than a success of its own - the poll
+                                                                     #     acts on that sentence, so a success nothing earned
+                                                                     #     advanced its fingerprint past a transition no paint
+                                                                     #     ever showed
+node tools/library-check.mjs --mutate download-ignores-the-volume    # ... a download asked against the disk before a byte
+                                                                     #     moves, because the byte ceiling holds the node to
+                                                                     #     its claim and a truthful take larger than the free
+                                                                     #     space breaks the shoot recording to the same volume
+node tools/library-check.mjs --mutate post-action-poll-discarded     # ... and a press asks again rather than taking the answer in flight
+node tools/library-check.mjs --mutate listing-never-times-out        # ... and a listing nothing will answer frees itself
+node tools/library-check.mjs --mutate delete-guesses-past-an-unreachable-node # ... a node that did not answer is not a node with nothing on it
+node tools/library-check.mjs --mutate first-load-bounded       # ... a cold library is slow for a reason, and the load is not the poll
+node tools/library-check.mjs --mutate first-load-strands-the-page  # ... and a first listing that fails leaves a page that still works
+node tools/library-check.mjs --mutate listing-ignores-client-abort # ... a caller that gave up takes the node fetch with it
+node tools/library-check.mjs --mutate signal-bound-after-an-await # ... and bound before the walk rather than after it, which
+                                                                   #     is the shape three of the four routes shipped: every
+                                                                   #     call site passes a signal and the presence row stays
+                                                                   #     green, because what is wrong is when it was created.
+                                                                   #     Reddens the ordering row alone - read the rows
+node tools/library-check.mjs --mutate cancel-watches-the-consumed-request # ... including on a route that read its body before asking
+node tools/library-check.mjs --mutate listing-takes-a-refusal-as-a-library # ... and a refusal that parses is not a library
+node tools/library-check.mjs --mutate faint-fixed-in-one-page       # ... one token, and the page that drifts is named
+node tools/library-check.mjs --mutate extent-reads-one-frame        # ... the cloud's reach measured over the take rather than its first frame
+node tools/library-check.mjs --mutate extent-cache-ignores-the-range # ... and cached against the depth range it was computed for
+node tools/library-check.mjs --mutate write-overwrites-builtin # ... and must FAIL
+node tools/library-check.mjs --mutate list-swallows-unreadable # ... and must FAIL
+node tools/library-check.mjs --mutate open-take-swallows-library # ... and must FAIL
+node tools/library-check.mjs --mutate one-refusal-for-older-versions # ... one sentence for every version, which
+                                                                   #     collapses the three bands `versionRefusal`
+                                                                   #     still keeps now the migration is gone:
+                                                                   #     older, later, and a version field that is
+                                                                   #     not a number at all
+node tools/library-check.mjs --mutate open-ignores-format          # ... the capture's generation, at all four doors at once
+node tools/library-check.mjs --mutate shipped-look-drops-a-value   # ... a shipped look with a hole in it, which is the last look staying under the next one
+node tools/library-check.mjs --mutate complete-look-drops-a-group  # ... and the definition those documents are written against, which is code where they are data
+node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g # the editor's controls: that they exist, that pressing them changes something
+node tools/editor-check.mjs --mutate export-name-not-taken --no-render # ... the output name read out of a deliverable
+                                                                       #     and never written into one, which is the
+                                                                       #     defect this branch shipped: the row walks it
+                                                                       #     out to the server and back through an
+                                                                       #     adoption, because a field read straight back
+                                                                       #     proves only that an input holds text
+node tools/editor-check.mjs --mutate aspect-skips-the-letterbox --no-render # ... the shape written into the document
+                                                                       #     and the stage not framed to it, which is the
+                                                                       #     one thing putting the shape on the document
+                                                                       #     was for. Reads the stage's own box rather than
+                                                                       #     the button that was just pressed, so a build
+                                                                       #     that lights the control and reframes nothing
+                                                                       #     fails here and passes on the attribute
+node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
+node tools/editor-check.mjs --mutate plant-unswept-control --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate ends-reaches-the-selection --no-render # ... `ends` shaping the selected key instead of the
+                                                                       #     move's two ends, which is `smooth` under another
+                                                                       #     name and halts the camera at an interior key
+node tools/editor-check.mjs --mutate ends-skips-the-arrival --no-render # ... and reaching only the departure, which is half the
+                                                                       #     reported defect surviving the fix for it
+node tools/editor-check.mjs --mutate glide-is-a-cubic --no-render      # ... the quintic dropped to a cubic, whose rate still
+                                                                       #     reaches zero at the key - so every velocity row stays
+                                                                       #     green and only the degree is gone with the
+                                                                       #     acceleration claim resting on it
+node tools/editor-check.mjs --mutate elevation-moves-the-curve --no-render # ... `+pt` appending a control point rather than
+                                                                       #     elevating, which is the one wrong implementation
+                                                                       #     that leaves the count right and moves the camera.
+                                                                       #     Only the sampled-curve row can see it, which is why
+                                                                       #     that row samples the render instead of reading the
+                                                                       #     handles back - every handle is meant to move
+node tools/editor-check.mjs --mutate handle-clamped-to-the-segment --no-render # ... a control point clamped to the segment's ends
+                                                                       #     rather than to its own neighbours, which was
+                                                                       #     complete while a side held one point - then the
+                                                                       #     neighbours *were* the ends - and lets two cross
+                                                                       #     once a side holds more. Only a drag of a point
+                                                                       #     that is not index 0 can see it
+node tools/editor-check.mjs --mutate points-reach-the-retime --no-render # ... and the point controls offered on the retime,
+                                                                       #     whose unit-box monotonicity proof is a proof about
+                                                                       #     a cubic and nothing else
+node tools/editor-check.mjs --mutate ease-gate-hardcodes-scalar --no-render # ... the ease gate naming one kind instead of asking
+                                                                       #     the table, which is what locked the camera out
+node tools/editor-check.mjs --mutate pose-segments-never-shaped --no-render # ... and a pose segment that never has a shape to
+                                                                       #     edit, which is the NaN the old subtraction returned
+node tools/editor-check.mjs --mutate pose-lane-draws-flat --no-render  # ... the lane's drawn curve, which every other pose row
+                                                                       #     reads past on its way to the evaluator
+node tools/editor-check.mjs --mutate pose-handle-overshoots --no-render # ... a pose handle leaving the unit box, which sends the
+                                                                       #     camera past the pose it was keyed at
+node tools/editor-check.mjs --mutate beads-evenly-spaced --no-render   # ... and the path's beads marking distance rather than
+                                                                       #     time, which is an overlay that redraws the route
+node tools/editor-check.mjs --mutate import-skips-normalise --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate import-saves-before-validating --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate picker-ignores-the-boxes --no-render # ... the subset a preset is written with
+node tools/editor-check.mjs --mutate readings-tick-alone --no-render   # ... and the five weights that move as one
+node tools/editor-check.mjs --mutate apply-says-nothing --no-render    # ... and that applying one says so, on the control that inherited the gesture
+node tools/editor-check.mjs --mutate group-never-reveals --no-render      # ... a panel group is open because the clip says so
+node tools/editor-check.mjs --mutate reveal-ignores-tracks --no-render    # ... and a keyframe counts where the value does not
+node tools/editor-check.mjs --mutate override-prunes-only-on-toggle --no-render # ... and the override the document, not the toggle, has caught up with
+node tools/editor-check.mjs --mutate panel-row-skips-parameter --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate nav-at-the-foot --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate panel-tabs-show-everything --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate dialog-close-strands-focus --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate obs-forgets-custom-resolution --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate orbit-pumps-on-change --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate camera-motion-keeps-history --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate orbit-uses-scrub-draft --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate orbit-arms-into-playback --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate orbit-arms-stale-position --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate release-seeks-past-target --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate pin-keeps-orbit-armed --no-render  # ... and must FAIL
+node tools/editor-check.mjs --mutate camkey-takes-the-passing-pose --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate rate-holds-cuts --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate rate-holds-keys --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate undo-skips-cuts --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate zoom-about-centre --no-render     # ... and must FAIL
+node tools/editor-check.mjs --mutate pointer-ignores-view --no-render  # ... and must FAIL
+node tools/editor-check.mjs --mutate marks-ignore-view --no-render     # ... and must FAIL
+node tools/editor-check.mjs --mutate mini-ignores-edges --no-render    # ... and must FAIL
+node tools/editor-check.mjs --mutate splitter-unclamped --no-render    # ... and must FAIL
+node tools/editor-check.mjs --mutate rail-ignores-scroll --no-render   # ... and must FAIL
+node tools/editor-check.mjs --mutate splitter-forgets --no-render      # ... and must FAIL
+node tools/editor-check.mjs --mutate mini-wheel-uses-ruler --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate shortcuts-ignore-consumed --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate rate-ends-on-change --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate takeover-ignored --no-render      # ... and must FAIL
+node tools/editor-check.mjs --mutate wheel-ignores-deltamode --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate pan-keys-unbound --no-render      # ... and must FAIL
+node tools/editor-check.mjs --mutate lanes-eat-touch --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate keys-yield-touch --no-render      # ... and must FAIL
+node tools/editor-check.mjs --mutate deliverable-keeps-gesture --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate window-clamp-ratchets --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate detent-eats-loaded-rate --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate anchor-floors-to-frame --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate keyup-ends-any-gesture --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate pause-keeps-resume --no-render   # ... and must FAIL
+node tools/editor-check.mjs --mutate bounds-compare-off-grid --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate detent-in-rate-units --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate zoom-pans-at-the-clamp --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate note-skips-title --no-render      # ... the whole of a long refusal stays reachable
+node tools/editor-check.mjs --mutate tick-seeks-source-seconds --no-render # ... a mark tick seeks where it is drawn
+node tools/editor-check.mjs --mutate offer-ignores-take-hash --no-render # ... the resume offer joins on footage, not on a name
+node tools/editor-check.mjs --mutate resume-waits-for-every-list --no-render # ... and a broken neighbouring library does not strand it
+node tools/editor-check.mjs --mutate resume-fetches-the-moving-name --no-render # ... and restores the document it offered, not what the name holds by then
+node tools/editor-check.mjs --mutate resume-restores-without-keeping --no-render # ... and keeps it, so the recovery outlives the tab
+node tools/editor-check.mjs --mutate shortcuts-reject-altgr --no-render # ... the mark keys work on the layouts that need AltGr to type them
+node tools/editor-check.mjs --mutate marks-ignore-the-clip-range --no-render # ... and offer only the marks a trimmed clip can reach
+node tools/editor-check.mjs --mutate tick-seeks-outside-the-trim --no-render # ... the ruler's ticks obey the same rule the keys do
+node tools/editor-check.mjs --mutate beyond-mark-loses-focus --no-render # ... a mark past the end still answers a keyboard
+node tools/editor-check.mjs --mutate clip-range-unclamped --no-render # ... a trim the program cannot hold
+node tools/editor-check.mjs --mutate clip-bound-coerces-nonnumeric --no-render # ... and a trim that is not a time at all
+node tools/editor-check.mjs --mutate refusal-strands-the-picker --no-render # ... and the menu that named what was refused
+node tools/editor-check.mjs --mutate resize-skips-repaint --no-render # ... and the picture a resize clears
+node tools/editor-check.mjs --mutate resume-races-the-autosave --no-render # ... the recovery is written after the edits already on the wire
+node tools/editor-check.mjs --mutate restore-accepts-view-track --no-render # ... and a track the writer never writes
+node tools/editor-check.mjs --mutate prune-ignores-movement --no-render # ... a stored collapse, against the boot it has to survive
+node tools/editor-check.mjs --mutate panel-rederives-per-write --no-render # ... and what the panel costs the render path
+node tools/editor-check.mjs --mutate envelope-unchecked --no-render     # ... the half of a preset document nothing used to read
+node tools/editor-check.mjs --mutate reset-missing-on-a-row --no-render # ... a reset per look scalar, enumerated off the registry
+node tools/editor-check.mjs --mutate reset-skips-a-tab --no-render      # ... and a whole inspector that lost them
+node tools/editor-check.mjs --mutate reset-remembers-its-own-state --no-render # ... what a row offers, re-read rather than remembered
+node tools/editor-check.mjs --mutate reset-collapses-the-slot --no-render # ... and the slot kept for it, so the row does not move
+node tools/editor-check.mjs --mutate reset-strands-focus --no-render    # ... the caret after the press that removed its own control
+node tools/editor-check.mjs --mutate reset-writes-around-the-registry --no-render # ... and a press that is a registry write rather than an assignment
+node tools/editor-check.mjs --mutate format-segments-paint-the-press --no-render # ... the export format shown, read off the deliverable rather than off the last click
+node tools/editor-check.mjs --mutate box-drag-pumps-renders --no-render # ... a crop face dragged out of the animation loop rather than out of its own handler
+node tools/editor-check.mjs --mutate resize-ignores-the-dock --no-render # ... the picture drawn full height under a bar drawn over its last 72px
+node tools/editor-check.mjs --mutate collapse-by-display --no-render   # ... and the panel a touchscreen could shut and never reopen
+node tools/editor-check.mjs --mutate collapsed-keeps-the-editor-height --no-render # ... the collapsed panel's box, which two rules of equal weight decided by source order
+node tools/editor-check.mjs --mutate collapsed-keeps-the-tab-rail --no-render # ... and the half of that a lower rule cannot fix, because `:not()` carries its argument's weight
+node tools/editor-check.mjs --mutate dock-sensor-takes-the-centre --no-render # ... a dock button forwarding faithfully to the neighbouring control
+node tools/editor-check.mjs --mutate dock-offers-the-take-on-the-editor --no-render # ... and `record` offered on the surface that never polls a recorder to paint it
+node tools/editor-check.mjs --mutate fit-lands-after-history-begins --no-render # ... the box a take opens with, which is the clip rather than the first thing you can undo
+node tools/editor-check.mjs --mutate fit-outlives-a-restored-project --no-render # ... and a document's own box, which only the ordering still protects
+node tools/editor-check.mjs --mutate play-button-skips-pausetransport --no-render # ... the one pause on this surface that did
+                                                                       #     not take the transport. **NOT caught by this suite**,
+                                                                       #     and that is recorded rather than left to be
+                                                                       #     rediscovered: the two pre-roll rows beside it pass
+                                                                       #     on both builds, because a pause pressed inside a
+                                                                       #     play's own pre-roll holds either way. The generation
+                                                                       #     guard protects a resume queued by *another* gesture,
+                                                                       #     and in each of those the transport is already paused,
+                                                                       #     so the button is a play rather than a pause. The fix
+                                                                       #     is consistency with the helper this file's own
+                                                                       #     comment mandates, not a demonstrated defect -
+                                                                       #     docs/instruments.md has the measurement
+node tools/editor-check.mjs --mutate toggle-plays-over-a-pending-play --no-render # ... the *demonstrated* defect on the same button:
+                                                                       #     the toggle reading `playing` alone, which is false
+                                                                       #     for the whole stretch a play spends awaiting the
+                                                                       #     accurate seek a draft forces, so the press that
+                                                                       #     meant stop started a second play. Reddens the
+                                                                       #     pending-outcome row and leaves the pending-window
+                                                                       #     row above it green - read the rows
+node tools/editor-check.mjs --mutate play-resolves-past-its-pause --no-render # ... and the transport's half of that claim: a pending
+                                                                       #     play that never rechecks its generation resolves
+                                                                       #     into `playing` over the pause that landed inside
+                                                                       #     it. Same row - two ways to break one claim, and it
+                                                                       #     needs both halves standing
+node tools/editor-check.mjs --mutate picker-keeps-a-refused-look --no-render # ... and the picker left naming a look the apply
+                                                                       #     refused, which the deliverable menu forty lines
+                                                                       #     away already reverts. The refusal itself is
+                                                                       #     unchanged, so only the revert row reddens
+node tools/editor-check.mjs --mutate restorekey-skips-handle-invariants --no-render # ... the ease-handle invariants asked of
+                                                                       #     the drag that makes a value and never of the
+                                                                       #     loader that reads one back, though the docstring
+                                                                       #     over it claimed them. Reddens the two per-side
+                                                                       #     refusal rows and leaves the look-overshoot and
+                                                                       #     fold rows green, because the bound is per kind
+                                                                       #     and the fold is the segment's own check
+node tools/editor-check.mjs --mutate restore-skips-the-fold-check --no-render # ... that check: whole-curve monotonicity asked once
+                                                                       #     per segment with both handles in hand. The per-side
+                                                                       #     ordering rule it replaced refused the legal crossed
+                                                                       #     polygons `elevate` produces - the editor could save
+                                                                       #     a document its own reload declined - and could not
+                                                                       #     see a fold spanning the join at all. Reddens the
+                                                                       #     fold row alone; the legal-crossed row beside it is
+                                                                       #     the half that fails on the build this replaced
+node tools/editor-check.mjs --mutate restore-admits-descending-times --no-render # ... the walk's other question: a pair whose times
+                                                                       #     descend skipped as merely coincident, so a damaged
+                                                                       #     track installs unsorted and keyBefore's binary
+                                                                       #     search selects segments nobody authored. Reddens
+                                                                       #     the descending-times row alone
+node tools/editor-check.mjs --mutate reset-forgets-the-pivot --no-render # ... the orbit's home aim, which `OrbitControls`
+                                                                       #     captures in its constructor before the target is
+                                                                       #     written and which no rebuild carried across.
+                                                                       #     Reddens the two pivot rows and leaves the position
+                                                                       #     row green, because the position was never the half
+                                                                       #     that was broken - read the rows
+node tools/editor-check.mjs --mutate commit-ignores-null-baseline --no-render # ... the recovery slot of the take that *was*
+                                                                       #     open, spent by a take that never opened. The
+                                                                       #     `!EDITING` guard beside it is about the surface
+                                                                       #     and cannot see this: `begin()` is the last thing
+                                                                       #     `openTake` does, so a failed open leaves `/edit`
+                                                                       #     interactive with a null baseline. Reddens exactly
+                                                                       #     two rows in section 13 - the press being recorded,
+                                                                       #     and what it destroyed - so read the rows
+node tools/boot-check.mjs                                 # the post-boot state diff: every control shows the value the registry holds
+node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the shipped fault put back - the boot write landing
+                                                          #     before the panel generator has filled its Maps, which reaches
+                                                          #     no control, throws nothing, and leaves a page whose sliders
+                                                          #     are lying. Reddens exactly one row of nine and leaves the
+                                                          #     write-sweep row beside it green, because that one is about the
+                                                          #     live path and the fault is in the boot write - read the rows
+node tools/monitor-check.mjs                              # step 9: the monitor's decimation, the take it must not touch, and the picture it shows
+node tools/monitor-check.mjs --mutate decimate-reaches-recorder  # ... and must FAIL mutated
+node tools/monitor-check.mjs --mutate bind-ignores-grid          # ... and must FAIL mutated
+node tools/monitor-check.mjs --mutate expand-shifts-by-a-block   # ... and must FAIL mutated
+node tools/monitor-check.mjs --mutate colour-off-keeps-the-texture # ... the cloud stops wearing the last JPEG
+node tools/sensor-view-check.mjs                          # the intrinsics a take was shot with, against a build that assumes them
+node tools/sensor-view-check.mjs --mutate fov-hardcoded   # ... and must FAIL mutated
+node tools/sensor-view-check.mjs --mutate no-repaint      # ... and must FAIL mutated
+node tools/level-check.mjs                                # levelling: the room turns, and the crop, the top-down and the sensor view keep their meaning
+node tools/level-check.mjs --mutate tilt-ignored          # ... and must FAIL mutated
+node tools/level-check.mjs --mutate crop-follows-tilt     # ... and must FAIL mutated
+node tools/level-check.mjs --mutate plan-ignores-tilt     # ... and must FAIL mutated
+node tools/level-check.mjs --mutate plan-skips-vertical-crop # ... and must FAIL mutated
+node tools/level-check.mjs --mutate region-follows-tilt   # ... and must FAIL mutated
+node tools/level-check.mjs --mutate sensor-view-ignores-tilt # ... and must FAIL mutated
+node tools/level-check.mjs --mutate level-order-swapped   # ... the pair's composition order, seen by the one surface that leans both ways
+node tools/level-check.mjs --mutate reset-keeps-roll      # ... and must FAIL mutated
+node tools/level-check.mjs --mutate plan-box-ignores-tilt # ... the crop box drawn in the room the shader deliberately does not test in
+node tools/level-check.mjs --mutate crop-switch-reaches-only-the-shader # ... and the switch over it, asked of the reader that is not the shader
+node tools/level-check.mjs --mutate x-not-mirrored        # the sensor's frames arrive mirrored, and the one fixture in the suite that is not symmetric about the optical axis
+node tools/level-check.mjs --mutate plan-x-not-mirrored   # ... asked of the top-down too, because a sign fixed in the shader alone leaves the plan reflected
+node tools/vcam-check.mjs                                 # the output to OBS: the colour camera, the take it must not touch, and the source's picture
+node tools/vcam-check.mjs --mutate hd-upscales-registered # ... and must FAIL mutated
+node tools/vcam-check.mjs --mutate hd-reencodes-in-flight # ... the bytes, where the picture is right
+node tools/vcam-check.mjs --mutate hd-reaches-recorder    # ... and must FAIL mutated
+node tools/vcam-check.mjs --mutate refusal-ignores-webcam # ... what the take is told the stream costs
+node tools/vcam-check.mjs --mutate pose-skips-the-registry # ... the camera pose in a socket patch, put through the
+                                                          #     registry the parameters beside it already go through.
+                                                          #     Four finite numbers are not a rotation, and the source
+                                                          #     was drawing with whatever arrived. Reddens the refusal
+                                                          #     row and leaves the pose-still-arrives row green
+node tools/vcam-check.mjs --mutate patch-params-applied-one-at-a-time # ... and the parameter half of the same patch, whole or
+                                                          #     not at all - applied one name at a time, a refused name
+                                                          #     kept the rest and the source drew half a frame nobody
+                                                          #     sent. Reddens the half-right-patch row alone
+node tools/guard-check.mjs                                # the socket's origin rule, the bind, and the rebinding rule
+node tools/guard-check.mjs --mutate upgrade-skips-origin  # ... and must FAIL mutated
+node tools/guard-check.mjs --mutate host-accepts-a-name   # ... and must FAIL mutated
+node tools/guard-check.mjs --mutate reads-answer-any-page # ... the reads a cross-origin `<img>` can start, which
+                                                          #     `originAllowed` cannot see: an `<img>` sends no Origin at
+                                                          #     all, so the header that separates it from the capture node
+                                                          #     is `sec-fetch-site`. Reddens the cross-origin row and
+                                                          #     leaves the same-origin, absent and navigation rows green
+node tools/jobs-check.mjs                                 # step 8: the queue, the pin, a real render, and a job
+                                                          #   whose deliverable this build cannot read, which has to
+                                                          #   come back failed rather than rendered - the batch path
+                                                          #   adopted past the version gate until it did
+node tools/jobs-check.mjs --mutate claim-ignores-renderer # ... and must FAIL mutated
+node tools/module-check.mjs                               # the boundaries in web/: the import graph, what an import names, what crosses it
+node tools/module-check.mjs --mutate cycle-planted        # ... the import web/scene.js's own header says does not exist
+node tools/module-check.mjs --mutate cycle-through-a-second-spelling # ... and the same ring written the way the other page writes its imports
+node tools/module-check.mjs --mutate import-of-a-missing-file # ... a specifier this server answers 404 for, which is a module that never evaluates
+node tools/module-check.mjs --mutate import-names-a-missing-export # ... and a name the other side does not export, which fails before anything evaluates
+node tools/module-check.mjs --mutate one-spelling-for-every-module # ... the fold onto one node, which only two spellings of one file exercise
+node tools/module-check.mjs --mutate exported-mutable-object # ... a state object handed across a boundary with nothing saying why
+node tools/module-check.mjs --mutate state-crosses-as-a-live-let # ... the same object under the one keyword that used to excuse it
+node tools/module-check.mjs --mutate state-crosses-as-a-default # ... and in the export form that used to contribute nothing at all
+node tools/module-check.mjs --mutate export-form-nothing-claims # ... an export spelling nobody thought of, named rather than dropped
+node tools/module-check.mjs --mutate a-barrel-re-export        # ... and the barrel the one-implementation rule already refuses
+node tools/module-check.mjs --mutate imported-object-written-across-the-boundary # ... and the write itself, into a binding this module does not own
+node tools/module-check.mjs --mutate write-through-a-namespace # ... the same write where the far-side name is a property rather than a binding
+node tools/module-check.mjs --mutate write-through-a-rename    # ... and under the rename a name collision is ordinarily resolved with
+node tools/module-check.mjs --mutate write-from-a-page         # ... and from a page's inline module, which is a module like any other
+node tools/module-check.mjs --mutate exemption-outlives-its-export # ... and the exemption table's own rot, which is what a list has instead of a bug
+node tools/module-check.mjs --mutate exemption-covers-nothing  # ... its other half, which is the only thing standing over both rule 3 classifiers
+node tools/module-check.mjs --mutate import-nothing-uses       # ... a name brought across a boundary that no line on this side reads, which is the defect this tool shipped
+node tools/module-check.mjs --mutate import-used-under-its-far-side-name # ... asked of the binding an import makes rather than the name it asks for, which a rename separates
+node tools/module-check.mjs --mutate export-nothing-imports    # ... and the other direction, a name let out that nothing anywhere asks for
+node tools/module-check.mjs --mutate consumer-outside-web-drops-the-name # ... where the only reader is outside web/, and the join is per name rather than per module
+node tools/module-check.mjs --mutate dead-import-is-not-a-consumer # ... and the two halves joined, so a dead import stops holding up the export on the far side of it
+node tools/module-check.mjs --mutate outside-consumer-imports-a-name-it-never-reads # ... the use question asked of the importers outside web/, which used to enter the join unasked
+node tools/module-check.mjs --mutate dead-bare-import          # ... and asked of a package name, the half of that row nothing controlled
+node tools/module-check.mjs --mutate import-used-only-in-a-string # ... a use read at a code position rather than anywhere in the text
+node tools/module-check.mjs --mutate import-used-only-as-an-object-key # ... and not in the one position this file is full of, a property key
+node tools/module-check.mjs --mutate namespace-hides-a-dead-export # ... a namespace import asking for the names it reaches rather than for all of them
+node tools/module-check.mjs --mutate namespace-reach-cannot-be-named # ... and a reach that names none of them, which costs an assertion rather than a blind module
+```
+
+The two below need no server, and `registration-check` needs no sensor either — it runs on a
+corpus of `Registration::apply` inputs dumped by `grabber --dump-corpus`.
+
+```
+node tools/vendor-check.mjs                          # third_party is upstream v0.2.1 + declared edits
+node tools/vendor-check.mjs --mutate oracle-drift    # ... and must FAIL mutated
+node tools/registration-check.mjs                    # our registration == upstream's, bit for bit
+node tools/registration-check.mjs --mutate one-lsb   # ... and must FAIL mutated
+```
+
+The three below are three of CI's four jobs. The fourth is `npm run test:unit`, which lives in
+`test/` rather than `tools/` — it needs no server, no sensor and no browser, but it **does need
+`npm ci`**, and that changed with the module extraction rather than being true all along. Four
+of the modules taken out of `web/main.js` return three.js types they exist to build —
+`world-tilt` a Quaternion, `plan-geometry` a Vector3, `gpu-textures` a DataTexture, `bloom-pass`
+a Pass — so a node test of them cannot resolve `three` out of a tree holding only source.
+Measured on the first push after the extraction: `ERR_MODULE_NOT_FOUND: Cannot find package
+'three'`, 47 tests, 4 failed, on all four CI arms while the same suite ran 68 green locally
+against an installed tree. `test/runner-control.test.mjs` is its control.
+
+```
+node tools/syntax-check.mjs                          # every JS file this repo ships parses, and the two
+                                                     #   constants the two languages cannot share agree
+node tools/syntax-check.mjs --mutate spec-drifts     # ... and the .knct decoder specification must FAIL when a constant moves under it
+node tools/syntax-check.mjs --mutate shell-id-renamed # ... and a surface whose shell drives an id the markup stopped declaring
+node tools/syntax-check.mjs --mutate shell-key-undeclared # ... and the other direction, which is the one a merge produces
+node tools/syntax-check.mjs --mutate web-citation-outlives-its-module # ... and a module this repo's own prose names, renamed to something the tree does not hold
+node tools/syntax-check.mjs --mutate line-citation-past-the-end # ... and the line half of that, which rots without the path rotting
+node tools/syntax-check.mjs --mutate citation-outside-the-prose # ... and one written in the C++, which is the half of the tree the walk used to skip
+node tools/release-gate-check.mjs                    # the .npmrc supply-chain gate is actually armed
+node tools/release-gate-check.mjs --mutate wrong-unit # ... and must FAIL (also: no-gate, absent)
+node tools/cpp-check.mjs                             # both C++ files parse and typecheck, in all four
+                                                     #   pipeline configurations they can be built in
+node tools/cpp-check.mjs --mutate grabber-syntax-error # ... and must FAIL mutated
+node tools/cpp-check.mjs --mutate grabber-type-error  # ... a wrong argument type, which is the row that says
+                                                      #   this is a semantic pass and not a tokeniser
+node tools/cpp-check.mjs --mutate opengl-branch-broken # ... a break inside the Pi's `#ifdef` arm, which is the
+                                                      #   control the matrix exists for: a gate parsing one
+                                                      #   configuration reports this green. Reddens 2 of the
+                                                      #   4 grabber rows, not all of them - read the rows
+node tools/cpp-check.mjs --mutate opencl-branch-broken # ... and the arm this machine actually compiles
+node tools/cpp-check.mjs --mutate harness-syntax-error # ... and the second file, asked for on its own
+```
 
 ## Exit codes, and why reading them is a trap
 
@@ -323,15 +861,107 @@ against 1.02 and 0.95 for the same rows at HEAD — run-to-run noise — where a
 arm reports 22.19 and 22.14. The normalisation is what makes that comparison possible at all,
 and it is why the sign appears in this tool as well as in `registry-check`.
 
-**`registry-check` is red on one row, `readGhost`, and it predates this branch.** The claim is
-that `readGhost` at 1.0 is bit-identical to the old `mode 2` at `f49c8339…^`. Measured at the
-branch point `6e1be6f` it fails on one frame of six; at HEAD it fails on two, frames 2 and 3.
-So it is not something this branch introduced, and it did get worse here — both halves of that
-sentence matter, and neither was written down anywhere until now, which is how a known-red row
-becomes a row nobody re-derives. A comment in `web/cloud-shader.js` calls it "the pre-existing
-readGhost failure" and that comment arrived in `40ab241`, which is testimony rather than a measurement;
-the two runs above are the measurement. Nothing has dated the one-frame-to-two change, and the
-same bisect harness that dated the `export-check` rows would do it.
+**`registry-check` has no standing red row any more, and this paragraph used to say it had
+one.** For a long time `readGhost` failed section 1b's claim that the reading at 1.0 is
+bit-identical to the old `mode 2` at `f49c8339…^` — one frame of six at the branch point
+`6e1be6f`, two frames at the head of the branch that recorded it. What nobody had measured was
+how much it differed *by*: one byte of 921,600, at a delta of 1. `52b75cc` replaced the
+equality with a two-sided tolerance taken from both ends — the noise at one byte and delta 1
+below, the quietest true positive the row must catch, `ghost-alpha-term-dropped` at 156,247 to
+159,539 bytes of the frame, 17.0 to 17.3% of it, at deltas of 47 to 52, above — and the passing
+line now names what it absorbed rather than reporting a bare `PASS`. Both ends are measured at
+the 640x360 comparison frame the tool renders today, which is where the 921,600 comes from:
+640 by 360 by four channels. Read on this branch it says `6 frames, 1 within tolerance (worst 1
+bytes of 921600, delta 1)`, the identical line on all 13 clean runs recorded here.
+`docs/instruments.md` carries the account, the arithmetic, and the correction that moved these
+figures off the 640x400 stage they were first taken at. The operational consequence is the whole
+point: **a red `readGhost` row is a finding now rather than the weather**, and so is that line's
+byte count climbing.
+
+**The baseline on this branch is 0 failed at 131 assertions**, up from 89 with the glyph field's
+planted sections in — 120 before the review round added the two-surface occlusion section,
+the descent row, the ripple arms and the solo-key guards, taken against a server on the default port with the tool's own planted
+fixtures on its 640x360 canvas. Three times after the rebase rather than once, because a single
+green run of a tool with a known
+intermittent in the suite beside it is not a baseline. Paired with `timeline-check` at 75/0, and
+with all 22 mutation runs re-run across the rebase reddening **the same named rows before and
+after** — the names being the claim, since a total can move without a name moving. The load on
+the machine during each of those runs is not recorded, and on this machine another agent's run
+is the normal state; what stands in for that field is the repetition, because contention here
+shows up as extra reddened rows rather than as a quietly wrong number.
+
+**One row changed verdict here and it is a fixture change rather than a fix.** The streak's
+45-degree direction row had been failing its floor at 2.65% of the frame along the angle and now
+passes at 4.48 along, 1.71 across; its two neighbours moved with it, 4.04 to 5.60 and 4.17 to
+6.75. Nothing touched the streak. The scrambled look those rows are measured over raises
+`lattice` to 1 with `additive` on, which used to render a saturated white field, and the glyph
+field's energy compensation divides that pile-up back down so the gradient the rows read is
+there. Do not read it as the streak having been repaired, and do not compare a streak figure
+taken before this branch against one taken after it — they are two fixtures rather than two
+builds. `docs/instruments.md` has the case file, including the margin that row now passes by.
+
+**The fifteen glyph and rain mutations need nothing this tool did not already need**: the same
+`--url` against the same running server, no extra port, no capture of its own. Their sections
+plant looks rather than sweeping parameters, which is the shape
+`duotone-span-against-a-frozen-range` and `vspeed-unnormalised` already have and is forced for
+the same reason — a drop-one sweep leaves every other displacement at zero, which is exactly
+where a character hashed off a moved point draws the bit-identical correct picture.
+`normalisation-floor-restored` goes further and cannot pick up a shipped look at all: the
+alpha floor bites nearer than `pointSize / 48` metres and all ten documents sit at 9 or below,
+so the row plants a large point size and a full lattice before it has anything to see.
+
+**Three of those rows are what now holds the eight-looks-byte-identical claim.**
+`glyph-leaks-at-zero` and `rain-leaks-at-zero` are the two masters asserted to be exactly absent
+at 0, and `compensation-leaks-at-lattice-zero` is the third and the one with no master over it —
+the energy correction rides neither, so neither excuses it. That last one is not a hypothetical
+wrong implementation either: the reachable mistake it plants is the deleted design document's own
+unbounded formula, which is exactly 1 at `lattice` 0 only while the sprite is no bigger than the
+cell, and `pointSize` reaches 64 against a cell that bottoms out at 5mm.
+
+**Where the byte-identity evidence itself came from.** The claim that the eight `lattice`-0
+shipped looks render identically to a clean `origin/main` build is not one the suite asserts; it
+was taken with a probe built on `registry-check`'s own page machinery, driving the editor and
+hashing the framebuffer at 15 pinned program positions per look — 0 to 0.9933s over six source
+frames of `captures/sample.knct` at indices 0, 4, 8, 12, 16 and 20 with three substeps each,
+drawn into a 572x322 buffer inside a 640x360 viewport at device scale 1. Each build's run takes
+three passes and writes nothing unless all three agree — two of them in one page, which catches
+a look leaking into the next, and the third in a fresh browser context, which is the shape a
+comparison run has — so "identical" is the run's own recorded
+verdict rather than something re-derived afterwards, and the two builds' arms are interleaved
+against one fixture whose sha256, frame indices, buffer size, camera matrix, browser build and
+rasteriser string are compared before any hash is. Measured against `825a3dd`: **8 looks x 15
+positions = 120 image hashes, no differences**. The control that says the harness can see a
+change at all is `voxel`, which differs at all 15 positions by design. Run the same comparison
+across the two `main` revisions this branch was rebased over and it reports 0 of 135 — nine
+looks unmoved by `main` itself, which is context for reading the 120 rather than a second
+control, since a null result cannot demonstrate sensitivity.
+
+**`timeline-check` runs 75 assertions, 0 failed, and its two newest mutations share a section
+brought in for them.** `rain-accumulates` integrates the rain frame to frame instead of computing it from program
+time, so a seek arrives carrying whatever the scrub built rather than the frame playback would
+have drawn — which is this tool's whole subject. It could not be hung on any existing arm,
+because the rain defaults to 0 and nothing else in the file raises it, so every other section
+renders the term completely inert and a mutation of an inert term is bit-identical to the truth.
+Section 6 applies a rain-raised look of its own before it seeks, and asserts it did — the first
+row reads the uniform back at 0.8, so a section whose look failed to apply says so rather than
+proving a seek matches an inert term. It reddens 2 of the 71: the seek row goes from a clean
+`max 0/255, 0.000% of pixels differ` to `max 249/255, 24.795%`, against a tolerance of 2/255.
+
+**It also has two intermittents, and neither of them has ever produced a section 6 row**, which
+is worth knowing before reading a red `rain-accumulates` result as flake. Tallied over 19 runs on
+one day: **2 of 19** die before the first assertion with `the stage came out 533x300 and this
+file's figures are 640x360`, printing zero failed assertions on a non-zero exit, and this tool
+has no crash handler, so nothing in its output tells that from a catch. **3 of 19** overshoot in
+the playback arm's `runTo` and redden section 1's render-count row at `362 of 361`, with 124
+state advances against a good run's 122. The second one was put down to file-write contention and
+is not that — it reproduces at about one in five on an idle machine, and the extra render being
+inside `runTo` makes it a candidate finding about the transport rather than about the check. Both
+are unresolved; `docs/instruments.md` carries the signatures and the measurements.
+
+**Read the assertion count and the fired-row names off every run of this tool, never the exit
+code or the total.** Both intermittents move a total without moving the names, and one of them
+has already corrupted a record: `preroll-constant` was carried at 11 reddened rows and its honest
+count is 8, the 11 having been taken from a run the overshoot was inside.
 
 **`keyframe-check`** runs its cheapest claim first, on a 60-second budget, and stops the run if
 it fails. That is not ordering by cost: an evaluator that announces its writes schedules a seek
@@ -882,9 +1512,19 @@ arm waits for `uniforms.focal.value.x !== 366`, which is a hello arriving over t
 server whose grabber will not spawn leaves the boot default standing and the wait times out at
 25s. The tool answers `untested` and says "no sensor, no claim" instead of failing, which is the
 right reading and still exits 2. Everything else in the file runs: **section 6 is the only arm
-in the suite pointed at the recorder's panel** — 20 blocks, 54 parameters on both surfaces, the
-nine look groups hidden and then revealed by `extended settings` — so a change to the panel is
-still graded on both surfaces on a sensorless rig, and that section is what to read. One row in
+in the suite pointed at the recorder's panel** — every block and every look parameter graded on
+both surfaces, with the look groups reached through the inspector tabs rather than through a
+toggle — so a change to the panel is still graded on both surfaces on a sensorless rig, and that
+section is what to read. **Two things this sentence used to name had stopped existing**, and
+neither of them failed anything on its way out. It said 54 parameters. The population is derived
+from the registry, so it was never a constant to write down: the run prints 86 of 86 against
+20 of 20 blocks today and it read 78 before the glyph field's eight arrived, so 54 matches
+neither, and nothing here dates when it last did. A count in prose is a snapshot wearing the
+grammar of a fact. And it said the groups
+are revealed by `extended settings`, whose rule and `#extendedRow` button left the markup in
+`988551e` when the panel became tabbed. The groups themselves went from nine to eleven with the
+glyph field, which is a second reason not to carry either number here. Read the counts off the
+run. One row in
 section 3 goes red there for a second environmental reason: it needs **two or more takes** with
 a hello to say that the library cannot tell a computed angle from a constant, and a `captures/`
 holding only `sample.knct` reports `1 takes`.
@@ -939,7 +1579,7 @@ nothing about a stale library looks wrong. It needs no sensor: it runs on a corp
 **`syntax-check`** needs nothing at all, and it refuses to pass on finding no files: the roots
 must exist, each must yield files, and the count is printed beside the verdict so a number that
 has quietly halved is visible rather than implied. It also asserts that every tool in `tools/`
-is named in `CLAUDE.md`, which is why the invocation list lives there rather than here — a tool
+is named in `CLAUDE.md`, which is why the index lives there rather than only here — a tool
 added later is asked by existing, and the falsification control is adding a tool without
 documenting it.
 
