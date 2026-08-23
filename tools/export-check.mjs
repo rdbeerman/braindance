@@ -205,6 +205,38 @@ const POINT_SIZE_REBASE = 1080 / GRADED_HEIGHT;
 // point-size clamp at a 600 buffer - at 4.0 it draws 0.80px points there, and a
 // comparison partly about the clamp would say nothing about the rebase.
 const REBASE_LOOK = { far: 2.8, near: 0.05 };
+
+/**
+ * The same look with the glow taken out, for the two arms that put the *whole* graded
+ * look through both builds.
+ *
+ * **The two builds have not had the same bloom since `124a90b`.** That commit replaced
+ * three's `UnrealBloomPass` with `BloomPass` in `web/bloom-pass.js` - ten draws against
+ * thirteen, a progressive down-and-up resample against a Gaussian per mip - and the
+ * pinned build these arms play imports three's and always will, because it is a
+ * revision rather than a tree. So a `rebase-full` arm with the glow up is not one look
+ * through two references, it is two different passes, and the number it reports is the
+ * difference between them rather than anything about the rebase.
+ *
+ * Measured on this tree with both builds at the same 960x600 buffer, so that resolution
+ * is out of the comparison entirely: at Blackwall's `bloom` of 0.5 the mean luminance is
+ * 7.1614 here against 17.3797 there - a ratio of 0.41205 and a worst tile of 45.649/255 -
+ * and at `bloom` 0 it is 5.0925 against 5.0581, a ratio of 1.00679 and a worst tile of
+ * 0.337. The whole 2.4x is that one term. Dated by running this file at the two commits
+ * on one machine with one capture: `124a90b^` reads 0.99312 and 0.99403 on the two rows
+ * and `124a90b` reads 0.40978 and 0.40931.
+ *
+ * **What the exclusion costs, and what still holds it.** Bloom's resolution independence
+ * is the `bloom` and `full` rows of the sweep above, which compare 960x600 against
+ * 1920x1200 on this build alone at a 0.03 band, and `bloom-buffer-sized` fails both by
+ * 6.5x and 8.1x - so the reference the chain is frozen at keeps its catcher and never
+ * depended on these two rows. What nothing here can hold is bloom's *absolute*
+ * appearance across the swap, which `docs/performance.md` already records as thin. So the
+ * rows below take the bloom-up ratio as well and print it whether they pass or fail: an
+ * object every observation skips is this file's most expensive habit, and a term left out
+ * of a comparison has to leave a number behind rather than a sentence.
+ */
+const REBASE_FULL_LOOK = { ...REBASE_LOOK, bloom: 0 };
 const EXPORT_FRAMES = 8;
 const EXPORT_FPS = 30;
 
@@ -1420,11 +1452,15 @@ const OFF = {
  * **It is deliberately not in `OFF`.** Eleven within-build rows spread `OFF`, and their
  * coarse-mean bands in `RES_TOLERANCE` were all measured with the grade running; putting
  * the zero there would silently re-baseline every one of them while looking like a fix
- * to three others. The two `rebase-full` rows do not spread `OFF` at all and are left
- * exactly as they are - they are the two cross-build rows that already pass, and they
- * pass because Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both sides, so
- * both builds run the grade. That table came out that way rather than being fitted, and
- * it is the reason to believe this.
+ * to three others. The two `rebase-full` rows do not spread `OFF` at all - they are
+ * Blackwall entire, and Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both
+ * sides, so both builds run the grade. That table came out that way rather than being
+ * fitted, and it is the reason to believe this.
+ *
+ * **This paragraph called them the two cross-build rows that already pass, and they were
+ * not** - they had been red since `124a90b` for a reason nothing here reaches, which
+ * `REBASE_FULL_LOOK` carries. What that constant takes off those two arms is `bloom` and
+ * nothing else, so the grade this paragraph is about still runs on both sides of them.
  *
  * `asOldBuild` needs nothing: the old module has never heard of `vignette`, so
  * `RES_ARM`'s drop-unknown filter takes it off that arm by itself.
@@ -1484,11 +1520,19 @@ const asOldBuild = (look) => {
  * so a count would catch that instance and miss a build that swapped one enabled pass for
  * another, which is the same defect wearing different names.
  *
- * The one difference that is *not* a finding is `UnrealBloomPass` becoming `BloomPass`;
- * that rename is in the range these arms span and the pass is the same pass. It is
- * normalised away by name rather than skipped, so a rename nobody knew about does not
- * pass quietly - it fails, with both chains printed in the row's own message, which is
- * an instrument asking a question rather than assuming an answer.
+ * **`UnrealBloomPass` is not `BloomPass`, and normalising the prefix away is what let the
+ * two `rebase-full` rows sit red for a fortnight with nothing able to name why.** This
+ * predicate used to strip a leading `Unreal`, on the reasoning that the change was a
+ * rename inside the range these arms span and the pass was the same pass. It was a rename
+ * in the source and a replacement in the picture: `124a90b` put our chain where three's
+ * had been, and at Blackwall's `bloom` of 0.5 the two deliver light in a ratio of 0.412 at
+ * one buffer. The single guard that existed to say "these are two different passes" was
+ * the guard taught to call them one, and the rows it was guarding could then only report
+ * the size of the difference - the exact failure this predicate was written after. So the
+ * prefix is compared like every other part of the name now, and the arms that have to span
+ * the swap take bloom out of the look instead; `REBASE_FULL_LOOK` carries the measurement.
+ * No cross-build comparison in this file runs bloom on either side any more, so no correct
+ * run meets this term; one that does gets a failure naming both passes.
  *
  * **An empty chain is a failed readback, not a match.** `chainOf` reads `arm.passes ?? []`
  * and joins, so an arm off a page that stopped publishing its composer answers `''` - and
@@ -1515,7 +1559,7 @@ const asOldBuild = (look) => {
  */
 const chainOf = (arm) => (arm.passes ?? [])
   .filter((p) => p.endsWith(':on'))
-  .map((p) => p.split(':')[0].replace(/^Unreal/, ''))
+  .map((p) => p.split(':')[0])
   .join('+');
 const sameChain = (a, b) => chainOf(a) !== '' && chainOf(a) === chainOf(b);
 
@@ -1645,6 +1689,15 @@ const PIPELINES = [
 // division of labour the point-size rows and the cross-build arm already have. Closing it
 // here instead would want a coarse band re-baselined against a measured residual rather
 // than a threshold tightened until this one row goes red.
+//
+// **Half of that paragraph has since stopped being true and the conclusion has not.** The
+// two `whole look rebases` rows carry no bloom any more - `REBASE_FULL_LOOK` has why - so
+// the mutation cannot reach their judged numbers at all rather than reaching them and
+// falling short. It still moves the glow ratio those rows print beside the judged one,
+// 0.40978 to 0.40043 and 45.923 to 42.065 on the worst of forty tile means, which is the
+// same direction and the same nowhere-near. Re-measured on this tree: 51 of 51 and 0
+// failed under the mutation, so it is uncaught here for a second reason and caught by
+// `test/bloom-chain.test.mjs` for the same one.
 //
 // What the widening cost, since a threshold change that only reports what it bought
 // is half a measurement. Two mutations lose an assertion to it, and both lose the
@@ -1924,12 +1977,25 @@ await main.page.evaluate(`globalThis.__kinect.params.apply(${JSON.stringify(CROP
 // isolates whether the chain is frozen in the right place, the 1200 one whether the
 // scaling exists. Dropping either would leave a mutation uncaught, and this was found
 // by running one rather than by reading the code.
+//
+// **Bloom is out of the look these two arms compare, and the glow arm beside each one is
+// how that exclusion stays visible.** `REBASE_FULL_LOOK` has the mechanism and the
+// numbers: the pinned build's glow is three's pass and this one's is ours, so the term
+// cannot be part of a claim about references. The `rebase-glow-*` arms render the same
+// scene with it up and are judged by nothing - their ratio goes into the row's own
+// message, so the quantity that was taken out is reported on every run.
 const rebaseFullBig = await armAt(main.page, {
-  label: 'rebase-full-big', look: {}, resLook: REBASE_LOOK,
+  label: 'rebase-full-big', look: {}, resLook: REBASE_FULL_LOOK,
+});
+const rebaseGlowBig = await armAt(main.page, {
+  label: 'rebase-glow-big', look: {}, resLook: REBASE_LOOK,
 });
 await setStage(main.page, REF);
 const rebaseFullRef = await armAt(main.page, {
-  label: 'rebase-full-ref', look: {}, resLook: REBASE_LOOK,
+  label: 'rebase-full-ref', look: {}, resLook: REBASE_FULL_LOOK,
+});
+const rebaseGlowRef = await armAt(main.page, {
+  label: 'rebase-glow-ref', look: {}, resLook: REBASE_LOOK,
 });
 
 // The precondition, measured rather than argued: with a clamp active the comparison
@@ -1977,6 +2043,7 @@ for (const [name, tol] of Object.entries(RES_TOLERANCE)) {
 // against itself.
 let rebaseOld = null;
 let rebaseFullOld = null;
+let rebaseGlowOld = null;
 let rebaseHdOld = null;
 let rebaseNon169Old = null;
 {
@@ -2032,7 +2099,13 @@ let rebaseNon169Old = null;
   // can: the graded look at the buffer it was graded at, against this build's look
   // at twice that, which is where the whole rebase either holds or does not.
   rebaseFullOld = await armAt(before.page, {
-    label: 'rebase-full-old', look: {}, resLook: REBASE_LOOK,
+    label: 'rebase-full-old', look: {}, resLook: REBASE_FULL_LOOK,
+  });
+  // The other end of the glow pair. Taken here rather than derived, because the whole
+  // point of the number is that nobody can predict what three's pass does from what
+  // ours does - that is the fact the rows above stopped being able to state.
+  rebaseGlowOld = await armAt(before.page, {
+    label: 'rebase-glow-old', look: {}, resLook: REBASE_LOOK,
   });
   // The other half of the 16:9 arm, and the reason it is taken here rather than
   // computed: this build has no reference of any kind, so 22 is 22 drawn pixels at
@@ -2076,7 +2149,10 @@ let rebaseNon169Old = null;
 // 1080p while measuring 1200 is a label claiming coverage the instrument does not
 // have - which is the shape of the JSON.stringify case this repo already has a rule
 // about.
-for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFullBig]]) {
+for (const [label, arm, glow] of [
+  ['1728x1080', rebaseFullRef, rebaseGlowRef],
+  ['1920x1200', rebaseFullBig, rebaseGlowBig],
+]) {
   // The clamp precondition again, on both cross-build arms, because the old build
   // draws its own preset's point size rather than the sweep's.
   const clear = [rebaseFullOld, arm].every((a) => a.sizes.smallest >= 1 && a.sizes.largest <= 64);
@@ -2101,10 +2177,19 @@ for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFu
   // costs the most, since nothing draws attention to it until the build it was wrong about
   // arrives.
   const chains = sameChain(arm, rebaseFullOld);
+  // The excluded term, reported beside the judged one on every run rather than left in
+  // a comment for somebody to go and read. It is not in the predicate on purpose: what
+  // it measures is the distance between two implementations of a pass, which is a fact
+  // about the pinned revision and not a property this build can be asked to hold.
+  const worstGlow = Math.max(...glow.tiles.map((v, i) => Math.abs(v - rebaseGlowOld.tiles[i])));
+  const ratioGlow = glow.lum.mean / rebaseGlowOld.lum.mean;
   check(clear && chains && Math.abs(ratioFull - 1) <= 0.02 && worstFull <= 2.0,
-    `and the whole look rebases, not just the points: Blackwall at ${label} is Blackwall at 960x600`,
+    `and the whole look bar the glow rebases, not just the points: Blackwall at ${label} is Blackwall at 960x600`,
     `${ends}; luminance ratio ${fixed(ratioFull, 5)}, worst of 40 tile means ${fixed(worstFull)}/255; `
-    + `chain ${chainOf(arm)} against ${chainOf(rebaseFullOld)}`);
+    + `chain ${chainOf(arm)} against ${chainOf(rebaseFullOld)}; bloom is left out because the `
+    + `pinned build's glow is three's pass and this one's is ours - with it up the same pair reads `
+    + `${fixed(ratioGlow, 5)} and ${fixed(worstGlow)}/255 through ${chainOf(glow)} against `
+    + `${chainOf(rebaseGlowOld)}`);
 }
 
 {

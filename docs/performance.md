@@ -224,6 +224,34 @@ nothing. A progressive chain resamples rather than point-sampling a frozen chain
 is the likely reason, and the honest alternative is that a differently-shaped halo simply
 differs less between two sizes. Both readings are open.
 
+**Those two paragraphs are the wrong way round, and the correction is left beside them
+rather than replacing them.** Re-measured on 2026-08-24 by running this file's own
+`export-check` at the two commits, one machine, one capture (`sample`), consecutive
+revisions and minutes apart: at `124a90b^` the pair reads luminance ratios of **0.99312
+and 0.99403** with worst tiles of 1.545 and 1.433 of 255, and passes; at `124a90b` it
+reads **0.40978 and 0.40931** with worst tiles of 45.923 and 45.962, and fails. So the
+replacement is what turned those two rows red, not what turned them green. The same
+numbers come back unchanged to five figures at `ad7c806`, `6ad2433` and at the tip, which
+is what says the flip is that one commit and not the fifteen days after it.
+
+The reason is that those rows are cross-build and the build they are pinned against is a
+revision, `f14b4be^`, which imports three's `UnrealBloomPass` and always will. From
+`124a90b` they compare our chain against three's and report the distance between two
+implementations as a rebase failure. Isolated at one 960x600 buffer, so that resolution is
+out of it entirely: at Blackwall's `bloom` of 0.5 the mean luminance is **7.1614 here
+against 17.3797 there**, a ratio of 0.41205 and a worst tile of 45.649; at `bloom` 0 it is
+5.0925 against 5.0581, a ratio of 1.00679 and a worst tile of 0.337. The whole 2.4x is that
+one term and none of it is the rebase. `export-check` now takes bloom out of those two rows
+and prints the bloom-up ratio beside the judged one on every run; `docs/instruments.md` has
+the case file.
+
+**What that leaves open is a picture question rather than an instrument one, and it is not
+settled here.** The same reading says the shipped graded looks got about 2.4x dimmer at
+`124a90b` - the same build, the same look, one commit apart - and this page prices the
+replacement's cost without pricing its picture. Whether that is a regrade somebody accepted
+or a gain this chain is missing wants a decision rather than another measurement, and until
+one is taken the section above should be read as a cost result only.
+
 **`bloom-reference-1080` is now inert for a new reason, and that is a hole to close
 rather than a result to bank.** It was already uncaught before this change, blinded by
 those two rows being red anyway. It is still uncaught now that they are green, and the
