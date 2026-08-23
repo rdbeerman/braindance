@@ -754,10 +754,27 @@ const MUTATIONS = {
   // The gallery goes back to assigning whatever listing comes back last. Every guard the
   // poll has against itself stays in place, which is the separation: a poll that will not
   // ask twice says nothing about a poll and a Delete asking once each. Must redden the
-  // two-caller row alone and leave the three poll-overlap rows above it green.
+  // two-caller row and the superseded-outcome row beside it - with the guard gone the
+  // stale body paints *and* its caller resolves on its own authority, which is both
+  // claims at once - and leave the three poll-overlap rows above them green.
   'refresh-paints-a-stale-listing': { file: 'web/library.js', edits: [[
-    '  if (mine !== refreshGeneration) return;\n',
+    '  if (mine !== refreshGeneration) return newestRefresh;\n',
     '',
+  ]] },
+
+  // The superseded caller goes back to reporting success on its own authority, which is
+  // how the generation guard first shipped: the stale body is still discarded, but the
+  // caller that asked is told the grid is current. The one caller that acts on that
+  // sentence is the poll - it records the tick as seen - so when the newer refresh then
+  // fails, nobody has painted, the fingerprint has moved on, and the transition is
+  // never offered again.
+  //
+  // Must redden the superseded-outcome row alone and leave the two-caller row and the
+  // three poll-overlap rows green, because the discard itself is unchanged - what moves
+  // is only which sentence the discarded caller is told.
+  'superseded-refresh-reports-success': { file: 'web/library.js', edits: [[
+    '  if (mine !== refreshGeneration) return newestRefresh;\n',
+    '  if (mine !== refreshGeneration) return undefined;\n',
   ]] },
 
   // The signal put back where it shipped: after the directory walk rather than before it.
@@ -8119,6 +8136,49 @@ async function runChecks() {
       'and a listing that resolves after a newer one is discarded rather than painted, because two callers refreshing is not the same question as the poll refreshing twice',
       `${idsAfterNew.length} takes after the newer listing, and the grid holds ${grid.slice(0, 90)}`);
     await racer.close();
+
+    // ---- and the superseded caller is told the newer one's answer, not a success of its own
+    //
+    // The row above proves the stale body is discarded; this one asks what the caller
+    // holding that body was *told*. The guard's first draft resolved it as a success
+    // while discarding it, and the one caller that acts on that sentence is the poll:
+    // it records the tick as seen and moves its fingerprint on. When the newer refresh
+    // then fails - a node dropping out mid-listing is enough - nobody has painted, the
+    // fingerprint has advanced past the transition, and every unchanged tick after
+    // that offers nothing. So a listing is held, the refresh that supersedes it is
+    // answered with a refusal, and the row reads which sentence the held caller heard:
+    // the newer one's failure, or a success nothing earned.
+    const chained = await browser.newPage();
+    let chainListings = 0;
+    const heldChain = [];
+    await chained.route('**/library/all', async (route) => {
+      chainListings++;
+      if (chainListings === 1) { await route.continue(); return; }
+      if (chainListings === 2) { heldChain.push(route); return; }
+      await route.fulfill({
+        status: 500, headers: { 'content-type': 'application/json' },
+        body: '{"error":"the linked node dropped out mid-listing"}',
+      });
+    });
+    await chained.goto(galleryPage(macUrl), { waitUntil: 'domcontentloaded' });
+    await chained.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
+    const olderOutcome = chained.evaluate(
+      '__library.refresh().then(() => "resolved", (err) => `rejected: ${err.message}`)');
+    for (let i = 0; i < 40 && heldChain.length === 0; i++) await new Promise((d) => { setTimeout(d, 50); });
+    const newerOutcome = await chained.evaluate(
+      '__library.refresh().then(() => "resolved", (err) => `rejected: ${err.message}`)');
+    // Only now does the held listing come back, valid and out of date - after the
+    // refresh that superseded it has already failed.
+    if (heldChain.length === 1) {
+      await heldChain[0].fulfill({
+        status: 200, headers: { 'content-type': 'application/json' }, body: realBody,
+      });
+    }
+    const olderSaid = heldChain.length === 1 ? await olderOutcome : 'the listing was never held';
+    check(heldChain.length === 1 && newerOutcome.startsWith('rejected') && olderSaid.startsWith('rejected'),
+      'a superseded refresh reports the newer one\'s failure rather than a success of its own, so the poll leaves the transition unseen and offers it again',
+      `held ${heldChain.length}; the newer caller was told "${newerOutcome.slice(0, 55)}" and the held one "${olderSaid.slice(0, 55)}"`);
+    await chained.close();
 
     // **The other way into the same poll, which the guard above nearly closed.** The
     // cadence wants to be skipped while a tick runs; the record button wants the

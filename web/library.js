@@ -1750,8 +1750,27 @@ const LISTING_TIMEOUT_MS = 15000;
  */
 let refreshGeneration = 0;
 
-async function refresh({ bound = false } = {}) {
+// The newest refresh's own outcome, held so a superseded one can hand its caller over
+// to it rather than inventing an answer of its own. A superseded refresh that resolved
+// successfully was telling its caller "the grid is current", and the one caller that
+// acts on that sentence is the poll: it records the tick as seen and moves its
+// fingerprint on. When the newer refresh then *failed* - the linked node dropping out
+// mid-listing is enough - nobody had painted, the poll had already advanced past the
+// transition, and every unchanged tick after that offered nothing. Stale recording
+// state stood until some unrelated change happened along. Chained to the newest run,
+// the superseded caller resolves when a newer generation has actually painted and
+// rejects when it failed, which is the sentence each of its callers already knows how
+// to act on - the poll leaves the transition unseen and offers it again.
+let newestRefresh = Promise.resolve();
+
+function refresh({ bound = false } = {}) {
   const mine = ++refreshGeneration;
+  const run = refreshNow(mine, bound);
+  newestRefresh = run;
+  return run;
+}
+
+async function refreshNow(mine, bound) {
   const res = await fetch('/library/all', {
     signal: bound ? AbortSignal.timeout(LISTING_TIMEOUT_MS) : undefined,
   });
@@ -1776,10 +1795,14 @@ async function refresh({ bound = false } = {}) {
   // came back broken is worth throwing from whether or not it is the newest, because the
   // caller that asked for it is the one that can say what to do about it - the poll
   // counts a failed refresh as a transition still unseen, and a button says so on screen.
-  // Only the *assignment* is what a stale answer must not do.
-  if (mine !== refreshGeneration) return;
+  // Only the *assignment* is what a stale answer must not do. What a superseded refresh
+  // may not do either is report success on its own authority - see `newestRefresh` -
+  // so it returns the newest run's outcome and its caller waits on the answer that
+  // actually painted, or actually failed.
+  if (mine !== refreshGeneration) return newestRefresh;
   library = body;
   paint();
+  return undefined;
 }
 
 /**

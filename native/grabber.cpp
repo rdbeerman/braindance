@@ -797,26 +797,6 @@ int main(int argc, char **argv) {
     libfreenect2::Frame *depth = depthFrames[libfreenect2::Frame::Depth];
     libfreenect2::Frame *rgb = haveColor ? colorFrames[libfreenect2::Frame::Color] : nullptr;
 
-    // The same refusal on the half of the frame that cannot be re-derived. The OpenCL
-    // processor - the default wherever OpenCL is compiled in, which is this project's
-    // editing station - sets `status = 1` when the readback off the device fails and
-    // still delivers the frame, buffer holding whatever was in it. Taken as ordinary
-    // depth it becomes u16 millimetres, goes down the wire, and is written into a take
-    // that cannot be shot again, while `frameCount` keeps advancing and delivered fps
-    // stays at a flawless 30.0. That is the one shape this whole repository is built to
-    // reject: a wrong result that renders successfully and passes the health number.
-    //
-    // Skipped rather than repaired, and the frameset is released first because the next
-    // `waitForNewFrame` needs the slot back. `frameCount` deliberately does not advance,
-    // so a run losing frames reads as a rate below 30 - which is the honest reading, and
-    // `badDepth` beside it is what separates this cause from a degraded USB link.
-    if (depth->status != 0) {
-      badDepth++;
-      depthListener.release(depthFrames);
-      continue;
-    }
-    uint64_t tAcquired = now_us();
-
     // The webcam's picture, handed off before registration rather than after, because
     // nothing it needs happens downstream and every microsecond it waits here is
     // latency in somebody's video call.
@@ -827,7 +807,17 @@ int main(int argc, char **argv) {
     // stationary webcam for 30fps of identical JPEGs. Gated this way, the output runs
     // at the colour camera's real rate, which halves to 15 in dim light and is the
     // honest number to show.
-    uint64_t tHdCopied = tAcquired;
+    //
+    // **And above the bad-depth refusal, because the two frames fail independently.**
+    // This block used to sit below it, and the ordering was a webcam defect wearing a
+    // depth cause: a healthy colour frame taken in the same iteration as a failed
+    // depth readback was held but never submitted - `newColor` resets next iteration,
+    // and the next colour arrival releases the frame unseen - so an intermittent GPU
+    // readback failure showed up as `/camera.mjpg` dropping and freezing while the
+    // colour decoder succeeded every time. The colour camera owes depth nothing, so
+    // its hand-off happens before depth is even asked.
+    uint64_t tHdStart = now_us();
+    uint64_t tHdDone = tHdStart;
     if (newColor && rgb && hdEncoder.enabled()) {
       // Checked rather than assumed: both JPEG decoders this library can be built
       // with produce BGRX today, and a build that produced RGBX would hand the webcam
@@ -848,8 +838,38 @@ int main(int argc, char **argv) {
       } else {
         hdEncoder.submit((const uint8_t *)rgb->data, (size_t)CW * CH * 4, now_ms());
       }
-      tHdCopied = now_us();
+      tHdDone = now_us();
     }
+
+    // The same refusal on the half of the frame that cannot be re-derived. The OpenCL
+    // processor - the default wherever OpenCL is compiled in, which is this project's
+    // editing station - sets `status = 1` when the readback off the device fails and
+    // still delivers the frame, buffer holding whatever was in it. Taken as ordinary
+    // depth it becomes u16 millimetres, goes down the wire, and is written into a take
+    // that cannot be shot again, while `frameCount` keeps advancing and delivered fps
+    // stays at a flawless 30.0. That is the one shape this whole repository is built to
+    // reject: a wrong result that renders successfully and passes the health number.
+    //
+    // Skipped rather than repaired, and the frameset is released first because the next
+    // `waitForNewFrame` needs the slot back. `frameCount` deliberately does not advance,
+    // so a run losing frames reads as a rate below 30 - which is the honest reading, and
+    // `badDepth` beside it is what separates this cause from a degraded USB link.
+    //
+    // The count reports on its own cadence rather than riding the healthy log below,
+    // because that log is gated on `frameCount` advancing - so a readback failing
+    // *continuously* was exactly the case with nothing to say: `waitForNewFrame` kept
+    // succeeding, the process looked alive, no frame was delivered, and the counter
+    // built to separate a GPU failure from a dropped USB link stayed invisible until
+    // shutdown.
+    if (depth->status != 0) {
+      badDepth++;
+      if (badDepth % 150 == 0)
+        std::fprintf(stderr, "[grabber] depth readback failing: %llu bad frames against %llu delivered\n",
+                     (unsigned long long)badDepth, (unsigned long long)frameCount);
+      depthListener.release(depthFrames);
+      continue;
+    }
+    uint64_t tAcquired = now_us();
 
     // Dumped before apply() rather than after, because these two frames are the
     // harness's input and apply() writes into buffers it also reads maps from.
@@ -937,12 +957,15 @@ int main(int argc, char **argv) {
       r.arrival   = tArrived; // absolute, so delivered rate over any window is exact
       r.newColor  = newColor ? 1 : 0;
       r.wait      = (uint32_t)(tArrived - tWaitStart);
-      r.acq       = (uint32_t)(tAcquired - tArrived);
-      // The webcam's copy sits between acquisition and registration, so it comes out
-      // of the span rather than being buried inside `reg`. A cost that hides in a
-      // neighbouring segment is a cost the next person attributes to registration.
-      r.hdCopy    = (uint32_t)(tHdCopied - tAcquired);
-      r.reg       = (uint32_t)(tRegistered - tHdCopied);
+      // The webcam's copy now happens inside the acquisition span - it moved above
+      // the bad-depth refusal so a healthy colour frame is never lost to a failed
+      // depth readback - so it is subtracted back out rather than left to inflate
+      // `acq`. A cost that hides in a neighbouring segment is a cost the next person
+      // attributes to the wrong stage; the columns keep their meanings and the row
+      // still sums to the frame.
+      r.acq       = (uint32_t)((tAcquired - tArrived) - (tHdDone - tHdStart));
+      r.hdCopy    = (uint32_t)(tHdDone - tHdStart);
+      r.reg       = (uint32_t)(tRegistered - tAcquired);
       r.conv      = (uint32_t)(tConverted - tRegistered);
       r.enc       = (uint32_t)(tEncoded - tConverted);
       r.asm_      = (uint32_t)(tAssembled - tEncoded);

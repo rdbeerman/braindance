@@ -214,7 +214,19 @@ async function main() {
   // footage, so pointing it at a real `captures/` would let a fixture nobody controls
   // decide what boots. It also keeps the run off the take somebody else is shooting.
   work = mkdtempSync(join(tmpdir(), 'boot-check-'));
-  server = spawn(process.execPath, [join(ROOT, 'server/index.js'), '--port', String(PORT), '--captures', work], {
+  // `--grabber` names a path that cannot exist - inside this run's own fresh temp
+  // directory - because with no flag at all the server falls back to
+  // `native/build/grabber`, and on a machine where that is built "needs no sensor"
+  // quietly became "opens the Kinect": a UI-state check retuning, or contending for,
+  // the device another process was shooting with. A spawn that fails is the branch
+  // this tool has always exercised on CI - one error event, then the same backoff a
+  // machine with no sensor lives in - so the deliberate absence makes the dev machine
+  // run the run CI already runs. The path carries no spaces, which matters because
+  // the flag is space-split into a binary and its arguments.
+  server = spawn(process.execPath, [
+    join(ROOT, 'server/index.js'), '--port', String(PORT), '--captures', work,
+    '--grabber', join(work, 'no-grabber-in-a-boot-check'),
+  ], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
   });

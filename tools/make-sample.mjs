@@ -632,11 +632,22 @@ for (let i = 0; i < FRAMES; i++) {
   }
 }
 
-await new Promise((res) => stream.end(res));
+// `end`'s callback receives the error when the final flush or close fails, and a
+// resolve that ignored it renamed a truncated `.part` onto `OUT` with a success
+// message over it - the exact artifact the atomic write exists to prevent, arriving
+// through its own last line. The latch below it is for the same failure arriving
+// earlier: an `error` that fired between the final `write` settling and this `end`
+// has already rejected every pending write, but nothing here was pending.
+await new Promise((res, rej) => stream.end((err) => (err ? rej(err) : res())));
+if (writeFailure) throw writeFailure;
 // The last thing that happens, and the only line that puts anything at `OUT`. Everything
 // above this point is reversible by deleting one temporary file.
 renameSync(TEMP, OUT);
 installed = true;
-console.log(`[make-sample] ${OUT}: ${FRAMES} frames at ${FPS}fps, `
-  + `${(FRAMES / FPS).toFixed(2)}s, mean colour ${(colorTotal / FRAMES / 1024).toFixed(1)}KB a frame`);
+// `FRAMES - 1` frame gaps, not `FRAMES`: the stamps run from index 0, so the span the
+// server and the editor read off the file is one frame period shorter than the count
+// times the rate - a one-frame file spans 0s. Reporting the naive quotient made every
+// number copied out of this line describe a fixture 33ms longer than the one written.
+console.log(`[make-sample] ${OUT}: ${FRAMES} frames at ${FPS}fps spanning `
+  + `${((FRAMES - 1) / FPS).toFixed(2)}s, mean colour ${(colorTotal / FRAMES / 1024).toFixed(1)}KB a frame`);
 console.log('[make-sample] generation zero, no startedAt - a stand-in, not footage; say so when reporting a number from it');

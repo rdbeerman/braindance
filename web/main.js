@@ -3742,7 +3742,14 @@ function restoreProject(project) {
 
   if (project.history) {
     history.stack = [...project.history.stack];
-    history.baseline = project.history.baseline;
+    // A null baseline is a shape the check above deliberately accepts - it is what the
+    // recorder's surface holds before `begin` has run - but installing one on an editor
+    // that is up and interactive would turn `commit`'s null-baseline guard from a fence
+    // around a failed open into a padlock on a healthy one: every later edit would
+    // return false, enter no undo and reach no auto-save, on a page whose controls all
+    // still work. The document just restored is the truth the stack was built against,
+    // so its own snapshot is the baseline a null one means.
+    history.baseline = project.history.baseline ?? history.snapshot();
   }
 }
 

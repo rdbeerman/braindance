@@ -220,6 +220,11 @@ node tools/library-check.mjs --mutate manifest-trusted-past-id-and-hash # ... a 
 node tools/library-check.mjs --mutate refresh-paints-a-stale-listing # ... and a slow listing does not paint over a newer one,
                                                                      #     which is a second caller rather than the poll twice -
                                                                      #     the three rows above it stay green, and that is the split
+node tools/library-check.mjs --mutate superseded-refresh-reports-success # ... and the discarded caller is told the newer one's
+                                                                     #     answer rather than a success of its own - the poll
+                                                                     #     acts on that sentence, so a success nothing earned
+                                                                     #     advanced its fingerprint past a transition no paint
+                                                                     #     ever showed
 node tools/library-check.mjs --mutate post-action-poll-discarded     # ... and a press asks again rather than taking the answer in flight
 node tools/library-check.mjs --mutate listing-never-times-out        # ... and a listing nothing will answer frees itself
 node tools/library-check.mjs --mutate delete-guesses-past-an-unreachable-node # ... a node that did not answer is not a node with nothing on it
