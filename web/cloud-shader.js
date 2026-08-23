@@ -1397,55 +1397,59 @@ void main() {
   // this line is in the shared fragment path the flare's measurement is about.
   if (softEdge == 1) alpha *= min(116.64 / (vSize * vSize), 1.0) * vCellNorm;
 
-  // **A fragment carrying no colour still writes depth, and most of a character is
-  // margin.** The hard-edged path draws with depthWrite on and there is no alphaTest
-  // anywhere, so every off bit of every bitmask - and every corner of the square the disc
-  // used to cut away - was a piece of invisible geometry standing in front of whatever the
-  // room had behind it. The crop's own comment up in the vertex stage already states the
-  // rule this rests on, that alpha alone is not enough because a faint point occludes at
-  // full strength; this is the same fact arriving where the alpha is exactly zero rather
-  // than merely low, and it is worse there, because a point you cannot see is a point
-  // nobody looks for. Measured at a glyph of 1 **on the build that had this defect** - the
-  // branch before the repair, and before the crossfade moved onto the drawn size, which
-  // matters because a reader running the same probe today gets zeroes: the four shipped
-  // looks that ship with additive off lost 4.3% to 5.0% of their pixels to it, and the same
-  // look with no lattice and a pointSize of 40 hid 43% of the lit frame and 38% of its
-  // light. Against the build these lines are in, that probe reads 0 differing pixels on
-  // four of those five arms and 1 on the fifth, which is the repair rather than the
-  // measurement going away.
+  // **A fragment carrying no colour still writes depth.** The hard-edged path draws with
+  // depthWrite on and there is no alphaTest anywhere, so a fragment whose alpha comes out
+  // exactly zero is invisible in colour and solid in depth - a piece of geometry standing in
+  // front of whatever the room had behind it with nothing in the picture to say so. The
+  // crop's own comment up in the vertex stage already states the rule this rests on, that
+  // alpha alone is not enough because a faint point occludes at full strength; this is the
+  // same fact arriving where the alpha is exactly zero rather than merely low, and it is
+  // worse there, because a point you cannot see is a point nobody looks for.
+  //
+  // **Three ways a fragment arrives here at exactly zero, and the condition is one statement
+  // rather than three cases.** Most of an 8x8 bitmask is margin, so every off bit of every
+  // character is one. A point born this frame carries a fade of exactly 0 for as long as its
+  // sprite is being rasterised, so the whole sprite is one. And the disc the hard-edged
+  // branch cuts lands smoothstep(0.25, 0.02, r2) on 0 at exactly r2 = 0.25, which is the one
+  // ring of fragments the r2 > 0.25 test above lets through. Written as the product, so it
+  // covers the three that exist and whatever a later term multiplies in.
+  //
+  // **The condition was confined to characters for one commit and the confinement is gone.**
+  // The glyph field introduced a *suppressed* disc test - a look drawing characters keeps its
+  // square sprite - and the repair that shipped with it carried glyphMix > 0.0 so that it
+  // put back only what that suppression had removed. The other two are older than the glyph
+  // field by a long way, they are not that branch's to repair inside a repair, and widening
+  // the condition to reach them moves four shipped documents. That movement is what this
+  // change buys and it was approved rather than absorbed.
+  //
+  // Measured, interleaved against the confined form, over 15 pinned program positions - six
+  // source frames of captures/sample.knct at stride 4 with three substeps each, drawn into
+  // a 572x322 buffer inside a 640x360 viewport at device scale 1, off the pinned drive with a
+  // planted colour image. **contour 847, depth 915, ghost 931 and rgb 901 differing pixels**
+  // over the run, each moving at 12 of the 15 positions, and those four are exactly the
+  // documents that ship with additive off. The same run splits the two older halves apart: a
+  // discard reaching births alone accounts for 835 / 903 / 919 / 889 of those pixels at the
+  // five positions where a frame lands and sinceFrameSec is 0, and one reaching the disc's
+  // rim alone accounts for 12 on every look, at nine positions. The two sum to the whole on
+  // every arm, which is the statement that these three are the class rather than three of it.
+  // The same look with no lattice and a pointSize of 40 moves 4805.
   //
   // **The first term is the path and it is not tidiness.** The additive branch shapes its
   // sprite with falloff alone and takes no discard at all, so that Apple's tile-based
   // hidden-surface removal keeps working - the comment above that branch says so - and it
   // draws with depthWrite off, so a zero-alpha fragment there occludes nothing and there
-  // is nothing here to repair. Measured rather than assumed: with this discard ungated,
-  // both additive controls came back at exactly zero differing pixels, so the gate costs
-  // no correction and keeps the tiler.
-  //
-  // **The second term is the crossfade, and it is here because the wider version moved
-  // four shipped looks.** Written as the path alone this discard also reaches the
-  // zero-alpha fragments that have nothing to do with characters - a point born this frame
-  // carries a fade of exactly 0 while its sprite is rasterised, and the disc's own rim
-  // lands falloff on exactly 0 - and those have been writing depth on the hard-edged path
-  // since long before this branch. Measured: against nine of the ten shipped looks - the
-  // pinned fixture that grades this comparison does not render cascade - rendered at
-  // 572x322, the ungated form left contour, depth, ghost and
-  // rgb differing at 12 of 15 positions each, which is exactly the four documents that
-  // ship with additive off, and left the five additive ones byte-identical. With the
-  // crossfade in the condition all nine are byte-identical. So the two halves are
-  // separable and this one is the branch's own: what the glyph field introduced is a
-  // *suppressed* disc test, and this puts back what that suppression removed. The older
-  // half is real, is reported rather than fixed here, and is worth its own change - it is
-  // a look change for four documents, which is not a thing to ship inside a repair.
+  // is nothing here to repair. Measured rather than assumed, on the same run: all six of the
+  // shipped additive documents come back byte-identical with this discard ungated entirely,
+  // so the gate costs no correction and keeps the tiler.
   //
   // The product is written out twice rather than hoisted into a local, following the
   // distance term in the vertex stage: this file has already measured that handing a value
   // through a variable licenses a contraction the inline expression does not get, and the
-  // line below it is in the shared fragment path the flare's measurement is about. That
-  // the branch itself costs no contraction is measured rather than argued, and it is the
-  // same reading as above: the four non-additive looks are byte-identical with this line
-  // present and its condition short-circuiting.
-  if (softEdge == 0 && glyphMix > 0.0 && alpha * falloff <= 0.0) discard;
+  // line below it is in the shared fragment path the flare's measurement is about. That the
+  // branch itself costs no contraction is measured rather than argued, and it is the same
+  // reading as above: the six additive looks are byte-identical with this line present and
+  // its condition short-circuiting on the path term.
+  if (softEdge == 0 && alpha * falloff <= 0.0) discard;
   fragColor = vec4(col * exposure, alpha * falloff);
 }
 `;

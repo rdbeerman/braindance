@@ -96,11 +96,16 @@ node tools/registry-check.mjs --mutate glyph-leaks-at-zero        # ... and the 
 node tools/registry-check.mjs --mutate rain-leaks-at-zero         # ... the other master, on the same terms
 node tools/registry-check.mjs --mutate compensation-leaks-at-lattice-zero # ... and the energy correction, which rides no master at
                                                                   #     all and so is excused by neither
-node tools/registry-check.mjs --mutate glyph-margins-occlude      # ... the off bits of a character writing depth, which is a
-                                                                  #     square of invisible geometry per point on the hard-edged
-                                                                  #     path. Its section is the only one here standing two
-                                                                  #     surfaces up: every other plants one wall coincident with
-                                                                  #     itself, where nothing is behind anything to be hidden
+node tools/registry-check.mjs --mutate glyph-margins-occlude      # ... a fragment at exactly zero alpha writing depth, which is
+                                                                  #     invisible geometry per point on the hard-edged path. Its
+                                                                  #     two sections are the only ones here standing two surfaces
+                                                                  #     up: every other plants one wall coincident with itself,
+                                                                  #     where nothing is behind anything to be hidden
+node tools/registry-check.mjs --mutate margins-confined-to-glyphs # ... the same discard narrowed back to characters, which is
+                                                                  #     the state one commit of this history was in and the
+                                                                  #     wrong fix the character section cannot refuse
+node tools/registry-check.mjs --mutate margins-miss-the-newborn   # ... and narrowed the other way, to the disc's rim and not
+                                                                  #     the point that has not faded in yet
 node tools/timeline-check.mjs --url http://localhost:8080 # step 4: seek equals playback
 node tools/timeline-check.mjs --mutate preroll-constant   # ... and must FAIL mutated
 node tools/timeline-check.mjs --mutate draft-always-resets # ... and must FAIL mutated
@@ -821,6 +826,16 @@ row requires the two builds to have run the same chain — printed in the row's 
 way. `UnrealBloomPass` becoming `BloomPass` is normalised by name rather than skipped, so a
 rename nobody knew about fails loudly instead of passing quietly.
 
+**That last sentence was the exemption in miniature and it has been taken out.** Stripping
+the prefix made the one guard written to notice a swapped pass the guard that could not:
+`124a90b` replaced three's `UnrealBloomPass` with ours and the two do not deliver the same
+light, so from that commit the `rebase-full` pair compared two implementations and reported
+it as a ratio — 0.40978 and 0.40931 against an expected 1, red for fifteen days. Names are
+compared whole now, and the two arms that have to span the swap render with `bloom` at 0
+instead, printing the bloom-up ratio beside the judged one so the excluded term is still a
+number in the run. `docs/instruments.md` has the case file and the isolation, and the row
+titles say **bar the glow** because a label may not claim more than the arm measured.
+
 **"Every cross-build row" was three of five when that paragraph was written, and the two it
 missed are the two the paragraph above explains were green.** The guard went on the arms the
 vignette had reddened and not on the `rebase-full` pair, whose exemption is the sentence
@@ -877,6 +892,20 @@ bytes of 921600, delta 1)`, the identical line on all 13 clean runs recorded her
 figures off the 640x400 stage they were first taken at. The operational consequence is the whole
 point: **a red `readGhost` row is a finding now rather than the weather**, and so is that line's
 byte count climbing.
+
+**And it has six standing red rows again, deliberately, which is the opposite situation and has
+to be read as such.** Widening the zero-alpha discard from characters to the whole hard-edged
+path moves the four non-additive documents, and section 1b compares this build against a
+revision that predates the discard entirely — so all five reading rows and the raster row now
+report `6 of 6 frames differ`, at 460 to 750 bytes of 921,600 per frame with worst deltas of
+191 to 250. That is the approved look change arriving in the one place in this suite that
+compares this build against a committed one, and re-pinning it would turn a golden arm into a
+mirror. **The clean run is 145 assertions, 139 passed, 6 failed**, and those six are the six.
+Two mutations make them green again, which is worth knowing before reading a mutation's count:
+`margins-confined-to-glyphs` and `glyph-margins-occlude` both put the older arithmetic back, so
+each of them reports *fewer* total reds than the clean tree while reddening the row it exists
+for. The other rows to read alongside them are the two two-surface claims, at 19,765 of 75,239
+and 365 of 184,184.
 
 **The baseline on this branch is 0 failed at 131 assertions**, up from 89 with the glyph field's
 planted sections in — 120 before the review round added the two-surface occlusion section,

@@ -2054,6 +2054,59 @@ declaration count the import row prints is two below rule 2's edge count on this
 are the pages' `<script src>` edges, which bind no name, so the gap is the count being taken
 where the question is asked rather than a population going missing.
 
+**A seventh, and the skipped object was a value one line of every planted look sets to
+zero.** `registry-check`'s two-surface section holds one claim — a fragment at exactly zero
+alpha must not write depth on the hard-edged path — and it was built for the glyph margins,
+which is one of the three ways a fragment gets there. The other two are older than the glyph
+field: a point born this frame carries `vFade` of exactly 0 while its sprite rasterises, and
+the disc's falloff reaches 0 at exactly `r2 == 0.25`. Neither could reach any arm in that
+file, and the reason is a single key. Every planted look there carries `fade: 0`, which sends
+the vertex stage down the `fadeTime > 0.0 ? … : 1.0` branch and makes the crossfade the
+constant 1 — so no planted point in the file is ever at zero alpha for any reason except a
+character's margin, and the section built to hold the class held exactly the instance it was
+written for. `fade: 0` is in those looks for a good reason, which is the shape this page keeps
+arriving at: an exclusion with a justification stops anybody looking twice.
+
+The measurement is what settled it rather than the reading. A discard-only A/B against the
+shipped looks — the widened condition served by route interception, everything else identical,
+over the fifteen pinned program positions — moves contour, depth, ghost and rgb by 847, 915,
+931 and 901 pixels and leaves all six additive documents byte-identical, and splitting the
+condition apart attributes 835/903/919/889 of those to births and 12 apiece to the rim, which
+sum to the whole on every arm. So the class is three, the section covered one, and the two it
+missed are 100% of the pixels the repair moves.
+
+**Closing it needed a fixture the section's own idiom cannot build**, and that is the part
+worth keeping. `field()` injects a depth grid straight into the texture and writes
+`sinceFrameSec` by hand, and the crossfade reads `st.g + sinceFrameSec` — so with the surface
+memory cleared every point in the frame carries the same age, and a fade window blanks the
+whole cloud or none of it. There is no setting of that helper in which one surface is faded in
+and another is not. The pinned drive has the per-texel age instead, because the memory zeroes
+`.g` on a swap and adds the gap to it otherwise: three synthetic frames, the far surface twice
+and then both surfaces, stepped to the second frame's own time. The near texels were born on
+the last step and sit at age 0; the far ones never swapped and sit at the gap. The near cloud
+is then invisible and the claim is byte-identity over the whole frame with no threshold in it.
+`--mutate margins-confined-to-glyphs` reddens that row alone at 365 of 184184 while every row
+of the character section stays green, which is the section's own coverage stated as a control.
+
+**What is still not held is the rim, and it is not held because it cannot be planted.**
+Whether a rasterised sprite lands a sample on `r2 == 0.25` at all depends on its fractional
+size, so the condition is real — 12 pixels per shipped look over the fifteen positions, at
+nine of them — and there is no camera or cell size that produces it on demand.
+`--mutate margins-miss-the-newborn` is the control for a repair written from that end, and
+what refuses it is section 1b rather than a planted arm: that section renders this build
+against one with no zero-alpha discard at all, and a condition reaching the rim alone moves
+five of its six frames by 3 to 12 bytes of 921600. **A claim can be held by the comparison
+that spans the change rather than by a fixture**, and saying which one holds it is the
+difference between a covered claim and a claim somebody assumes is covered.
+
+**One number on this page was wrong and is corrected rather than replaced.**
+`glyph-ignored`'s entry read that its two-surface claim row goes red at 17 pixels of 9922
+because "with no character anywhere what is left writing depth at exactly zero alpha is the
+disc's own rim". The rim is discarded outright on this build and the row still reads 17 of
+9922, to the pixel — so the attribution was a reading rather than a measurement. What those
+pixels are is bloom spreading the near cloud's own light past the pixels it drew on, which
+that comparison excludes by drawn pixel and not by halo.
+
 ### The third form: a fixture symmetric under the very transform you are testing
 
 The two forms above are about arms agreeing and about an object nobody looks at. There is a
@@ -2206,6 +2259,60 @@ at all, so on those rows `sameChain` is not a second opinion, it is the only one
 emptying every arm's pass list gives 45 of 50, failing exactly the five cross-build rows, which
 is the vacuity the population row now catches at its source. Both are recorded here with their
 numbers because that is the whole of what stands behind those rows.
+
+### And the same guard then normalised away the one difference that mattered
+
+`sameChain` shipped with an exemption written into `chainOf`: a leading `Unreal` was
+stripped off a pass name, so `UnrealBloomPass` and `BloomPass` compared equal. The reasoning
+in the comment was that the change was a rename inside the range the cross-build arms span
+and the pass was the same pass. It was a rename in the source and a **replacement in the
+picture** — `124a90b` put our down-and-up chain where three's Gaussian-per-mip one had been —
+and the two do not deliver the same light. So the one guard written to say "these two arms
+are not comparable" was the guard taught to say they were, on the same two rows the section
+above had just finished exempting for a different reason.
+
+The rows went red at that commit and stayed red for fifteen days, reporting a luminance
+ratio and nothing else. Measured 2026-08-24, this file's `export-check` at consecutive
+revisions on one machine with one capture: `124a90b^` reads **0.99312 and 0.99403** and
+passes, `124a90b` reads **0.40978 and 0.40931** with worst tiles of 45.923 and 45.962 and
+fails, and the same numbers come back unchanged to five figures at `ad7c806`, `6ad2433` and
+at the tip. Isolated at a single 960x600 buffer so resolution is out of the comparison: at
+`bloom` 0.5 the mean luminance is 7.1614 here against 17.3797 there, ratio 0.41205; at
+`bloom` 0 it is 5.0925 against 5.0581, ratio 1.00679 and a worst tile of 0.337. One term
+carried all of it.
+
+**Three things worth keeping.** The first is the shape: an instrument may exempt a term from
+a comparison, but it may not exempt a term from a *predicate whose job is to notice the
+term*. Normalising two names together is the same move as widening a band until a row
+passes, and it is harder to see because it reads as tidying. The prefix is compared like
+every other part of a name now, and the arms that have to span the swap take bloom out of
+the look instead — so a future pass swap fails the row with both names printed rather than
+arriving as a ratio.
+
+The second is that a term taken out of a comparison has to **leave a number behind**. The two
+rows render the same scene a second time with the glow up and print that ratio in their own
+message whether they pass or fail, because this file's most expensive habit is an object
+every observation skips and a comment is not an observation. The judged rows now read 1.00475
+and 1.00378 at worst tiles of 0.219 and 0.244, and the printed glow pair reads 0.40978 and
+45.923 beside them.
+
+The third is what the exclusion did **not** cost, checked rather than argued.
+`bloom-buffer-sized` reddens the sweep's own `bloom` and `full` rows — 2 assertions, coarse
+means 6.651 and 6.498 against 1.6 and 2.6 — so the reference the chain is frozen at keeps its
+catcher and never depended on this pair. `pointsize-absolute` still reddens the 1920x1200 row
+with bloom off, at ratio 0.88296 and a worst tile of 5.435 against bands of 0.02 and 2.0,
+and still leaves the 1728x1080 row green where the scale factor is exactly 1, which is the
+asymmetry those two arms exist for. `bloom-reference-1080` is uncaught before and after, at
+51 of 51, which is what this page already says of it.
+
+**Two records here disagree with all of that and are left standing rather than edited.**
+`docs/performance.md` credits the replacement with turning these two rows green, and the
+probe note above this one quotes a clean run at ratio 1.00883 and worst tile 0.410 on
+2026-08-12. Neither reproduces: `6ad2433` measures 0.40978 and 45.923 like every other
+revision after the swap. The A/B that dates the flip is two consecutive commits minutes
+apart on one machine, so the direction is not in doubt whatever those numbers were taken on —
+but the disagreement is a fact about this repository's records and belongs on the page rather
+than in a commit message.
 
 ### The half measured by hand is the half the next round finds
 

@@ -91,6 +91,20 @@ function revBeforeMarker(marker) {
 // rows: a mutation that fails everything cannot say which claim is load-bearing, which
 // is the same reason `expand-shifts-by-a-block` exists beside `bind-ignores-grid` in
 // monitor-check.
+//
+// **Every list below is read against six rows that are red on the clean tree, and they are
+// not a catch of anything.** Section 1b renders this build against the revision before the
+// registry, and that revision predates the discard that keeps a zero-alpha fragment out of
+// the depth buffer - so the five reading rows and the raster row now report 6 of 6 frames
+// differing, at 460 to 750 bytes of 921600 with worst deltas of 191 to 250. It renders the
+// five readings at defaults rather than any shipped document, and the defaults sit on the
+// hard-edged path, which is why `readBlackwall`'s row moves here while the Blackwall document
+// itself is additive and byte-identical. That is the look change the widening bought,
+// arriving in the one place in this suite that compares this build against a committed one.
+// It is reported rather than re-pinned, because a golden arm re-pinned to whatever the tree
+// does today is not a golden arm. Read a mutation's own list as rows *beyond* those six, and
+// note that two of the mutations here make them green again by putting the older behaviour
+// back.
 const MUTATIONS = {
   // Section 1b, the readRgb row and only that row. Alpha is the asymmetric half of this
   // blend and the place a rewrite of it actually breaks: three readings multiply
@@ -592,21 +606,34 @@ const MUTATIONS = {
       ['  if (glyph > 0.0) {', '  if (false) {'],
       ['  if (glyphMix > 0.0) {', '  if (false) {'],
     ],
-    fails: 'twenty-one rows, counted out because a list that undercounts sends the next reader '
-      + 'hunting a defect that is not there. **Two carry the claim**: the drop-one sweep, '
+    fails: 'twenty-two rows on top of the six section 1b carries on the clean tree, counted out '
+      + 'because a list that undercounts sends the next reader hunting a defect that is not '
+      + 'there. **Two carry the claim**: the drop-one sweep, '
       + 'naming glyph.amount, glyph.tone, glyph.hash and glyph.rain unexplained, and the count beneath '
-      + 'it at 81 of 89. **Eighteen are the planted glyph sections losing their fixture** - '
+      + 'it at 81 of 89. **Nineteen are the planted glyph sections losing their fixture** - '
       + 'the thinning section\'s guard and its equality, all three turbulence rows, both '
       + 'ripple rows, the index section\'s guard, its doubling row and its distinctness row, '
       + 'the hash ramp\'s strict row, the rain key\'s own row, the strict ink row, all three '
-      + 'rows of the two-surface section, the unit section\'s hard-bit reference row, and the '
-      + 'keys-move control. That section\'s claim row is worth reading '
+      + 'rows of the character two-surface section, the unit section\'s hard-bit reference row, '
+      + 'the above-1080 section\'s companion arm, and the '
+      + 'keys-move control. **This list said eighteen and nineteen fire**, and the one it left '
+      + 'out is the above-1080 companion arm; that it fired before the discard was widened as '
+      + 'well is a reading rather than a measurement - the mutation draws no character under '
+      + 'either key setting, so the two arms are identical splats whatever the discard does - '
+      + 'and it was not re-derived on the pre-widening tree, because this worktree was carrying '
+      + 'other agents\' live runs at the time. That section\'s claim row is worth reading '
       + 'rather than counting: it goes red at 17 pixels of 9922 against the 19,765 of 75,239 '
-      + '`glyph-margins-occlude` produces, because with no character anywhere what is left '
-      + 'writing depth at exactly zero alpha is the disc\'s own rim - an older fault this '
-      + 'branch neither introduced nor repairs, showing through a fixture that has lost its '
-      + 'subject. **One is a neighbour**: the streak\'s 90-degree '
+      + '`glyph-margins-occlude` produces. **The 17 used to be written down here as the disc\'s '
+      + 'own rim and they are not**, and the correction is recorded rather than quietly made: '
+      + 'the rim is discarded outright on this build, and the number did not move by a pixel. '
+      + 'What is left is bloom spreading the near cloud\'s own light past the pixels it drew '
+      + 'on, which the comparison excludes by drawn pixel rather than by halo - a fixture that '
+      + 'has lost its subject rather than a fault of any age. **One is a neighbour**: the '
+      + 'streak\'s 90-degree '
       + 'row at 2.44/0.14, which reads the scrambled set this mutation emptied.\n'
+      + '           The newborn section stays green throughout, correctly: its look draws no '
+      + 'characters to begin with, so a mutation that stops characters being drawn is its '
+      + 'shipped arithmetic.\n'
       + '           `bloom` is a fifth *name* inside the sweep row rather than a thirteenth '
       + 'row, and it is unexplained in both senses - why that pass in particular stops '
       + 'reaching a pixel here is a reading and not a measurement, presumably a frame with no '
@@ -811,7 +838,8 @@ const MUTATIONS = {
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);',
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vSize);',
     ]],
-    fails: 'five rows. **Two carry the claim** and they are the two halves of it: the in-band '
+    fails: 'five rows on top of section 1b\'s standing six. **Two carry the claim** and they '
+      + 'are the two halves of it: the in-band '
       + 'cell coming back a hard bit at one colour, and the cut-away cell doing the same - '
       + 'vSize is taken before the halving as well as in the wrong unit, so this mutation is '
       + 'wrong about both. The hard-bit reference row above them stays green, which is what '
@@ -904,10 +932,11 @@ const MUTATIONS = {
       + 'and so does the afterglow row, which is the whole point of the pair: the trail is '
       + 'still on the upper side of the head in a wave that is going the wrong way',
   },
-  // **The repair for the glyph margins taken back out**, which is the build this branch
-  // shipped before the review found it: on the hard-edged path a fragment whose alpha comes
-  // out exactly zero goes on writing depth, so the off bits of every bitmask and the corners
-  // of every sprite stand in front of the room as invisible geometry.
+  // **The repair for the zero-alpha occluders taken back out**, which is the build this
+  // shader shipped before it: on the hard-edged path a fragment whose alpha comes out exactly
+  // zero goes on writing depth, so the off bits of every bitmask, the whole sprite of every
+  // point that has not faded in yet, and the disc's own rim all stand in front of the room as
+  // invisible geometry.
   //
   // The whole statement is removed rather than its condition weakened, because the condition
   // is the fix. Anchored together with the line under it: the output statement appears once
@@ -916,17 +945,71 @@ const MUTATIONS = {
   'glyph-margins-occlude': {
     file: 'web/cloud-shader.js',
     edits: [[
-      '  if (softEdge == 0 && glyphMix > 0.0 && alpha * falloff <= 0.0) discard;\n'
+      '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;\n'
         + '  fragColor = vec4(col * exposure, alpha * falloff);',
       '  fragColor = vec4(col * exposure, alpha * falloff);',
     ]],
-    fails: 'the claim row of the two-surface section, alone - the far surface moving under '
-      + 'pixels the near marks never drew on. Both guards beside it stay green, because the '
-      + 'two surfaces still render and the sparse mark still leaves its box empty; what '
-      + 'changes is only whether that empty box is a surface. Nothing else in this file sees '
-      + 'it, and that is the coverage this mutation exists to state: every other planted '
-      + 'section here stands one wall coincident with itself, where there is nothing behind '
-      + 'anything to hide',
+    fails: 'the claim row of each of the two two-surface sections, and nothing else. The '
+      + 'character section\'s is the far surface moving under pixels the near marks never drew '
+      + 'on; the newborn section\'s is the frame with an invisible cloud in it no longer being '
+      + 'the frame without it. Every guard beside them stays green, because both fixtures '
+      + 'still render and the sparse mark still leaves its box empty; what changes is only '
+      + 'whether an empty box is a surface. Nothing else in this file sees it, and that is the '
+      + 'coverage these two sections exist to state: every other planted section here stands '
+      + 'one wall coincident with itself, where there is nothing behind anything to hide',
+  },
+  // **The same repair confined back to characters**, which is the one commit's worth of state
+  // between the glyph field going in and the widening. It is the wrong fix that is hardest to
+  // tell from the right one, because the section built for the glyph margins passes it
+  // perfectly - the margins are exactly what it still discards - and the two older halves of
+  // the class go on writing depth underneath.
+  //
+  // Its sibling one line further in is the same narrowing written the other way: a condition
+  // reaching the rim and not the birth. Both are here because the fix is one expression and
+  // the ways to get it nearly right are conditions bolted onto that expression; a section that
+  // could only refuse the empty gate would accept either of them.
+  'margins-confined-to-glyphs': {
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;',
+      '  if (softEdge == 0 && glyphMix > 0.0 && alpha * falloff <= 0.0) discard;',
+    ]],
+    fails: 'the claim row of the newborn section, alone, at 365 of 184184 pixels moved with '
+      + 'all 365 behind a newborn sprite. Both guards beside it stay green - the plant is '
+      + 'geometry and a condition does not move it - and so does every row of the character '
+      + 'section next door, which is the whole point of this control: that section holds the '
+      + 'glyph margins and cannot hold anything else, so a build that repaired only them reads '
+      + 'clean everywhere it used to be read.\n'
+      + '           **It also turns six red rows green, and a reader counting reds has to know '
+      + 'that before reading the one.** Section 1b compares this tree against a revision that '
+      + 'predates the repair entirely, and the mode presets it renders draw no characters - so '
+      + 'the confined condition is that revision\'s arithmetic exactly and the five reading '
+      + 'rows and the raster row all match again. On the clean tree those six are red, and they '
+      + 'are the shipped look movement this change bought rather than a fault',
+  },
+  // The same narrowing pointed at the other older half: a condition that reaches the disc's
+  // rim and leaves a point that has not faded in yet writing depth. Written as a disjunct
+  // rather than as a rewrite, so the anchor is the shipped line and the arithmetic on every
+  // fragment except a newborn one is the shipped arithmetic.
+  'margins-miss-the-newborn': {
+    file: 'web/cloud-shader.js',
+    edits: [[
+      '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;',
+      '  if (softEdge == 0 && (glyphMix > 0.0 || falloff <= 0.0) && alpha * falloff <= 0.0) discard;',
+    ]],
+    fails: 'seven rows. The claim is the newborn section\'s, at the same 365 of 184184 - the '
+      + 'two narrowings are indistinguishable on that fixture and that is correct rather than a '
+      + 'gap, because on it every zero-alpha fragment is a birth. It is a separate control '
+      + 'because it is a separate reachable mistake: this one is what a reader repairing the '
+      + 'defect from the disc\'s end writes, and the fixture has to refuse both ends.\n'
+      + '           **The other six are section 1b, and they are the one place in this suite '
+      + 'the rim is visible at all.** That section renders this tree against a revision with no '
+      + 'zero-alpha discard of any kind, so it sees whatever this condition reaches: the whole '
+      + 'repair moves all six frames, five of them by 460 to 750 bytes of 921600, and a '
+      + 'condition reaching the rim alone moves five of the six by 3 to 12. Both are past the '
+      + 'tolerance - which asks for 64 bytes and a single step, and every one of these bytes is '
+      + 'a couple of hundred - so the rows are red either way and the byte count is the reading '
+      + 'rather than the verdict',
   },
   // The energy normalisation's floor put back, which is the state this branch found the
   // shader in. It looked harmless while a sprite was `pointSize`-sized, because 9 pixels
@@ -5280,6 +5363,164 @@ console.log('\n[registry] and the margin around a character is not a surface');
       ? `0 of ${occl.population} pixels moved, ${occl.atRisk} of them inside a near sprite`
       : `${occl.moved} of ${occl.population} pixels moved without a near mark on them, `
         + `${occl.movedAtRisk} of those inside a near sprite - the margin is writing depth`);
+}
+
+// **A point that has not faded in yet is invisible in colour and solid in depth, and that
+// is older than characters by a long way.** The section above stands the same two surfaces
+// up and cannot see it: every planted look in this file carries `fade: 0`, which sends the
+// vertex stage down the `fadeTime > 0.0 ? ... : 1.0` branch and makes the crossfade the
+// constant 1, so nothing up there is ever at zero alpha for any reason except a character's
+// margin. That is rule 5 twice over on the same fixture - an object every observation
+// happens to skip, and skipped for a reason that reads as sound.
+//
+// **The fixture cannot be `field()` and the reason is arithmetic rather than convenience.**
+// `field()` injects a depth grid straight into the texture and writes `sinceFrameSec` by
+// hand, and the crossfade reads `st.g + sinceFrameSec` - so with the surface memory cleared
+// every point in the frame carries the same age, and a fade window either blanks the whole
+// cloud or none of it. There is no setting of it in which one surface is faded in and the
+// other is not, which is exactly the frame this claim needs.
+//
+// The pinned drive has the per-texel age the plant wants, because the memory zeroes `.g` on
+// a swap and adds the gap to it otherwise. Three synthetic frames carry that:
+//
+//   0, 1   the far surface, with holes where the near points are going to be
+//   2      both surfaces
+//
+// Stepped to frame 1's own time, the offset into the frame is 0 - asserted below rather than
+// assumed - and the drive has applied every frame up to 2. The near texels were born on that
+// last step, so their age is exactly 0 and the fade window puts them at exactly zero alpha.
+// The far texels never swapped, so theirs is the gap between two frames and they draw at full
+// strength. **The far-only arm is the same three frames with the near points never
+// arriving**, so the only difference between the two is a cloud that draws nothing - which
+// makes the claim byte-identity over the whole frame rather than an equality carved out of
+// part of it, with no threshold anywhere in it.
+//
+// A birth leaves no ghost to confuse the comparison, and that is the memory's own rule rather
+// than an assumption: a swap writes `wasValid ? last : 0.0` into the depth a ghost would stand
+// at, so a texel arriving over nothing writes 0 there and the ghost branch's `st.r <= 0.0`
+// takes it out before it can rasterise.
+//
+// It costs a page of its own because it re-pins the drive, and every section after this one
+// plants through `field()` on the shared page's fixture.
+//
+// **What this does not hold is the disc's own rim**, and that is stated rather than left to
+// be inferred. `smoothstep(0.25, 0.02, r2)` reaches 0 at exactly r2 = 0.25, one ring of
+// fragments the `r2 > 0.25` test lets through, and whether a rasterised sprite lands a sample
+// on that ring at all depends on its fractional size - so it is real and measured on footage,
+// at 12 pixels per shipped look over the fifteen pinned positions, and there is no setting of
+// this fixture that plants it deterministically. `docs/instruments.md` carries the case file.
+console.log('\n[registry] and a point that has not faded in yet is not a surface either');
+{
+  const born = await openPage();
+  const occl = await born.page.evaluate(`(async () => {
+    ${PAGE_HELPERS}
+    const W = 512, H = 424, N = W * H;
+    // The same interleave the section above uses and for the same reason: a near sprite only
+    // hides a far point the driver reaches after it, and a block of near texels would leave
+    // that dependent on which side of the block the far rows sat.
+    const mask = (withNear) => {
+      const a = new Uint16Array(N);
+      for (let r = 0; r < H; r++) {
+        for (let c = 0; c < W; c++) {
+          const near = r % 16 === 0 && c % 16 === 0;
+          a[r * W + c] = near ? (withNear ? 1200 : 0) : 4000;
+        }
+      }
+      return a;
+    };
+    // The pinned wire shape, which is the one \`PinnedPairSource\` parses: depth byte count,
+    // colour byte count, the capture stamp, then the depth. A hundred milliseconds apart, so
+    // the far surface's age clears the fade window below with room to spare.
+    const pack = (grids) => {
+      const per = 16 + N * 2;
+      const buf = new ArrayBuffer(per * grids.length);
+      const view = new DataView(buf);
+      grids.forEach((g, i) => {
+        view.setUint32(i * per, N * 2, true);
+        view.setUint32(i * per + 4, 0, true);
+        view.setBigUint64(i * per + 8, BigInt(i * 100), true);
+        new Uint16Array(buf, i * per + 16, N).set(g);
+      });
+      return buf;
+    };
+    const far = mask(false);
+    const both = mask(true);
+    const none = new Uint16Array(N);
+    // No characters anywhere: this is the older half of the class and it belongs to looks
+    // that draw no glyph at all, so a fixture drawing them would be asking the question the
+    // section above already answers.
+    const look = { additive: false, denoise: false, wake: 0, opacity: 1, exposure: 1,
+      pointSize: 64, 'lattice.amount': 1, cell: 0.15, 'glyph.amount': 0, 'rain.amount': 0,
+      interpolate: false, readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0,
+      readBlackwall: 0, near: 0.5, far: 4.5 };
+    const shot = (grids, fade) => {
+      const times = k.drive.pin(pack(grids));
+      k.params.reset();
+      k.params.apply({ ...look, fade });
+      k.drive.reset();
+      pinCamera(k.freeCamera);
+      k.drive.stepTo(times[1]);
+      return { px: k.drive.readPixels().slice(), since: k.uniforms.sinceFrameSec.value };
+    };
+    // This renderer does not clear to black, so every "is anything lit here" reading taken
+    // against zero comes back saying the whole frame is lit. Each arm is read against a frame
+    // of the same fixture with no depth in it at all.
+    const bg = shot([none, none, none], 60).px;
+    const F = shot([far, far, far], 60);
+    const C = shot([far, far, both], 60);
+    // The same pair with no fade window, which is what says the near cloud is present and
+    // held at zero alpha rather than simply absent - without it the equality below would be
+    // satisfied perfectly by a plant that failed.
+    const Flit = shot([far, far, far], 0).px;
+    const Clit = shot([far, far, both], 0).px;
+    const drew = (px, i) => px[i] !== bg[i] || px[i + 1] !== bg[i + 1] || px[i + 2] !== bg[i + 2];
+    const lit = (px) => { let n = 0; for (let i = 0; i < px.length; i += 4) if (drew(px, i)) n++; return n / (px.length / 4); };
+    let moved = 0, atRisk = 0, movedAtRisk = 0;
+    for (let i = 0; i < C.px.length; i += 4) {
+      const inSprite = Clit[i] !== Flit[i] || Clit[i + 1] !== Flit[i + 1] || Clit[i + 2] !== Flit[i + 2];
+      if (inSprite && drew(F.px, i)) atRisk++;
+      if (C.px[i] !== F.px[i] || C.px[i + 1] !== F.px[i + 1]
+        || C.px[i + 2] !== F.px[i + 2] || C.px[i + 3] !== F.px[i + 3]) {
+        moved++;
+        if (inSprite) movedAtRisk++;
+      }
+    }
+    return { moved, atRisk, movedAtRisk, since: C.since, sinceFar: F.since,
+      pixels: C.px.length / 4, farLit: lit(F.px), combinedLit: lit(C.px),
+      farPaint: lit(Flit), nearPaint: lit(Clit) };
+  })()`);
+
+  check(occl.farLit > 0.02 && occl.nearPaint > occl.farPaint * 1.2,
+    'the far surface renders and the near cloud is really in front of it, so the equality '
+    + 'below is comparing pictures rather than two empty frames',
+    `the far surface inks ${(100 * occl.farLit).toFixed(2)}% of the frame, and with the fade `
+    + `window off the same pair inks ${(100 * occl.nearPaint).toFixed(2)}% against the far `
+    + `surface's ${(100 * occl.farPaint).toFixed(2)}%`);
+
+  // The vacuity guard, and it is the plant asserted rather than described. `sinceFrameSec` at
+  // exactly 0 is what puts the newborn points at an age of exactly 0, and a drive that landed
+  // anywhere else inside the frame would fade them in and leave nothing here to hide with.
+  // The at-risk count is the population an invisible sprite could take away: lit far surface
+  // standing behind a near sprite's own footprint.
+  check(occl.since === 0 && occl.atRisk > 300,
+    'and the near cloud is at zero alpha because its points were born on this frame, with lit '
+    + 'far surface behind them, so there is something for an invisible sprite to hide',
+    `sinceFrameSec ${occl.since} at the plant and ${occl.sinceFar} on the far-only arm; `
+    + `${occl.atRisk} pixels of lit far surface sit inside a near sprite's footprint`);
+
+  // The claim, and it is the whole frame rather than a carved-out part of it: the near cloud
+  // draws nothing at all, so a correct build renders the far-only frame byte for byte.
+  check(occl.moved === 0,
+    'and the frame with the newborn cloud in it is the frame without it, byte for byte, so a '
+    + 'point that has not faded in yet occludes nothing',
+    occl.moved === 0
+      ? `0 of ${occl.pixels} pixels moved, ${occl.atRisk} of them behind a newborn sprite`
+      : `${occl.moved} of ${occl.pixels} pixels moved, ${occl.movedAtRisk} of those behind a `
+        + `newborn sprite - a point at zero alpha is writing depth`);
+
+  check(born.errors.length === 0, 'and the page it ran on logged no errors',
+    born.errors.slice(0, 2).join('; '));
+  await born.page.close();
 }
 
 // **Which side of the head the afterglow sits on**, which is what makes the wave read as
