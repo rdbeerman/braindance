@@ -167,11 +167,11 @@ const MUTATIONS = {
       '  if (duotoneDepth > 0.0) {',
       '  if (false) {',
     ]],
-    fails: 'duotoneDepth, duotoneHue, duotoneSplit and duotoneMotion in the drop-one sweep, '
+    fails: 'duotone.amount, duotone.hue, duotone.split and duotone.motion in the drop-one sweep, '
       + 'plus the planted section\'s two motion rows, which the block being off takes with it',
   },
   // The sharper half of the one above, and the reason both are kept: the duotone goes on
-  // working as a flat tint, so `duotoneDepth` still moves pixels and only the split stops
+  // working as a flat tint, so `duotone.amount` still moves pixels and only the split stops
   // meaning anything. That is the difference between "the term is wired up" and "the term
   // is keyed on depth", and depth is the whole claim - a duotone that is not depth-keyed
   // cannot draw the silhouette this parameter exists for, which is exactly the shape of
@@ -182,7 +182,7 @@ const MUTATIONS = {
       '    float k = smoothstep(duotoneSplit - w * 0.5, duotoneSplit + w * 0.5, t);',
       '    float k = 0.5;',
     ]],
-    fails: 'duotoneSplit and duotoneSpan in the drop-one sweep - the amount and the hue still '
+    fails: 'duotone.split and duotone.span in the drop-one sweep - the amount and the hue still '
       + 'reach pixels, and the span goes with the split because the ramp it widens is gone - '
       + 'plus the metre section\'s control row, since a ramp replaced by a constant cannot be '
       + 'widened either',
@@ -196,7 +196,7 @@ const MUTATIONS = {
       '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
       '    float w = 1.0;',
     ]],
-    fails: 'duotoneSpan in the drop-one sweep - every other duotone term still reaches pixels, '
+    fails: 'duotone.span in the drop-one sweep - every other duotone term still reaches pixels, '
       + 'since the ramp goes on running at the width it had before this parameter - and the whole '
       + 'of the metre section, whose two invariance rows read a ramp that is once again a share '
       + 'of the box and whose control row cannot widen it',
@@ -230,7 +230,7 @@ const MUTATIONS = {
       '    vSpeed = paired ? abs(mmC - mmP) / spanSec : 0.0;',
       '    vSpeed = 0.0;',
     ]],
-    fails: 'duotoneMotion in the drop-one sweep and the proven-parameter count beneath it, '
+    fails: 'duotone.motion in the drop-one sweep and the proven-parameter count beneath it, '
       + 'plus the planted section\'s two motion rows - the one that says a planted pair moves '
       + 'the picture and the one that says it moves it toward the hot pole',
   },
@@ -317,7 +317,7 @@ const MUTATIONS = {
       '    apply: (v) => { uniforms.duotoneHue.value = THREE.MathUtils.degToRad(v); } },',
       '    apply: (v) => { uniforms.duotoneHue.value = v; } },',
     ]],
-    fails: 'the duotoneHue row of the one-at-a-time landing sweep, reporting "landed 47 want '
+    fails: 'the duotone.hue row of the one-at-a-time landing sweep, reporting "landed 47 want '
       + '0.8203047484373349", and the all-at-once row beside it - that second one is the same '
       + 'comparison over the whole set rather than a separate finding',
   },
@@ -388,7 +388,7 @@ const MUTATIONS = {
       '  if (ripple > 0.0 && rw > 0.0) {',
       '  if (false) {',
     ]],
-    fails: 'ripple, rippleFreq and rippleSpeed in the drop-one sweep, and the ripple-alone row',
+    fails: 'ripple.amount, ripple.freq and ripple.speed in the drop-one sweep, and the ripple-alone row',
   },
   // The gate put back the way it was before the ripple existed, so the region weight is
   // only computed when one of the older three effects asks for it. **The drop-one sweep
@@ -426,7 +426,7 @@ const MUTATIONS = {
       '      ? floor(mix(position.y, position.x, glitchAxis) / glitchBands)',
       '      ? floor(position.y / glitchBands)',
     ]],
-    fails: 'glitchAxis in the drop-one sweep, alone',
+    fails: 'glitch.axis in the drop-one sweep, alone',
   },
   // The streak switched off at its own guard, which is the plainest thing that can go
   // wrong with it: a term whose slider moves and whose uniform lands and whose pixels never
@@ -440,8 +440,8 @@ const MUTATIONS = {
     ]],
     // Six rows and not the one this first claimed, taken off the run rather than
     // predicted - and it has grown twice, which is the argument for taking it off a run
-    // every time rather than reasoning about it. The drop-one sweep names both `streak`
-    // and `streakAngle`, because a direction that reaches nothing is a parameter that
+    // every time rather than reasoning about it. The drop-one sweep names both `streak.amount`
+    // and `streak.angle`, because a direction that reaches nothing is a parameter that
     // changes no pixel when it is reverted; the count beneath the sweep follows; and all
     // four rows of the direction section go, its guard first. **Three of those are the
     // fixture rather than the claim**: the pair rows compare the light two angles add, and
@@ -449,7 +449,7 @@ const MUTATIONS = {
     // wrong way. The guard row is what tells them apart, and it reporting zero added
     // luminance is the whole reason it is there - without it the pair rows would be
     // differencing two empty images and could pass by arithmetic.
-    fails: 'streak and streakAngle in the drop-one sweep, the proven-parameter count '
+    fails: 'streak.amount and streak.angle in the drop-one sweep, the proven-parameter count '
       + 'beneath it, and all four rows of the direction section - the added-light guard '
       + 'reporting zero, and the three pair rows behind it, which are the fixture going '
       + 'rather than three findings about direction',
@@ -471,7 +471,7 @@ const MUTATIONS = {
       '          vec3 tap = texture2D(tDiffuse, vUv + d * texel * streakAxis).rgb;',
       '          vec3 tap = texture2D(tDiffuse, vUv + vec2(0.0, d * texel.y)).rgb;',
     ]],
-    fails: 'streakAngle in the drop-one sweep and the proven-parameter count beneath it, '
+    fails: 'streak.angle in the drop-one sweep and the proven-parameter count beneath it, '
       + 'and all three of the direction section\'s pair rows - a nailed build renders the '
       + 'same frame at every angle, so each pair differs by exactly nothing',
   },
@@ -503,7 +503,7 @@ const MUTATIONS = {
       '      grade.uniforms.streakAxis.value.set(Math.sin(r), Math.cos(r));',
       '      grade.uniforms.streakAxis.value.set(Math.sin(v), Math.cos(v));',
     ]],
-    fails: 'the streakAngle row of the one-at-a-time landing sweep, reporting "landed '
+    fails: 'the streak.angle row of the one-at-a-time landing sweep, reporting "landed '
       + '[-0.097181906,0.995266636] want [0.920504853,-0.390731128]", and the all-at-once '
       + 'row beside it - that second one is the same comparison over the whole set rather '
       + 'than a separate finding. Nothing in the direction section moves: this is a unit '
@@ -522,7 +522,7 @@ const MUTATIONS = {
       '          float coord = dot(vUv * ref, scanAxis);',
       '          float coord = vUv.y * ref.y;',
     ]],
-    fails: 'scanAngle in the drop-one sweep, alone',
+    fails: 'raster.angle in the drop-one sweep, alone',
   },
   // The pitch back to the literal it was promoted from. Its default *is* that literal, so
   // nothing about the shipped picture moves - which is the point, and which leaves the
@@ -533,7 +533,7 @@ const MUTATIONS = {
       '          float wave = sin(coord * scanPitch + time * 2.0) * 0.5 + 0.5;',
       '          float wave = sin(coord * 1.3 + time * 2.0) * 0.5 + 0.5;',
     ]],
-    fails: 'scanPitch in the drop-one sweep, alone',
+    fails: 'raster.pitch in the drop-one sweep, alone',
   },
   // The duty cycle dropped, leaving the sine the term has always drawn. This is the
   // control that separates "the raster rotates and crowds" from "the raster is a grille",
@@ -545,7 +545,7 @@ const MUTATIONS = {
       '          line = mix(wave, smoothstep(0.5 - w, 0.5 + w, wave), scanHard);',
       '          line = wave;',
     ]],
-    fails: 'scanHard in the drop-one sweep, alone',
+    fails: 'raster.hard in the drop-one sweep, alone',
   },
   // The tempting edit, planted: `crush` joins the four terms that gate the grade pass, so
   // the pass runs whenever the toe is non-zero, which is always. This is deliberately not
@@ -594,7 +594,7 @@ const MUTATIONS = {
     ],
     fails: 'twenty-one rows, counted out because a list that undercounts sends the next reader '
       + 'hunting a defect that is not there. **Two carry the claim**: the drop-one sweep, '
-      + 'naming glyph, glyphTone, glyphHash and glyphRain unexplained, and the count beneath '
+      + 'naming glyph.amount, glyph.tone, glyph.hash and glyph.rain unexplained, and the count beneath '
       + 'it at 81 of 89. **Eighteen are the planted glyph sections losing their fixture** - '
       + 'the thinning section\'s guard and its equality, all three turbulence rows, both '
       + 'ripple rows, the index section\'s guard, its doubling row and its distinctness row, '
@@ -724,7 +724,7 @@ const MUTATIONS = {
       '    float f = fract(glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
       '    float f = fract(0.0 * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
     ]],
-    fails: 'three rows: glyphTone unexplained in the drop-one sweep, the count at 85 of 89, '
+    fails: 'three rows: glyph.tone unexplained in the drop-one sweep, the count at 85 of 89, '
       + 'and the ink ramp\'s strict row at 1.55% to 1.55%. The non-decreasing row above it '
       + 'stays green and that is why the strict one exists - four equal readings satisfy '
       + '"non-decreasing" perfectly. Both source rows stay green too, correctly: this '
@@ -732,12 +732,12 @@ const MUTATIONS = {
   },
   // The falling wave switched off at both ends of it: the lift the colour stage applies,
   // and the whole-drop counter the glyph field's fourth key reads. One edit is not enough
-  // in either direction. Killing the lift alone leaves `rainSpeed` and `rainSpan` reaching
+  // in either direction. Killing the lift alone leaves `rain.speed` and `rain.span` reaching
   // pixels through the character scramble, and zeroing the coordinate alone leaves
   // `fract(0.0)` at the head of a drop, which is a lift of exactly 1 everywhere - a uniform
   // brightening that `rain` still controls.
   //
-  // `glyphRain` goes into the no-effect bucket with the four, on the `duotone-ignored`
+  // `glyph.rain` goes into the no-effect bucket with the four, on the `duotone-ignored`
   // terms: a key that reads the rain cannot be observed with the rain gone.
   'rain-ignored': {
     file: 'web/cloud-shader.js',
@@ -746,7 +746,7 @@ const MUTATIONS = {
         '  float rainLift = 0.0;'],
       ['    float rainStep = floor(vRain) * 0.6180339887498949;', '    float rainStep = 0.0;'],
     ],
-    fails: 'nine rows. The claim: glyphRain, rain, rainSpeed, rainSpan and rainTrail '
+    fails: 'nine rows. The claim: glyph.rain, rain.amount, rain.speed, rain.span and rain.trail '
       + 'unexplained in the drop-one sweep, with the count at 81 of 89. The rest is the '
       + 'fixture going with it - the trail section finds no head in the column at any phase, '
       + 'so all four of its rows go together: the guard, the afterglow row reading 0.0000 '
@@ -883,7 +883,7 @@ const MUTATIONS = {
       + 'key at exactly 1 drawing the picture it draws with the key at 0. Its nonblank guard '
       + 'stays green, because the frame is still full of characters; what has gone is the '
       + 'key\'s contribution to which ones. The other two are the drop-one sweep naming '
-      + 'glyphRain unexplained and the count beneath it at 85 of 89, which the sweep can only '
+      + 'glyph.rain unexplained and the count beneath it at 85 of 89, which the sweep can only '
       + 'say because SCRAMBLE holds this key at 1 rather than at the 0.44 it used to - at any '
       + 'weight whose fraction is not zero a raw counter still scrambles and the sweep sees '
       + 'nothing wrong',
@@ -1005,7 +1005,7 @@ const MUTATIONS = {
   // written off as arithmetic. The compensation is not a parameter and rides no master: it
   // multiplies alpha on the shared additive path at every value of everything, so neither
   // master being inert says anything about it. The row that catches it asks whether
-  // `latticeCell` can reach a pixel with the lattice at zero, which is the plainest
+  // `cell` can reach a pixel with the lattice at zero, which is the plainest
   // statement of "those eight documents render the frames they always did".
   'compensation-leaks-at-lattice-zero': {
     file: 'web/cloud-shader.js',
@@ -1253,14 +1253,17 @@ const LANDING = {
   opacity: 'k.uniforms.opacity.value',
   exposure: 'k.uniforms.exposure.value',
   additive: '[k.material.blending, k.material.depthWrite, k.uniforms.softEdge.value]',
-  // The glyph field's four, each landing 1:1 on the uniform of its own name. The master is
+  // The glyph field's four, each landing 1:1 on one uniform - the uniform keeping the flat
+  // spelling the parameter had before the rename moved the registry onto dotted effect
+  // names, because the rename was a registry fact and deliberately not a shader one, so
+  // this table is where the pairing of the two spellings is written down. The master is
   // read in both stages of the cloud shader and the three keys in the fragment stage alone,
   // but that is a fact about the shader rather than about the landing site: there is one
   // cell per parameter and the sweep below reads it.
-  glyph: 'k.uniforms.glyph.value',
-  glyphTone: 'k.uniforms.glyphTone.value',
-  glyphHash: 'k.uniforms.glyphHash.value',
-  glyphRain: 'k.uniforms.glyphRain.value',
+  'glyph.amount': 'k.uniforms.glyph.value',
+  'glyph.tone': 'k.uniforms.glyphTone.value',
+  'glyph.hash': 'k.uniforms.glyphHash.value',
+  'glyph.rain': 'k.uniforms.glyphRain.value',
   near: 'k.uniforms.nearClip.value',
   far: 'k.uniforms.farClip.value',
   left: 'k.uniforms.cropL.value',
@@ -1272,11 +1275,11 @@ const LANDING = {
   snapDelta: 'k.uniforms.snapDelta.value',
   fade: '[k.uniforms.fadeTime.value, k.geometry.drawRange.count]',
   wake: '[k.uniforms.wakeTime.value, k.geometry.drawRange.count]',
-  noise: 'k.uniforms.noise.value',
-  noiseScale: 'k.uniforms.noiseScale.value',
-  noiseSpeed: 'k.uniforms.noiseSpeed.value',
-  lattice: 'k.uniforms.lattice.value',
-  latticeCell: 'k.uniforms.latticeCell.value',
+  'noise.amount': 'k.uniforms.noise.value',
+  'noise.scale': 'k.uniforms.noiseScale.value',
+  'noise.speed': 'k.uniforms.noiseSpeed.value',
+  'lattice.amount': 'k.uniforms.lattice.value',
+  cell: 'k.uniforms.latticeCell.value',
   // The centre and the half-extents are three sliders landing in one vector each, so
   // the component is named here rather than the uniform - an apply that wrote the
   // whole vector, or wrote y where x was meant, reads identically at `.value`.
@@ -1288,19 +1291,19 @@ const LANDING = {
   regionD: 'k.uniforms.regionHalf.value.z',
   regionRound: 'k.uniforms.regionRound.value',
   regionSoft: 'k.uniforms.regionSoft.value',
-  regionPush: 'k.uniforms.regionPush.value',
-  regionNoise: 'k.uniforms.regionNoise.value',
-  regionMask: 'k.uniforms.regionMask.value',
-  ripple: 'k.uniforms.ripple.value',
-  rippleFreq: 'k.uniforms.rippleFreq.value',
-  rippleSpeed: 'k.uniforms.rippleSpeed.value',
-  glitch: 'k.uniforms.glitch.value',
-  glitchDensity: 'k.uniforms.glitchDensity.value',
-  glitchShove: 'k.uniforms.glitchShove.value',
-  glitchTint: 'k.uniforms.glitchTint.value',
-  glitchBands: 'k.uniforms.glitchBands.value',
-  glitchAxis: 'k.uniforms.glitchAxis.value',
-  glitchRate: 'k.uniforms.glitchRate.value',
+  'push.amount': 'k.uniforms.regionPush.value',
+  'noise.region': 'k.uniforms.regionNoise.value',
+  'mask.amount': 'k.uniforms.regionMask.value',
+  'ripple.amount': 'k.uniforms.ripple.value',
+  'ripple.freq': 'k.uniforms.rippleFreq.value',
+  'ripple.speed': 'k.uniforms.rippleSpeed.value',
+  'glitch.amount': 'k.uniforms.glitch.value',
+  'glitch.density': 'k.uniforms.glitchDensity.value',
+  'glitch.shove': 'k.uniforms.glitchShove.value',
+  'glitch.tint': 'k.uniforms.glitchTint.value',
+  'glitch.bands': 'k.uniforms.glitchBands.value',
+  'glitch.axis': 'k.uniforms.glitchAxis.value',
+  'glitch.rate': 'k.uniforms.glitchRate.value',
   spin: 'k.controls.autoRotate',
   // The five readings land on uniforms of their own name, which is the one place in
   // this table where the parameter and the uniform were deliberately made to match:
@@ -1324,29 +1327,29 @@ const LANDING = {
   blackwallSweep: 'k.uniforms.blackwallSweep.value',
   scan: 'k.uniforms.scanAmount.value',
   rim: 'k.uniforms.rimAmount.value',
-  thermal: 'k.uniforms.thermal.value',
-  edges: 'k.uniforms.edges.value',
-  duotoneDepth: 'k.uniforms.duotoneDepth.value',
+  'thermal.amount': 'k.uniforms.thermal.value',
+  'edges.amount': 'k.uniforms.edges.value',
+  'duotone.amount': 'k.uniforms.duotoneDepth.value',
   // Degrees on the slider and radians at the uniform, so this row is the conversion as
   // much as the arrival. An apply that handed the shader its degrees straight through
   // would read here as a perfectly ordinary number and spin the poles fifty-seven times
   // too far, which is a look nobody authored arriving through a slider that works.
-  duotoneHue: 'k.uniforms.duotoneHue.value',
-  duotoneSplit: 'k.uniforms.duotoneSplit.value',
-  duotoneSpan: 'k.uniforms.duotoneSpan.value',
-  duotoneMotion: 'k.uniforms.duotoneMotion.value',
+  'duotone.hue': 'k.uniforms.duotoneHue.value',
+  'duotone.split': 'k.uniforms.duotoneSplit.value',
+  'duotone.span': 'k.uniforms.duotoneSpan.value',
+  'duotone.motion': 'k.uniforms.duotoneMotion.value',
   // The rain's four, 1:1 like the glyph field's. None of them converts a unit on the way
   // through - the three lengths are metres and metres per second of the room in the
   // document and in the shader alike, which is the whole reason they are not referred to
   // the 1080p reference the screen-space terms are.
-  rain: 'k.uniforms.rain.value',
-  rainSpeed: 'k.uniforms.rainSpeed.value',
-  rainSpan: 'k.uniforms.rainSpan.value',
-  rainTrail: 'k.uniforms.rainTrail.value',
+  'rain.amount': 'k.uniforms.rain.value',
+  'rain.speed': 'k.uniforms.rainSpeed.value',
+  'rain.span': 'k.uniforms.rainSpan.value',
+  'rain.trail': 'k.uniforms.rainTrail.value',
   bloom: '[k.bloom.strength, k.bloom.enabled]',
   trails: '[k.afterimage.uniforms.damp.value, k.afterimage.enabled]',
-  rgbSplit: '[k.grade.uniforms.rgbSplit.value, k.grade.enabled]',
-  scanlines: '[k.grade.uniforms.scanlines.value, k.grade.enabled]',
+  'rgbsplit.amount': '[k.grade.uniforms.rgbSplit.value, k.grade.enabled]',
+  'raster.amount': '[k.grade.uniforms.scanlines.value, k.grade.enabled]',
   // The raster's three settings, and like `crush` below none of them carries
   // `k.grade.enabled` - they are settings of the master above rather than terms beside
   // it, so the pass is the master's to gate. The angle is degrees on the slider and
@@ -1354,20 +1357,20 @@ const LANDING = {
   // Named as the pair rather than as an angle, because that is what the registry
   // actually writes: an apply that moved one component and not the other, or wrote the
   // sine where the cosine belongs, reads identically at either one on its own.
-  scanAngle: '[k.grade.uniforms.scanAxis.value.x, k.grade.uniforms.scanAxis.value.y].map((v) => Number(v.toFixed(9)))',
-  scanPitch: 'k.grade.uniforms.scanPitch.value',
-  scanHard: 'k.grade.uniforms.scanHard.value',
-  grain: '[k.grade.uniforms.grain.value, k.grade.enabled]',
-  streak: '[k.grade.uniforms.streak.value, k.grade.enabled]',
+  'raster.angle': '[k.grade.uniforms.scanAxis.value.x, k.grade.uniforms.scanAxis.value.y].map((v) => Number(v.toFixed(9)))',
+  'raster.pitch': 'k.grade.uniforms.scanPitch.value',
+  'raster.hard': 'k.grade.uniforms.scanHard.value',
+  'grain.amount': '[k.grade.uniforms.grain.value, k.grade.enabled]',
+  'streak.amount': '[k.grade.uniforms.streak.value, k.grade.enabled]',
   // The streak's direction, on the raster angle's terms exactly: degrees on the slider,
   // an axis at the uniform, so this row is the conversion as much as the arrival, and
   // named as the pair because an apply that wrote the sine where the cosine belongs reads
   // as a perfectly ordinary number at either component on its own. No `k.grade.enabled`
-  // beside it, and the absence is the assertion - it is a setting of `streak` above rather
-  // than a term beside it, so switching the pass on to point a streak nobody raised is the
-  // no-op the gate matrix refuses by name.
-  streakAngle: '[k.grade.uniforms.streakAxis.value.x, k.grade.uniforms.streakAxis.value.y].map((v) => Number(v.toFixed(9)))',
-  vignette: '[k.grade.uniforms.vignette.value, k.grade.enabled]',
+  // beside it, and the absence is the assertion - it is a setting of `streak.amount` above
+  // rather than a term beside it, so switching the pass on to point a streak nobody raised
+  // is the no-op the gate matrix refuses by name.
+  'streak.angle': '[k.grade.uniforms.streakAxis.value.x, k.grade.uniforms.streakAxis.value.y].map((v) => Number(v.toFixed(9)))',
+  'vignette.amount': '[k.grade.uniforms.vignette.value, k.grade.enabled]',
   // The fifth term in that pass, and **the missing `k.grade.enabled` beside it is the
   // assertion**. The four above gate the pass and so each has to carry whether it is on;
   // this one is a sub-control inside the pass and deliberately does not, because its
@@ -1413,10 +1416,10 @@ const EXPECT = {
   opacity: (v) => v,
   exposure: (v) => v,
   additive: (v) => [v ? ADDITIVE_BLENDING : NORMAL_BLENDING, !v, v ? 1 : 0],
-  glyph: (v) => v,
-  glyphTone: (v) => v,
-  glyphHash: (v) => v,
-  glyphRain: (v) => v,
+  'glyph.amount': (v) => v,
+  'glyph.tone': (v) => v,
+  'glyph.hash': (v) => v,
+  'glyph.rain': (v) => v,
   near: (v) => v,
   far: (v) => v,
   left: (v) => v,
@@ -1428,11 +1431,11 @@ const EXPECT = {
   snapDelta: (v) => v,
   fade: (v, all) => [v / 1000, v > 0 || all.wake > 0 ? POINTS * 2 : POINTS],
   wake: (v, all) => [v / 1000, all.fade > 0 || v > 0 ? POINTS * 2 : POINTS],
-  noise: (v) => v,
-  noiseScale: (v) => v,
-  noiseSpeed: (v) => v,
-  lattice: (v) => v,
-  latticeCell: (v) => v,
+  'noise.amount': (v) => v,
+  'noise.scale': (v) => v,
+  'noise.speed': (v) => v,
+  'lattice.amount': (v) => v,
+  cell: (v) => v,
   regionX: (v) => v,
   regionY: (v) => v,
   regionZ: (v) => v,
@@ -1441,19 +1444,19 @@ const EXPECT = {
   regionD: (v) => v,
   regionRound: (v) => v,
   regionSoft: (v) => v,
-  regionPush: (v) => v,
-  regionNoise: (v) => v,
-  regionMask: (v) => v,
-  ripple: (v) => v,
-  rippleFreq: (v) => v,
-  rippleSpeed: (v) => v,
-  glitch: (v) => v,
-  glitchDensity: (v) => v,
-  glitchShove: (v) => v,
-  glitchTint: (v) => v,
-  glitchBands: (v) => v,
-  glitchAxis: (v) => v,
-  glitchRate: (v) => v,
+  'push.amount': (v) => v,
+  'noise.region': (v) => v,
+  'mask.amount': (v) => v,
+  'ripple.amount': (v) => v,
+  'ripple.freq': (v) => v,
+  'ripple.speed': (v) => v,
+  'glitch.amount': (v) => v,
+  'glitch.density': (v) => v,
+  'glitch.shove': (v) => v,
+  'glitch.tint': (v) => v,
+  'glitch.bands': (v) => v,
+  'glitch.axis': (v) => v,
+  'glitch.rate': (v) => v,
   spin: (v) => v,
   readRgb: (v) => v,
   readDepth: (v) => v,
@@ -1474,26 +1477,26 @@ const EXPECT = {
   blackwallSweep: (v) => v,
   scan: (v) => v,
   rim: (v) => v,
-  thermal: (v) => v,
-  edges: (v) => v,
-  duotoneDepth: (v) => v,
+  'thermal.amount': (v) => v,
+  'edges.amount': (v) => v,
+  'duotone.amount': (v) => v,
   // The degrees-to-radians the registry does on the way through, written out here as the
   // same double arithmetic rather than read back off the page - three's `degToRad` is a
   // multiply by `Math.PI / 180` and so is this, which makes the equality exact instead of
   // nearly exact. A tool that asked the page what conversion it used would agree with the
   // implementation by construction and could never see a wrong one.
-  duotoneHue: (v) => v * (Math.PI / 180),
-  duotoneSplit: (v) => v,
+  'duotone.hue': (v) => v * (Math.PI / 180),
+  'duotone.split': (v) => v,
   // Metres straight through, which is the whole of what this landing has to say: the
   // conversion into the ramp's own units happens in the shader against the clip range,
   // so an apply that divided here would be doing it twice and against a range the
   // document may not still have by the time the frame is drawn.
-  duotoneSpan: (v) => v,
-  duotoneMotion: (v) => v,
-  rain: (v) => v,
-  rainSpeed: (v) => v,
-  rainSpan: (v) => v,
-  rainTrail: (v) => v,
+  'duotone.span': (v) => v,
+  'duotone.motion': (v) => v,
+  'rain.amount': (v) => v,
+  'rain.speed': (v) => v,
+  'rain.span': (v) => v,
+  'rain.trail': (v) => v,
   bloom: (v) => [v, v > 0],
   trails: (v) => [v, v > 0],
   // The five that share one pass, so each one's landing carries whether the pass is on
@@ -1506,10 +1509,10 @@ const EXPECT = {
   // gone on passing - right up until a set that raised the streak alone, where four rows
   // would expect a shut pass against an open one and read as findings about terms that had
   // not changed. The gate is one condition and each row states the whole of it.
-  rgbSplit: (v, all) => [v, v > 0 || all.scanlines > 0 || all.grain > 0 || all.vignette > 0
-    || all.streak > 0],
-  scanlines: (v, all) => [v, all.rgbSplit > 0 || v > 0 || all.grain > 0 || all.vignette > 0
-    || all.streak > 0],
+  'rgbsplit.amount': (v, all) => [v, v > 0 || all['raster.amount'] > 0 || all['grain.amount'] > 0
+    || all['vignette.amount'] > 0 || all['streak.amount'] > 0],
+  'raster.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || v > 0 || all['grain.amount'] > 0
+    || all['vignette.amount'] > 0 || all['streak.amount'] > 0],
   // Same double arithmetic three's `degToRad` does, so the equality is exact rather than
   // near - and written out here rather than read back off the page, because a tool that
   // asked the page what conversion it used could never see a wrong one.
@@ -1521,23 +1524,23 @@ const EXPECT = {
   // different order of operations from the registry, so the two land a ULP apart -
   // 0.4539904997395468 against 0.45399049973954686 at the scrambled 63 degrees. A ULP is
   // not a finding; an axis built the wrong way round still is, and still fails here.
-  scanAngle: (v) => [Math.sin(v * (Math.PI / 180)), Math.cos(v * (Math.PI / 180))]
+  'raster.angle': (v) => [Math.sin(v * (Math.PI / 180)), Math.cos(v * (Math.PI / 180))]
     .map((x) => Number(x.toFixed(9))),
-  scanPitch: (v) => v,
-  scanHard: (v) => v,
-  grain: (v, all) => [v, all.rgbSplit > 0 || all.scanlines > 0 || v > 0 || all.vignette > 0
-    || all.streak > 0],
-  streak: (v, all) => [v, all.rgbSplit > 0 || all.scanlines > 0 || all.grain > 0
-    || all.vignette > 0 || v > 0],
+  'raster.pitch': (v) => v,
+  'raster.hard': (v) => v,
+  'grain.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || all['raster.amount'] > 0 || v > 0
+    || all['vignette.amount'] > 0 || all['streak.amount'] > 0],
+  'streak.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || all['raster.amount'] > 0
+    || all['grain.amount'] > 0 || all['vignette.amount'] > 0 || v > 0],
   // The same double arithmetic the registry does on the way through, written out here
-  // rather than read back off the page for `scanAngle`'s reason two rows up: a tool that
+  // rather than read back off the page for `raster.angle`'s reason two rows up: a tool that
   // asked the page which axis it built could never see a wrong one. Rounded on both sides,
   // because this rebuilds the cosine in a different order of operations from the registry
   // and a ULP apart is not a finding, where an axis built in degrees still is.
-  streakAngle: (v) => [Math.sin(v * (Math.PI / 180)), Math.cos(v * (Math.PI / 180))]
+  'streak.angle': (v) => [Math.sin(v * (Math.PI / 180)), Math.cos(v * (Math.PI / 180))]
     .map((x) => Number(x.toFixed(9))),
-  vignette: (v, all) => [v, all.rgbSplit > 0 || all.scanlines > 0 || all.grain > 0 || v > 0
-    || all.streak > 0],
+  'vignette.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || all['raster.amount'] > 0
+    || all['grain.amount'] > 0 || v > 0 || all['streak.amount'] > 0],
   // Reads its own value and nothing else, because it shares the pass without gating it -
   // so unlike the four above it names none of the others and none of them name it.
   crush: (v) => v,
@@ -1568,17 +1571,17 @@ const SCRAMBLE = {
   // cover the same pixels. At a half the mark is a character glowing inside a dot, both
   // halves of the blend are in the picture, and dropping the master takes the characters
   // out of it. The three keys are all non-zero and none of them is at the value the sweep
-  // reverts it to - `glyphHash` in particular defaults to 1, so it is scrambled *down*
+  // reverts it to - `glyph.hash` in particular defaults to 1, so it is scrambled *down*
   // where its two neighbours are scrambled up.
   //
   // The master is what makes the three observable at all, which is the argument the raster's
   // three settings and the glitch's five ceilings are set on: at a glyph of 0 no character
   // is drawn, so which character it would have been cannot reach a pixel and all three
   // would land in the no-pixel bucket together.
-  glyph: 0.5,
-  glyphTone: 0.61,
-  glyphHash: 0.37,
-  glyphRain: 1,
+  'glyph.amount': 0.5,
+  'glyph.tone': 0.61,
+  'glyph.hash': 0.37,
+  'glyph.rain': 1,
   // Both non-zero and both off the other's axis, because the drop-one sweep reverts one
   // at a time: a scrambled set that levelled along a single axis would leave the other
   // parameter with nothing to undo, and it would land in the no-pixel bucket looking
@@ -1619,32 +1622,32 @@ const SCRAMBLE = {
   snapDelta: 410,
   fade: 260,
   wake: 830,
-  noise: 0.08,
-  noiseScale: 5.5,
-  noiseSpeed: 1.45,
+  'noise.amount': 0.08,
+  'noise.scale': 5.5,
+  'noise.speed': 1.45,
   // Full strength, because a partial snap is a blend of the grid and the surface and the
   // drop-one sweep would be separating that from the turbulence three rows up.
-  lattice: 1,
+  'lattice.amount': 1,
   // Coarse enough that a cell spans several points at this pose. A cell near the point
   // spacing snaps every point to roughly where it already was, which is a lattice that
   // renders as its own absence.
-  latticeCell: 0.11,
+  cell: 0.11,
   // The master well up, because the five ceilings under it are only observable through
   // it: at a glitch of 0 no band tears, so density, shove, flare, band height and rate
   // would every one of them land in the no-pixel bucket together - the same argument the
   // region's three effects below are set for. The flare is above its default so it is
   // being raised onto the picture rather than lowered out of it.
-  glitch: 0.31,
-  glitchDensity: 0.62,
-  glitchShove: 1.23,
-  glitchTint: 4.35,
-  glitchBands: 27,
+  'glitch.amount': 0.31,
+  'glitch.density': 0.62,
+  'glitch.shove': 1.23,
+  'glitch.tint': 4.35,
+  'glitch.bands': 27,
   // Most of the way to the sensor's columns, so the bands cross the frame on a steep
   // diagonal rather than at either of the two axes it interpolates between. A value of 1
   // would be a second baked axis and would leave the interesting half of this control -
   // everything off the diagonal - unmeasured by the sweep.
-  glitchAxis: 0.78,
-  glitchRate: 13.5,
+  'glitch.axis': 0.78,
+  'glitch.rate': 13.5,
   // The region is placed rather than picked, because the sweep below drops each
   // parameter in turn and asserts the image moved - and a region floating in empty
   // space would leave all eight of its geometry parameters inert while looking like a
@@ -1676,15 +1679,15 @@ const SCRAMBLE = {
   // push, scramble and mask all at their defaults the region has no effect to have, and
   // every geometry parameter would land in the no-pixel bucket at once. The mask is
   // well short of 1 for the same reason - a region that hid its contents outright would
-  // make the displacement inside it invisible and take `regionPush` down with it.
-  regionPush: 0.35,
-  regionNoise: 0.5,
-  regionMask: 0.4,
-  ripple: 0.14,
-  rippleFreq: 6.3,
+  // make the displacement inside it invisible and take `push.amount` down with it.
+  'push.amount': 0.35,
+  'noise.region': 0.5,
+  'mask.amount': 0.4,
+  'ripple.amount': 0.14,
+  'ripple.freq': 6.3,
   // Off the whole eighths its own clock steps in, so a phase that stopped being quantised
   // would land somewhere else rather than on the same step by luck.
-  rippleSpeed: 1.35,
+  'ripple.speed': 1.35,
   spin: true,
   // All five readings live at once, which is what keeps every per-reading term in the
   // shader reachable from the one sweep this file runs. They are deliberately unequal:
@@ -1723,22 +1726,22 @@ const SCRAMBLE = {
   // serialised set is a JSON.stringify equality, so these keys have to sit in the order
   // PARAMS declares them. Put them anywhere else and the check fails with an empty
   // detail line, because every value matches and only the ordering does not.
-  thermal: 0.6,
-  edges: 0.45,
+  'thermal.amount': 0.6,
+  'edges.amount': 0.45,
   // The duotone amount well up, because the two below are only observable through it -
   // the same argument the glitch master and the region's three effects are set on. At a
   // depth of 0 the poles never reach a pixel, so the hue and the split would both land in
   // the no-pixel bucket together looking like parameters that do nothing.
-  duotoneDepth: 0.65,
+  'duotone.amount': 0.65,
   // Off the axis in both senses: a rotation big enough to move both poles well clear of
   // where they started, and not one of the right angles a hardcoded constant would
   // plausibly be. 47 degrees is on the step grid and is nobody's round number.
-  duotoneHue: 47,
+  'duotone.hue': 47,
   // Off centre, so reverting it moves the crossover through the cloud rather than
   // symmetrically about it. The fixture's points run z [-4.50, -0.50] against a near/far
   // of 0.35/4.2, so a split at 0.36 puts the meeting plane inside the subject where the
   // default at 0.5 puts it behind them.
-  duotoneSplit: 0.36,
+  'duotone.split': 0.36,
   // A ramp much steeper than the default one, because the default is what has to be
   // observable against. `near`/`far` above make the range 3.85m, so the default span of
   // 5.95m already runs wider than the box - the crossing is spread over the whole cloud
@@ -1746,8 +1749,8 @@ const SCRAMBLE = {
   // this parameter therefore flattens a visible edge rather than nudging one, which is
   // what the drop-one sweep needs and what a value near the default would not give.
   //
-  // On the 0.05 grid and nobody's round number, for the reason `duotoneHue`'s 47 is.
-  duotoneSpan: 1.15,
+  // On the 0.05 grid and nobody's round number, for the reason `duotone.hue`'s 47 is.
+  'duotone.span': 1.15,
   // Well up, because what it has to be observable against is the depth key beside it: at
   // the split above, the middle of this cloud sits at a k of about 0.56, so there is room
   // above it for a moving point to be pushed into and reverting this parameter takes that
@@ -1759,7 +1762,7 @@ const SCRAMBLE = {
   // samples move faster than 150 mm/s, the 99th percentile is about 430 and the fastest is
   // about 1900, against a ramp that reaches its pole at 1200. The nearly-static fixture
   // still carries a subject moving through it.
-  duotoneMotion: 0.83,
+  'duotone.motion': 0.83,
   // The rain, on the same terms: the master well up so the three lengths under it are
   // reachable, and every one of the three off the value the sweep reverts it to. The span
   // is *below* its 1.3m default and the room this fixture holds is about two metres tall,
@@ -1767,51 +1770,51 @@ const SCRAMBLE = {
   // that put a single head in the picture would be one the sweep could not separate from
   // the trail beneath it.
   //
-  // `rainSpeed` is the one of the four that cannot be seen in a single frame, because it is
+  // `rain.speed` is the one of the four that cannot be seen in a single frame, because it is
   // a rate: at program time 0 every speed draws the same phase. It is observable here for
   // `blackwallSweep`'s reason two dozen rows up - the run below spans a second, and at 1.35
   // against its default of 0.55 the pattern has travelled 0.8m further down the room by the
   // end of it, which is more than a whole head gap at the span above.
-  rain: 0.6,
-  rainSpeed: 1.35,
-  rainSpan: 0.73,
-  rainTrail: 0.28,
+  'rain.amount': 0.6,
+  'rain.speed': 1.35,
+  'rain.span': 0.73,
+  'rain.trail': 0.28,
   bloom: 1.35,
   trails: 0.44,
-  rgbSplit: 2.3,
-  scanlines: 0.61,
+  'rgbsplit.amount': 2.3,
+  'raster.amount': 0.61,
   // Off every axis the raster has a right angle at, so a build that rounded the angle to
   // the nearest quarter turn - or dropped it - draws a visibly different grille. The
-  // master above is what makes these three observable at all: at a scanlines of 0 the
+  // master above is what makes these three observable at all: at a raster.amount of 0 the
   // block never runs and all three would land in the no-pixel bucket together, which is
   // the argument the glitch ceilings and the region's three effects are set on.
-  scanAngle: 63,
+  'raster.angle': 63,
   // Well *below* the 1.3 it defaults to, which is where the grille is: the wave is
   // expressed against 1080p, so the default is already the television artifact and the
   // wide bands live under 0.6. The registry entry in `web/main.js` carries the measurement
   // and the correction it replaced. A pitch that only moved a hair would be a parameter
   // the drop-one sweep could not separate from sampling noise, and this one is far enough
   // off the default to redraw the whole frame.
-  scanPitch: 0.37,
+  'raster.pitch': 0.37,
   // High enough that the wave is a grille rather than a sine, which is the state the
   // hardness exists to reach. At its default of 0 it is the identity by construction, so
   // leaving it there would have the sweep record it as a parameter that cannot touch a
   // pixel - the trap `rgbSaturation` and `depthGamma` above are set off their defaults for.
-  scanHard: 0.82,
-  grain: 0.37,
+  'raster.hard': 0.82,
+  'grain.amount': 0.37,
   // High enough that the gather wins over the pixel it started from across a good part of
   // the frame. The taps decay with distance, so a small streak moves only what sits
   // directly under a highlight and the drop-one sweep would be separating that from the
   // grain two rows up.
-  streak: 0.62,
+  'streak.amount': 0.62,
   // Off every right angle and off both diagonals - 113 sits 22.5 degrees from 90 and from
   // 135, which are the two nearest values a build that quantised the axis could plausibly
   // land on, and it is nowhere near the 0 the sweep reverts it to. A direction a hair off
   // its default would be a parameter the drop-one sweep could not separate from sampling
   // noise; a direction on a right angle would be one a build with four choices rather than
   // an angle would answer correctly.
-  streakAngle: 113,
-  vignette: 0.73,
+  'streak.angle': 113,
+  'vignette.amount': 0.73,
   // Well above the 0.018 it defaults to, and the four terms above hold the pass open so
   // it is reachable at all - a toe inside a pass nothing switched on is the dead zone
   // this table's `rgbSaturation` comment describes, arriving by a different route.
@@ -1860,9 +1863,12 @@ const PAGE_HELPERS = `
   };
 `;
 
+// The generated keys are JSON-quoted because the dotted parameter names are not
+// identifiers: an unquoted `glyph.tone:` in the built literal is a syntax error inside
+// `page.evaluate`, which no check on this side of the bridge would ever parse.
 const landingReader = `(() => {
   const k = globalThis.__kinect;
-  return { ${Object.entries(LANDING).map(([n, e]) => `${n}: (${e})`).join(', ')} };
+  return { ${Object.entries(LANDING).map(([n, e]) => `${JSON.stringify(n)}: (${e})`).join(', ')} };
 })()`;
 
 // The same reader with every expression allowed to come back undefined, and it is used
@@ -1877,7 +1883,7 @@ const landingReader = `(() => {
 const tolerantLandingReader = `(() => {
   const k = globalThis.__kinect;
   const at = (f) => { try { return f(); } catch { return undefined; } };
-  return { ${Object.entries(LANDING).map(([n, e]) => `${n}: at(() => (${e}))`).join(', ')} };
+  return { ${Object.entries(LANDING).map(([n, e]) => `${JSON.stringify(n)}: at(() => (${e}))`).join(', ')} };
 })()`;
 
 const readLanding = (page) => page.evaluate(landingReader);
@@ -2224,25 +2230,96 @@ const GOLDEN_SKIP = new Set(['camera']);
 const POINT_SIZE_REBASE = 1080 / 600;
 const GOLDEN_RESCALE = { pointSize: POINT_SIZE_REBASE };
 
+// The rename, which is a fact about history on exactly the terms the rescale above is.
+// Step S1 moved every effect parameter onto a dotted effect-namespaced name and left the
+// uniforms alone, so the committed page this arm replays still speaks the old spellings
+// in one place: its control ids, which are what the `dom` and `readouts` halves of the
+// snapshot are keyed by. (`landing` is keyed by this file's own table on both arms and
+// already speaks today's names.) Those two halves are therefore joined on this map - the
+// earlier arm is asked under the name it actually had - and the equality still has to
+// hold value for value.
+//
+// Joined rather than excused, and the difference is the whole arm. Every name here could
+// have been dropped into GOLDEN_ABSENT instead - the earlier page answers undefined
+// under a dotted spelling, so the excuse would have taken - and that would have blinded
+// this comparison to exactly the regression class it exists for: a renamed parameter
+// whose default, range or readout moved in the same commit as its name. Four of the
+// forty-two have controls on the committed page (glitch.amount, rgbsplit.amount,
+// raster.amount, grain.amount) and compare against real values through this map; the
+// other thirty-eight existed nowhere at BEFORE_REV and still go through GOLDEN_ABSENT,
+// which the join makes *stricter* rather than looser - see the note on that set.
+const GOLDEN_RENAME = {
+  'noise.amount': 'noise',
+  'noise.scale': 'noiseScale',
+  'noise.speed': 'noiseSpeed',
+  'noise.region': 'regionNoise',
+  'lattice.amount': 'lattice',
+  cell: 'latticeCell',
+  'glyph.amount': 'glyph',
+  'glyph.tone': 'glyphTone',
+  'glyph.hash': 'glyphHash',
+  'glyph.rain': 'glyphRain',
+  'rain.amount': 'rain',
+  'rain.speed': 'rainSpeed',
+  'rain.span': 'rainSpan',
+  'rain.trail': 'rainTrail',
+  'glitch.amount': 'glitch',
+  'glitch.density': 'glitchDensity',
+  'glitch.shove': 'glitchShove',
+  'glitch.tint': 'glitchTint',
+  'glitch.bands': 'glitchBands',
+  'glitch.axis': 'glitchAxis',
+  'glitch.rate': 'glitchRate',
+  'push.amount': 'regionPush',
+  'mask.amount': 'regionMask',
+  'ripple.amount': 'ripple',
+  'ripple.freq': 'rippleFreq',
+  'ripple.speed': 'rippleSpeed',
+  'thermal.amount': 'thermal',
+  'edges.amount': 'edges',
+  'duotone.amount': 'duotoneDepth',
+  'duotone.hue': 'duotoneHue',
+  'duotone.split': 'duotoneSplit',
+  'duotone.span': 'duotoneSpan',
+  'duotone.motion': 'duotoneMotion',
+  'rgbsplit.amount': 'rgbSplit',
+  'streak.amount': 'streak',
+  'streak.angle': 'streakAngle',
+  'raster.amount': 'scanlines',
+  'raster.angle': 'scanAngle',
+  'raster.pitch': 'scanPitch',
+  'raster.hard': 'scanHard',
+  'grain.amount': 'grain',
+  'vignette.amount': 'vignette',
+};
+// The same fact read the other way, for folding the earlier arm's keys into the union:
+// an old-spelled control id from the committed page joins the comparison under the name
+// it carries today, so a control the rename dropped shows up as a difference rather than
+// standing beside the comparison as a stray key nobody compared.
+const OLD_SPELLING = Object.fromEntries(
+  Object.entries(GOLDEN_RENAME).map(([now, was]) => [was, now]));
+
 // Parameters that did not exist at BEFORE_REV, so there is no earlier value to hold
 // them to. This is the `camera` case rather than the `pointSize` case - nothing left to
 // compare against - but it is not a skip, and the difference is what keeps it honest:
 // a name is only excused here if the *earlier* arm answered `undefined`, which is the
 // signature of a uniform, a slider and a readout that genuinely were not there. Put a
 // name in this set that did exist at that revision and it still fails, because its old
-// value is a number and a number is not undefined.
+// value is a number and a number is not undefined - and since the rename, the asking is
+// done under GOLDEN_RENAME's old spelling, so respelling a name cannot manufacture the
+// excuse either.
 //
 // What that leaves proven is the claim worth making about an added look parameter: the
 // twenty-five that were already here render and read back exactly as they did, so
 // twelve new sliders at their defaults changed no image. Whether the new ones reach the
 // pixels at all is section 9's question, not this one's.
 const GOLDEN_ABSENT = new Set([
-  'noise', 'noiseScale', 'noiseSpeed',
-  'lattice', 'latticeCell',
+  'noise.amount', 'noise.scale', 'noise.speed',
+  'lattice.amount', 'cell',
   'regionX', 'regionY', 'regionZ', 'regionW', 'regionH', 'regionD',
-  'regionRound', 'regionSoft', 'regionPush', 'regionNoise', 'regionMask',
-  'ripple', 'rippleFreq', 'rippleSpeed',
-  'thermal', 'edges',
+  'regionRound', 'regionSoft', 'push.amount', 'noise.region', 'mask.amount',
+  'ripple.amount', 'ripple.freq', 'ripple.speed',
+  'thermal.amount', 'edges.amount',
   // The four lateral crop faces. They are excused here on the same terms as the rest -
   // the pinned revision has no such control, so there is nothing on that side to hold
   // them to - and the excuse costs nothing, because the defaults are the bounds: a
@@ -2297,12 +2374,12 @@ const GOLDEN_ABSENT = new Set([
   // one without them. What holds them to that is section 1b, which renders at parameter
   // defaults - a default that drifted off its literal would move whichever readings the
   // torn bands reach and fail there by name rather than being excused here.
-  'glitchDensity', 'glitchShove', 'glitchTint', 'glitchBands', 'glitchRate',
+  'glitch.density', 'glitch.shove', 'glitch.tint', 'glitch.bands', 'glitch.rate',
   // The band axis, which had no control at the pinned revision because the tear was cut
   // along the sensor's rows and nothing else. It defaults to 0 and the block reaches the
   // old division textually at that value, so a build carrying it draws what a build
   // without it drew.
-  'glitchAxis',
+  'glitch.axis',
   // `vignette` is here on different terms from everything above it, and the difference
   // is worth the sentence. It was a literal too, but it is the one promoted literal that
   // does NOT keep its old value: the behaviour it replaces is conditional - 0.55 while
@@ -2310,7 +2387,7 @@ const GOLDEN_ABSENT = new Set([
   // reproduce both branches. It defaults to the branch the parameter defaults are in,
   // which is why section 1b still agrees with a build from before it existed. The look
   // that did carry a vignette, `blackwall.json`, now names 0.55 for itself.
-  'vignette',
+  'vignette.amount',
   // The duotone's four, on the plainest version of these terms: nothing at the pinned
   // revision resembles them, and all four default to the identity - a depth of 0 never
   // enters the block, so a build carrying them draws precisely what a build without them
@@ -2318,7 +2395,7 @@ const GOLDEN_ABSENT = new Set([
   // an excuse and becomes a framebuffer hash, since the duotone sits after the blend and
   // would move every one of the five readings if its default reached a pixel.
   //
-  // **`duotoneMotion` is the one of the four that section 1b cannot vouch for**, and the
+  // **`duotone.motion` is the one of the four that section 1b cannot vouch for**, and the
   // difference is worth the sentence rather than being carried along with its neighbours.
   // 1b renders at parameter defaults, where the depth is 0 and the block never executes,
   // so a term added *inside* it is unreached by that hash whichever way its own default
@@ -2328,7 +2405,7 @@ const GOLDEN_ABSENT = new Set([
   // frame at a motion of 0 has to come back bit-identical to the frame with no motion in
   // it at all.
   //
-  // **`duotoneSpan` is excused on the strongest version of these terms and is the only one
+  // **`duotone.span` is excused on the strongest version of these terms and is the only one
   // of the five that can say so.** The rest are excused because the pinned revision has no
   // such control; this one is excused because its default *is* the arithmetic that
   // revision ran. The ramp used to span the clip range, and the default here is the clip
@@ -2337,7 +2414,7 @@ const GOLDEN_ABSENT = new Set([
   // literals rounding to the same value rather than about the derivation, so it is not
   // taken on trust: the commit that added this parameter carries the five readings'
   // hashes either side of the change, and section 1b is where a drift in it would show.
-  'duotoneDepth', 'duotoneHue', 'duotoneSplit', 'duotoneSpan', 'duotoneMotion',
+  'duotone.amount', 'duotone.hue', 'duotone.split', 'duotone.span', 'duotone.motion',
   // The glyph field's four and the rain's four, excused on the plainest version of these
   // terms: nothing at the pinned revision resembles any of them, so the earlier arm answers
   // undefined for all eight and there is no earlier value to hold them to.
@@ -2347,7 +2424,7 @@ const GOLDEN_ABSENT = new Set([
   // `glyph` and `rain` are both 0 and each gates its own block, so a term added *inside* one
   // of them is unreached by that hash whichever way its own default behaves - which is
   // exactly the hole the glitch flare's compensating default fell through, and the reason
-  // `duotoneMotion` above carries the same warning. The two the hash does cover are the
+  // `duotone.motion` above carries the same warning. The two the hash does cover are the
   // masters themselves: at 0 the vertex stage takes the else branch of the sprite size, so
   // the point-size statement the pinned build compiled is the one that runs, and the
   // fragment stage's crossfade multiplies by a glyphMix of exactly 0.
@@ -2361,8 +2438,8 @@ const GOLDEN_ABSENT = new Set([
   // value of everything. It is exactly 1 wherever `lattice` is 0, which is where section 1b
   // renders and where eight of the ten shipped looks sit, so a compensation that leaked at
   // zero would move this arm and 1b together rather than being excused anywhere.
-  'glyph', 'glyphTone', 'glyphHash', 'glyphRain',
-  'rain', 'rainSpeed', 'rainSpan', 'rainTrail',
+  'glyph.amount', 'glyph.tone', 'glyph.hash', 'glyph.rain',
+  'rain.amount', 'rain.speed', 'rain.span', 'rain.trail',
   // `crush` is here on `vignette`'s terms turned the other way up, and the contrast is
   // the reason it gets its own sentence. It was a literal too, and unlike the vignette it
   // *keeps* the value it replaced - so the excuse is the strong one rather than the
@@ -2379,20 +2456,20 @@ const GOLDEN_ABSENT = new Set([
   // equality this arm measures. That it holds is not taken on trust: section 1b renders
   // at parameter defaults, where the raster block does not run at all, and the drop-one
   // sweep is where the three are shown to reach pixels once the master is up.
-  'scanAngle', 'scanPitch', 'scanHard',
+  'raster.angle', 'raster.pitch', 'raster.hard',
   // The streak, which had no control and no uniform at the pinned revision. It defaults to
   // zero and the block is guarded on that, so a build carrying it draws exactly what a
   // build without it drew - the same argument the three above are excused by, and held to
   // the same standard: the pass-gate row below has it opening the grade on its own, and
   // the drop-one sweep has it reaching pixels once it is up.
-  'streak',
+  'streak.amount',
   // And its direction, which is excused twice over: there was no streak at the pinned
   // revision to point anywhere, and the axis it defaults to is the one the gather ran
   // along when it ran one way only. That second half is the stronger claim and it is not
   // taken on trust here either - the gather's own comment carries the hash comparison, and
   // section 1b renders at parameter defaults, where a streak of 0 keeps the block shut
   // whichever way the axis points.
-  'streakAngle',
+  'streak.angle',
   // The program-out size, on the same terms and for the same reason: not a registry
   // parameter, no such control at the earlier revision, and its own bounds live in the
   // handler that parses it rather than in the markup. What it is held to is
@@ -2429,14 +2506,26 @@ const rescaled = (name, before, after) => {
 for (const stage of Object.keys(beforeArm.out)) {
   const a = beforeArm.out[stage];
   const b = afterArm.out[stage];
+  // Which halves join through GOLDEN_RENAME: `dom` and `readouts` are keyed by the
+  // page's own control ids, and at BEFORE_REV those are the old spellings. `landing` is
+  // keyed by this file's LANDING table on both arms, so a join there would look the four
+  // renamed-but-real values up under keys the reader never wrote and read undefined.
+  const joined = (field) => field !== 'landing';
+  const spelledThen = (field, sub) => (joined(field) ? (GOLDEN_RENAME[sub] ?? sub) : sub);
   const unexplained = (field) => (typeof a[field] === 'object' && a[field]
     // Keyed off the union rather than the earlier arm's keys, because a parameter this
     // build added is absent from `a` entirely - iterating `a` alone would step straight
-    // past every new name and call that agreement.
-    ? [...new Set([...Object.keys(a[field]), ...Object.keys(b[field] ?? {})])]
-      .filter((sub) => !eq(a[field][sub], b[field][sub])
-        && !GOLDEN_SKIP.has(sub) && !rescaled(sub, a[field][sub], b[field][sub])
-        && !absentBefore(sub, a[field][sub]) && !removedSince(sub, b[field][sub]))
+    // past every new name and call that agreement. The earlier arm's keys enter the
+    // union under the name each carries today, so a renamed control compares rather
+    // than standing beside the comparison as a stray key nobody looked at.
+    ? [...new Set([
+      ...Object.keys(a[field]).map((k) => (joined(field) && OLD_SPELLING[k]) || k),
+      ...Object.keys(b[field] ?? {})])]
+      .filter((sub) => !eq(a[field][spelledThen(field, sub)], b[field][sub])
+        && !GOLDEN_SKIP.has(sub)
+        && !rescaled(sub, a[field][spelledThen(field, sub)], b[field][sub])
+        && !absentBefore(sub, a[field][spelledThen(field, sub)])
+        && !removedSince(sub, b[field][sub]))
     : []);
   const differing = Object.keys(a).filter((field) => {
     if (eq(a[field], b[field])) return false;
@@ -2446,7 +2535,7 @@ for (const stage of Object.keys(beforeArm.out)) {
   const detail = differing.map((field) => {
     const keys = unexplained(field);
     return keys.length
-      ? `${field}{${keys.map((s) => `${s}: ${show(a[field][s])} -> ${show(b[field][s])}`).join(', ')}}`
+      ? `${field}{${keys.map((s) => `${s}: ${show(a[field][spelledThen(field, s)])} -> ${show(b[field][s])}`).join(', ')}}`
       : `${field}: ${show(a[field])} -> ${show(b[field])}`;
   }).join('; ');
   check(differing.length === 0, `${stage.padEnd(10)} identical to ${BEFORE_REV}`, detail);
@@ -2747,14 +2836,14 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
   //
   // **The five rows above cannot see the raster at all, and that is worth saying plainly
   // rather than leaving as a gap somebody finds later.** They render at parameter
-  // defaults, `scanlines` defaults to 0, and the whole raster block sits behind
+  // defaults, `raster.amount` defaults to 0, and the whole raster block sits behind
   // `if (scanlines > 0.0)` - so a run that came back bit-identical has measured the
   // branch being added and not one line of the arithmetic inside it. Every mutation in
   // this file's table is likewise blind to it, because the drop-one sweep compares arms
   // of one build against each other rather than against a build from before.
   //
   // What makes that a hole rather than a nicety is `presets-builtin/blackwall.json`,
-  // which names `scanlines: 0.35`. The generalisation replaced an inline expression with
+  // which names `raster.amount: 0.35`. The generalisation replaced an inline expression with
   // a coordinate through a local, which is exactly the substitution `docs/measurement.md`
   // records producing a third image out of two that were each bit-identical - so "the
   // defaults reach the old expression" is a claim about a compiler, and the shipped look
@@ -2773,13 +2862,13 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
   // weight this arm leaves at zero, so no reading's mutation can switch this probe off.
   //
   // It is also the more faithful choice: `blackwall.json` is the document that names a
-  // scanlines of 0.35, so this arm now stands where the shipped look actually stands.
+  // raster.amount of 0.35, so this arm now stands where the shipped look actually stands.
   //
   // **The two arms are handed different values on purpose, and the first version of this
   // row was wrong for exactly the reason that sounds like a bug.** Raising the raster
   // opens the grade pass on both builds, and the pinned one bakes its corner falloff into
-  // that pass as `mix(1.0, vig, 0.55)` where this one reads a `vignette` parameter that
-  // defaults to 0. So the obvious arrangement - the same look on both sides - compares a
+  // that pass as `mix(1.0, vig, 0.55)` where this one reads a `vignette.amount` parameter
+  // that defaults to 0. So the obvious arrangement - the same look on both sides - compares a
   // frame with a vignette against a frame without one, and reports 6 of 6 frames differing
   // over a promotion that landed in `40ab241` and has nothing to do with the raster. Named
   // here, the two arms draw the same corner falloff and the raster is what is left.
@@ -2787,15 +2876,20 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
   // This is the units error `export-check`'s cross-build arm already records, arriving
   // from the other direction: **each build has to be given the values that mean the same
   // picture in its own vocabulary**, not the same numbers. `blackwall.json` names 0.55 for
-  // precisely this reason.
-  const RASTER_LOOK = "k.params.set('scanlines', 0.35);";
-  const RASTER_NEW_LOOK = `${RASTER_LOOK} k.params.set('vignette', 0.55);`;
+  // precisely this reason. Since the rename that vocabulary includes the names themselves:
+  // the pinned build predates it and answers to `scanlines`, where this build answers to
+  // `raster.amount`, so the two arms are two spellings of one look on the same terms as
+  // the two values - and the new arm is its own literal rather than a derivation from the
+  // old one, because deriving it would smuggle the old spelling into the build that no
+  // longer speaks it.
+  const RASTER_OLD_LOOK = "k.params.set('scanlines', 0.35);";
+  const RASTER_NEW_LOOK = "k.params.set('raster.amount', 0.35); k.params.set('vignette.amount', 0.55);";
   {
     const rasterOld = await hashesFor(
       { source: againstSource, viewportSize: COMPARISON_VIEW, comparisonShell: true },
       'k.uniforms.mode.value = $MODE;',
       { readBlackwall: 4 },
-      RASTER_LOOK,
+      RASTER_OLD_LOOK,
     );
     const rasterNew = await hashesFor(
       { viewportSize: COMPARISON_VIEW, comparisonShell: true },
@@ -2821,7 +2915,7 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
       { viewportSize: COMPARISON_VIEW, comparisonShell: true },
       'k.readings().forEach((n) => k.params.set(n, 0)); k.params.set($READING, 1);',
       { readBlackwall: 4 },
-      "k.params.set('scanlines', 0.0); k.params.set('vignette', 0.55);",
+      "k.params.set('raster.amount', 0.0); k.params.set('vignette.amount', 0.55);",
     )).out.readBlackwall;
     check(!eq(flat, lit),
       'and the raster is actually drawing at that value, so the equality above is about something',
@@ -3167,21 +3261,22 @@ console.log('\n[registry] the side effects that are not a uniform write');
 
   const gates = [];
   for (const [values, want] of [
-    [{ bloom: 0, trails: 0, rgbSplit: 0, scanlines: 0, grain: 0, vignette: 0 }, { bloom: false, trails: false, grade: false }],
+    [{ bloom: 0, trails: 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0 },
+      { bloom: false, trails: false, grade: false }],
     [{ bloom: 0.05 }, { bloom: true, trails: false, grade: false }],
     [{ trails: 0.01 }, { bloom: false, trails: true, grade: false }],
-    [{ rgbSplit: 0.05 }, { bloom: false, trails: false, grade: true }],
-    [{ scanlines: 0.01 }, { bloom: false, trails: false, grade: true }],
-    [{ grain: 0.01 }, { bloom: false, trails: false, grade: true }],
+    [{ 'rgbsplit.amount': 0.05 }, { bloom: false, trails: false, grade: true }],
+    [{ 'raster.amount': 0.01 }, { bloom: false, trails: false, grade: true }],
+    [{ 'grain.amount': 0.01 }, { bloom: false, trails: false, grade: true }],
     // The fourth term sharing that pass, and the one that used to ride on the other
     // three: raised on its own it has to bring the pass up by itself, or the vignette
     // is back to being a thing you can only have by asking for something else.
-    [{ vignette: 0.01 }, { bloom: false, trails: false, grade: true }],
+    [{ 'vignette.amount': 0.01 }, { bloom: false, trails: false, grade: true }],
     // The streak, which gates for the plain reason rather than by exception: its default
     // is zero, so a look that never asks for it pays nothing. This row is the one that
     // separates it from `crush` below - both share the pass, and only the one whose off
     // state is actually off is allowed to switch it on.
-    [{ streak: 0.02 }, { bloom: false, trails: false, grade: true }],
+    [{ 'streak.amount': 0.02 }, { bloom: false, trails: false, grade: true }],
     // The fifth term in that pass, and the only one whose expectation is `false`. `crush`
     // shares the grade and deliberately does not gate it, so this row is the negative
     // asserted rather than left as an omission - an omission would pass on a build that
@@ -3199,15 +3294,15 @@ console.log('\n[registry] the side effects that are not a uniform write');
     // so is non-zero in every document there has ever been; the angle and the hardness
     // would merely switch a full-screen pass on to rotate and square a raster whose master
     // is off, which is the no-op this row exists to refuse. All three are settings of
-    // `scanlines`, and the pass is the master's to gate.
-    [{ scanAngle: 90 }, { bloom: false, trails: false, grade: false }],
-    [{ scanPitch: 0.3 }, { bloom: false, trails: false, grade: false }],
-    [{ scanHard: 1 }, { bloom: false, trails: false, grade: false }],
+    // `raster.amount`, and the pass is the master's to gate.
+    [{ 'raster.angle': 90 }, { bloom: false, trails: false, grade: false }],
+    [{ 'raster.pitch': 0.3 }, { bloom: false, trails: false, grade: false }],
+    [{ 'raster.hard': 1 }, { bloom: false, trails: false, grade: false }],
     // The streak's direction, on the raster angle's terms: a setting of the term above it
     // rather than a term beside it, so pointing a streak nobody raised has to leave the
     // pass shut. Gating it would switch a full-screen read and write on to aim an effect
     // whose amount is zero, which is precisely the no-op the gate exists to refuse.
-    [{ streakAngle: 90 }, { bloom: false, trails: false, grade: false }],
+    [{ 'streak.angle': 90 }, { bloom: false, trails: false, grade: false }],
   ]) {
     const r = await setAndRead(values);
     const got = { bloom: r.bloom, trails: r.trails, grade: r.grade };
@@ -3766,7 +3861,7 @@ console.log('\n[registry] the streak goes where the angle points');
     // describes a drawing buffer this block never looks at, and every index below would be
     // out by the ratio between the two. It used to be read at the top and was right only
     // because a neighbouring section happened to leave the page scrambled.
-    const base = shot({ streak: 0 });
+    const base = shot({ 'streak.amount': 0 });
     const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
     // The luminance-weighted mean position of the light in a that is not in b, so one
     // helper reads the light a term adds and the light a crop face takes away.
@@ -3786,10 +3881,10 @@ console.log('\n[registry] the streak goes where the angle points');
     // The scrambled crop window runs -1.5 to 1 in y and -1.5 to 1.5 in x, so each face
     // brought to the value below takes roughly half the room off its own side of the
     // picture and leaves the other half standing.
-    const cut = (over) => meanPos(base, shot({ streak: 0, ...over }));
+    const cut = (over) => meanPos(base, shot({ 'streak.amount': 0, ...over }));
     const added = {};
     for (const a of [0, 180, 90, -90, 45, -135]) {
-      added[a] = meanPos(shot({ streak: 0.9, streakAngle: a }), base);
+      added[a] = meanPos(shot({ 'streak.amount': 0.9, 'streak.angle': a }), base);
     }
     return {
       added,
@@ -3868,8 +3963,8 @@ console.log('\n[registry] the streak goes where the angle points');
 // something else is already on", and only a look with nothing else on can tell them apart.
 console.log('\n[registry] the ripple opens the region by itself');
 {
-  const alone = { ...SCRAMBLE, regionPush: 0, regionNoise: 0, regionMask: 0 };
-  const still = await run({ ...alone, ripple: 0 });
+  const alone = { ...SCRAMBLE, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0 };
+  const still = await run({ ...alone, 'ripple.amount': 0 });
   const moving = await run(alone);
   check(!eq(still, moving),
     'raising the ripple alone moves the picture, so the gate names it',
@@ -3912,7 +4007,7 @@ console.log('\n[registry] the cloud carries a rotation and nothing else');
 
 // The ripple's clock steps rather than slides, which is the term's whole character and
 // which **no mutation of it was caught by until this arm existed**. The drop-one sweep asks
-// whether reverting `rippleSpeed` changes the picture, and it does either way - a smooth
+// whether reverting `ripple.speed` changes the picture, and it does either way - a smooth
 // wave moves when you change its speed exactly as a stepped one does - so a build whose
 // ripple breathed instead of ratcheting went green through the entire suite. Written after
 // running `--mutate ripple-clock-continuous` and watching it be missed.
@@ -3921,8 +4016,9 @@ console.log('\n[registry] the cloud carries a rotation and nothing else');
 // obvious arrangement and the reason this one works.** Comparing two program times inside
 // one step was tried first and failed on a build that steps correctly, because moving the
 // time moves everything else with it - which source frames are bound, the gap handed to
-// the state pass, the turbulence field that `regionNoise` keeps alive even with `noise` at
-// zero. Every one of those had to be chased down and the arm was still red. Holding the
+// the state pass, the turbulence field that `noise.region` keeps alive even with
+// `noise.amount` at zero. Every one of those had to be chased down and the arm was still
+// red. Holding the
 // time fixed removes the entire class: the two renders differ in one uniform, and a phase
 // that quantises cannot tell them apart.
 //
@@ -3933,11 +4029,11 @@ console.log('\n[registry] the cloud carries a rotation and nothing else');
 console.log('\n[registry] the ripple advances in steps, not smoothly');
 {
   const AT = 0.5;
-  const at = async (rippleSpeed) => page.evaluate(`(async () => {
+  const at = async (speed) => page.evaluate(`(async () => {
     ${PAGE_HELPERS}
     k.params.reset();
     k.params.apply(${JSON.stringify(SCRAMBLE)});
-    k.params.set('rippleSpeed', ${rippleSpeed});
+    k.params.set('ripple.speed', ${speed});
     k.drive.reset();
     pinCamera(k.freeCamera);
     k.drive.stepTo(${AT});
@@ -4000,7 +4096,7 @@ console.log('\n[registry] a pair planted with a known speed in it');
   // the draw range, so nothing renders from a surface memory this section never advances,
   // and vFade takes the ternary's 1.0 rather than a value that depends on how long ago a
   // frame notionally arrived.
-  const LOOK = { duotoneDepth: 1, fade: 0, wake: 0 };
+  const LOOK = { 'duotone.amount': 1, fade: 0, wake: 0 };
 
   // The previous frame is built from a rule rather than filled with a value, so one helper
   // plants both a uniform wall and a chequered one: a block size of 0 is the plane, and any
@@ -4012,7 +4108,7 @@ console.log('\n[registry] a pair planted with a known speed in it');
     ${PAGE_HELPERS}
     k.params.reset();
     k.params.apply(${JSON.stringify(LOOK)});
-    k.params.set('duotoneMotion', ${motion});
+    k.params.set('duotone.motion', ${motion});
     k.drive.reset();
     pinCamera(k.freeCamera);
     const plane = (mm) => new Uint16Array(512 * 424).fill(mm);
@@ -4081,7 +4177,7 @@ console.log('\n[registry] a pair planted with a known speed in it');
 
   // The default is the picture without the term, bit for bit, and it is measured here
   // because it cannot be measured where the rest of the defaults are. Section 1b renders
-  // against the pinned build at parameter defaults, where duotoneDepth is 0 and this whole
+  // against the pinned build at parameter defaults, where duotone.amount is 0 and this whole
   // block is skipped - so a term added inside it is unreached by that hash however its own
   // default behaves. That is the hole the glitch flare's compensating default fell through,
   // and this is the same hole one block over.
@@ -4191,7 +4287,7 @@ console.log('\n[registry] and the span it is divided by is the gap between the b
 // The duotone's ramp is a distance, and this is the only section that can say so.
 //
 // **Nothing above this line can.** Every arm in this file renders at one clip range, and
-// `duotoneSpan` reaches the pixels through `duotoneSpan / (farClip - nearClip)` - so a
+// `duotone.span` reaches the pixels through `duotoneSpan / (farClip - nearClip)` - so a
 // build dividing by a frozen 5.95 instead produces the identical number at the default
 // range, lands the parameter in its uniform, moves the picture when it is reverted, and
 // satisfies the drop-one sweep completely. What it gets wrong is only visible from two
@@ -4200,7 +4296,7 @@ console.log('\n[registry] and the span it is divided by is the gap between the b
 // probe placed where its answer cannot be different.
 //
 // **The crossing plane is held at 1.5m in both arms while the range changes underneath
-// it**, which is what makes the comparison about the width alone. `duotoneSplit` is a
+// it**, which is what makes the comparison about the width alone. `duotone.split` is a
 // fraction of the range by design, so the two arms name different splits to describe the
 // same plane - 0.5 through 0.5..2.5m and 0.25 through 0.5..4.5m. Every number here is
 // exact in float32, on the planted section's reasoning: a row asking for equality cannot
@@ -4228,8 +4324,8 @@ console.log('\n[registry] the duotone span is metres, held across two clip range
   const wallAt = ({ mm, near, far, split, span }) => page.evaluate(`(async () => {
     ${PAGE_HELPERS}
     k.params.reset();
-    k.params.apply({ duotoneDepth: 1, fade: 0, wake: 0,
-      near: ${near}, far: ${far}, duotoneSplit: ${split}, duotoneSpan: ${span} });
+    k.params.apply({ 'duotone.amount': 1, fade: 0, wake: 0,
+      near: ${near}, far: ${far}, 'duotone.split': ${split}, 'duotone.span': ${span} });
     k.drive.reset();
     pinCamera(k.freeCamera);
     const plane = new Uint16Array(512 * 424).fill(${mm});
@@ -4473,7 +4569,8 @@ const FIELD_HELPERS = `
 // margin, which is exactly why the old reading of it looked correct.
 const GLYPH_LOOK = {
   additive: false, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 1, pointSize: 64,
-  lattice: 1, latticeCell: 0.25, glyph: 1, glyphTone: 0, glyphHash: 1, glyphRain: 0, rain: 0,
+  'lattice.amount': 1, cell: 0.25, 'glyph.amount': 1, 'glyph.tone': 0, 'glyph.hash': 1,
+  'glyph.rain': 0, 'rain.amount': 0,
   readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 4,
 };
 
@@ -4486,9 +4583,9 @@ console.log('\n[registry] one cell, one character: the mark is a fact about the 
     const bg = field({ look, depth: empty() }).slice();
     const out = {};
     for (const [fixture, depth] of [['whole', plane(2400)], ['thinned', thinned(2400)]]) {
-      for (const glyph of [1, 0]) {
-        const px = field({ look: { ...look, glyph }, depth });
-        out[fixture + (glyph ? 'Glyph' : 'Dots')] = { hash: await sha256(px), ...above(px, bg) };
+      for (const master of [1, 0]) {
+        const px = field({ look: { ...look, 'glyph.amount': master }, depth });
+        out[fixture + (master ? 'Glyph' : 'Dots')] = { hash: await sha256(px), ...above(px, bg) };
       }
     }
     return out;
@@ -4553,7 +4650,7 @@ console.log('\n[registry] and a character travels with its point through the tur
   // back at 13.48 against a correct 27.79, a separation of two. Centred at 2500mm with the
   // amplitude under the 0.125m half-cell, the same mutation has nothing left but the wall's
   // own rim.
-  const NOISE = { noise: 0.1, noiseScale: 1.5, noiseSpeed: 1 };
+  const NOISE = { 'noise.amount': 0.1, 'noise.scale': 1.5, 'noise.speed': 1 };
   // **The same question asked of the other two displacements that run before the hash**,
   // because the arms above leave the ripple and the region push at zero and a build taking
   // its hash after *those* renders bit-identically to a correct one there. Three
@@ -4567,7 +4664,7 @@ console.log('\n[registry] and a character travels with its point through the tur
   // weight of zero and is not displaced at all: the occupied cell set cannot change at the
   // edge of the fixture, which is the only place a dense plane has one.
   //
-  // `rippleSpeed` is 0.5 because the ripple's clock is quantised to eighths of a cycle and
+  // `ripple.speed` is 0.5 because the ripple's clock is quantised to eighths of a cycle and
   // this section's two phases are 3 seconds apart: at 0.5 that is twelve steps, an offset
   // of exactly one and a half cycles, so the displacement between the two arms is negated
   // rather than merely moved. At the ripple's default speed of 1 the same pair lands on
@@ -4582,20 +4679,22 @@ console.log('\n[registry] and a character travels with its point through the tur
   // the push is doing here is making the drawn position genuinely differ from the hash
   // source, so the mutation below can be the honest one that inlines both.
   const RIPPLE = {
-    noise: 0, ripple: 0.05, rippleFreq: 4, rippleSpeed: 0.5, regionPush: 0.06,
+    'noise.amount': 0, 'ripple.amount': 0.05, 'ripple.freq': 4, 'ripple.speed': 0.5,
+    'push.amount': 0.06,
     regionX: 0, regionY: 0, regionZ: -2.5, regionW: 1, regionH: 1, regionD: 1,
   };
   const moved = await page.evaluate(`(async () => {
     ${PAGE_HELPERS}
     ${FIELD_HELPERS}
-    const look = { ...${JSON.stringify(GLYPH_LOOK)}, latticeCell: 0.25, ...${JSON.stringify(NOISE)} };
+    const look = { ...${JSON.stringify(GLYPH_LOOK)}, cell: 0.25, ...${JSON.stringify(NOISE)} };
     const ripple = ${JSON.stringify(RIPPLE)};
     const wall = plane(2500);
     const bg = field({ look, depth: empty() }).slice();
     const at = (over, time) => field({ look: { ...look, ...over }, depth: wall, time });
     const out = {};
-    for (const [label, over] of [['characters', {}], ['cells', { glyphHash: 0 }], ['dots', { glyph: 0 }],
-      ['rippleCharacters', ripple], ['rippleCells', { ...ripple, glyphHash: 0 }]]) {
+    for (const [label, over] of [['characters', {}], ['cells', { 'glyph.hash': 0 }],
+      ['dots', { 'glyph.amount': 0 }],
+      ['rippleCharacters', ripple], ['rippleCells', { ...ripple, 'glyph.hash': 0 }]]) {
       const first = at(over, 0).slice();
       const second = at(over, 3);
       out[label] = { ...apart(first, second), ...above(first, bg) };
@@ -4671,19 +4770,20 @@ console.log('\n[registry] the three keys add and wrap, so doubling two of them i
   const keys = await page.evaluate(`(async () => {
     ${PAGE_HELPERS}
     ${FIELD_HELPERS}
-    const look = { ...${JSON.stringify(GLYPH_LOOK)}, latticeCell: 0.25, glyphHash: 0, glyphTone: 0 };
+    const look = { ...${JSON.stringify(GLYPH_LOOK)}, cell: 0.25, 'glyph.hash': 0, 'glyph.tone': 0 };
     const wall = plane(2400);
     const bg = field({ look, depth: empty() }).slice();
-    const at = async (glyphTone, glyphHash, glyphRain = 0) => {
-      const px = field({ look: { ...look, glyphTone, glyphHash, glyphRain }, depth: wall });
+    const at = async (toneKey, hashKey, rainKey = 0) => {
+      const px = field({ look: { ...look, 'glyph.tone': toneKey, 'glyph.hash': hashKey,
+        'glyph.rain': rainKey }, depth: wall });
       return { hash: await sha256(px), ...above(px, bg) };
     };
     // The hash key swept on its own, for the sign row below. With the other two keys down
     // the index argument is the fraction of the weight times the cell seed, and a seed is
     // under 1, so nothing wraps and the sweep walks the table out of its sparse end.
     const ramp = [];
-    for (const glyphHash of [0, 0.25, 0.5, 0.75, 1]) {
-      ramp.push({ glyphHash, ...(await at(0, glyphHash)) });
+    for (const hashKey of [0, 0.25, 0.5, 0.75, 1]) {
+      ramp.push({ hashKey, ...(await at(0, hashKey)) });
     }
     return {
       half: await at(0.35, 0.35),
@@ -4763,7 +4863,7 @@ console.log('\n[registry] the three keys add and wrap, so doubling two of them i
   check(descents.length === 0,
     'and raising the hash key alone only ever draws more ink, so it walks the table out of '
     + 'the sparse end rather than into it',
-    ramp.map((r) => `${r.glyphHash} -> ${(100 * r.lit).toFixed(2)}%`).join(', '));
+    ramp.map((r) => `${r.hashKey} -> ${(100 * r.lit).toFixed(2)}%`).join(', '));
   check(inks[inks.length - 1] > inks[0] * 1.5,
     'and the far end of that sweep is substantially inkier than the near one, so the row '
     + 'above is a ramp rather than five equal readings',
@@ -4811,24 +4911,24 @@ console.log('\n[registry] the alphabet is sorted by ink, and the tone key reads 
   const ramp = await page.evaluate(`(async () => {
     ${PAGE_HELPERS}
     ${FIELD_HELPERS}
-    const look = { ...${JSON.stringify(GLYPH_LOOK)}, latticeCell: 0.25, glyphHash: 0, glyphRain: 0 };
+    const look = { ...${JSON.stringify(GLYPH_LOOK)}, cell: 0.25, 'glyph.hash': 0, 'glyph.rain': 0 };
     const wall = plane(2400);
     const rows = [];
     for (const far of [8, 4, 3, 2.6]) {
       const range = { near: 0.5, far };
-      const bg = field({ look: { ...look, ...range, glyphTone: 0 }, depth: empty() }).slice();
+      const bg = field({ look: { ...look, ...range, 'glyph.tone': 0 }, depth: empty() }).slice();
       // The base arm draws one character in every cell - index 0, the apostrophe - so its
       // coverage is identical at every range and the colour it draws in is the reading's.
       // That is what lets the luminance be measured off the picture rather than assumed
       // from the clip arithmetic.
-      const flat = field({ look: { ...look, ...range, glyphTone: 0 }, depth: wall });
+      const flat = field({ look: { ...look, ...range, 'glyph.tone': 0 }, depth: wall });
       let r = 0, g = 0, b = 0, n = 0;
       for (let i = 0; i < flat.length; i += 4) {
         if ((flat[i] + flat[i + 1] + flat[i + 2]) - (bg[i] + bg[i + 1] + bg[i + 2]) > 12) {
           r += flat[i] - bg[i]; g += flat[i + 1] - bg[i + 1]; b += flat[i + 2] - bg[i + 2]; n++;
         }
       }
-      const inked = field({ look: { ...look, ...range, glyphTone: 1 }, depth: wall });
+      const inked = field({ look: { ...look, ...range, 'glyph.tone': 1 }, depth: wall });
       rows.push({
         far,
         lum: n ? (0.299 * r + 0.587 * g + 0.114 * b) / n / 255 : 0,
@@ -4928,7 +5028,7 @@ console.log('\n[registry] and the band is counted in the pixels the buffer actua
   const unit = await page.evaluate(`(async () => {
     ${PAGE_HELPERS}
     ${FIELD_HELPERS}
-    const base = { ...${JSON.stringify(GLYPH_LOOK)}, glyphHash: 0, glyphTone: 0, glyphRain: 0 };
+    const base = { ...${JSON.stringify(GLYPH_LOOK)}, 'glyph.hash': 0, 'glyph.tone': 0, 'glyph.rain': 0 };
     const wall = plane(2400);
     const bg = field({ look: base, depth: empty() }).slice();
     const at = (over, cropOutside = null) => {
@@ -4939,16 +5039,16 @@ console.log('\n[registry] and the band is counted in the pixels the buffer actua
       // 0.25m: 24 framebuffer pixels, 72 reference. Above the band on both readings, so
       // the mark is a hard bit whichever one the shader takes - this is the arm that says
       // the statistic can read a one.
-      above: at({ latticeCell: 0.25 }),
+      above: at({ cell: 0.25 }),
       // 0.125m: 12 framebuffer pixels, 36 reference. The two readings disagree here.
-      inside: at({ latticeCell: 0.125 }),
+      inside: at({ cell: 0.125 }),
       // The crop's own half, which is the same disagreement produced by the halving rather
       // than by the cell. A cut-away point draws at half its size, so a 0.25m cell that is
       // above the band whole is inside it cut - and the sprite is then smaller than the
       // cell pitch, so the marks stand apart and nothing overlaps into a second value.
       // The depth range is what puts every point outside the box: the wall is at 2.4m and
       // the far face is at 1.0, so the whole frame is cut away and the faint pass keeps it.
-      cropped: at({ latticeCell: 0.25, crop: true, near: 0.5, far: 1.0 }, 0.6),
+      cropped: at({ cell: 0.25, crop: true, near: 0.5, far: 1.0 }, 0.6),
     };
   })()`);
 
@@ -5017,7 +5117,7 @@ console.log('\n[registry] and above 1080 the same band is counted in the look\'s
   const over = await wide.page.evaluate(`(async () => {
     ${PAGE_HELPERS}
     ${FIELD_HELPERS}
-    const base = { ...${JSON.stringify(GLYPH_LOOK)}, glyphHash: 0, glyphTone: 0, glyphRain: 0 };
+    const base = { ...${JSON.stringify(GLYPH_LOOK)}, 'glyph.hash': 0, 'glyph.tone': 0, 'glyph.rain': 0 };
     const wall = plane(2400);
     const bg = field({ look: base, depth: empty() }).slice();
     const gl = k.renderer.getContext();
@@ -5031,10 +5131,10 @@ console.log('\n[registry] and above 1080 the same band is counted in the look\'s
       return { cell, reference, drawn: reference * scale };
     };
     const at = async (cell, keys) => {
-      const px = field({ look: { ...base, latticeCell: cell, ...keys }, depth: wall });
+      const px = field({ look: { ...base, cell, ...keys }, depth: wall });
       return { hash: await sha256(px), ...above(px, bg) };
     };
-    const LOUD = { glyphHash: 1, glyphTone: 0.7 };
+    const LOUD = { 'glyph.hash': 1, 'glyph.tone': 0.7 };
     return {
       buffer,
       scale,
@@ -5129,13 +5229,13 @@ console.log('\n[registry] and the margin around a character is not a surface');
     // getting this wrong: at the shared 0.25m cell both surfaces sat above the band and the
     // population fell from 5881 pixels to 291.
     const look = { ...${JSON.stringify(GLYPH_LOOK)},
-      latticeCell: 0.15, near: 0.5, far: 4.5, glyphHash: 0, glyphTone: 0, glyphRain: 0 };
+      cell: 0.15, near: 0.5, far: 4.5, 'glyph.hash': 0, 'glyph.tone': 0, 'glyph.rain': 0 };
     const { both, near, far } = twoSurfaces(1200, 4000, 16);
     const bg = field({ look, depth: empty() }).slice();
     const C = field({ look, depth: both }).slice();
     const F = field({ look, depth: far }).slice();
     const N = field({ look, depth: near }).slice();
-    const D = field({ look: { ...look, glyphHash: 1 }, depth: near }).slice();
+    const D = field({ look: { ...look, 'glyph.hash': 1 }, depth: near }).slice();
     let population = 0, atRisk = 0, moved = 0, movedAtRisk = 0, nearInk = 0, farLit = 0;
     for (let i = 0; i < C.length; i += 4) {
       if (drew(N, bg, i)) { nearInk++; continue; }
@@ -5208,11 +5308,11 @@ console.log('\n[registry] the rain falls, and its afterglow is above the head');
     // of. Round splats and no lattice, because the rain is a colour term that works over
     // dots and this section is not about characters.
     const look = { additive: false, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 1,
-      pointSize: 12, lattice: 0, latticeCell: 0.5, glyph: 0,
+      pointSize: 12, 'lattice.amount': 0, cell: 0.5, 'glyph.amount': 0,
       readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 4,
-      rain: 0.9, rainSpeed: 0.55, rainSpan: 4, rainTrail: 1.2 };
+      'rain.amount': 0.9, 'rain.speed': 0.55, 'rain.span': 4, 'rain.trail': 1.2 };
     const strip = column(2400, 30);
-    const off = field({ look: { ...look, rain: 0 }, depth: strip }).slice();
+    const off = field({ look: { ...look, 'rain.amount': 0 }, depth: strip }).slice();
     // The lift is read as a ratio against the same column with the rain down, so the base
     // picture divides out and what is left is the term itself.
     let lo = 360, hi = -1;
@@ -5285,7 +5385,7 @@ console.log('\n[registry] the rain falls, and its afterglow is above the head');
       : `no phase in the sweep put a head clear of the ends of a ${trail.rows}-row column`);
 
   // The claim, and it is stated as which way rather than as whether. The trail decays
-  // upward from the head over `rainTrail` metres and a point just under a head is a whole
+  // upward from the head over `rain.trail` metres and a point just under a head is a whole
   // span below the next one, so the room above the head is lit and the room below it is
   // dark. A build reading the other side of the fraction puts the same decay underneath,
   // which draws a wave that reads as rising.
@@ -5344,13 +5444,13 @@ console.log('\n[registry] and the rain\'s head gap is metres of room, not the li
     ${PAGE_HELPERS}
     ${FIELD_HELPERS}
     const look = { additive: false, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 1,
-      pointSize: 12, lattice: 0, latticeCell: 0.5, glyph: 0,
+      pointSize: 12, 'lattice.amount': 0, cell: 0.5, 'glyph.amount': 0,
       readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 4,
-      rain: 0.9, rainSpeed: 0.55, rainSpan: 1.3, rainTrail: 0.45 };
+      'rain.amount': 0.9, 'rain.speed': 0.55, 'rain.span': 1.3, 'rain.trail': 0.45 };
     const wall = plane(2400);
     const bg = field({ look, depth: empty() }).slice();
-    const at = async (spanSec, rainSpan) => {
-      const px = field({ look: { ...look, rainSpan }, depth: wall, spanSec, rainPhase: 7 });
+    const at = async (spanSec, span) => {
+      const px = field({ look: { ...look, 'rain.span': span }, depth: wall, spanSec, rainPhase: 7 });
       return { hash: await sha256(px), ...above(px, bg) };
     };
     return {
@@ -5413,7 +5513,7 @@ console.log('\n[registry] a splat\'s energy is its own, whatever size the sprite
     // dimmest arm spreads one point's energy over a thousand pixels and an eight-bit
     // readback throws away whatever rounds to zero.
     const look = { additive: true, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 6,
-      pointSize: 64, lattice: 0, glyph: 0, rain: 0,
+      pointSize: 64, 'lattice.amount': 0, 'glyph.amount': 0, 'rain.amount': 0,
       readRgb: 1, readDepth: 0, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 2.6 };
     const point = oneTexel(2400);
     const rows = [];
@@ -5473,7 +5573,7 @@ console.log('\n[registry] the two masters are exactly absent at zero, and so is 
     ${PAGE_HELPERS}
     ${FIELD_HELPERS}
     const look = { additive: true, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 1,
-      pointSize: 40, lattice: 0, latticeCell: 0.15, glyph: 0, rain: 0,
+      pointSize: 40, 'lattice.amount': 0, cell: 0.15, 'glyph.amount': 0, 'rain.amount': 0,
       readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 4 };
     const wall = plane(2400);
     const bg = field({ look, depth: empty() }).slice();
@@ -5483,9 +5583,9 @@ console.log('\n[registry] the two masters are exactly absent at zero, and so is 
     };
     // Two settings of the three lengths, and two of the three keys, chosen wide apart so
     // that a term leaking by a hundredth still separates them.
-    const SLOW = { rainSpeed: 0.3, rainSpan: 0.6, rainTrail: 0.2 };
-    const FAST = { rainSpeed: 2.4, rainSpan: 3.4, rainTrail: 1.7 };
-    const QUIET = { glyphTone: 0, glyphHash: 0, glyphRain: 0 };
+    const SLOW = { 'rain.speed': 0.3, 'rain.span': 0.6, 'rain.trail': 0.2 };
+    const FAST = { 'rain.speed': 2.4, 'rain.span': 3.4, 'rain.trail': 1.7 };
+    const QUIET = { 'glyph.tone': 0, 'glyph.hash': 0, 'glyph.rain': 0 };
     // The rain key sits at exactly 1 rather than near it, which is where a build handing
     // the whole-drop counter to the index raw goes inert - the fraction of an integer is
     // zero. It buys this pair nothing on its own and that is worth saying rather than
@@ -5493,7 +5593,7 @@ console.log('\n[registry] the two masters are exactly absent at zero, and so is 
     // equality would hold either way. What closes the whole-number counter is the
     // rain-key-alone row in the index section, and this value is here so that no reader
     // takes 0.7 for coverage of it.
-    const LOUD = { glyphTone: 0.8, glyphHash: 0.9, glyphRain: 1 };
+    const LOUD = { 'glyph.tone': 0.8, 'glyph.hash': 0.9, 'glyph.rain': 1 };
     // **The rain arms raise the glyph master, and that is not incidental.** The vertex
     // stage computes the drop coordinate under a gate naming both masters, so with both of
     // them down the coordinate is zero, the lift collapses to a constant, and the three
@@ -5503,19 +5603,20 @@ console.log('\n[registry] the two masters are exactly absent at zero, and so is 
     // gate open the lift is a value per point again and a term that is not exactly absent
     // separates the two settings. The rain key stays at zero, or the lengths would reach
     // the character index and the arms would differ on a build with nothing wrong with it.
-    const GATED = { glyph: 0.6, glyphRain: 0, glyphTone: 0, glyphHash: 1 };
+    const GATED = { 'glyph.amount': 0.6, 'glyph.rain': 0, 'glyph.tone': 0, 'glyph.hash': 1 };
     return {
-      rainOffSlow: await at({ rain: 0, ...GATED, ...SLOW }),
-      rainOffFast: await at({ rain: 0, ...GATED, ...FAST }),
-      rainOnSlow: await at({ rain: 0.8, ...GATED, ...SLOW }),
-      rainOnFast: await at({ rain: 0.8, ...GATED, ...FAST }),
-      glyphOffQuiet: await at({ glyph: 0, ...QUIET }), glyphOffLoud: await at({ glyph: 0, ...LOUD }),
-      glyphOnQuiet: await at({ glyph: 1, lattice: 1, ...QUIET }),
-      glyphOnLoud: await at({ glyph: 1, lattice: 1, ...LOUD }),
-      flatFine: await at({ pointSize: 64, latticeCell: 0.005 }),
-      flatCoarse: await at({ pointSize: 64, latticeCell: 0.5 }),
-      snappedFine: await at({ lattice: 0.5, pointSize: 64, latticeCell: 0.005 }),
-      snappedCoarse: await at({ lattice: 0.5, pointSize: 64, latticeCell: 0.5 }),
+      rainOffSlow: await at({ 'rain.amount': 0, ...GATED, ...SLOW }),
+      rainOffFast: await at({ 'rain.amount': 0, ...GATED, ...FAST }),
+      rainOnSlow: await at({ 'rain.amount': 0.8, ...GATED, ...SLOW }),
+      rainOnFast: await at({ 'rain.amount': 0.8, ...GATED, ...FAST }),
+      glyphOffQuiet: await at({ 'glyph.amount': 0, ...QUIET }),
+      glyphOffLoud: await at({ 'glyph.amount': 0, ...LOUD }),
+      glyphOnQuiet: await at({ 'glyph.amount': 1, 'lattice.amount': 1, ...QUIET }),
+      glyphOnLoud: await at({ 'glyph.amount': 1, 'lattice.amount': 1, ...LOUD }),
+      flatFine: await at({ pointSize: 64, cell: 0.005 }),
+      flatCoarse: await at({ pointSize: 64, cell: 0.5 }),
+      snappedFine: await at({ 'lattice.amount': 0.5, pointSize: 64, cell: 0.005 }),
+      snappedCoarse: await at({ 'lattice.amount': 0.5, pointSize: 64, cell: 0.5 }),
     };
   })()`);
 

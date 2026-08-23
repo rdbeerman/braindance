@@ -1568,7 +1568,7 @@ const MUTATIONS = {
   // ---- a shipped look and the definition it is written against
   //
   // The two controls for section 8's completeness arm, and they are a pair because the
-  // arm compares two things that are genuinely separate: nine documents on disk, and one
+  // arm compares two things that are genuinely separate: ten documents on disk, and one
   // line of code saying what a document has to name. One mutation falsifies each side,
   // and each has to redden its own row - a control that reddened both would be saying the
   // arm noticed *something*, which is what a single equality already says.
@@ -1613,18 +1613,22 @@ const MUTATIONS = {
     'const key = `${capture.index.hash}`;',
   ]] },
   // **And the other side of the comparison: the definition, narrowed by one group.**
-  // `completeLookNames` is the look tag less its framing, and this drops `post` as well -
-  // so the nine documents go on naming `bloom`, `grain`, `vignette` and the four beside
-  // them while the definition has stopped asking for any of them. The documents are then
-  // supersets rather than equals, which is the direction a "names at least" row could
-  // never see, and it is the direction a wrongly *grown* exclusion arrives from: framing
-  // creeping back into the filter reads identically from here.
+  // `coreLookNames()` is the look tag less its framing and less every effect's own
+  // parameters, and this drops `post` from it as well - but `post` mostly holds effect
+  // parameters that `effectOf(n) === null` already excludes (`rgbsplit.amount`,
+  // `grain.amount`, `streak.amount`, `streak.angle`, `vignette.amount`), so what this
+  // mutation actually removes from the core is the two `post` members no effect
+  // claims: `bloom` and `crush`. The ten documents go on naming both while the
+  // definition has stopped asking for either, so the documents become supersets
+  // rather than equals - the direction a "names at least" row could never see, and
+  // the direction a wrongly *grown* exclusion arrives from: framing creeping back
+  // into the filter reads identically from here.
   //
   // It leaves `wholeLookTag` easier to satisfy rather than harder, so the provenance rows
   // above stay green and this reddens the extra-values row alone.
   'complete-look-drops-a-group': { file: 'web/main.js', edits: [[
-    "const completeLookNames = () => params.names('look').filter((n) => PARAMS[n].group !== 'framing');",
-    "const completeLookNames = () => params.names('look').filter((n) => PARAMS[n].group !== 'framing' && PARAMS[n].group !== 'post');",
+    "  .filter((n) => PARAMS[n].group !== 'framing' && effectOf(n) === null);",
+    "  .filter((n) => PARAMS[n].group !== 'framing' && PARAMS[n].group !== 'post' && effectOf(n) === null);",
   ]] },
 };
 
@@ -5471,7 +5475,7 @@ async function runChecks() {
     // A look nothing defaults to, so a restore that did nothing cannot pass.
     const SCRAMBLE = {
       pointSize: 21.6, opacity: 0.62, exposure: 2.35, bloom: 1.35, trails: 0.62,
-      rgbSplit: 2.4, scanlines: 0.44, grain: 0.31, scan: 0.62, rim: 0.28, fade: 340, wake: 720,
+      'rgbsplit.amount': 2.4, 'raster.amount': 0.44, 'grain.amount': 0.31, scan: 0.62, rim: 0.28, fade: 340, wake: 720,
     };
     // The deterministic drive rather than the timeline: an image comparison needs a
     // program position rendered with nothing between the walk and the pixels, and
@@ -5687,7 +5691,7 @@ async function runChecks() {
     // shipped look could not tell "your values came back" from "the built-in look for
     // this reading was reapplied", which is the confusion a preset library exists to
     // avoid. The reading goes in through the registry with everything else now.
-    const TUNED = { bloom: 2.4, trails: 0.11, rgbSplit: 4.2, grain: 0.77, pointSize: 30.5 };
+    const TUNED = { bloom: 2.4, trails: 0.11, 'rgbsplit.amount': 4.2, 'grain.amount': 0.77, pointSize: 30.5 };
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
       k.params.apply({ readRgb: 0, readBlackwall: 1 });
@@ -5722,7 +5726,7 @@ async function runChecks() {
     const applied = await retryOnContextLoss('applying the preset', () => page.evaluate(`(async () => {
       const k = globalThis.__kinect;
       k.params.apply({ readBlackwall: 0, readRgb: 1 });
-      k.params.apply({ bloom: 0, trails: 0, rgbSplit: 0, grain: 0, pointSize: 9 });
+      k.params.apply({ bloom: 0, trails: 0, 'rgbsplit.amount': 0, 'grain.amount': 0, pointSize: 9 });
       const before = { pose: k.params.get('camera'), values: k.params.values(k.params.names('look')) };
       const docRes = await fetch('/presets/hand-tuned');
       k.library.applyStoredPreset(await docRes.json());
@@ -5733,10 +5737,10 @@ async function runChecks() {
         stamp: k.library.appliedPreset(),
       };
     })()`));
-    check(applied.after.bloom === TUNED.bloom && applied.after.rgbSplit === TUNED.rgbSplit
-      && applied.after.grain === TUNED.grain && applied.after.pointSize === TUNED.pointSize,
+    check(applied.after.bloom === TUNED.bloom && applied.after['rgbsplit.amount'] === TUNED['rgbsplit.amount']
+      && applied.after['grain.amount'] === TUNED['grain.amount'] && applied.after.pointSize === TUNED.pointSize,
       'applying a preset restores the values it was saved with, not a built-in look',
-      `bloom ${applied.after.bloom} rgbSplit ${applied.after.rgbSplit} pointSize ${applied.after.pointSize}`);
+      `bloom ${applied.after.bloom} rgbsplit.amount ${applied.after['rgbsplit.amount']} pointSize ${applied.after.pointSize}`);
     check(applied.after.readBlackwall === 1 && applied.after.readRgb === 0,
       'and it restores the reading, which needs no special case to travel',
       `readBlackwall ${applied.after.readBlackwall}`);
@@ -5798,57 +5802,99 @@ async function runChecks() {
     // 33 of the 72 ordered pairs rendered a different frame in sequence than the same
     // look rendered alone. A user reported it as "the voxel effect stays".
     //
-    // So the rule is set equality against `completeLookNames()` - the look tag less its
-    // framing, which is the shot rather than the look - and the two directions are two
-    // rows because they fail for different reasons and each has a control of its own. A
-    // document short of a key is the layering bug above. A document carrying a key the
-    // definition does not ask for is the same drift arriving from the other end: it says
-    // the exclusion has widened underneath the documents, which is what would happen if
-    // framing crept back into that filter, and a "names at least" row cannot see it at
-    // all.
+    // So the rule was set equality against one constant. It is per document now,
+    // because `wholeLookNames` is a function of the document rather than of the build:
+    // an effect's parameters belong to a document only when that document's own
+    // `requires` claims the effect, so what a document owes is `coreLookNames()` plus
+    // the full parameter list of every effect its `requires` names. Three rows follow
+    // rather than two - a document short of a key it owes is the layering bug above; a
+    // document carrying a key nothing asks for is the same drift from the other end,
+    // whether that is a widened exclusion in `coreLookNames` or an effect the document
+    // uses without declaring it; and a `requires` list that disagrees with the effects
+    // the values actually touch, in either direction, is a hand edit the derivation on
+    // save would never produce.
     //
-    // **The two sides are independent probes rather than one quantity read twice.** The
-    // documents are bytes on disk, enumerated off the directory so a tenth look added
-    // next year is asked by existing; the required set is code, read off the live
-    // registry through the page so a tool spelling the framing exclusion out for itself
-    // would be a second statement of the line, drifting in the direction where this goes
-    // on passing. Fetched through `/presets/:name` - the route the picker uses - rather
-    // than off disk, so what is under test is what the program is served.
-    const required = await page.evaluate('globalThis.__kinect.completeLookNames()');
+    // **The sides stay independent probes rather than one quantity read twice.** The
+    // documents are bytes on disk, enumerated off the directory so an eleventh look
+    // added next year is asked by existing; what each owes is computed off the live
+    // registry through the page - `coreLookNames()`, `effectOf()` and
+    // `effectParamNames()` - so a tool spelling the namespace split out for itself
+    // would be a second statement of the line, drifting in the direction where this
+    // goes on passing. Fetched through `/presets/:name` - the route the picker uses -
+    // rather than off disk, so what is under test is what the program is served.
+    const core = await page.evaluate('globalThis.__kinect.coreLookNames()');
     const shippedDocs = [];
     for (const name of shippedNames) {
       let values = null;
+      let requires;
       try {
         const doc = await getJson(`${macUrl}/presets/${name}`);
-        if (doc?.body?.values && typeof doc.body.values === 'object') values = doc.body.values;
+        if (doc?.body?.values && typeof doc.body.values === 'object') {
+          values = doc.body.values;
+          requires = doc.body.requires;
+        }
       } catch { /* an answer that is not a document is a document that did not come back */ }
-      shippedDocs.push({ name, values });
+      shippedDocs.push({ name, values, requires });
     }
     const readable = shippedDocs.filter((d) => d.values !== null);
     // The floor, and it fails where neither row below can: a look that 404s or answers
-    // something that is not a document simply drops out of both comparisons, so a run
-    // with nothing readable would report set equality over the empty set. The required
+    // something that is not a document simply drops out of every comparison, so a run
+    // with nothing readable would report set equality over the empty set. The core
     // count is printed rather than asserted - a registry that answered with nothing is
     // the extras row's to catch, where every key in every document is one it did not ask
     // for.
     check(readable.length === shippedNames.length && readable.length > 0,
-      'and each of them comes back through the route the picker reads, so the two rows below compare something',
-      `${readable.length} of ${shippedNames.length} documents read, against ${required.length} values the registry says a whole look is`);
+      'and each of them comes back through the route the picker reads, so the rows below compare something',
+      `${readable.length} of ${shippedNames.length} documents read, against ${core.length} core values every look owes`);
+
+    // One evaluate over the whole readable set rather than one per document, so the
+    // ten reads land against a single, coherent snapshot of `PARAMS` instead of one
+    // that could in principle change between them.
+    const analysis = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const core = k.coreLookNames();
+      const docs = ${JSON.stringify(readable.map((d) => ({ name: d.name, values: d.values, requires: d.requires ?? [] })))};
+      return docs.map((d) => {
+        const names = Object.keys(d.values);
+        const usedIds = [...new Set(names.map((n) => k.effectOf(n)).filter(Boolean))];
+        const requiresIds = d.requires.map((r) => r.id);
+        const required = [...core, ...requiresIds.flatMap((id) => k.effectParamNames(id))];
+        return {
+          name: d.name,
+          missing: required.filter((n) => !names.includes(n)),
+          extra: names.filter((n) => !required.includes(n)),
+          touchedNotRequired: usedIds.filter((id) => !requiresIds.includes(id)),
+          requiredNotTouched: requiresIds.filter((id) => !usedIds.includes(id)),
+        };
+      });
+    })()`);
 
     const say = (rows) => rows.map((r) => `${r.name}: ${r.keys.slice(0, 6).join(' ')}`
       + `${r.keys.length > 6 ? ` (+${r.keys.length - 6} more)` : ''}`).join('; ');
-    const missing = readable
-      .map((d) => ({ name: d.name, keys: required.filter((n) => !Object.hasOwn(d.values, n)) }))
-      .filter((d) => d.keys.length > 0);
+    const missing = analysis.map((d) => ({ name: d.name, keys: d.missing })).filter((d) => d.keys.length > 0);
     check(missing.length === 0,
-      'every look that ships names every value the registry says a whole look is',
-      missing.length ? say(missing) : `all ${readable.length} name all ${required.length}`);
-    const extra = readable
-      .map((d) => ({ name: d.name, keys: Object.keys(d.values).filter((k) => !required.includes(k)) }))
-      .filter((d) => d.keys.length > 0);
+      "every look that ships names every value coreLookNames() and its own requires say it owes",
+      missing.length ? say(missing) : `all ${readable.length} name everything they claim`);
+    const extra = analysis.map((d) => ({ name: d.name, keys: d.extra })).filter((d) => d.keys.length > 0);
     check(extra.length === 0,
       'and none of them names a value that is not one of those',
-      extra.length ? say(extra) : `all ${readable.length} name nothing beyond the ${required.length}`);
+      extra.length ? say(extra) : `all ${readable.length} name nothing beyond what they claim`);
+
+    // The third direction, which the two rows above cannot see: `requires` is derived
+    // from the values on save, so a document whose list disagrees with what its values
+    // actually touch is a hand edit that slipped past the derivation. An effect used
+    // but not listed would load fine here and render wrong on a build missing that
+    // effect; an effect listed but never used claims part of the look the look does not
+    // make.
+    const requiresMismatch = analysis
+      .map((d) => ({
+        name: d.name,
+        keys: [...d.touchedNotRequired.map((id) => `+${id}`), ...d.requiredNotTouched.map((id) => `-${id}`)],
+      }))
+      .filter((d) => d.keys.length > 0);
+    check(requiresMismatch.length === 0,
+      "and each one's requires list names exactly the effects its own values touch",
+      requiresMismatch.length ? say(requiresMismatch) : `all ${readable.length} requires lists agree with their values`);
 
     // The fork. Written through the same route a save uses, because the claim is about
     // that route rather than about a helper.
@@ -5859,7 +5905,7 @@ async function runChecks() {
     // file under test is the one the process can actually reach.
     const builtinPath = join(WORK, 'builtin-presets/blackwall.json');
     const bytesBefore = readFileSync(builtinPath, 'utf8');
-    const forkBody = { version: PROJECT_VERSION, values: { ...shipped.values, bloom: 5.5 } };
+    const forkBody = { version: PROJECT_VERSION, requires: shipped.requires, values: { ...shipped.values, bloom: 5.5 } };
     await post(`${macUrl}/presets/blackwall`, forkBody, 'PUT');
     check(readFileSync(builtinPath, 'utf8') === bytesBefore,
       'saving over a shipped look leaves the shipped file byte-identical',

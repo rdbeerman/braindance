@@ -327,7 +327,7 @@ const MUTATIONS = {
   // spelling nobody thought of leaving the tree with less in it than the tree has.
   'export-form-nothing-claims': {
     file: 'web/format.js',
-    edits: [['export const PROJECT_VERSION = 5;', 'export const PROJECT_VERSION = 5;\nexport const { major, minor } = { major: 1, minor: 0 };']],
+    edits: [['export const PROJECT_VERSION = 6;', 'export const PROJECT_VERSION = 6;\nexport const { major, minor } = { major: 1, minor: 0 };']],
   },
 
   // A barrel, refused rather than followed. Resolving one needs a second resolver - which

@@ -958,7 +958,7 @@ const RES_ARM = `async ({ label, look, at, resLook, camera }) => {
   // a worst tile of 48.7/255, which reads as the rebase having broken and was a mask
   // still fading the cloud. Zero is the default for all four, so this changes nothing
   // for any row that was here before.
-  const REGION_BASE = { noise: 0, regionPush: 0, regionNoise: 0, regionMask: 0 };
+  const REGION_BASE = { 'noise.amount': 0, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0 };
   const merged = { ...REGION_BASE, ...resLook, ...look };
   const dropped = Object.keys(merged).filter((n) => !known.has(n));
   k.params.apply(Object.fromEntries(Object.entries(merged).filter(([n]) => known.has(n))));
@@ -1374,7 +1374,7 @@ const NEAR_CAMERA = { position: [0, 0.1, -0.2], quaternion: [0, 0, 0, 1], fov: 5
 // result that reads exactly like the look having stopped holding across output size, and
 // was entirely the tool's own state. Zeroing them here costs nothing, because zero is
 // what they already default to.
-const REGION_OFF = { noise: 0, regionPush: 0, regionNoise: 0, regionMask: 0 };
+const REGION_OFF = { 'noise.amount': 0, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0 };
 // The crop planes wide open, and they are in `OFF` for the reason the region's
 // effects are: **an arm applies its look over whatever the previous one left.** The
 // sweep runs every pipeline at the small size and then every pipeline at the big one,
@@ -1385,7 +1385,9 @@ const REGION_OFF = { noise: 0, regionPush: 0, regionNoise: 0, regionMask: 0 };
 // against an uncropped small one. Asserted against the registry's own defaults below,
 // so "wide open" cannot drift from what the sliders mean by it.
 const CROP_OPEN = { left: -7, right: 7, bottom: -7, top: 7 };
-const OFF = { bloom: 0, trails: 0, rgbSplit: 0, scanlines: 0, grain: 0, ...REGION_OFF, ...CROP_OPEN };
+const OFF = {
+  bloom: 0, trails: 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, ...REGION_OFF, ...CROP_OPEN,
+};
 
 /**
  * `OFF` with the vignette taken out too, for the arms that render the same look
@@ -1426,8 +1428,25 @@ const OFF = { bloom: 0, trails: 0, rgbSplit: 0, scanlines: 0, grain: 0, ...REGIO
  *
  * `asOldBuild` needs nothing: the old module has never heard of `vignette`, so
  * `RES_ARM`'s drop-unknown filter takes it off that arm by itself.
+ *
+ * **`rgbSplit`, `scanlines` and `grain` are named twice, on purpose, and this is not
+ * leftover from the rename.** `OFF` carries them dotted, because the eleven
+ * within-build rows spread `OFF` straight into `main.page` and the sweep above
+ * asserts `dropped` is empty there - a flat name would be an unknown parameter on
+ * this build and redden that row for no reason about the pixels. But this constant
+ * also feeds the pinned old build, through `asOldBuild`, and that build's registry
+ * has never heard of a dotted name - it is the same "unknown parameter" gap
+ * `vignette` opened above, one rename earlier. Unlike `vignette` there is something
+ * on that side worth zeroing: `setMode(4)` on the old build sets these three exactly
+ * as `BLACKWALL_LOOK` does on this one, so a spread that only carries the dotted
+ * name would leave the old build's grade running while this build's grade is off,
+ * which is the same silent chain divergence the `vignette` finding above already
+ * paid for once. Carrying both spellings costs nothing on either side: whichever
+ * name a build's registry does not have is dropped by the same filter that already
+ * tolerates `vignette`, and `dropped` is only asserted empty for the eleven rows
+ * that never reach this constant.
  */
-const CROSS_BUILD_OFF = { ...OFF, vignette: 0 };
+const CROSS_BUILD_OFF = { ...OFF, 'vignette.amount': 0, rgbSplit: 0, scanlines: 0, grain: 0 };
 
 /**
  * The same look with the crop planes taken out, for the arms that run against the
@@ -1537,13 +1556,13 @@ const PIPELINES = [
   // point blends the same way.
   ['splat', { look: { ...OFF, additive: true, pointSize: 7 }, camera: NEAR_CAMERA }],
   ['trails', { look: { ...OFF, trails: 0.5 } }],
-  ['rgbsplit', { look: { ...OFF, rgbSplit: 1.6 } }],
+  ['rgbsplit', { look: { ...OFF, 'rgbsplit.amount': 1.6 } }],
   // Both at full rather than at the preset's 0.35 and 0.22. At preset strength the
   // grain is about one part in 255 and reverting it to framebuffer pixels moved
   // every number here by 4%, which is a probe standing where the answer is the
   // same either way. At full strength the same revert is unmissable.
-  ['scanlines', { look: { ...OFF, scanlines: 1 } }],
-  ['grain', { look: { ...OFF, grain: 1 } }],
+  ['scanlines', { look: { ...OFF, 'raster.amount': 1 } }],
+  ['grain', { look: { ...OFF, 'grain.amount': 1 } }],
   // Bloom was the one term the design said needed nothing, on the grounds that it
   // already runs at half the drawing buffer. Half the buffer makes its cost
   // proportional and its appearance anything but - a fixed tap count per mip
@@ -1572,9 +1591,9 @@ const PIPELINES = [
   // sample capture's cloud runs z [-4.50, -0.50] with its median point at
   // (0.021, 0.019, -1.893), so this sits on the subject with its surface passing
   // through the cloud instead of enclosing it or missing it.
-  ['noise', { look: { ...OFF, ...REGION_OFF, noise: 0.06, noiseScale: 4, noiseSpeed: 0 } }],
-  ['regionpush', { look: { ...OFF, ...REGION_AT_SUBJECT, regionPush: 0.35 } }],
-  ['regionmask', { look: { ...OFF, ...REGION_AT_SUBJECT, regionMask: 0.5 } }],
+  ['noise', { look: { ...OFF, ...REGION_OFF, 'noise.amount': 0.06, 'noise.scale': 4, 'noise.speed': 0 } }],
+  ['regionpush', { look: { ...OFF, ...REGION_AT_SUBJECT, 'push.amount': 0.35 } }],
+  ['regionmask', { look: { ...OFF, ...REGION_AT_SUBJECT, 'mask.amount': 0.5 } }],
   // The four lateral crop faces, and they belong in this family for the same reason
   // the region does: they are metres in the sensor frame, so the same four numbers
   // have to cut the same box out of the room at 600 and at 1200. `crop-in-pixels` is

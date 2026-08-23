@@ -646,9 +646,10 @@ const BLACKWALL = { look: BLACKWALL_LOOK };
 
 // The one look in this file with the rain switched on, and it has to exist rather than
 // being folded into an arm above. **Every other arm here renders the rain completely
-// inert**: `blackwall.json`, `depth.json` and `rgb.json` all carry `rain: 0`, because the
-// eight values this feature added are zero in all nine shipped documents, and a term behind
-// a master at zero is not a term a comparison can see. Run against any of them the rain
+// inert**: `blackwall.json`, `depth.json` and `rgb.json` do not carry the rain effect at
+// all - a version 6 document sheds an effect wholly at its defaults, and the whole-look
+// apply resets what a document leaves unnamed - and a term behind a master at zero is not
+// a term a comparison can see. Run against any of them the rain
 // mutation below reddens nothing, the run exits 0, and this file has no NOT CAUGHT branch
 // to say so - a miss that reads as a clean pass, which is the worse of the two shapes.
 //
@@ -659,7 +660,7 @@ const BLACKWALL = { look: BLACKWALL_LOOK };
 const CASCADE_PATH = new URL('../presets-builtin/cascade.json', import.meta.url);
 const CASCADE_SHIPPED = existsSync(CASCADE_PATH)
   ? JSON.parse(readFileSync(CASCADE_PATH, 'utf8')).values
-  : { ...BLACKWALL_LOOK, rain: 0.8, rainSpeed: 0.55, rainSpan: 1.3, rainTrail: 0.45 };
+  : { ...BLACKWALL_LOOK, 'rain.amount': 0.8, 'rain.speed': 0.55, 'rain.span': 1.3, 'rain.trail': 0.45 };
 
 // **Two values are moved off that document, and the rain is not one of them.** What this
 // section claims is about the rain and what its control claims is about the pre-roll, and the
@@ -698,7 +699,7 @@ const CASCADE_SHIPPED = existsSync(CASCADE_PATH)
 const CASCADE_LOOK = {
   ...CASCADE_SHIPPED,
   trails: BLACKWALL_LOOK.trails,
-  latticeCell: (CASCADE_SHIPPED.latticeCell ?? 0.055) * 3,
+  cell: (CASCADE_SHIPPED.cell ?? 0.055) * 3,
 };
 
 const arm = (opts) => page.evaluate(`(${ARM})(${JSON.stringify(opts)})`);
@@ -828,18 +829,18 @@ console.log('\n== 1c. the image at a program position is the frame the index nam
   // leave whatever the previous section selected - and the section before this one runs
   // in Blackwall, whose scan plane sweeps with program time. Every "nothing left that
   // can move the image" claim below would then be measuring a moving image.
-  // `vignette` is named here for the same reason every other grade term is, and it is the
-  // one that says why this list cannot be shortened: FLAT spreads over a look that has the
+  // `vignette.amount` is named here for the same reason every other grade term is, and it is
+  // the one that says why this list cannot be shortened: FLAT spreads over a look that has the
   // grade up, so a term it does not zero arrives from underneath. When the vignette stopped
   // being a literal applied whenever the pass ran and became a parameter Blackwall names,
   // this list went on zeroing the three it knew about and the fourth came through - a flat
   // look with a corner falloff on it, which is 100% of pixels differing from the bytes.
-  // `duotoneDepth` joins that list ahead of needing to. It is not time-varying, so seek
+  // `duotone.amount` joins that list ahead of needing to. It is not time-varying, so seek
   // still equals playback with it up - but it is a tonal transform after the blend, and
   // this arm compares the rendered image against the frame bytes themselves, so the moment
   // the shipped Blackwall look names a duotone it would arrive from underneath exactly the
   // way the vignette did. The list is cheaper to extend than the failure is to diagnose.
-  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, glitch: 0, scan: 0, noise: 0, rgbSplit: 0, scanlines: 0, grain: 0, vignette: 0, duotoneDepth: 0 };
+  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, scan: 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
   const look = { ...FLAT, interpolate: false };
   // A source time sitting just inside a bracket, so which pair it names is not a
   // rounding question. Which *half* of that pair the image comes from is the part
@@ -1383,18 +1384,18 @@ console.log('\n== 4b. 60 fps out of a capture whose median gap is 64ms ==');
   // leave whatever the previous section selected - and the section before this one runs
   // in Blackwall, whose scan plane sweeps with program time. Every "nothing left that
   // can move the image" claim below would then be measuring a moving image.
-  // `vignette` is named here for the same reason every other grade term is, and it is the
-  // one that says why this list cannot be shortened: FLAT spreads over a look that has the
+  // `vignette.amount` is named here for the same reason every other grade term is, and it is
+  // the one that says why this list cannot be shortened: FLAT spreads over a look that has the
   // grade up, so a term it does not zero arrives from underneath. When the vignette stopped
   // being a literal applied whenever the pass ran and became a parameter Blackwall names,
   // this list went on zeroing the three it knew about and the fourth came through - a flat
   // look with a corner falloff on it, which is 100% of pixels differing from the bytes.
-  // `duotoneDepth` joins that list ahead of needing to. It is not time-varying, so seek
+  // `duotone.amount` joins that list ahead of needing to. It is not time-varying, so seek
   // still equals playback with it up - but it is a tonal transform after the blend, and
   // this arm compares the rendered image against the frame bytes themselves, so the moment
   // the shipped Blackwall look names a duotone it would arrive from underneath exactly the
   // way the vignette did. The list is cheaper to extend than the failure is to diagnose.
-  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, glitch: 0, scan: 0, noise: 0, rgbSplit: 0, scanlines: 0, grain: 0, vignette: 0, duotoneDepth: 0 };
+  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, scan: 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
   const walk = `(async (o) => {
     const k = globalThis.__kinect;
     const tl = globalThis.__tl;

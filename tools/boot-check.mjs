@@ -371,7 +371,7 @@ async function main() {
   // **What this row cannot separate, counted rather than left implied.** A parameter whose
   // stored value happens to equal what its own unwritten control would read is invisible to
   // the row above, because both builds show the same thing. Seven are on this build -
-  // `additive`, `spin`, `right`, `top`, `ripple`, `readRgb` and `trails` - and that number
+  // `additive`, `spin`, `right`, `top`, `ripple.amount`, `readRgb` and `trails` - and that number
   // is the measured set rather than a predicted one: it is exactly the set observed still
   // agreeing under `reset-before-the-panel-generator`, which is the check that the two agree
   // about what "indistinguishable" means. A tolerance that reports nothing is a blindfold, so

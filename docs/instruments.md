@@ -1050,7 +1050,7 @@ worse direction, because it looks like coverage.
 
 What separates them is the property the section next door already rests on, read backwards: a
 ratio has no scale. Double every weight and a normalising mix renders the identical image while
-a sum walks the index. The shipped row hashes the field at `glyphTone`/`glyphHash` of 0.35 each
+a sum walks the index. The shipped row hashes the field at `glyph.tone`/`glyph.hash` of 0.35 each
 against the same pair at 0.70 each and requires the two frames to differ, with the two keys
 also asserted to draw something on their own so that a difference cannot come from a field that
 is blank either way.
@@ -1763,7 +1763,7 @@ cell coarse enough that neighbouring columns share a phase.
 
 **Direction had to be measured by advancing the phase rather than by reading the sign.** The
 probe holds one frame of footage still — `fixture-1g` seeked to program time 12.000s on `/edit`,
-in a 1280x800 page, `lattice` 1 on the 5.5cm cell with `glyph` 0 over a depth reading — and moves
+in a 1280x800 page, `lattice.amount` 1 on the 5.5cm cell with `glyph.amount` 0 over a depth reading — and moves
 nothing but `rainPhase`, because two program times would move the footage as well and a
 difference between the frames could then be a person walking. The depth box is shut onto an 0.8m
 slab, 2.0 to 2.8 metres, so that one metre of world descent is one number of pixels: over the
@@ -1777,7 +1777,7 @@ against a predicted 87. The gap is not explained and the prediction is the part 
 with: at 0.55 m/s the rows per second depend on the **view** distance to the slab and the camera
 sits at z = +1.6, so predicting from sensor depth instead lands about a factor of two out.
 
-**And the lift a pixel actually receives is not the parameter.** At `rain` 0.8 the largest
+**And the lift a pixel actually receives is not the parameter.** At `rain.amount` 0.8 the largest
 per-pixel lift measured is 0.383 against the 0.8 the expression suggests, from multiple cells
 contributing to one pixel and from clipping — a mechanism that has not itself been verified.
 **The clip range and cell size that number was taken at were not recorded with it**, so it is
@@ -1792,13 +1792,13 @@ them; a number wanted at a different slab, cell or clip range has to be taken ag
 `registry-check`'s sweep takes each look parameter off in turn and asks whether the picture
 moved, and its line reads "86 of 89 parameters proven to reach the pixels". Run
 `--mutate lattice-ignored`, which closes the guard around the snap so a cell quantises nothing,
-and the sweep prints exactly the same 86 of 89. The `lattice` row is green over a shader whose
+and the sweep prints exactly the same 86 of 89. The `lattice.amount` row is green over a shader whose
 lattice does not exist.
 
 The mechanism is that the sweep's question and the mutation's subject are two different things.
-`lattice` reaches the pixels down more than one path now: the glyph field's energy compensation
-crosses as `vCellNorm` and reads `lattice` directly, above the guard, and the cell seed and the
-sprite size read `latticeCell` outside it too, because the rain rides those columns whatever the
+`lattice.amount` reaches the pixels down more than one path now: the glyph field's energy
+compensation crosses as `vCellNorm` and reads the `lattice` uniform directly, above the guard,
+and the cell seed and the sprite size read `latticeCell` outside it too, because the rain rides those columns whatever the
 lattice is doing. So the parameter still moves the image with the snap dead, which is all the
 sweep ever asked. **A drop-one sweep is an existence proof over the whole shader, and a mutation
 is about one branch of it. The two coincide only while the parameter has exactly one reader, and
@@ -2141,8 +2141,8 @@ URL for named rather than silently driven at a URL still carrying a literal `:fo
 produced `sameChain` — two builds silently running different post chains, reported for as long
 as those rows existed as a luminance ratio — put the guard on three of them. The two it skipped
 are the `rebase-full` pair, and the reason they were skipped is written down in
-`docs/proof-tools.md`: they spread nothing, so Blackwall's own `rgbSplit`, `scanlines` and
-`grain` survive on both sides and both builds run the grade, which is why they stayed green
+`docs/proof-tools.md`: they spread nothing, so Blackwall's own `rgbsplit.amount`, `raster.amount` and
+`grain.amount` survive on both sides and both builds run the grade, which is why they stayed green
 while the other three went red. The commit that landed all this then claimed in prose that
 **every** cross-build row required a matching chain. It was three of five.
 
@@ -2699,17 +2699,17 @@ it had no range.
 the frames. Every default in the glitch block was chosen to be the literal the one-slider
 version baked, and three separate comments said so — one of them as a universal, "Every default
 is exactly the literal it replaced", sitting directly above an enumeration of *four* numbers
-where there are five parameters. `glitchTint` was the fifth, and it is 1.8 where the old line
+where there are five parameters. `glitch.tint` was the fifth, and it is 1.8 where the old line
 baked 3.0.
 
-Nothing caught it for the plainest possible reason: **`glitch` defaults to 0, so the block never
+Nothing caught it for the plainest possible reason: **`glitch.amount` defaults to 0, so the block never
 executed on either arm.** The one shipped look that switches it on, `blackwall.json` at
-`glitch: 0.18`, was never rendered by the comparison that exists to protect it. The claim and
+`glitch.amount: 0.18`, was never rendered by the comparison that exists to protect it. The claim and
 the instrument were arranged so that the claim's only counterexample was outside what the
 instrument looked at.
 
-It came out by adding `glitch: 0.18` to both arms and getting 6 of 6 frames differing, then
-bisecting: at `glitchTint: 0` the colour, depth and contour readings come back byte for byte
+It came out by adding `glitch.amount: 0.18` to both arms and getting 6 of 6 frames differing, then
+bisecting: at `glitch.tint: 0` the colour, depth and contour readings come back byte for byte
 identical, which proves `pos.x += shove` — the block's geometry — really is bit-exact, and the
 four defended terms really do hold. The flare alone moved. Measured against the pinned build on
 `readBlackwall`, 1.8 lands 30 of 255 off at worst against 3.0's 5, so the compensating default
@@ -2724,14 +2724,14 @@ Two lessons, and the second is the one that generalises:
 - **A cross-build comparison rendered at defaults tests the build nobody ships.** The values a
   shipped preset names are exactly the ones a drift would reach first, and exactly the ones a
   defaults-only arm cannot see. The raster arm above it already stands at the shipped
-  `scanlines: 0.35` for this reason; the glitch had no such arm because nobody had asked what
+  `raster.amount: 0.35` for this reason; the glitch had no such arm because nobody had asked what
   the shipped document turns on. **Ask what the shipped look names, and render there.**
 
 ## A number written into a document does not fail
 
 The nine shipped looks each named a different subset of the look values, so picking one
 after another left the previous look's terms standing — `voxel` was the only document
-naming `lattice`, and picking `ember` next drew amber over a lattice nobody had asked for.
+naming `lattice.amount`, and picking `ember` next drew amber over a lattice nobody had asked for.
 That was reported as a bug and it is one.
 
 **It had already been measured.** The README beside those files carried the sentence "all
@@ -2766,11 +2766,11 @@ The glyph field's energy compensation darkens exactly one shipped look — `voxe
 re-grade that buys it back was done the way the section above says: search the value, read it out
 of the registry with the look on screen, do not type it. **The narrow claim is true and the
 obvious reason for it is false**, which is worth separating before the case file starts. `voxel`
-is not the only document that raises `lattice`: `cascade` ships it at 1.0 against `voxel`'s 0.55
+is not the only document that raises `lattice.amount`: `cascade` ships it at 1.0 against `voxel`'s 0.55
 and the correction never reaches it, because the factor is exactly 1 wherever the sprite already
-covers the cell, and full `glyph` is what makes it that size. What the compensation acts on is a
+covers the cell, and full `glyph.amount` is what makes it that size. What the compensation acts on is a
 lattice underneath a sprite *smaller* than its cell, and of the ten documents only `voxel` is in
-that state — 0.55 with `glyph` 0 and a `pointSize` of 6.5 against a 3.5cm cell. What is worth a
+that state — 0.55 with `glyph.amount` 0 and a `pointSize` of 6.5 against a 3.5cm cell. What is worth a
 case file is the number the search would have been given if anybody had worked it out on paper
 instead.
 
@@ -3218,7 +3218,7 @@ glyph field went in it reads **4.48 / 1.71** and passes, and its two
 neighbours moved with it, 4.04 to 5.60 and 4.17 to 6.75.
 
 Nothing touched the streak, the rows or their thresholds. What moved is the fixture they are
-measured over: the scrambled look raises `lattice` to 1 on an 11cm cell with `additive` on, which
+measured over: the scrambled look raises `lattice.amount` to 1 on an 11cm cell with `additive` on, which
 piled every point in a cell onto one position and rendered a white field, and the glyph field's
 energy compensation now divides that pile-up back down. The frame stopped being saturated, a
 gradient the row needs became readable, and three rows changed verdict. **A row can pass because

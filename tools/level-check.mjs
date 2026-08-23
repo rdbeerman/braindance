@@ -165,8 +165,8 @@ const MUTATIONS = {
   // The region is read after the model rotation instead of on the undisplaced
   // sensor-space position, so a region placed on a subject slides off it the moment
   // the room is levelled underneath. Section 2 is the only thing that can see it, and
-  // only because that section now switches a region effect on: with `regionPush`,
-  // `regionNoise` and `regionMask` all at zero the shader never evaluates the region
+  // only because that section now switches a region effect on: with `push.amount`,
+  // `noise.region` and `mask.amount` all at zero the shader never evaluates the region
   // coordinate at all, and this mutation and the fix draw the same picture.
   'region-follows-tilt': { file: 'web/cloud-shader.js', edits: [[
     '  vec3 p0 = pos;',
@@ -383,7 +383,7 @@ try {
   const plant = (surface) => page.evaluate(({ n: n0, z: zc }) => {
     const k = globalThis.__kinect;
     for (const [name, value] of Object.entries({
-      fade: 0, wake: 0, noise: 0, additive: false, spin: false, denoise: false,
+      fade: 0, wake: 0, 'noise.amount': 0, additive: false, spin: false, denoise: false,
     })) k.params.set(name, value);
     const DW = 512;
     const DH = 424;
@@ -514,7 +514,7 @@ try {
    * not do.
    *
    * The crop faces alone cannot prove the region is in sensor space: the shader gates
-   * the whole region evaluation behind `regionPush`, `regionNoise` and `regionMask`
+   * the whole region evaluation behind `push.amount`, `noise.region` and `mask.amount`
    * being non-zero, so with all three at their defaults the region coordinate is never
    * read, and a build that evaluated it after the model rotation drew a pixel-identical
    * picture and passed this section. `region-follows-tilt` is the control for that, and
@@ -534,7 +534,7 @@ try {
     k.params.set('regionD', 0.25);
     k.params.set('regionRound', 0.05);
     k.params.set('regionSoft', 0.05);
-    k.params.set('regionMask', 1);
+    k.params.set('mask.amount', 1);
   });
   /** Poses the program camera, optionally carried by the world's own rotation. */
   const poseProgram = (carry) => page.evaluate((withTilt) => {
@@ -585,7 +585,7 @@ try {
     // the middle of that surface would be measuring a hole in both.
     k.params.reset([
       'left', 'right', 'bottom', 'top',
-      'regionZ', 'regionW', 'regionH', 'regionD', 'regionRound', 'regionSoft', 'regionMask',
+      'regionZ', 'regionW', 'regionH', 'regionD', 'regionRound', 'regionSoft', 'mask.amount',
     ]);
   });
 
@@ -895,7 +895,7 @@ try {
   const plantBar = (offsetFrom, offsetTo, metres) => page.evaluate(({ a, b, z }) => {
     const k = globalThis.__kinect;
     for (const [name, value] of Object.entries({
-      fade: 0, wake: 0, noise: 0, additive: false, spin: false, denoise: false,
+      fade: 0, wake: 0, 'noise.amount': 0, additive: false, spin: false, denoise: false,
     })) k.params.set(name, value);
     const DW = 512;
     const DH = 424;

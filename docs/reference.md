@@ -128,9 +128,9 @@ The tear is applied in the sensor's frame before the camera sees it, so it is on
 screen-horizontal from head-on: orbit around a torn band and it shoves in depth instead, and
 a levelled room tears along the angle the mount was really at. That is the effect saying the
 *volume* is corrupt rather than the picture, and it is why the group sits at the displacement
-stage next to what moves points rather than in `Post` next to `scanlines`.
+stage next to what moves points rather than in `Post` next to `raster.amount`.
 
-**`lattice`** rebuilds the volume on a grid: every axis quantised to `cell m`, so surfaces
+**`lattice.amount`** rebuilds the volume on a grid: every axis quantised to `cell m`, so surfaces
 break into steps and the cloud reads as something being reconstructed rather than something
 that was measured. It is the last displacement applied, after the tear, so what gets snapped
 is where the point actually ends up — a grid cut before the turbulence would be smoothly
@@ -139,8 +139,8 @@ rather than with the bracket: level a canted mount afterwards and the grid does 
 The cell is metres in the room like the other displacements, so a look gives the same grid at
 any export size.
 
-**`glyph`** draws every point as a character rather than as a round splat, and it has no grid
-of its own — it rides `lattice` and `latticeCell`, which already cut the room into cubes and
+**`glyph.amount`** draws every point as a character rather than as a round splat, and it has no grid
+of its own — it rides `lattice.amount` and `cell`, which already cut the room into cubes and
 move each point to the centre of the cube it falls in. One cell draws one character, so the
 characters stand in the room at the size the room gives them and recede with it, which is
 what a pass stamping text onto the finished frame could not draw at all. The master
@@ -148,16 +148,16 @@ crossfades the mark rather than switching it: at 0.5 every cell is a dot with a 
 glowing inside it, and the sprite grows from `pointSize` to cell-sized along the same blend,
 so one character comes to stand for one cube of room.
 
-**Riding the lattice is why glyphs read as characters only near `lattice` 1.0.** The lattice
+**Riding the lattice is why glyphs read as characters only near `lattice.amount` 1.0.** The lattice
 is a blend from the measured surface to the reconstructed one rather than a switch, so at 0.5
 each point sits halfway to its cell centre and you get several copies of one character
-smeared along that path. At `lattice` 1.0 with `glyph` 0 you have the `voxel` recipe fully
-engaged — every point on its cell centre, drawn as a round splat — and raising `glyph` turns
+smeared along that path. At `lattice.amount` 1.0 with `glyph.amount` 0 you have the `voxel` recipe fully
+engaged — every point on its cell centre, drawn as a round splat — and raising `glyph.amount` turns
 those dots into characters without moving one of them. The shipped `voxel` document is not that
 picture, and the difference is worth knowing before you reach for it as a reference: it names
-`lattice` 0.55 on a 3.5cm cell, halfway along the blend this paragraph opened on, so it keeps
+`lattice.amount` 0.55 on a 3.5cm cell, halfway along the blend this paragraph opened on, so it keeps
 some of the smear deliberately.
-**At `lattice` 0 with `glyph` 1 the picture is mush**, because every one of the 217,088 points
+**At `lattice.amount` 0 with `glyph.amount` 1 the picture is mush**, because every one of the 217,088 points
 draws a cell-sized character at its own unquantised position — that is authoring rather than a
 defect, and nothing gates one control on the other.
 
@@ -168,8 +168,8 @@ sum into one index into a table of sixty-four 8x8 bitmasks and wrap. They sum ra
 blend the way the five readings do because character indices do not average — character 3
 half-and-half with character 9 is character 6, an unrelated symbol rather than anything
 between the two. All three are weights from 0 to 1, and `hash key` is the only one of them
-that defaults to 1 rather than to 0 — so raising `glyph` on its own gives the field one key,
-the cell's, which is the reading the reference frames have. It reaches nothing while `glyph`
+that defaults to 1 rather than to 0 — so raising `glyph.amount` on its own gives the field one key,
+the cell's, which is the reading the reference frames have. It reaches nothing while `glyph.amount`
 is 0.
 
 **The table is sorted by ink**, punctuation at the sparse end and dense kana at the other, so
@@ -181,7 +181,7 @@ distance, which the tone key then reads as a depth band.
 
 **The mark crossfades back to the round splat at whichever floor it hits first: the look's own,
 between sixteen and eight reference pixels, or what the buffer can actually resolve**, so the
-near room is text and the far room is texture. At full `glyph` on `cascade`'s 5.5cm cell the
+near room is text and the far room is texture. At full `glyph.amount` on `cascade`'s 5.5cm cell the
 look's band is 4.0 to 8.0 metres out, the same metres at 1080p and in a 4K export; a buffer
 shorter than 1080 pulls the boundary nearer because eight framebuffer pixels stop existing
 sooner, which is the buffer being honest about what it can draw rather than the look changing.
@@ -195,16 +195,16 @@ zoom makes characters resolve out of texture mid-clip — and that is the recess
 rather than a defect: the marks are objects in the room at a size the room gives them, and a
 narrower field gives every object more pixels.
 
-**`rain`** is a term of its own rather than a setting inside the glyph field, and it works
+**`rain.amount`** is a term of its own rather than a setting inside the glyph field, and it works
 over round splats. It computes one scalar per point out of world height and program time,
 brightens what a drop head passes, and the glyph field's `rain key` reads that same scalar to
 scramble the character — one source and two consumers, the arrangement `duotone` already has,
 so a wave descending through a room is reachable for any look that is not drawing text and
 `voxel` gets it for nothing. `fall m/s` is how fast a head descends, `head gap m` how many
 metres of column separate one head from the next, and `trail m` how many metres of afterglow
-sit above it: 0.55, 1.3 and 0.45 by default. Only `trail m` belongs to `rain` alone — `fall
-m/s` and `head gap m` shape the drop coordinate *both* consumers read, so with `rain` at 0 and
-`glyph` and `rain key` up they still move the picture, by changing which character the passing
+sit above it: 0.55, 1.3 and 0.45 by default. Only `trail m` belongs to `rain.amount` alone — `fall
+m/s` and `head gap m` shape the drop coordinate *both* consumers read, so with `rain.amount` at 0 and
+`glyph.amount` and `rain key` up they still move the picture, by changing which character the passing
 counter scrambles a cell to. With both masters at 0 none of the three reaches a pixel, which
 is what keeps a look that never asked for any of this rendering the frame it always did. A head
 every `head gap` metres rather than one head that wraps is what keeps two or three running in
@@ -218,11 +218,11 @@ immediately after `Points`, because what mark gets drawn is what `Points` is abo
 is beside `Style`, because what colour a point takes is what `Style` is about — so the rain's
 home does not depend on glyphs being switched on. The cost that accepts is that the
 falling-code look is authored in two places on the panel, and `cascade` is the shipped
-document that holds it: the lattice at 1.0 on a 5.5cm cell, `glyph` at 1.0, the hash key full
+document that holds it: the lattice at 1.0 on a 5.5cm cell, `glyph.amount` at 1.0, the hash key full
 and the rain key at 0.6, the rain at 0.8 falling 0.55 m/s with heads 1.3m apart, over a depth
 reading with a green duotone, a toe and bloom on top.
 
-**`ripple`** is the region read a fourth way, after displacing, scrambling and masking: a wave
+**`ripple.amount`** is the region read a fourth way, after displacing, scrambling and masking: a wave
 travelling out along the radius, in metres at a full weight, so the volume breathes where
 `push` only swells it. `ripple per m` is its spacing and `ripple hz` its speed — and the wave
 advances in eighths of a cycle rather than sliding, which is the character rather than a
@@ -244,7 +244,7 @@ subject its edge, but under additive blending plus bloom it washes broad surface
 turn it down before turning down bloom.
 
 **The five Post terms share one pass, and the pass carries the tonemap.** `rgb split`,
-`scanlines`, `grain`, `streak` and `vignette` each switch it on, because a full-screen read and
+`raster.amount`, `grain.amount`, `streak.amount` and `vignette.amount` each switch it on, because a full-screen read and
 write that changes nothing is worth skipping. What rides along with it is the highlight rolloff
 and the black-toe crush, so a look with all five at zero is not the same image without five
 effects: it also has lifted blacks and no rolloff, and additive accumulation clips to flat
@@ -252,7 +252,7 @@ white where it would otherwise keep its hue. Raising any one of the five brings 
 The vignette used to be part of that bundle and is now its own control, which is why a project
 saved before it existed loses its corner falloff until it names one.
 
-**`streak`** bleeds light across the frame. Each pixel gathers back along the streak's axis and
+**`streak.amount`** bleeds light across the frame. Each pixel gathers back along the streak's axis and
 keeps the brightest thing it finds, decayed by distance, so a highlight smears the way a sensor
 smears one down a column of wells — sixteen taps at geometric spacing, reaching about 168 pixels
 at the 1080p reference. `streak angle` beside it is which way, in degrees, and **0 is straight
@@ -378,7 +378,7 @@ so they keyframe: the colour's saturation, the depth ramp's gamma, the ghost she
 exponent and fill, the contour's bands per metre and line thickness, and the Blackwall scan
 speed. Each defaults to the literal it replaced.
 
-**The duotone sits on top of all five**, beside `thermal` and `edges` and for their reason:
+**The duotone sits on top of all five**, beside `thermal.amount` and `edges.amount` and for their reason:
 a term written into one reading is inert in every other. It is a tonal transform rather than
 a tint, because its two poles carry luminance as well as hue — the near one runs toward black
 and the far one toward hot, so one term gives both the depth-keyed palette and the near-black
@@ -417,7 +417,7 @@ than further because a line thinner than the pixel drawing it is aliasing rather
 lines, and it is the one that makes the other two worth having: an angle over a sine only ever
 buys rotated softness, where the references are hard line grilles.
 
-They are settings of `scanlines` rather than terms beside it, so only the master gates the
+They are settings of `raster.amount` rather than terms beside it, so only the master gates the
 grade pass — raise the angle with the master at zero and nothing happens, which is deliberate,
 since switching a full-screen pass on to draw nothing is the no-op the gate exists to refuse.
 The angle is one parameter behind a two-component uniform, computed in double on the way
@@ -441,8 +441,13 @@ rows it emitted are not the parameters that were declared.
 Selecting Blackwall used to apply twelve post-chain values with it. They are separate now: a
 preset is look values and nothing else, so applying one never moves your camera.
 
-A preset is `{ version, values }`, and the keys it names are its scope. Ten ship read-only
-from `presets-builtin/` and are marked `·` in the picker. Five of them — `rgb`, `depth`,
+A preset is `{ version, values }`, plus a `requires` list when the look touches any effect,
+and the keys it names in `values` are its scope. A parameter's key is dotted by the effect it
+belongs to — `glyph.tone`, `raster.pitch` — and a core value that belongs to no effect stays
+bare, like `pointSize` or `readDepth`. `requires` is `[{ id, version }]`, one entry per effect
+the values touch, derived from them rather than typed: a look that never raises the rain
+carries no entry for it. Ten ship read-only from `presets-builtin/` and are marked `·` in the
+picker. Five of them — `rgb`, `depth`,
 `ghost`, `contour` and `blackwall` — are one per reading and differ in little else, so they
 are where a grade starts, with `blackwall.json` carrying the twelve values the old mode
 wrote. The other five — `ember`, `grille`, `voxel`, `tearline` and `cascade` — are graded
@@ -453,17 +458,27 @@ Nothing in the format marks the difference and nothing should — they are all d
 the split is editorial. A preset naming two values is equally valid, and applying it leaves
 everything else where the grade left it.
 
-**All ten name the whole look**, which is the 77 look values outside the framing group, so
-picking one gives you that look whatever was on screen before it. Framing — levelling, the
-clip planes, the crop box — is the shot rather than the look, so no shipped document names
-it and picking one never reframes what you framed. `none` is the one entry that does reach
-the framing, because it is the way back to the defaults rather than an eleventh look.
-`library-check` holds the rule against the registry, so a look parameter added later fails
-all ten until each of them names it.
+**All ten name the whole look**: the 36 core values every look owes regardless of which
+effects it uses, plus every parameter of each effect the document itself touches — so picking
+one gives you that look whatever was on screen before it. Applying a whole look resets every
+effect the document does not claim back to that effect's own defaults, which is what makes
+leaving an effect out and writing it in at its defaults describe the same look; a document
+naming four core-only readings owes 36 values, and one naming Blackwall's five effects owes
+36 plus their 14. Framing — levelling, the clip planes, the crop box — is the shot rather
+than the look, so no shipped document names it and picking one never reframes what you
+framed. `none` is the one entry that does reach the framing, because it is the way back to
+the defaults rather than an eleventh look. `library-check` holds the rule against the
+registry: a new core value fails all ten until each names it, and a new parameter added to an
+effect fails only the documents whose `requires` already claims that effect — an effect
+nothing has reached yet fails nothing, because nothing claims it.
 
-Saving and exporting both ask which values go in, every box ticked, so a sparse preset takes
-deliberate effort. The boxes derive from the registry, so a parameter added later appears
-under its own heading by existing.
+Saving and exporting both ask which values go in, every box ticked by default, so a sparse
+preset takes deliberate effort. A whole-look save still sheds what it can: an effect sitting
+wholly at its own defaults leaves no trace in the saved file, because the whole-look apply
+above restores that same effect to those same defaults whenever the document does not claim
+it — lossless by construction rather than by argument. A subset save sheds nothing, because a
+picked value at its default is still a value somebody chose. The boxes derive from the
+registry, so a parameter added later appears under its own heading by existing.
 
 **The five reading weights tick and untick together.** A file naming any reading has to name
 all five, because the ones it omits stay at whatever the clip was already wearing, and two
@@ -472,9 +487,10 @@ that is not about the reading, which is fine. `refusePresetBody` refuses everyth
 between.
 
 **A partial preset does not stamp the clip**, because the stamp answers "what look is this
-clip wearing" and three of seventy-seven values did not answer it. The two surfaces that report
-an apply say which of the two happened, and a document naming the whole look stamps whether
-it also names the framing or not — the framing is not part of the answer.
+clip wearing" and a document short even one of the values its own core and effects call for
+did not answer it. The two surfaces that report an apply say which of the two happened, and a
+document naming the whole look stamps whether it also names the framing or not — the framing
+is not part of the answer.
 
 **Saving over a shipped name forks it**: the write lands in your library and shadows the
 built-in, and deleting the fork brings the shipped look back.
@@ -492,5 +508,8 @@ validates, so `editor-check` section 12 drives the round trip in a browser, with
 
 Documents from before the readings are version 3 and will not open, and there is nothing to
 run: the one-shot conversion this repo used to ship was deleted once every document it could
-act on had already been converted. A version 3 or 4 file is refused, naming its own version,
-and stays refused.
+act on had already been converted. This build reads version 6 alone — a version 5 document
+still spelled its parameters bare (`glyphTone` rather than `glyph.tone`) and carried no
+`requires` list, so it is refused the same way a version 3 or 4 one is, and there is no
+conversion for it either: every document this project holds was re-authored at 6. A file from
+any older version is refused, naming its own version, and stays refused.

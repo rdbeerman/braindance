@@ -789,7 +789,7 @@ it was the first, and the second would have hidden it.
 
 `gradeNeeded()` here is true if any of `rgbSplit`, `scanlines`, `grain`, `vignette` or
 `streak` is up. At the pinned rev it knows only the first three, because the vignette was a
-baked `0.55` inside the pass rather than a parameter. Blackwall carries `vignette: 0.55`,
+baked `0.55` inside the pass rather than a parameter. Blackwall carries `vignette.amount: 0.55`,
 and the `OFF` look those arms spread zeroes exactly the three names both builds share — so
 the grade switched **off** over there and stayed **on** here, and the cross-build rows have
 been comparing a graded image against an ungraded one for as long as they have existed. The
@@ -810,7 +810,7 @@ The repair is `CROSS_BUILD_OFF`, which is `OFF` with the vignette taken out, rea
 the arms that render one look through two builds. **It is deliberately not in `OFF`**: eleven
 within-build rows spread that, and their bands in `RES_TOLERANCE` were measured with the
 grade running. The two `rebase-full` rows spread nothing and were already green — because
-Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both sides, so both builds run the
+Blackwall's own `rgbsplit.amount`/`raster.amount`/`grain.amount` survive on both sides, so both builds run the
 grade — and that table came out that way rather than being fitted, which is the reason to
 believe the diagnosis.
 
@@ -894,7 +894,7 @@ shows up as extra reddened rows rather than as a quietly wrong number.
 45-degree direction row had been failing its floor at 2.65% of the frame along the angle and now
 passes at 4.48 along, 1.71 across; its two neighbours moved with it, 4.04 to 5.60 and 4.17 to
 6.75. Nothing touched the streak. The scrambled look those rows are measured over raises
-`lattice` to 1 with `additive` on, which used to render a saturated white field, and the glyph
+`lattice.amount` to 1 with `additive` on, which used to render a saturated white field, and the glyph
 field's energy compensation divides that pile-up back down so the gradient the rows read is
 there. Do not read it as the streak having been repaired, and do not compare a streak figure
 taken before this branch against one taken after it — they are two fixtures rather than two
@@ -915,10 +915,10 @@ so the row plants a large point size and a full lattice before it has anything t
 at 0, and `compensation-leaks-at-lattice-zero` is the third and the one with no master over it —
 the energy correction rides neither, so neither excuses it. That last one is not a hypothetical
 wrong implementation either: the reachable mistake it plants is the deleted design document's own
-unbounded formula, which is exactly 1 at `lattice` 0 only while the sprite is no bigger than the
+unbounded formula, which is exactly 1 at `lattice.amount` 0 only while the sprite is no bigger than the
 cell, and `pointSize` reaches 64 against a cell that bottoms out at 5mm.
 
-**Where the byte-identity evidence itself came from.** The claim that the eight `lattice`-0
+**Where the byte-identity evidence itself came from.** The claim that the eight `lattice.amount`-0
 shipped looks render identically to a clean `origin/main` build is not one the suite asserts; it
 was taken with a probe built on `registry-check`'s own page machinery, driving the editor and
 hashing the framebuffer at 15 pinned program positions per look — 0 to 0.9933s over six source
@@ -973,7 +973,7 @@ that into a sentence.
 `page.click('.kf[aria-label="bloom keyframe"]')` calls need that diamond *visible*, and `bloom`
 lives in the `optical` panel group, which collapses when every parameter in it is at its
 default. They work only because 6e applies the Blackwall look first and that look moves `bloom`,
-`rgbSplit`, `scanlines` and `grain` off their defaults, so the group has derived itself open by
+`rgbsplit.amount`, `raster.amount` and `grain.amount` off their defaults, so the group has derived itself open by
 the time the click lands. Nothing in either file says so, and the two ends can move
 independently: a look re-graded to leave `optical` alone, or a change to the reveal predicate,
 turns those clicks into thirty-second timeouts - which arrive as a crash with **zero failed
@@ -1488,8 +1488,8 @@ arrives as a crash carrying no failed assertion rather than as a finding.
 
 **`keyframe-check` depends on this feature without mentioning it.** Its section 6e clicks
 `.kf[aria-label="bloom keyframe"]`, `bloom` is in the `optical` group, and that click needs the
-group open. It works because 6e applies the Blackwall look first, which moves `bloom`, `rgbSplit`,
-`scanlines` and `grain` off their defaults — so the per-write refresh that opens a group is
+group open. It works because 6e applies the Blackwall look first, which moves `bloom`, `rgbsplit.amount`,
+`raster.amount` and `grain.amount` off their defaults — so the per-write refresh that opens a group is
 load-bearing for another tool's actionability and not only for the panel looking right. Run
 `keyframe-check` after touching the predicate.
 

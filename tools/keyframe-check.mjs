@@ -208,8 +208,8 @@ const MUTATIONS = {
   // the exit code was concerned. The claim is unchanged: the snapshot is document state,
   // so widening it to the whole registry has to be caught.
   'undo-includes-view': { file: 'web/main.js', edits: [[
-    "      params: params.values(params.names('look')),",
-    '      params: params.values(params.names()),',
+    '  const lookParams = params.values(lookNames);',
+    '  const lookParams = params.values(params.names());',
   ]] },
   // Undo pushes on every input event rather than on the end of the interaction, so
   // one slider drag is two hundred levels.
@@ -1000,11 +1000,12 @@ const specOf = (name) => page.evaluate(`globalThis.__kinect.params.spec(${src(na
 // in it. The looks are read out of the documents that ship them for the same reason
 // they were clicked rather than typed: so no look value is invented here.
 const applyLook = (look) => page.evaluate(`globalThis.__kinect.applyPreset(${src(look)})`);
-const shippedLook = (name) => JSON.parse(
+const shippedDoc = (name) => JSON.parse(
   readFileSync(new URL(`../presets-builtin/${name}.json`, import.meta.url), 'utf8'),
-).values;
-const BLACKWALL_LOOK = shippedLook('blackwall');
-const RGB_LOOK = shippedLook('rgb');
+);
+const BLACKWALL_DOC = shippedDoc('blackwall');
+const BLACKWALL_LOOK = BLACKWALL_DOC.values;
+const RGB_LOOK = shippedDoc('rgb').values;
 
 // ============================ 0. the evaluator asks for nothing, probed first
 //
@@ -1828,7 +1829,7 @@ console.log('\n== 4b. a hold freezes source time, and the image with it ==');
   // is not a claim about a renderer that had stopped working. The other side of
   // that - that the program-time terms *do* keep moving - is the second half below.
   await applyLook(BLACKWALL_LOOK);
-  const TIME_FREE = { scan: 0, grain: 0, scanlines: 0, rgbSplit: 0, glitch: 0, noise: 0, trails: 0 };
+  const TIME_FREE = { scan: 0, 'grain.amount': 0, 'raster.amount': 0, 'rgbsplit.amount': 0, 'glitch.amount': 0, 'noise.amount': 0, trails: 0 };
   await page.evaluate(`globalThis.__kinect.params.apply(${src(TIME_FREE)})`);
   await settle();
 
@@ -1889,7 +1890,7 @@ console.log('\n== 4b. a hold freezes source time, and the image with it ==');
     const k = globalThis.__kinect;
     const kf = globalThis.__kf;
     const t = k.timeline.transport();
-    k.params.apply({ scan: 0.35, grain: 0.22, scanlines: 0.35 });
+    k.params.apply({ scan: 0.35, 'grain.amount': 0.22, 'raster.amount': 0.35 });
     await k.timeline.settled();
     for (const [i, p] of ${src(inside)}.entries()) {
       await t.seek(p);
@@ -2493,7 +2494,9 @@ console.log('\n== 5. undo restores the document and never the view ==');
     const read = () => Object.fromEntries(watched.map((n) => [n, k.params.get(n)]));
     k.keyframes.undo.begin();
     const before = read();
-    k.library.applyStoredPreset({ name: 'keyframe-check', rev: 'sha256:0', body: { version: k.library.PROJECT_VERSION, values: LOOK } });
+    // The document's own body, whole, because the door validates the requires list
+    // against the values and a body assembled here would be a second statement of it.
+    k.library.applyStoredPreset({ name: 'keyframe-check', rev: 'sha256:0', body: ${JSON.stringify(BLACKWALL_DOC)} });
     await k.timeline.settled();
     const after = read();
     const pushed = k.keyframes.undo.depth();

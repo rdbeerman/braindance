@@ -1,7 +1,8 @@
 # The looks that ship
 
 Ten preset documents in exactly the shape `PUT /presets/:name` writes and
-`applyStoredPreset` reads: `{ version, values }`. They are the same kind of file a
+`applyStoredPreset` reads: `{ version, values }`, plus a `requires` list — one entry per
+effect the values touch — whenever the look raises any. They are the same kind of file a
 user's own preset is, and they are read-only only in the sense that the store serves them
 from here and writes go to the user's directory — saving over one forks it rather than
 overwriting it.
@@ -26,28 +27,31 @@ name.
 
 ## Every one of them names the whole look
 
-All ten carry all 77 values `completeLookNames()` returns — the look tag less its framing —
-and **that is the rule an eleventh one has to meet**, enforced by `library-check` against the
-registry rather than against a list, so a look parameter added next year fails all ten
-documents until somebody chooses a value for it in each. Picking a shipped look therefore
-gives you that look and nothing else, whatever was on screen before it.
+Naming the whole look means the 36 core values every look owes regardless of which effects it
+uses, plus every parameter of each effect the document itself touches, with a `requires` entry
+claiming that effect — and **that is the rule an eleventh one has to meet**, enforced by
+`library-check` against the registry rather than against a list. A new core value fails all
+ten until each names it; a new parameter on an effect a document already touches fails that
+document alone, because completeness is a function of what each document's own `requires`
+claims rather than a single count every file owes. Picking a shipped look therefore gives you
+that look and nothing else, whatever was on screen before it.
 
 **The glyph field is the parameter addition that rule was written against, and it landed
-exactly the way the rule says.** Its eight values — `glyph`, `glyphTone`, `glyphHash`,
-`glyphRain`, `rain`, `rainSpeed`, `rainSpan` and `rainTrail` — failed all nine existing
-documents the moment they entered the registry, and each was closed by reading the value back
-out of the registry with that look on screen rather than by typing eight numbers into nine
-files. That takes `completeLookNames()` from 69 to 77 — and 69 rather than the 68 this
-paragraph carried until now, because a look value was added after the sentence was written and
-nobody re-ran the count. A number in prose beside a registry that grows rots exactly the way
-the section below says a number in a document does; 77 is what a run reports. Measured after
-the padding, over `captures/sample.knct` at 15 pinned program positions running 0 to 0.9933s,
-drawn into a 572x322 buffer inside a 640x360 viewport at device scale 1: eight of
-the nine render byte-identical frames to the pre-implementation build at every one of those
-positions, three passes agreeing, two of them in one page and the third in a fresh browser
-context. `voxel` is the one that moves, and it moves on purpose,
-because it is the only one of the nine that raises `lattice`. The pair sweep was re-run over
-the ten documents at 0 of 90 ordered pairs contaminated, two arms and two identical runs.
+exactly the way the rule says.** Its eight values — `glyph.amount`, `glyph.tone`,
+`glyph.hash`, `glyph.rain`, `rain.amount`, `rain.speed`, `rain.span` and `rain.trail` — failed
+all nine existing documents the moment they entered the registry, and each was closed by
+reading the value back out of the registry with that look on screen rather than by typing
+eight numbers into nine files. That took the look tag less its framing from 69 to 77 — and 69
+rather than the 68 this paragraph carried until now, because a look value was added after the
+sentence was written and nobody re-ran the count. A number in prose beside a registry that
+grows rots exactly the way the section below says a number in a document does; 77 is what a
+run reports. Measured after the padding, over `captures/sample.knct` at 15 pinned program
+positions running 0 to 0.9933s, drawn into a 572x322 buffer inside a 640x360 viewport at
+device scale 1: eight of the nine render byte-identical frames to the pre-implementation build
+at every one of those positions, three passes agreeing, two of them in one page and the third
+in a fresh browser context. `voxel` is the one that moves, and it moves on purpose, because it
+is the only one of the nine that raises `lattice.amount`. The pair sweep was re-run over the
+ten documents at 0 of 90 ordered pairs contaminated, two arms and two identical runs.
 
 **Framing is the shot, not the look, which is why nine values are outside the rule.**
 `tilt`, `roll`, the clip planes and the crop box are in the look tag because that tag is
@@ -62,7 +66,7 @@ nine were each sparse in a *different* set of keys, and the argument written her
 was that a zero in one of these files is a value somebody chose and none of these four chose
 one. It was wrong in the direction that is hard to see: the alternative to writing the zero
 was not writing nothing, it was inheriting a value nobody chose at all. `voxel` was the only
-document naming `lattice`, so picking `ember` after it drew amber over a lattice from the
+document naming `lattice.amount`, so picking `ember` after it drew amber over a lattice from the
 previous look — reported as a bug, because it is one. Measured at 22.000s of
 `2026-08-07-take2`, **33 of the 72 ordered pairs rendered a different frame in sequence from
 the frame that look renders alone**. After the fix, 0 of 72, and all nine render byte-identical
@@ -111,8 +115,8 @@ wanted a smaller point, which is a value somebody chose rather than a rebase of 
 **`cascade.json` is the tenth document and the only one that draws the glyph field**, which
 is why it exists at all: the feature draws one picture, and without a document holding it
 that picture has to be rebuilt from eight sliders plus a lattice nobody would connect to
-them. It reads depth rather than Blackwall, sits at `lattice` 1.0 on a 5.5cm cell with
-`glyph` 1.0, keeps the hash key full and the rain key at 0.6, and runs the rain at 0.8
+them. It reads depth rather than Blackwall, sits at `lattice.amount` 1.0 on a 5.5cm cell with
+`glyph.amount` 1.0, keeps the hash key full and the rain key at 0.6, and runs the rain at 0.8
 falling 0.55 m/s with heads 1.3m apart and 0.45m of trail, under a green duotone, a toe, a hard
 raster at a low weight and a little bloom. It is named in the house style rather than after the film the
 look references — `ember`, `grille`, `voxel` and `tearline` are single evocative nouns and
@@ -123,11 +127,11 @@ than a padding.** The glyph field's energy compensation cancels the pile-up a la
 by collapsing many points onto one cell, and `voxel` is the only shipped document it darkens,
 so the look fell to 0.1595 of its mean channel. **It is the only one darkened without being the
 only one with a lattice**, which is the part worth stating rather than leaving as a
-coincidence: `cascade` raises `lattice` further, to 1.0, and the correction never touches it,
+coincidence: `cascade` raises `lattice.amount` further, to 1.0, and the correction never touches it,
 because the factor is exactly 1 wherever the sprite is already the size of the cell — and full
-`glyph` is precisely what makes it that size. The compensation and the glyph field do not
+`glyph.amount` is precisely what makes it that size. The compensation and the glyph field do not
 interact at full strength, so what the correction is for is `voxel`'s combination and not its
-lattice alone: 0.55 with `glyph` 0 and a `pointSize` of 6.5 well under its 3.5cm cell.
+lattice alone: 0.55 with `glyph.amount` 0 and a `pointSize` of 6.5 well under its 3.5cm cell.
 
 The replacement exposure was found by sweeping 43 candidates from 0.05 to 6.00 and minimising
 the mean absolute deviation per RGB channel against 15 pre-implementation reference frames —

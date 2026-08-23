@@ -124,7 +124,7 @@ quote at anybody asking whether a look is smooth.
 
 ### The shipped looks are two populations, not a range
 
-Nobody drags `streak`; they pick a look. Whole documents against the parameter defaults,
+Nobody drags `streak.amount`; they pick a look. Whole documents against the parameter defaults,
 same paired design, 17 rounds of 50 renders:
 
 | look | 0.851 Mpx | 1.915 Mpx |
@@ -142,8 +142,8 @@ same paired design, 17 rounds of 50 renders:
 Four bare readings cost about nothing and five graded looks cost double, and **the gap
 widens with resolution** because the graded half's cost sits in the post chain. The five
 expensive ones are expensive for the same reason as each other: every one of them turns on
-`additive`, `wake`, `bloom`, `trails`, `rgbSplit`, `scanlines`, `grain` and a vignette
-together, and four of them add `streak` and a hard raster on top. So "what do the effects
+`additive`, `wake`, `bloom`, `trails`, `rgbsplit.amount`, `raster.amount`, `grain.amount` and a vignette
+together, and four of them add `streak.amount` and a hard raster on top. So "what do the effects
 cost" has no single answer, and which of the two populations a tester happened to pick
 decides their number before any individual slider does.
 
@@ -306,7 +306,7 @@ Sixteen taps per pixel in the grade pass, and it needed **two numbers rather tha
 because what a guarded block costs the looks that enable it and what it costs the looks that
 do not are different questions and only one of them answers to a parameter toggle.
 
-**Both numbers below predate `streakAngle` and neither has been re-taken.** The tap offset
+**Both numbers below predate `streak.angle` and neither has been re-taken.** The tap offset
 was a scalar step down the column when they were measured and is a vec2 multiply against the
 streak's axis now, so each tap gained arithmetic the figures do not include. It is left
 stated rather than guessed at: the gather is sixteen texture fetches and two more multiplies
@@ -351,7 +351,7 @@ absent for the opposite reason. `wake` is the page's other unmeasured term and s
 own paragraph; this is the second.
 
 The arithmetic that says it will not be cheap is arithmetic and not a measurement. At full
-`glyph` the sprite grows from `pointSize` to the size of a lattice cell on screen, which is
+`glyph.amount` the sprite grows from `pointSize` to the size of a lattice cell on screen, which is
 `latticeCell * projectionMatrix[1][1] * 540.0 / dist` reference pixels — for `cascade`'s 5.5cm
 cell under the default 50-degree camera, **63.7 pixels at one metre against the 8.1 that same
 document names for `pointSize`**, so about 62 times the fill per point at that distance. That is
@@ -381,7 +381,7 @@ discard, so the two are not the same experiment at two sizes.
 
 **What is measured is that it draws, and that is a correctness result rather than a cost one.**
 Driven in a real browser on `/edit` and `/record` with zero console errors, over `fixture-1g` on
-a 1280x800 page with a planted look — `lattice` 1 on the 5.5cm cell, `glyph` 1, a depth reading
+a 1280x800 page with a planted look — `lattice.amount` 1 on the 5.5cm cell, `glyph.amount` 1, a depth reading
 clipped to 0.4 and 4.5 metres — characters render at cell size in the near room and crossfade
 back to round splats at range, and the rain's pattern moves between program times 12.000 and
 13.000. None of those runs counted a frame. Those observations predate the crossfade reading
@@ -400,7 +400,7 @@ What separates them is `registry-check`'s `one cell, one character` section: thi
 wall to a quarter of its points leaves the two frames bit-identical, hash for hash, because a
 mark that belongs to the cell cannot depend on how many points landed in that cell, where a
 build reading the point's own texel draws whichever of its four hundred occupants arrived first
-and thinning changes which one that is. Its control is the same thinning at `glyph` 0, where the
+and thinning changes which one that is. Its control is the same thinning at `glyph.amount` 0, where the
 splat's falloff is a gradient rather than a bit, so the point count reaches the pixels and the
 two frames have to differ — which is what says the equality above it is not a fixture nothing
 can reach. The digests themselves stay in the run rather than on this page: they are identifiers
@@ -411,7 +411,7 @@ not evidence against the other one**, and that is the whole of the error being c
 **Closing this is two measurements rather than one, and the design document collapsed them
 into one.** It said the cost could not be answered offline and wanted `grabber --profile` on
 the sensor, which is right about half of it. The render cost is answerable here and by the
-instrument this section already runs: `cascade` against the same document at `glyph` 0, paced,
+instrument this section already runs: `cascade` against the same document at `glyph.amount` 0, paced,
 paired, on the GPU's own timer query, with the arm order flipped every round. Nothing stops
 that but nobody having run it. What the editor genuinely cannot answer is whether a grown
 sprite costs the *recorder* anything, because the recorder's number is delivered fps and a

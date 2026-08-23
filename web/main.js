@@ -1102,7 +1102,7 @@ const PARAMS = {
   // `lattice` 0 with this at 1 every one of 217,088 points draws a cell-sized character at
   // its own unquantised position and the picture is mush, which is authoring rather than a
   // defect.
-  glyph: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'glyph.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glyph', label: 'glyph',
     apply: (v) => { uniforms.glyph.value = v; } },
   // The three keys, which add into one index and wrap. Each is how far that reading moves
@@ -1119,13 +1119,13 @@ const PARAMS = {
   // came from had exactly one key, the cell's. So raising `glyph` alone draws the field the
   // probe drew rather than sixty-four copies of one character, which is what a default of 0
   // across all three would give.
-  glyphTone: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'glyph.tone': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glyph', label: 'tone key',
     apply: (v) => { uniforms.glyphTone.value = v; } },
-  glyphHash: { def: 1, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'glyph.hash': { def: 1, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glyph', label: 'hash key',
     apply: (v) => { uniforms.glyphHash.value = v; } },
-  glyphRain: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'glyph.rain': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glyph', label: 'rain key',
     apply: (v) => { uniforms.glyphRain.value = v; } },
 
@@ -1211,27 +1211,27 @@ const PARAMS = {
   // screen-space length, so unlike `pointSize` and the grade terms none of it is
   // referred to 1080p - the same values draw the same displacement at every output
   // size because they describe the room rather than the frame.
-  noise: { def: 0, min: 0, max: 1, step: 0.005, kind: 'scalar', tag: 'look',
+  'noise.amount': { def: 0, min: 0, max: 1, step: 0.005, kind: 'scalar', tag: 'look',
     group: 'displacement', label: 'turbulence',
     apply: (v) => { uniforms.noise.value = v; } },
-  noiseScale: { def: 3, min: 0.2, max: 12, step: 0.1, kind: 'scalar', tag: 'look',
+  'noise.scale': { def: 3, min: 0.2, max: 12, step: 0.1, kind: 'scalar', tag: 'look',
     group: 'displacement', label: 'grain m',
     apply: (v) => { uniforms.noiseScale.value = v; } },
-  noiseSpeed: { def: 0.7, min: 0, max: 3, step: 0.05, kind: 'scalar', tag: 'look',
+  'noise.speed': { def: 0.7, min: 0, max: 3, step: 0.05, kind: 'scalar', tag: 'look',
     group: 'displacement', label: 'speed',
     apply: (v) => { uniforms.noiseSpeed.value = v; } },
   // How far the cloud is pulled onto its grid, so the two ends are the measured surface
   // and a fully reconstructed one, and everything between is the surface arriving. It
   // snaps in the levelled frame, which means a canted mount does not cut the grid on the
   // diagonal - the shader block carries that reasoning and the rotation it uses.
-  lattice: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'lattice.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'displacement', label: 'lattice',
     apply: (v) => { uniforms.lattice.value = v; } },
   // The cell, in metres of the room like every other displacement here and unlike the
   // screen-space terms. A cell is a distance the subject stands in rather than a size on
   // screen, so the same look gives the same grid at any output resolution, and the floor
   // does not re-quantise when you export at a different size.
-  latticeCell: { def: 0.05, min: 0.005, max: 0.5, step: 0.005, kind: 'scalar', tag: 'look',
+  'cell': { def: 0.05, min: 0.005, max: 0.5, step: 0.005, kind: 'scalar', tag: 'look',
     group: 'displacement', label: 'cell m',
     apply: (v) => { uniforms.latticeCell.value = v; } },
 
@@ -1256,20 +1256,20 @@ const PARAMS = {
   // out of the Blackwall branch - which is in `web/cloud-shader.js` now, and was a
   // thousand-odd lines above this even before it left the file - is a deliberate change on
   // top of that; this one was not deliberate.
-  glitch: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'glitch.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glitch', label: 'amount',
     apply: (v) => { uniforms.glitch.value = v; } },
   // How much of the frame tears at a full master, as a fraction of the bands. The
   // shove's other half: this one is how *often* the feed fails and the next is how
   // badly, and the two were the same number until now.
-  glitchDensity: { def: 0.45, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'glitch.density': { def: 0.45, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glitch', label: 'density',
     apply: (v) => { uniforms.glitchDensity.value = v; } },
   // Metres a band travels at a full master, half of it either way. World units like
   // the turbulence field and unlike every screen-space term here, because a tear is a
   // distance in the room: the same look draws the same shear at any output size, and a
   // shove referred to 1080p would change how far the feed failed when you exported.
-  glitchShove: { def: 0.45, min: 0, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
+  'glitch.shove': { def: 0.45, min: 0, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glitch', label: 'shove m',
     apply: (v) => { uniforms.glitchShove.value = v; } },
   // What a torn band flares, per metre it was shoved. Deliberately per metre rather
@@ -1291,14 +1291,14 @@ const PARAMS = {
   // a master of 0.18, where the largest shove is 8.1cm and the whole flare spans 0.13 to
   // 0.19 across that entire luminance range. It is at a full master that the end of the
   // range starts to matter, and a full master is a slider anybody setting it is watching.
-  glitchTint: { def: 1.8, min: 0, max: 8, step: 0.05, kind: 'scalar', tag: 'look',
+  'glitch.tint': { def: 1.8, min: 0, max: 8, step: 0.05, kind: 'scalar', tag: 'look',
     group: 'glitch', label: 'flare',
     apply: (v) => { uniforms.glitchTint.value = v; } },
   // Depth-image rows per band, so the count of bands is 424 over this - 35 of them at
   // the default. Rows and not a fraction of the frame, because a band is a run of the
   // sensor's own scanlines and that is what makes the tear read as the feed failing
   // rather than as a shape drawn over the picture.
-  glitchBands: { def: 12, min: 1, max: 64, step: 1, kind: 'scalar', tag: 'look',
+  'glitch.bands': { def: 12, min: 1, max: 64, step: 1, kind: 'scalar', tag: 'look',
     group: 'glitch', label: 'band rows',
     apply: (v) => { uniforms.glitchBands.value = v; } },
   // Which way the bands run, from the sensor's rows at 0 to its columns at 1, and the
@@ -1318,7 +1318,7 @@ const PARAMS = {
   // turning the axis rotates which bands are chosen and not which way they slide, and the
   // pair of controls that would let those disagree buys a look nothing in the references
   // shows and two more ways to author something incoherent.
-  glitchAxis: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'glitch.axis': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'glitch', label: 'axis',
     apply: (v) => { uniforms.glitchAxis.value = v; } },
   // Hertz: how often the torn set is redrawn, 7 by default, so a state holds for 143ms
@@ -1326,7 +1326,7 @@ const PARAMS = {
   // function of program time - integrating a rate for a smoother phase would make the
   // frame depend on how the playhead got there, and seek-equals-playback dies the
   // moment it does. Keyframing the rate therefore jumps the pattern, which is in genre.
-  glitchRate: { def: 7, min: 0, max: 30, step: 0.5, kind: 'scalar', tag: 'look',
+  'glitch.rate': { def: 7, min: 0, max: 30, step: 0.5, kind: 'scalar', tag: 'look',
     group: 'glitch', label: 'rate hz',
     apply: (v) => { uniforms.glitchRate.value = v; } },
 
@@ -1370,13 +1370,13 @@ const PARAMS = {
   // The three effects. Push and mask are signed because both questions have two
   // answers - bulge or pinch, hide the inside or hide everything else - and a sign is
   // one slider where a direction toggle would be a second parameter that cannot lerp.
-  regionPush: { def: 0, min: -1, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'push.amount': { def: 0, min: -1, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'region', label: 'push',
     apply: (v) => { uniforms.regionPush.value = v; } },
-  regionNoise: { def: 0, min: 0, max: 1, step: 0.005, kind: 'scalar', tag: 'look',
+  'noise.region': { def: 0, min: 0, max: 1, step: 0.005, kind: 'scalar', tag: 'look',
     group: 'region', label: 'scramble',
     apply: (v) => { uniforms.regionNoise.value = v; } },
-  regionMask: { def: 0, min: -1, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'mask.amount': { def: 0, min: -1, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'region', label: 'mask',
     apply: (v) => { uniforms.regionMask.value = v; } },
   // The region read a fourth way, after displacing, scrambling and masking: a wave
@@ -1384,18 +1384,18 @@ const PARAMS = {
   // push and the mask beside it, because the phase is what a sign would invert and the
   // wave already visits both directions every cycle - a negative amplitude would be a
   // second spelling of a shift the frequency can already reach.
-  ripple: { def: 0, min: 0, max: 0.5, step: 0.005, kind: 'scalar', tag: 'look',
+  'ripple.amount': { def: 0, min: 0, max: 0.5, step: 0.005, kind: 'scalar', tag: 'look',
     group: 'region', label: 'ripple m',
     apply: (v) => { uniforms.ripple.value = v; } },
   // Cycles per metre of radius, so the wave's spacing is a distance in the room.
-  rippleFreq: { def: 4, min: 0.2, max: 20, step: 0.1, kind: 'scalar', tag: 'look',
+  'ripple.freq': { def: 4, min: 0.2, max: 20, step: 0.1, kind: 'scalar', tag: 'look',
     group: 'region', label: 'ripple per m',
     apply: (v) => { uniforms.rippleFreq.value = v; } },
   // Cycles per second, and it advances in eighths of one rather than smoothly - the block
   // says why. Zero freezes the wave where it stands instead of switching it off, which is
   // the state `glitchRate` reaches the same way and for the same reason: a held shape is
   // a different picture from no shape, and both keyframe.
-  rippleSpeed: { def: 1, min: 0, max: 8, step: 0.05, kind: 'scalar', tag: 'look',
+  'ripple.speed': { def: 1, min: 0, max: 8, step: 0.05, kind: 'scalar', tag: 'look',
     group: 'region', label: 'ripple hz',
     apply: (v) => { uniforms.rippleSpeed.value = v; } },
   // Still what it always was - orbit the view you are looking at - and still view
@@ -1498,10 +1498,10 @@ const PARAMS = {
     group: 'style', label: 'rim',
     apply: (v) => { uniforms.rimAmount.value = v; } },
   // The same argument the readings above were rebuilt on, made here first.
-  thermal: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'thermal.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'style', label: 'thermal',
     apply: (v) => { uniforms.thermal.value = v; } },
-  edges: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'edges.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'style', label: 'edges',
     apply: (v) => { uniforms.edges.value = v; } },
   // The duotone: how far the image lands between the two poles, which way they are
@@ -1516,7 +1516,7 @@ const PARAMS = {
   // light is emitted by the data rather than reflected off surfaces - so the interiors
   // have to fall toward black before a raster over the top reads as a reconstruction
   // instead of as a filter laid over a video.
-  duotoneDepth: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'duotone.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'style', label: 'duotone depth',
     apply: (v) => { uniforms.duotoneDepth.value = v; } },
   // Degrees on the slider and radians at the uniform, the way `tilt` and `roll` are, so
@@ -1524,13 +1524,13 @@ const PARAMS = {
   // trigonometric function takes. The full turn either way rather than a half, because
   // the two poles are asymmetric - the near one is nearly black - so +90 and -90 are
   // genuinely different pictures and a half-range would hide one of them.
-  duotoneHue: { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
+  'duotone.hue': { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
     group: 'style', label: 'duotone hue',
     apply: (v) => { uniforms.duotoneHue.value = THREE.MathUtils.degToRad(v); } },
   // Where the poles meet, as a fraction of the near/far clip range. A place in the room
   // rather than a fraction of the frame, which is what lets a subject keep its silhouette
   // when the camera moves - and it is the same reasoning `contourBands` is per metre for.
-  duotoneSplit: { def: 0.5, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'duotone.split': { def: 0.5, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'style', label: 'duotone split',
     apply: (v) => { uniforms.duotoneSplit.value = v; } },
   // And how many metres the crossing between the poles takes, which is the one term here
@@ -1550,7 +1550,7 @@ const PARAMS = {
   // every saved project render what they rendered. Deriving it means the three defaults
   // cannot drift apart silently; it does not make the identity exact on its own, which is
   // why the commit carries hashes rather than this comment carrying an argument.
-  duotoneSpan: { def: CLIP_FAR_DEFAULT - CLIP_NEAR_DEFAULT, min: 0.2, max: 9.5, step: 0.05, kind: 'scalar', tag: 'look',
+  'duotone.span': { def: CLIP_FAR_DEFAULT - CLIP_NEAR_DEFAULT, min: 0.2, max: 9.5, step: 0.05, kind: 'scalar', tag: 'look',
     group: 'style', label: 'duotone span m',
     apply: (v) => { uniforms.duotoneSpan.value = v; } },
   // The fourth of them, and the one that is not a fact about where a point is. It keys
@@ -1572,7 +1572,7 @@ const PARAMS = {
   // An amount rather than an amount and a reference speed, on the precedent the poles
   // themselves are baked on: what a look parameterises is how much of a ramp it wants.
   // The shader carries the reference and the measurement behind it.
-  duotoneMotion: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'duotone.motion': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'style', label: 'duotone motion',
     apply: (v) => { uniforms.duotoneMotion.value = v; } },
 
@@ -1595,7 +1595,7 @@ const PARAMS = {
   // `span` metres means a column always has two or three running. And the trail sits
   // *above* the head, which is what makes it read as falling rather than as a band sliding
   // through.
-  rain: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'rain.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'rain', label: 'rain',
     apply: (v) => { uniforms.rain.value = v; } },
   // The three lengths under it, in metres and metres per second of the room, so unlike the
@@ -1604,13 +1604,13 @@ const PARAMS = {
   // were shot at rather than to zero: they are settings under a master on the glitch
   // ceilings' convention, and a span of zero in particular is a degenerate divisor with
   // nothing but the master standing over it.
-  rainSpeed: { def: 0.55, min: 0.05, max: 3, step: 0.01, kind: 'scalar', tag: 'look',
+  'rain.speed': { def: 0.55, min: 0.05, max: 3, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'rain', label: 'fall m/s',
     apply: (v) => { uniforms.rainSpeed.value = v; } },
-  rainSpan: { def: 1.3, min: 0.2, max: 4, step: 0.01, kind: 'scalar', tag: 'look',
+  'rain.span': { def: 1.3, min: 0.2, max: 4, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'rain', label: 'head gap m',
     apply: (v) => { uniforms.rainSpan.value = v; } },
-  rainTrail: { def: 0.45, min: 0.05, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
+  'rain.trail': { def: 0.45, min: 0.05, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'rain', label: 'trail m',
     apply: (v) => { uniforms.rainTrail.value = v; } },
   // Each post pass costs a full-screen read and write whether or not it changes
@@ -1622,7 +1622,7 @@ const PARAMS = {
   trails: { def: 0, min: 0, max: 0.97, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'motion', label: 'trails',
     apply: (v) => { afterimage.uniforms.damp.value = v; afterimage.enabled = v > 0; } },
-  rgbSplit: { def: 0, min: 0, max: 6, step: 0.05, kind: 'scalar', tag: 'look',
+  'rgbsplit.amount': { def: 0, min: 0, max: 6, step: 0.05, kind: 'scalar', tag: 'look',
     group: 'post', label: 'rgb split',
     apply: (v) => { grade.uniforms.rgbSplit.value = v; grade.enabled = gradeNeeded(); } },
   // The raster's master, and the only one of the four that gates the pass. It keeps the
@@ -1630,7 +1630,7 @@ const PARAMS = {
   // a rename is the one change `registry-check` cannot make bit-exact against its pinned
   // commit, and it would break every preset anybody has authored. Accepted rather than
   // overlooked.
-  scanlines: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'raster.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'raster', label: 'scanlines',
     apply: (v) => { grade.uniforms.scanlines.value = v; grade.enabled = gradeNeeded(); } },
   // The three settings under it, and none of them gates the pass - for `crush`'s reason
@@ -1646,7 +1646,7 @@ const PARAMS = {
   // the shader. The comment beside the uniform carries the measurement that forced it;
   // what belongs here is that the arithmetic is stated once, in this file, so a check can
   // hold the axis against it rather than against a second copy of the same sum.
-  scanAngle: { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
+  'raster.angle': { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
     group: 'raster', label: 'angle',
     apply: (v) => {
       const r = THREE.MathUtils.degToRad(v);
@@ -1677,16 +1677,16 @@ const PARAMS = {
   // every one of the 396 reachable positions round-trips. Checked in a browser rather than
   // reasoned about, because a default that missed by one bit would take the shipped raster
   // off its bit-exact path with nothing anywhere turning red to say so.
-  scanPitch: { def: 1.3, min: 0.05, max: 4, step: 0.01, kind: 'scalar', tag: 'look',
+  'raster.pitch': { def: 1.3, min: 0.05, max: 4, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'raster', label: 'pitch',
     apply: (v) => { grade.uniforms.scanPitch.value = v; } },
   // How square the wave is, from the sine it has always been to a hard grille with dark
   // gaps. This is the control that makes the other two reach the look at all - an angle
   // over a sine is rotated softness, and softness is not what the references show.
-  scanHard: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'raster.hard': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'raster', label: 'hardness',
     apply: (v) => { grade.uniforms.scanHard.value = v; } },
-  grain: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'grain.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'post', label: 'grain',
     apply: (v) => { grade.uniforms.grain.value = v; grade.enabled = gradeNeeded(); } },
   // The fifth term that gates the pass, and it gates for the plain reason the other four
@@ -1694,7 +1694,7 @@ const PARAMS = {
   // pays nothing and the pass stays shut. Contrast `crush` further down, whose default is
   // the literal it replaced and which therefore cannot gate anything without holding the
   // pass open for every look there has ever been.
-  streak: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'streak.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'post', label: 'streak',
     apply: (v) => { grade.uniforms.streak.value = v; grade.enabled = gradeNeeded(); } },
   // Which way the light runs, and this **reverses a decision the code used to state as
@@ -1720,7 +1720,7 @@ const PARAMS = {
   // rather than derived. One parameter, one vec2 uniform, and the trigonometry happens in
   // this file so a check can hold the axis against the arithmetic stated once rather than
   // against a second copy of the same sum.
-  streakAngle: { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
+  'streak.angle': { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
     group: 'post', label: 'streak angle',
     apply: (v) => {
       const r = THREE.MathUtils.degToRad(v);
@@ -1731,7 +1731,7 @@ const PARAMS = {
   // why this is the one promoted literal that does not keep its old value; what belongs
   // here is that it gates the pass like the other three, so the vignette can be had on
   // its own and a look wanting none of the four still pays for no pass at all.
-  vignette: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
+  'vignette.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'post', label: 'vignette',
     apply: (v) => { grade.uniforms.vignette.value = v; grade.enabled = gradeNeeded(); } },
   // The toe under the grade's Reinhard curve, and **the one term sharing that pass which
@@ -3391,15 +3391,34 @@ function toggleKey(name) {
 // and there is no second list to forget.
 
 function serialiseProjectBody() {
+  const lookNames = params.names('look');
+  const lookParams = params.values(lookNames);
+  // The save rule, the same one `presetFromCurrentLook` applies and for the same
+  // reason: an effect the edit holds at defaults with nothing keyed is not part of
+  // this clip, and writing it out anyway would make `requires` claim the clip needs
+  // it. `restoreProject` resets the look tag before applying, so the shed effect
+  // restores to exactly the defaults that were shed - the two documents are one
+  // state. A track with keys keeps its effect whole even at default values, because
+  // the keys are the edit.
+  for (const id of effectIds()) {
+    const mine = effectParamNames(id);
+    const keyed = mine.some((n) => tracks.get(n)?.keys.length);
+    const moved = mine.some((n) => lookParams[n] !== PARAMS[n].def);
+    if (keyed || moved) continue;
+    for (const n of mine) delete lookParams[n];
+  }
+  const kept = Object.keys(lookParams);
+  const requires = requiresFor(kept);
   return {
     version: PROJECT_VERSION,
+    ...(requires.length ? { requires } : {}),
     look: {
       // Look parameters only; the registry separates look from view and from the
       // camera, so an undo snapshot or a render job does not carry render scale or
       // the free camera's orbit.
-      params: params.values(params.names('look')),
+      params: lookParams,
       tracks: Object.fromEntries(
-        params.names('look')
+        kept
           .filter((n) => tracks.has(n))
           .map((n) => [n, tracks.get(n).serialise()]),
       ),
@@ -3685,6 +3704,27 @@ function restoreProject(project) {
   }
   if (!project.look.tracks || typeof project.look.tracks !== 'object') {
     throw new Error('a project look carries a tracks object, empty if nothing is keyed');
+  }
+  // The effect list against what the document touches - values and tracks both,
+  // because a track is a use of the effect whether or not a static value moved.
+  refuseRequires('this project', project.requires, [
+    ...Object.keys(project.look.params),
+    ...Object.keys(project.look.tracks),
+  ]);
+  // And each effect it touches, whole - the readings rule one namespace over. The
+  // reset below hands an omitted parameter its default, so half a glyph field would
+  // load as a blend of the document and the defaults that nothing on screen says is
+  // a blend. The writer saves whole effects, so the reader demands what the writer
+  // meets.
+  for (const id of effectIdsIn(Object.keys(project.look.params))) {
+    const short = effectParamNames(id).filter((n) => !Object.hasOwn(project.look.params, n));
+    if (short.length) {
+      throw new Error(
+        `this project names part of ${id} but not ${short.join(', ')}: a document carries every `
+        + 'parameter of an effect it uses, and the ones it leaves out would come back as defaults '
+        + 'rather than as the look it was saved with',
+      );
+    }
   }
   if (!project.composition.retime || !Array.isArray(project.composition.retime.keys) || !Number.isFinite(project.composition.retime.rate) || project.composition.retime.rate <= 0) {
     throw new Error('a project composition carries a retime with a positive rate and an array of keys');
@@ -9286,7 +9326,26 @@ let appliedPreset = null;
  * door to pick between: one subset in, one subset out.
  */
 function presetFromCurrentLook(names) {
-  return { version: PROJECT_VERSION, values: params.values(names ?? params.names('look')) };
+  const values = params.values(names ?? params.names('look'));
+  // The save rule: a whole look sheds every effect it holds at defaults. Lossless by
+  // construction rather than by argument - an effect's master defaults inert, and the
+  // whole-look apply resets what a whole-look document leaves unnamed, so the document
+  // with the effect written out at defaults and the document without it restore the
+  // same registry. What the shorter one buys is a `requires` that tells the truth:
+  // a look that never raises the rain does not require the rain effect, and a machine
+  // without it can apply that look whole. **A subset save sheds nothing**, because a
+  // picked value at its default is still a write the author chose - dropping it would
+  // change what applying the subset does to a clip wearing something else.
+  if (wholeLookTag(values)) {
+    for (const id of effectIdsIn(Object.keys(values))) {
+      const mine = effectParamNames(id);
+      if (mine.every((n) => values[n] === PARAMS[n].def)) {
+        for (const n of mine) delete values[n];
+      }
+    }
+  }
+  const requires = requiresFor(Object.keys(values));
+  return { version: PROJECT_VERSION, ...(requires.length ? { requires } : {}), values };
 }
 
 /**
@@ -9310,7 +9369,51 @@ function presetFromCurrentLook(names) {
  * nine values measured in metres. A silent drift would be the reason not to; a loud one
  * is the reason this is derived rather than restated.
  */
-const completeLookNames = () => params.names('look').filter((n) => PARAMS[n].group !== 'framing');
+
+/**
+ * The effect a dotted name belongs to, or null for a core parameter. The dot is the
+ * namespace: `glyph.tone` is the glyph effect's tone key, `cell` is the core grid.
+ * The split is what lets a reader tell a typo from an effect this build does not
+ * have - a bare name the registry lacks is a typo, a dotted name whose prefix names
+ * no effect is a document from a machine with something installed that this one
+ * lacks. The two get different answers, and this is the line they divide on.
+ */
+const effectOf = (name) => {
+  const dot = name.indexOf('.');
+  return dot > 0 ? name.slice(0, dot) : null;
+};
+
+/** Every look parameter of one effect, in declaration order. */
+const effectParamNames = (id) => params.names('look').filter((n) => effectOf(n) === id);
+
+/** The effect ids a set of names touches, in first-appearance order. */
+const effectIdsIn = (names) => [...new Set(names.map(effectOf).filter(Boolean))];
+
+/** The ids of every effect the registry currently declares. */
+const effectIds = () => effectIdsIn(params.names('look'));
+
+/**
+ * The core half of a whole look: the look tag less its framing and less every
+ * effect's parameters. What is left is grading that is always installed - the
+ * readings, the points base, the region geometry, the grid, the post core - so it
+ * is the part every whole-look document owes regardless of which effects it uses.
+ */
+const coreLookNames = () => params.names('look')
+  .filter((n) => PARAMS[n].group !== 'framing' && effectOf(n) === null);
+
+/**
+ * The values *this* document has to name to be describing a whole look: all of the
+ * core, plus every parameter of every effect the document itself touches. The set is
+ * a function of the document rather than of the build, because a look that never
+ * raises the glyph field owes nothing about it - the whole-look apply resets an
+ * unnamed effect to its inert defaults, so leaving one out and writing its defaults
+ * are the same look, and the shorter document is the one whose `requires` tells the
+ * truth about what it needs.
+ */
+const wholeLookNames = (values) => [
+  ...coreLookNames(),
+  ...effectIdsIn(Object.keys(values)).flatMap((id) => effectParamNames(id)),
+];
 
 /**
  * Whether a document says what the whole look is, rather than adjusting part of one.
@@ -9326,8 +9429,89 @@ const completeLookNames = () => params.names('look').filter((n) => PARAMS[n].gro
  * picking `voxel` reported "applied 35 of 77 values" and left the clip stamped with
  * whatever it had been wearing, for the sake of nine values a look has no business
  * setting. A subset of the grading is still a subset and still cannot stamp.
+ *
+ * **And it asks per effect, not of every effect.** A document naming any parameter of
+ * an effect owes all of that effect's parameters - half a glyph field is the reading
+ * rule's mistake again, one namespace over - but an effect it never mentions is not a
+ * hole in it, because the whole-look apply resets what a whole-look document leaves
+ * unnamed.
  */
-const wholeLookTag = (values) => completeLookNames().every((n) => Object.hasOwn(values, n));
+const wholeLookTag = (values) => wholeLookNames(values).every((n) => Object.hasOwn(values, n));
+
+/**
+ * The `requires` list, checked against what the document actually touches - both
+ * directions, because the list is derived on the way out and a hand edit can break
+ * the derivation either way. An effect used but not listed is a document that would
+ * load on a machine missing that effect and render a look it does not claim; an
+ * effect listed but never used is a claim about the look that the look does not
+ * make, and the likelier story is a values key someone deleted without its entry.
+ *
+ * The writers derive this list, so like every envelope rule the reader makes a
+ * demand the writer already meets - the refusals here are for the hand-edited file,
+ * and each one names the key to fix.
+ */
+function refuseRequires(what, requires, names) {
+  const used = effectIdsIn(names);
+  if (requires === undefined) {
+    if (used.length) {
+      throw new Error(
+        `${what} names ${used.join(', ')} values but carries no requires list: a document says `
+        + 'which effects its look is built from, so a reader on a machine without one of them '
+        + 'can name what is missing instead of rendering something else under this name',
+      );
+    }
+    return;
+  }
+  if (!Array.isArray(requires)) {
+    throw new Error(`${what} carries ${JSON.stringify(requires)} where its requires belong: a requires list is an array of { id, version } entries`);
+  }
+  const seen = new Set();
+  for (const entry of requires) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`${what} carries a requires entry ${JSON.stringify(entry)}: each entry is an object with an id and a version`);
+    }
+    const strays = Object.keys(entry).filter((k) => !['id', 'version', 'rev'].includes(k));
+    if (strays.length) {
+      throw new Error(`${what} carries ${strays.join(', ')} on a requires entry, which has no place there: an entry is id, version and optionally rev`);
+    }
+    if (typeof entry.id !== 'string' || !/^[a-z][a-z0-9]*$/.test(entry.id)) {
+      throw new Error(`${what} requires ${JSON.stringify(entry.id)}, which is not an effect id: an id is lowercase letters and digits, the prefix its parameters carry`);
+    }
+    if (typeof entry.version !== 'string' || entry.version.length === 0) {
+      throw new Error(`${what} requires ${entry.id} at version ${JSON.stringify(entry.version)}: a version is a non-empty string`);
+    }
+    if (entry.rev !== undefined && (typeof entry.rev !== 'string' || entry.rev.length === 0)) {
+      throw new Error(`${what} pins ${entry.id} to rev ${JSON.stringify(entry.rev)}: a rev is a non-empty string when it is there at all`);
+    }
+    if (seen.has(entry.id)) {
+      throw new Error(`${what} requires ${entry.id} twice: one entry per effect, because two versions of one effect cannot both be what the look was built from`);
+    }
+    seen.add(entry.id);
+  }
+  const unlisted = used.filter((id) => !seen.has(id));
+  if (unlisted.length) {
+    throw new Error(
+      `${what} names ${unlisted.join(', ')} values but its requires list does not claim ${unlisted.length === 1 ? 'it' : 'them'}: `
+      + 'the list is derived from the values on save, so a gap between them is a hand edit to finish',
+    );
+  }
+  const unused = [...seen].filter((id) => !used.includes(id));
+  if (unused.length) {
+    throw new Error(
+      `${what} requires ${unused.join(', ')} but names no value under ${unused.length === 1 ? 'it' : 'them'}: `
+      + 'an effect the look never touches is not required by it, so either its values were deleted by hand or the entry was added by one',
+    );
+  }
+}
+
+// Until the effects are packages with manifests of their own, every effect this build
+// declares is at 1.0.0: the version a requires entry names belongs to the package, and
+// the packages do not exist yet - the registry is still one table. The constant moves
+// into the manifests when they arrive, and nothing else should learn this number.
+const EFFECT_VERSION = '1.0.0';
+
+/** The requires list a set of value names derives, one entry per effect touched. */
+const requiresFor = (names) => effectIdsIn(names).map((id) => ({ id, version: EFFECT_VERSION }));
 
 // ------------------------------------------- which look values a preset carries
 
@@ -9553,14 +9737,17 @@ function refusePresetBody(name, body) {
   // own key, so a file smuggling one is refused here as well - earlier than the values
   // walk that already refuses it, and for the more accurate reason.
   //
-  // `presetFromCurrentLook` emits these two and the five shipped looks carry these two,
-  // so this is the shape the program authors rather than a shape asserted about it.
-  const PRESET_KEYS = ['version', 'values'];
+  // `presetFromCurrentLook` emits these three and the shipped looks carry them, so
+  // this is the shape the program authors rather than a shape asserted about it.
+  // `requires` is optional because a document naming only core values needs no
+  // effects, and deriving an empty list into every file would be a key that says
+  // nothing.
+  const PRESET_KEYS = ['version', 'requires', 'values'];
   const stray = Object.keys(body).filter((k) => !PRESET_KEYS.includes(k));
   if (stray.length) {
     throw new Error(
       `preset ${name} carries ${stray.join(', ')}, which a version ${PROJECT_VERSION} preset has no `
-      + `place for: a preset is ${PRESET_KEYS.join(' and ')} and nothing else, so a key beside them is `
+      + `place for: a preset is ${PRESET_KEYS.join(', ')} and nothing else, so a key beside them is `
       + 'either a field an older version had or a typo, and both would be read as neither',
     );
   }
@@ -9624,6 +9811,11 @@ function refusePresetBody(name, body) {
     }
     params.normalise(key, value);
   }
+
+  // The effect list against the effect values, both directions - after the values
+  // walk, so a misspelt key gets the specific answer before the list gets the
+  // structural one.
+  refuseRequires(`preset ${name}`, body.requires, Object.keys(body.values));
 
   // **And the readings are all or none**, which is the version 4 rule stated as a
   // scope rather than as a census, because the file's own keys are what it claims to
@@ -9693,11 +9885,28 @@ function applyStoredPreset(doc) {
   refusePresetBody(doc.name, doc.body);
   const values = doc.body.values ?? {};
   const stamped = wholeLookTag(values);
-  params.apply(values);
+  // A whole look says what all of it is, so the effects it never mentions are part
+  // of what it says: their inert defaults. Written explicitly rather than assumed,
+  // because the document was saved on some install set and is being applied over
+  // some other clip's leftovers - a raised glyph field surviving a look that never
+  // mentions glyphs would be the ordered-pair contamination the suite sweeps for,
+  // reintroduced by the shorter document format. A partial apply writes what it
+  // names and nothing else, exactly as before.
+  if (stamped) {
+    const named = new Set(effectIdsIn(Object.keys(values)));
+    const resets = {};
+    for (const id of effectIds()) {
+      if (named.has(id)) continue;
+      for (const n of effectParamNames(id)) resets[n] = PARAMS[n].def;
+    }
+    params.apply({ ...resets, ...values });
+  } else {
+    params.apply(values);
+  }
   if (stamped) appliedPreset = { name: doc.name, rev: doc.rev };
   requestRepaint();
   history.commit();
-  return { stamped, written: Object.keys(values).length, look: completeLookNames().length };
+  return { stamped, written: Object.keys(values).length, look: wholeLookNames(values).length };
 }
 
 /**
@@ -14108,7 +14317,17 @@ globalThis.__kinect = {
   // and redden; grow it and they come up short and redden. Its two mutations are the
   // control at each end: one drops a value from a document, the other drops a group from
   // here.
-  completeLookNames,
+  //
+  // `wholeLookNames` is a function of the document now rather than of the build - the
+  // core plus every parameter of every effect the document itself touches - so the
+  // completeness a tool asserts is per document: `coreLookNames()` plus the effect
+  // expansion of the document's own `requires`. The effect helpers are published with
+  // it so no tool re-derives the namespace split for itself.
+  coreLookNames,
+  wholeLookNames,
+  effectOf,
+  effectIds,
+  effectParamNames,
 
   // How often the panel has re-derived which groups are open, since boot. Published
   // because the claim it carries is about *how many times* a bulk write asks that

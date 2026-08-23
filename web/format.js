@@ -83,8 +83,20 @@
  * above `aspect` in `serialiseProjectBody` declines to pay for a field presets have
  * nothing to do with. It is paid here because the thing that moved is the *format* of
  * something both kinds could carry, rather than a field only one of them has.
+ *
+ * **Version 6 names the look's parameters by the effect they belong to.** A version 5
+ * document said `glyphTone`; a version 6 document says `glyph.tone`, carries a
+ * `requires` list naming the effects its values are built from, and leaves out every
+ * effect it holds at inert defaults. The dot is load-bearing rather than cosmetic: it
+ * is what lets a reader tell a typo from an effect this machine does not have, and
+ * the `requires` list is what lets it say *which* effect is missing instead of
+ * refusing the whole document for one unknown name. There is no way across, as ever -
+ * the renames are one-to-one and a converter could exist, which is exactly why this
+ * paragraph records that one deliberately does not: every document this project holds
+ * was re-authored at 6, and a reader of both shapes is the second implementation this
+ * design keeps refusing.
  */
-export const PROJECT_VERSION = 5;
+export const PROJECT_VERSION = 6;
 
 /**
  * The sentence a document from the wrong version gets, in one place because the two
@@ -93,8 +105,8 @@ export const PROJECT_VERSION = 5;
  * **This build carries no migration, and the refusal says so rather than sending anybody
  * looking for one.** There used to be a one-shot rewriter under `tools/` that converted
  * documents on disk, and four bands here that told a version 3 or 4 document which steps
- * stood between it and this one. Both are gone: every document this project has ever held
- * is version 5, so the converter was a one-way rewriter of authored work that nothing
+ * stood between it and this one. Both are gone: every document this project holds is
+ * re-authored at the current version, so the converter was a one-way rewriter of authored work that nothing
  * could exercise - the most dangerous shape a piece of untested code can have, since its
  * *successful* outcome is that the original is gone. Deleting it is the greenfield call,
  * and the cost is stated rather than hidden: a version 3 or 4 document, if one exists

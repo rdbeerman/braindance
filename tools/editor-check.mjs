@@ -1138,13 +1138,13 @@ const MUTATIONS = {
   // which of the four had gone.
 
   // One row emitted without its reset, and the parameter is chosen for being one
-  // nothing else in the section touches: `noiseSpeed` sits in `displacement`, which is
+  // nothing else in the section touches: `noise.speed` sits in `displacement`, which is
   // on the region inspector, so no press row, no geometry row and no preset row reads
   // it. The existence row is the only thing that can see it go.
   //
   // Must redden: **two rows**, and the second is what makes the driver rule honest.
   // `every look parameter the registry declares as a scalar carries exactly one reset
-  // naming itself` reports `noiseSpeed`, and `every reset the panel renders was pressed
+  // naming itself` reports `noise.speed`, and `every reset the panel renders was pressed
   // here` reports it too - the press sweep drags the parameter, waits for a reset that
   // never appears, and says so rather than pressing nothing quietly. The stray row stays
   // green on purpose: it asks whether every reset that exists is in the right row, which
@@ -1158,7 +1158,7 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [[
       '      const beside = [...(keyButton ? [keyButton] : []), makeResetButton(name)];',
-      "      const beside = name === 'noiseSpeed' ? [...(keyButton ? [keyButton] : [])]\n"
+      "      const beside = name === 'noise.speed' ? [...(keyButton ? [keyButton] : [])]\n"
         + "        : [...(keyButton ? [keyButton] : []), makeResetButton(name)];",
     ]],
   },
@@ -7705,8 +7705,8 @@ try {
   // unclamped` came back NOT CAUGHT at eight lanes and reddens the row at fourteen.
   // Look parameters only - `spin` was in this list and is tagged `view`, so it took no
   // lane and the count assertion read one short.
-  const LANED = ['bloom', 'grain', 'scanlines', 'rgbSplit', 'glitch', 'trails', 'rim',
-    'thermal', 'edges', 'scan', 'noise', 'denoise', 'exposure'];
+  const LANED = ['bloom', 'grain.amount', 'raster.amount', 'rgbsplit.amount', 'glitch.amount', 'trails', 'rim',
+    'thermal.amount', 'edges.amount', 'scan', 'noise.amount', 'denoise', 'exposure'];
   // The value each key holds is asked of the registry rather than assumed, because
   // `denoise` is a step parameter and a key holding 0.2 makes `normalise` throw the
   // moment anything evaluates the track. This list carried 0.2 and 0.5 into all
@@ -8007,7 +8007,7 @@ try {
     }
   };
   try {
-    const known = { bloom: 2.75, grain: 0.66, readBlackwall: 1, readRgb: 0 };
+    const known = { bloom: 2.75, 'grain.amount': 0.66, readBlackwall: 1, readRgb: 0 };
     await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(known)})`);
     // Moved again *after* the apply and never saved, which is what makes the row below
     // able to fail. `exportPresetFile` takes its name from the picker and its values
@@ -8126,14 +8126,14 @@ try {
     // Edited outside the program, which is the whole point of a file: a look you can
     // put in a repository, mail to somebody, or change in a text editor.
     const edited = join(TMP, `${NAME_EDITED}.braindance-preset.json`);
-    const nextBody = { ...exported, values: { ...exported.values, bloom: 4.4, grain: 0.13 } };
+    const nextBody = { ...exported, values: { ...exported.values, bloom: 4.4, 'grain.amount': 0.13 } };
     writeFileSync(edited, `${JSON.stringify(nextBody, null, 2)}\n`);
     await page.evaluate("globalThis.__kinect.params.reset(globalThis.__kinect.params.names('look'))");
     await settle();
     await importFile(edited);
     await page.waitForFunction("document.getElementById('tNote').textContent.startsWith('imported')", null, { timeout: 15000 });
     await settle();
-    const back = await page.evaluate("(() => { const k = globalThis.__kinect; return JSON.stringify({ bloom: k.params.get('bloom'), grain: k.params.get('grain'), readBlackwall: k.params.get('readBlackwall'), stamp: k.library.appliedPreset() }); })()");
+    const back = await page.evaluate("(() => { const k = globalThis.__kinect; return JSON.stringify({ bloom: k.params.get('bloom'), grain: k.params.get('grain.amount'), readBlackwall: k.params.get('readBlackwall'), stamp: k.library.appliedPreset() }); })()");
     const landed = JSON.parse(back);
     check(landed.bloom === 4.4 && landed.grain === 0.13 && landed.readBlackwall === 1,
       'and importing it puts the edited look on screen', `bloom ${landed.bloom} grain ${landed.grain}`);
@@ -8226,7 +8226,7 @@ try {
     check(importNote.startsWith('imported'),
       'and the format accepts the document this dialog authored, which is the file rule reading back what the control wrote',
       `"${importNote}"`);
-    const afterPart = await page.evaluate("(() => { const k = globalThis.__kinect; return JSON.stringify({ stamp: k.library.appliedPreset(), grain: k.params.get('grain') }); })()");
+    const afterPart = await page.evaluate("(() => { const k = globalThis.__kinect; return JSON.stringify({ stamp: k.library.appliedPreset(), grain: k.params.get('grain.amount') }); })()");
     const part = JSON.parse(afterPart);
     check(part.stamp?.name === NAME_EDITED,
       'a preset that is part of a look leaves the clip\'s provenance alone - it did not say what the look is',
@@ -9972,13 +9972,13 @@ try {
     // ---- 15d. a keyframe counts even where the value does not
     //
     // The whole reason the predicate has a keyframe term, and the one row
-    // `reveal-ignores-tracks` can reach. The track's keys are all at `grain`'s own
+    // `reveal-ignores-tracks` can reach. The track's keys are all at `grain.amount`'s own
     // default, so the evaluator writes the default into the registry at every position
     // and the value test says untouched at every frame - a parameter that is being
     // animated, on a curve, with the group holding it shut.
     await freshLook();
-    const grainDefault = await defaultOf('grain');
-    await page.evaluate(`__kinect.keyframes.setTracks({ grain: [
+    const grainDefault = await defaultOf('grain.amount');
+    await page.evaluate(`__kinect.keyframes.setTracks({ 'grain.amount': [
       { t: 1, value: ${grainDefault} }, { t: 6, value: ${grainDefault} }] })`);
     await page.evaluate('__kinect.timeline.transport().seek(3)');
     await settle();
@@ -9986,7 +9986,7 @@ try {
     // nothing: if the planted keys had moved the value off its default, the group would
     // open through the term this row is trying to isolate and `reveal-ignores-tracks`
     // would come back NOT CAUGHT for a reason that is about the fixture.
-    const parked = await page.evaluate("__kinect.params.get('grain')");
+    const parked = await page.evaluate("__kinect.params.get('grain.amount')");
     check(parked === grainDefault,
       'the keyed parameter really is sitting on its default at the parked frame, or the row below tests nothing',
       `grain reads ${parked} against a default of ${grainDefault}`);
@@ -10015,7 +10015,7 @@ try {
       `post: shut=${marked.shut}, mark visible=${marked.markVisible}, reads "${marked.mark}"`);
     // Two parameters, so the mark is a count rather than a light that came on. A mark
     // reading "1" whatever is underneath it would pass the row above on every build.
-    await page.evaluate("__kinect.params.set('grain', 0.4)");
+    await page.evaluate("__kinect.params.set('grain.amount', 0.4)");
     await settle();
     const marked2 = await groupOf('post');
     check(marked2.mark === '2',
@@ -10701,11 +10701,14 @@ try {
     const armReset = async (name) => {
       await driveSlider(name, await oneStepOff(name));
       await settle();
+      // The attribute value is quoted because a name may carry a dot - unquoted,
+      // `[data-reset=glyph.amount]` is a CSS parse error, querySelector throws inside
+      // the waited function, and the timeout files a working row under "never offered".
       const armed = await page.waitForFunction(
-        `(() => { const b = document.querySelector('.reset[data-reset=${name}]');
+        `(() => { const b = document.querySelector('.reset[data-reset=${JSON.stringify(name)}]');
           return Boolean(b) && !b.disabled && b.checkVisibility({ checkVisibilityCSS: true }); })()`,
         null, { timeout: 2500 }).then(() => true, () => false);
-      if (armed) await page.click(`.reset[data-reset=${name}]`);
+      if (armed) await page.click(`.reset[data-reset="${name}"]`);
       await settle();
       return armed;
     };
