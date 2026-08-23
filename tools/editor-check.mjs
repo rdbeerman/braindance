@@ -373,6 +373,27 @@ const MUTATIONS = {
     ],
   },
 
+  // The order refusal collapses back to the fold walk's first shape: a pair whose
+  // times descend is skipped as though it were merely coincident, so a hand-edited or
+  // damaged track installs unsorted and `keyBefore`'s binary search - which still
+  // terminates and still returns an index - selects segments nobody authored, silently.
+  //
+  // Must redden the descending-times row alone and leave the fold and legal-crossed
+  // rows green, because the two questions the walk asks are separable and this takes
+  // out exactly one of them.
+  'restore-admits-descending-times': {
+    file: 'web/main.js',
+    edits: [[
+      '    if (keys[i + 1].t < keys[i].t) {\n'
+      + '      throw new Error(`${owner} holds a key at ${keys[i + 1].t}s after one at ${keys[i].t}s: keys are `\n'
+      + "        + 'stored ascending, and the binary search the evaluators run over this track answers '\n"
+      + "        + 'wrongly rather than failing on one that is not');\n"
+      + '    }\n'
+      + '    if (keys[i + 1].t === keys[i].t) continue;\n',
+      '    if (!(keys[i + 1].t > keys[i].t)) continue;\n',
+    ]],
+  },
+
   // The orbit's home pose goes back to whatever the constructor happened to capture,
   // which is the state this has shipped in since it was first built: `target0` a fresh
   // `(0, 0, 0)` taken before the target is written, and nothing carrying it across a
@@ -9741,6 +9762,27 @@ try {
     check(!crossedLegal.threw,
       '  while the legal crossed polygon elevate produces still loads, because the curve is single-valued however its polygon crosses',
       crossedLegal.threw ? `"${String(crossedLegal.message).slice(0, 110)}"` : 'accepted');
+
+    // The same walk's other question, one level down: a track whose key *times*
+    // descend. Every writer in the program sorts, so this only arrives hand-edited or
+    // damaged - and installed unchanged it hands `keyBefore`'s binary search an array
+    // its invariant does not hold on, which still terminates, still returns an index,
+    // and renders values nobody authored. The first shape of the fold walk skipped
+    // such a pair as though it were merely coincident, which is a refusal that was
+    // never written anywhere.
+    const descending = await page.evaluate(`(() => {
+      const body = JSON.parse(${JSON.stringify(original)});
+      body.look.tracks.bloom = [{ t: 4, value: 0.4 }, { t: 0, value: 0.8 }];
+      try {
+        __kinect.library.restoreProject(body);
+        return { threw: false, message: null };
+      } catch (err) {
+        return { threw: true, message: String(err?.message ?? err) };
+      }
+    })()`);
+    check(descending.threw && /ascending/.test(descending.message ?? ''),
+      'a track whose key times descend is refused by name, rather than handing the evaluators a track their binary search answers wrongly over',
+      descending.threw ? `"${String(descending.message).slice(0, 110)}"` : 'it was accepted');
 
     const pastTheEnd = await withHandle('look', [[1.4, 0]]);
     check(pastTheEnd.threw && /outside the segment/.test(pastTheEnd.message ?? ''),

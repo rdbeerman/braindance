@@ -3400,13 +3400,26 @@ function restoreKey(owner, k, kind) {
  * see a fold spanning the two sides at all. `foldRefusal` in `curve.js` asks the real
  * question of the real curve.
  *
- * A pair of keys with no forward span between them is skipped rather than asked,
- * because there is no curve there to fold: `scalarAt` treats a zero-or-negative span as
- * a step and never evaluates the handles.
+ * The walk asks a pair two questions, and order comes first because the fold question
+ * is not askable of a pair that is not a segment. Descending times are refused
+ * outright: every writer in this program sorts - a drag re-sorts the track, the
+ * serialiser writes what the track holds - so a document whose keys descend is
+ * hand-edited or damaged, and installing it unchanged hands `keyBefore`'s binary
+ * search an array its invariant does not hold on. That search still terminates and
+ * still returns an index, so the track renders values and camera poses nobody
+ * authored, silently - the same failure shape as the fold, one level down. A
+ * *coincident* pair is different and stays legal: it is what a key dragged onto
+ * another holds, `scalarAt` treats the zero span as a step and never evaluates the
+ * handles, so there is no curve there to ask about.
  */
 function refuseFolds(owner, keys) {
   for (let i = 0; i + 1 < keys.length; i++) {
-    if (!(keys[i + 1].t > keys[i].t)) continue;
+    if (keys[i + 1].t < keys[i].t) {
+      throw new Error(`${owner} holds a key at ${keys[i + 1].t}s after one at ${keys[i].t}s: keys are `
+        + 'stored ascending, and the binary search the evaluators run over this track answers '
+        + 'wrongly rather than failing on one that is not');
+    }
+    if (keys[i + 1].t === keys[i].t) continue;
     const why = foldRefusal(keys[i].easeOut, keys[i + 1].easeIn);
     if (why) {
       throw new Error(`${owner}'s segment between ${keys[i].t}s and ${keys[i + 1].t}s has ${why}`);
@@ -4212,6 +4225,23 @@ function applyProgramOut(patch) {
       return;
     }
   }
+  // **The parameter half held to the same rule as the pose, because the reordering
+  // above was only half of it.** The old foot walked `patch.params` through
+  // `params.set` one name at a time with a catch per entry, after `size` and `mode`
+  // had already landed - so a patch from a mismatched build refused one name, kept
+  // the rest, and recorded a frame combining the new mode with whatever stale value
+  // the refused parameter was parked at. `params.apply` checks the whole object
+  // before writing any of it, which is the same all-or-nothing `restoreProject`
+  // reads a document through - one refusal, nothing applied, the previous frame
+  // intact, exactly as the paragraph above promises.
+  if (patch.params) {
+    try {
+      params.apply(patch.params);
+    } catch (err) {
+      console.error(`[program-out] ${err.message}`);
+      return;
+    }
+  }
   if (patch.size && Number.isInteger(patch.size.w) && Number.isInteger(patch.size.h)
       && patch.size.w > 0 && patch.size.h > 0) {
     programOutSize = { w: patch.size.w, h: patch.size.h };
@@ -4221,20 +4251,6 @@ function applyProgramOut(patch) {
   if (patch.mode === 'mirror' || patch.mode === 'camera') {
     programOutMode = patch.mode;
     setViewCamera(programOutMode === 'mirror' ? freeCamera : programCamera);
-  }
-  if (patch.params) {
-    // Through the registry's own write path, so a value arriving over a socket is
-    // normalised, clamped and applied exactly as one typed into a slider would be.
-    // A refused name throws rather than being ignored - a source silently dropping a
-    // parameter it did not recognise is a source drawing something other than what
-    // the operator is looking at, which is the one thing this mode must not do.
-    for (const [name, value] of Object.entries(patch.params)) {
-      try {
-        params.set(name, value);
-      } catch (err) {
-        console.error(`[program-out] ${err.message}`);
-      }
-    }
   }
   // Refused loudly and the frame left as it was, rather than half-applied - which is now
   // a statement the ordering supports rather than one it contradicts, since the refusal

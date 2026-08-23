@@ -777,6 +777,24 @@ const MUTATIONS = {
     '  if (mine !== refreshGeneration) return undefined;\n',
   ]] },
 
+  // The download stops asking the volume and goes back to asking only the node, which
+  // is how it shipped: the byte ceiling holds the node to its advertised size and says
+  // nothing about whether that size fits, so a truthful take larger than the free space
+  // writes to ENOSPC and the shoot recording to the same disk is what actually breaks.
+  //
+  // Must redden the volume-refusal row alone - its message becomes the node stub's
+  // connection failure instead of the free-space sentence - and leave the fits-twin row
+  // green, because that one was always answered by the stub.
+  'download-ignores-the-volume': { file: 'server/library.js', edits: [[
+    '  const space = await remaining(dir);\n'
+    + '  if (take.bytes > space.freeBytes - space.bytesPerSec * 60) {\n'
+    + '    throw new Error(`downloading ${take.id}: it advertises ${take.bytes} bytes and the volume under `\n'
+    + '      + `${dir} has ${space.freeBytes} free - refused before a byte moved, keeping a minute of `\n'
+    + "      + 'recording headroom for the shoot this disk may be carrying');\n"
+    + '  }\n',
+    '',
+  ]] },
+
   // The signal put back where it shipped: after the directory walk rather than before it.
   //
   // **Every call site still passes one and the presence sweep still reads clean**, which
@@ -6102,6 +6120,33 @@ async function runChecks() {
       `landed as ${pulled.downloaded}`);
     check(pulled.downloaded !== 'same-name.knct' && /same-name-[0-9a-f]{8}\.knct/.test(pulled.downloaded),
       'the collision takes the hash into the name, which is what the join was already saying');
+
+    // **Refused against the volume before a byte moves, driven at the function with a
+    // take too large to land.** The byte ceiling inside the transfer holds the node to
+    // its claim and says nothing about the disk: a truthful take larger than the free
+    // space started writing, reached ENOSPC, tidied its own `.part` away - and the
+    // recorder writing the current shoot to the same volume was what actually broke.
+    // Driven at `downloadTake` directly with a fabricated manifest entry, because a
+    // take genuinely larger than this machine's free space is not a fixture anybody
+    // can stage - and imported from the staged tree for the reason the rename race
+    // gives. The node stub is never contacted: the refusal has to come before the
+    // fetch, and a fetch against a port nobody holds is what the twin below reads as
+    // *its* answer.
+    const stagedLib = await import(pathToFileURL(join(root, 'server/library.js')).href);
+    const { freeBytes } = await stagedLib.remaining(macCaps);
+    const tooBig = await stagedLib.downloadTake({ url: 'http://127.0.0.1:9' },
+      { id: 'a-take-too-big-to-land', bytes: freeBytes * 2, hash: `sha256:${'ab'.repeat(32)}` }, macCaps)
+      .then(() => null, (err) => String(err.message));
+    check(tooBig !== null && /free/.test(tooBig)
+      && !existsSync(join(macCaps, 'a-take-too-big-to-land.knct.part')),
+      'a download that cannot fit on the capture volume is refused before a byte moves, with the recording headroom kept out of it',
+      (tooBig ?? 'IT DOWNLOADED').slice(0, 90));
+    const fits = await stagedLib.downloadTake({ url: 'http://127.0.0.1:9' },
+      { id: 'a-take-that-fits', bytes: 1024, hash: `sha256:${'cd'.repeat(32)}` }, macCaps)
+      .then(() => null, (err) => String(err.message));
+    check(fits !== null && !/free/.test(fits),
+      '  while one that fits is stopped only by the node stub being unreachable, so the gate is a gate rather than downloads switched off',
+      (fits ?? 'IT DOWNLOADED').slice(0, 90));
 
     // The marks came with it, merged rather than replaced, with the tombstone
     // holding: n1 and n2 survive, n3 does not.

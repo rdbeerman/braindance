@@ -983,6 +983,21 @@ async function downloadClaimed(node, take, dir) {
 async function downloadToPath(node, take, dir, targetIn) {
   let target = targetIn;
   const temp = `${target}.part`;
+  // **Refused against the volume before a byte moves, because the byte ceiling below
+  // only holds the node to its claim.** A node telling the truth about a take larger
+  // than the free space walked straight past every guard here: the transfer wrote
+  // until `ENOSPC`, tidied its own `.part` away - and the recorder writing the current
+  // shoot to the same volume is the thing that actually broke, before this copy ever
+  // failed. The margin is a minute of recording at the rate `remaining` already
+  // reports space in, because the disk this must not fill is the one a take may be
+  // landing on right now, and a transfer that fits to the last byte fills it just as
+  // surely as one that does not fit at all.
+  const space = await remaining(dir);
+  if (take.bytes > space.freeBytes - space.bytesPerSec * 60) {
+    throw new Error(`downloading ${take.id}: it advertises ${take.bytes} bytes and the volume under `
+      + `${dir} has ${space.freeBytes} free - refused before a byte moved, keeping a minute of `
+      + 'recording headroom for the shoot this disk may be carrying');
+  }
   // Declared before the fetch, because the first thing that can hang is the fetch: a
   // node that completes the TCP handshake and never sends a status line leaves this
   // `await` parked forever, and with it the handler, the socket, and both entries in

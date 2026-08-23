@@ -225,6 +225,10 @@ node tools/library-check.mjs --mutate superseded-refresh-reports-success # ... a
                                                                      #     acts on that sentence, so a success nothing earned
                                                                      #     advanced its fingerprint past a transition no paint
                                                                      #     ever showed
+node tools/library-check.mjs --mutate download-ignores-the-volume    # ... a download asked against the disk before a byte
+                                                                     #     moves, because the byte ceiling holds the node to
+                                                                     #     its claim and a truthful take larger than the free
+                                                                     #     space breaks the shoot recording to the same volume
 node tools/library-check.mjs --mutate post-action-poll-discarded     # ... and a press asks again rather than taking the answer in flight
 node tools/library-check.mjs --mutate listing-never-times-out        # ... and a listing nothing will answer frees itself
 node tools/library-check.mjs --mutate delete-guesses-past-an-unreachable-node # ... a node that did not answer is not a node with nothing on it
@@ -428,6 +432,11 @@ node tools/editor-check.mjs --mutate restore-skips-the-fold-check --no-render # 
                                                                        #     see a fold spanning the join at all. Reddens the
                                                                        #     fold row alone; the legal-crossed row beside it is
                                                                        #     the half that fails on the build this replaced
+node tools/editor-check.mjs --mutate restore-admits-descending-times --no-render # ... the walk's other question: a pair whose times
+                                                                       #     descend skipped as merely coincident, so a damaged
+                                                                       #     track installs unsorted and keyBefore's binary
+                                                                       #     search selects segments nobody authored. Reddens
+                                                                       #     the descending-times row alone
 node tools/editor-check.mjs --mutate reset-forgets-the-pivot --no-render # ... the orbit's home aim, which `OrbitControls`
                                                                        #     captures in its constructor before the target is
                                                                        #     written and which no rebuild carried across.
@@ -480,6 +489,10 @@ node tools/vcam-check.mjs --mutate pose-skips-the-registry # ... the camera pose
                                                           #     Four finite numbers are not a rotation, and the source
                                                           #     was drawing with whatever arrived. Reddens the refusal
                                                           #     row and leaves the pose-still-arrives row green
+node tools/vcam-check.mjs --mutate patch-params-applied-one-at-a-time # ... and the parameter half of the same patch, whole or
+                                                          #     not at all - applied one name at a time, a refused name
+                                                          #     kept the rest and the source drew half a frame nobody
+                                                          #     sent. Reddens the half-right-patch row alone
 node tools/guard-check.mjs                                # the socket's origin rule, the bind, and the rebinding rule
 node tools/guard-check.mjs --mutate upgrade-skips-origin  # ... and must FAIL mutated
 node tools/guard-check.mjs --mutate host-accepts-a-name   # ... and must FAIL mutated

@@ -78,7 +78,19 @@ const BOOLEAN = ['--force', '--if-missing'];
 const positional = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
-  if (VALUED.includes(a)) { i++; continue; }
+  if (VALUED.includes(a)) {
+    // A valued option at the end of the line has no value, and skipping past it made
+    // `--frames` alone read as `--frames 284`: `flag()` finds no following token and
+    // hands back the default, so the tool wrote a plausible fixture nobody asked for
+    // and `--if-missing` kept it - the same class as the misspelling above, arriving
+    // with the name spelled right.
+    if (i + 1 >= argv.length) {
+      console.error(`[make-sample] ${a} takes a value and none followed it. Nothing was written.`);
+      process.exit(2);
+    }
+    i++;
+    continue;
+  }
   if (BOOLEAN.includes(a)) continue;
   if (a.startsWith('-')) {
     console.error(`[make-sample] ${a} is not an option this tool has`

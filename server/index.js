@@ -973,6 +973,12 @@ async function serveRemoteFrame(req, res, [id, n], query) {
   // near this ceiling is a desync or a node that is not this program.
   const declared = Number(upstream.headers.get('content-length') ?? NaN);
   if (Number.isFinite(declared) && declared > MAX_PAYLOAD_BYTES) {
+    // Cancelled for the reason the streamed-overage branch below gives about its own
+    // `cancel()`: a refusal on the header alone leaves the node still sending the body
+    // it declared into a connection nobody is draining, and this 502 completes while
+    // that socket stays occupied - so a peer answering every poster request this way
+    // holds a connection per refusal without ever crossing the incremental reader.
+    upstream.body?.cancel().catch(() => { /* the node may already be gone */ });
     res.writeHead(502).end(`the node offered ${declared} bytes for one frame, past the ${MAX_PAYLOAD_BYTES} this format allows`);
     return;
   }

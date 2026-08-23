@@ -130,6 +130,38 @@ const MUTATIONS = {
     ]],
   },
 
+  // The parameter half of the patch goes back to landing one name at a time with a
+  // catch per entry, which is how it shipped: a refused name logged and the loop
+  // carried on, so a patch from a mismatched build applied its good half and the
+  // source drew the new mode against whatever stale value the refused parameter was
+  // parked at. `params.apply` checks the whole object before writing any of it; this
+  // puts the per-entry walk back.
+  //
+  // Must redden the half-right-patch row alone and leave the whole-patch twin and the
+  // pose rows green, because a wholly valid patch lands identically either way.
+  'patch-params-applied-one-at-a-time': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (patch.params) {\n'
+      + '    try {\n'
+      + '      params.apply(patch.params);\n'
+      + '    } catch (err) {\n'
+      + '      console.error(`[program-out] ${err.message}`);\n'
+      + '      return;\n'
+      + '    }\n'
+      + '  }\n',
+      '  if (patch.params) {\n'
+      + '    for (const [name, value] of Object.entries(patch.params)) {\n'
+      + '      try {\n'
+      + '        params.set(name, value);\n'
+      + '      } catch (err) {\n'
+      + '        console.error(`[program-out] ${err.message}`);\n'
+      + '      }\n'
+      + '    }\n'
+      + '  }\n',
+    ]],
+  },
+
   // **The control for claim 2.** The endpoint serves the registered colour scaled up
   // to 1080p instead of the colour camera's own frame - the plausible wrong
   // implementation, and the one somebody would reach for to avoid a second encode.
@@ -722,6 +754,32 @@ try {
       await page.waitForTimeout(1200);
       const forwarded = await page.evaluate('__kinect.params.get("pointSize")');
       ok('and a parameter write reaches it through the registry', forwarded === 4.2, String(forwarded));
+
+      // **A patch that is half right applies as nothing at all.** The old foot walked
+      // `patch.params` through `params.set` one name at a time with a catch per entry,
+      // so a patch from a mismatched build refused one name, kept the rest, and the
+      // source recorded a frame combining the applied half with whatever stale value
+      // the refused parameter was parked at. Driven at the source's own handler with a
+      // name no registry holds beside a value the registry does, and read back off the
+      // half that would have landed.
+      const bloomHeld = await page.evaluate('__kinect.params.get("bloom")');
+      await page.evaluate(`__kinect.applyProgramOut({ params: {
+        bloom: ${JSON.stringify(bloomHeld === 0.25 ? 0.75 : 0.25)}, "a-parameter-no-build-has": 1,
+      } })`);
+      await page.waitForTimeout(300);
+      const bloomAfterBad = await page.evaluate('__kinect.params.get("bloom")');
+      ok('a patch carrying one refused parameter applies none of them, so the source never draws half of a frame nobody sent',
+        bloomAfterBad === bloomHeld, `bloom ${bloomAfterBad}, held at ${bloomHeld}`);
+      // The positive twin, for the same reason the pose rows below carry one: refused
+      // and ignored have to be told apart, or this gate is indistinguishable from the
+      // params half of the patch being dropped.
+      const bloomTarget = bloomHeld === 0.25 ? 0.75 : 0.25;
+      await page.evaluate(`__kinect.applyProgramOut({ params: { bloom: ${JSON.stringify(bloomTarget)} } })`);
+      await page.waitForTimeout(300);
+      const bloomAfterGood = await page.evaluate('__kinect.params.get("bloom")');
+      ok('  while a patch that is whole still lands through the registry',
+        bloomAfterGood === bloomTarget, `bloom ${bloomAfterGood}, sent ${bloomTarget}`);
+      await page.evaluate(`__kinect.applyProgramOut({ params: { bloom: ${JSON.stringify(bloomHeld)} } })`);
 
       // **The other half of the same patch, which took a different road.** `params` goes
       // through the registry's write path and is normalised, clamped and refused there;
