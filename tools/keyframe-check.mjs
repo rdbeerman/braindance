@@ -994,18 +994,26 @@ const specOf = (name) => page.evaluate(`globalThis.__kinect.params.spec(${src(na
  *
  * **`page.mouse` presses a coordinate, and a coordinate belongs to whatever is stacked
  * on it.** The centre of an element's box is only its own while nothing else is drawn
- * there, and this strip draws plenty: `#tIn` is a one-pixel line whose grab zone
- * reaches sixteen pixels *inward* at `z-index: 4` against a key's 2, and it spans the
- * whole column from the ruler to the bottom of the last lane. So every key inside the
- * first seconds of a take sits under it. Measured at this file's 640-wide viewport on
- * the 243s `fixture-1g`: the bed runs 525 pixels from x 115, the bloom key at 4s draws
- * centred on x 123.6, `#tIn`'s zone covers 111 to 127, and `elementFromPoint` there
- * answers `#tIn` - so `ui.beds`' `pointerdown` ran
- * `closest('.tkey, .thandle')`, got null, and returned. Nothing was selected, no handle
- * was drawn, and section 6e's first row reddened about a build that had done nothing
- * wrong. Playwright's own actionability is no rescue: `locator.click()` on the same key
- * hit-tests the same way, waits thirty seconds to receive pointer events and then
- * throws, which is a crash where a row belongs.
+ * there, and this strip draws plenty. Playwright's own actionability is no rescue
+ * either: `locator.click()` hit-tests the same way, waits thirty seconds to receive
+ * pointer events and then throws, which is a crash where a row belongs.
+ *
+ * **The case this was written for was a product defect and has been fixed, and the
+ * measurement is kept rather than deleted.** `#tIn` is a one-pixel line whose grab zone
+ * reaches sixteen pixels *inward* at `z-index: 4`, and it spans the whole column from
+ * the ruler to the bottom of the last lane - so the zone lay over the lanes and not
+ * only over the ruler. Measured at this file's 640-wide viewport on the 243s
+ * `fixture-1g`: the bed runs 525 pixels from x 115, the bloom key at 4s draws centred
+ * on x 123.6, `#tIn`'s zone covers 114.5 to 126.5, and `elementFromPoint` there answered
+ * `#tIn` - so `ui.beds`' `pointerdown` ran `closest('.tkey, .thandle')`, got null, and
+ * returned, while the marker's own handler trimmed the clip in to 00:03.986. Nothing was
+ * selected, no handle was drawn, and section 6e's first row reddened about a press that
+ * had landed on something else. `.tkey` and `.thandle` are `z-index: 5` now, above that
+ * zone, so the same key answers for its own centre and this helper reports an offset of
+ * zero there.
+ *
+ * It still walks, because the other overlap it was written against has not gone
+ * anywhere - see the identity test below.
  *
  * The predicate here is the page's own, deliberately: a point counts when
  * `elementFromPoint(x, y).closest('.tkey, .thandle')` is *this* element, which is the
@@ -2853,8 +2861,9 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   // (c) an ease handle, dragged with the pointer.
   //
   // Both presses go through `lanePressPoint` rather than through the middle of a
-  // rectangle, for the reason written above it: the middle of the key at 4s belongs to
-  // `#tIn`'s grab zone at this viewport, and pressing it selected nothing.
+  // rectangle, for the reason written above it: the middle of the key at 4s belonged to
+  // `#tIn`'s grab zone at this viewport until the keys were stacked above it, and the
+  // three keys here still overlap each other by more than a diamond's reach.
   //
   // One press and no retry, which is not thrift. A second press on the same key inside
   // `DOUBLE_CLICK_MS` is the gesture that *deletes* it, so a loop that clicked again
