@@ -1979,7 +1979,7 @@ The second: the use question is asked of a **name** and not of a scope, and it t
 coming back NOT CAUGHT to find where that bites. `--mutate import-used-under-its-far-side-name`
 renamed `pollRecordState` to `poll` on import, leaving the file full of the far-side name and
 holding no reference to the binding it makes — and the row stayed green, because
-`web/main.js:9860` defines a method called `poll` in an object literal, which is a name written
+`gpuTimer` in `web/main.js` defines a method called `poll` in an object literal, which is a name written
 in code position with no dot in front of it and so indistinguishable from a reference. The
 control now uses an alias nothing else spells; the limitation is in the tool's header beside the
 other one, that a name appearing only inside a string body reads as used. Both are false

@@ -105,7 +105,7 @@ const MUTATIONS = {
   // path survives every edit to the file it names and the line survives none of them.
   'line-citation-past-the-end': {
     file: 'docs/proof-tools.md',
-    edits: [['`web/main.js:9860` is and what made', '`web/main.js:98600` is and what made']],
+    edits: [['`gpuTimer.poll` in `web/main.js` is and what made', '`gpuTimer.poll` in `web/main.js:98600` is and what made']],
   },
 
   // The third half of the same row, and the one that says the walk reaches outside the
@@ -473,7 +473,7 @@ const withoutStringBodies = (src) => {
   const citing = walkShipped(ROOT).map((p) => relative(ROOT, p)).sort();
 
   const cited = new Set();
-  // Keyed by the citation as written, so `web/main.js` and `web/main.js:9860` are two
+  // Keyed by the citation as written, so `web/main.js` and `web/main.js:1` are two
   // entries and the line form is not answered by the bare one appearing elsewhere.
   const modules = new Map();
   let scanned = 0;

@@ -1942,7 +1942,7 @@ lookahead: the nearest code character before the hit is `{` or `,` and the neare
 it takes no name off the swept set, which is what makes it free in the one file that is full of
 registries and menu tables; `--mutate import-used-only-as-an-object-key` is the arm. What is left
 open is the **method shorthand**, found by a control coming back NOT CAUGHT: `{ name(gl) { … } }`
-has no dot in front of it either, which is what `web/main.js:9860` is and what made an alias of
+has no dot in front of it either, which is what `gpuTimer.poll` in `web/main.js` is and what made an alias of
 `poll` look read. That one will not close with a lookahead, and the measurement says so rather
 than the argument — excluding a hit followed by `:` or by `(` at the head of a line calls twelve
 live imports unused, `writeClipRange`, `tiltQuaternion` and `pollRecordState` among them, because
