@@ -29,7 +29,7 @@ import {
 import {
   EASE_OUT_LINEAR, EASE_IN_LINEAR, SEGMENT_POINT_CEILING, copyHandle, easeAt, elevate, keyBefore,
   HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
-  handleRefusal,
+  handleRefusal, foldRefusal, foldFreeX,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
 import {
@@ -3371,7 +3371,8 @@ function restoreKey(owner, k, kind) {
     }
     // Shape first and then the invariants, because the second question is only askable
     // of something with the first answer - and the two refusals say different things, so
-    // a document with a wrong-shaped handle should not be told its abscissae descend.
+    // a document with a wrong-shaped handle should not be told a point sits outside
+    // the box.
     const why = handleRefusal(points, loY, hiY);
     if (why) {
       throw new Error(`${owner}'s key at ${k.t}s has a ${side} handle with ${why}`);
@@ -3384,6 +3385,33 @@ function restoreKey(owner, k, kind) {
     easeOut: handle('easeOut', k.easeOut, EASE_OUT_LINEAR),
     easeIn: handle('easeIn', k.easeIn, EASE_IN_LINEAR),
   };
+}
+
+/**
+ * Refuses a restored track whose timing curve folds anywhere, asked once per segment
+ * with both handles in hand.
+ *
+ * This cannot live in `restoreKey`, and the reason is the shape of the invariant: a
+ * segment's curve is composed of the *leaving* key's `easeOut` and the *arriving* key's
+ * `easeIn`, so no single key holds both of its terms. The per-key check this replaced
+ * asked each side for ordered control x, which is sufficient for the curve and stricter
+ * than it - it refused the legal crossed polygons `elevate` produces, so the editor
+ * could save a document its own reload declined - and, reset at the join, it could not
+ * see a fold spanning the two sides at all. `foldRefusal` in `curve.js` asks the real
+ * question of the real curve.
+ *
+ * A pair of keys with no forward span between them is skipped rather than asked,
+ * because there is no curve there to fold: `scalarAt` treats a zero-or-negative span as
+ * a step and never evaluates the handles.
+ */
+function refuseFolds(owner, keys) {
+  for (let i = 0; i + 1 < keys.length; i++) {
+    if (!(keys[i + 1].t > keys[i].t)) continue;
+    const why = foldRefusal(keys[i].easeOut, keys[i + 1].easeIn);
+    if (why) {
+      throw new Error(`${owner}'s segment between ${keys[i].t}s and ${keys[i + 1].t}s has ${why}`);
+    }
+  }
 }
 
 /**
@@ -3575,11 +3603,13 @@ function restoreProject(project) {
     // An empty track is still nothing to restore, so it is still skipped. The change is
     // that it is skipped for being empty rather than for being cheap to skip.
     if (keys.length === 0) continue;
-    restoredLook.push([name, keys.map((k) => {
+    const restored = keys.map((k) => {
       const key = restoreKey(`track ${name}`, k, params.spec(name).kind);
       key.value = params.normalise(name, key.value);
       return key;
-    })]);
+    });
+    refuseFolds(`track ${name}`, restored);
+    restoredLook.push([name, restored]);
   }
 
   // The same refusal for the parameter values, and for the same reason - but it has
@@ -3602,6 +3632,7 @@ function restoreProject(project) {
     key.value = params.normalise('camera', key.value);
     return key;
   });
+  refuseFolds('track camera', restoredCamera);
 
   const restoredRetime = project.composition.retime.keys.map((k) => {
     const key = restoreKey('the retime curve', k, 'retime');
@@ -3610,6 +3641,7 @@ function restoreProject(project) {
     }
     return key;
   });
+  refuseFolds('the retime curve', restoredRetime);
   // The fourth door onto the curve, and the one this step exists to close. The
   // other three are gestures inside a page that already vetted the curve; this is
   // the one a file arrives through, and a descending region does not merely fail -
@@ -10130,7 +10162,16 @@ ui.beds.addEventListener('pointermove', (e) => {
     // a side, "either end" means the neighbouring control points rather than the
     // segment's own - see `handleSpan`, where the two readings are one rule.
     const span = handleSpan(keys, laneDrag.seg, laneDrag.side, laneDrag.index);
-    h[0] = Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt));
+    // The span first and the curve last. The neighbour span is the ordering rule, and
+    // ordering is sufficient only when the polygon starts ordered - from the legal
+    // crossed states `elevate` produces, a sequence of drags each inside its span can
+    // still fold the curve, measured at six drags from the twice-elevated pair. So the
+    // final clamp asks the curve itself: `foldFreeX` slides x to the last fold-free
+    // point, which is the curve resisting the way `clampRetimeKey` resists, and it is
+    // what keeps every state this handler can produce a state the loader will accept
+    // back.
+    h[0] = foldFreeX(a.easeOut, b.easeIn, laneDrag.side, laneDrag.index, h[0],
+      Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt)));
     // `dv` is non-zero by construction - a handle only exists where
     // `segmentHasShape` said there was a shape, and a handle drag moves no key
     // value - so this is a backstop against writing NaN into the document rather

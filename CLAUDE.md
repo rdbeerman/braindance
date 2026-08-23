@@ -399,9 +399,18 @@ node tools/editor-check.mjs --mutate picker-keeps-a-refused-look --no-render # .
 node tools/editor-check.mjs --mutate restorekey-skips-handle-invariants --no-render # ... the ease-handle invariants asked of
                                                                        #     the drag that makes a value and never of the
                                                                        #     loader that reads one back, though the docstring
-                                                                       #     over it claimed them. Reddens three refusal rows
-                                                                       #     and leaves the look-overshoot row green, because
-                                                                       #     the bound is per kind rather than per handle
+                                                                       #     over it claimed them. Reddens the two per-side
+                                                                       #     refusal rows and leaves the look-overshoot and
+                                                                       #     fold rows green, because the bound is per kind
+                                                                       #     and the fold is the segment's own check
+node tools/editor-check.mjs --mutate restore-skips-the-fold-check --no-render # ... that check: whole-curve monotonicity asked once
+                                                                       #     per segment with both handles in hand. The per-side
+                                                                       #     ordering rule it replaced refused the legal crossed
+                                                                       #     polygons `elevate` produces - the editor could save
+                                                                       #     a document its own reload declined - and could not
+                                                                       #     see a fold spanning the join at all. Reddens the
+                                                                       #     fold row alone; the legal-crossed row beside it is
+                                                                       #     the half that fails on the build this replaced
 node tools/editor-check.mjs --mutate reset-forgets-the-pivot --no-render # ... the orbit's home aim, which `OrbitControls`
                                                                        #     captures in its constructor before the target is
                                                                        #     written and which no rebuild carried across.

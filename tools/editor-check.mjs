@@ -301,9 +301,16 @@ const MUTATIONS = {
   // The drag handler still clamps, so nothing an operator can do changes - what changes
   // is the one caller that was taken on trust, a document.
   //
-  // Must redden the three refusal rows and leave the overshoot row green: a build that
-  // had simply stopped accepting handles would redden all four, and that is a different
-  // defect wearing the same colour.
+  // Must redden the two per-side refusal rows - a point outside the segment, a camera
+  // handle above the box - and leave the overshoot row green: a build that had simply
+  // stopped accepting handles would redden all three, and that is a different defect
+  // wearing the same colour. The fold row stays green too, because the fold refusal is
+  // the segment's own check in `refuseFolds` rather than this per-key one, and that
+  // split is what the mutation below is for. Read the two red rows for *why* they
+  // fired, though, because they differ: the camera row is a genuine acceptance, while
+  // the past-the-end fixture is still refused on the mutated build - x=1.4 folds the
+  // curve, so `refuseFolds` catches it - and its row reddens on the sentence naming
+  // the wrong term rather than on a document getting through.
   'restorekey-skips-handle-invariants': {
     file: 'web/main.js',
     edits: [[
@@ -313,6 +320,24 @@ const MUTATIONS = {
       + '    }\n',
       '',
     ]],
+  },
+
+  // The loader stops asking whether the composed segment folds, which is the defect the
+  // per-side ordering rule was hiding: a polygon can ascend within each side and still
+  // run backwards across the join, and `easeParam`'s bisection renders that curve
+  // deterministically at the wrong times rather than failing. All three tracks lose the
+  // walk at once, because the shipped build had it nowhere.
+  //
+  // Must redden the fold row alone and leave the per-side rows and the legal-crossed
+  // row green: the per-key invariants still stand, and a mutated build that reddened
+  // those too would be refusing handles at large rather than being this.
+  'restore-skips-the-fold-check': {
+    file: 'web/main.js',
+    edits: [
+      ['    refuseFolds(`track ${name}`, restored);\n', ''],
+      ["  refuseFolds('track camera', restoredCamera);\n", ''],
+      ["  refuseFolds('the retime curve', restoredRetime);\n", ''],
+    ],
   },
 
   // The orbit's home pose goes back to whatever the constructor happened to capture,
@@ -2154,8 +2179,8 @@ const MUTATIONS = {
   'handle-clamped-to-the-segment': {
     file: 'web/main.js',
     edits: [[
-      `    const span = handleSpan(keys, laneDrag.seg, laneDrag.side, laneDrag.index);
-    h[0] = Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt));`,
+      `    h[0] = foldFreeX(a.easeOut, b.easeIn, laneDrag.side, laneDrag.index, h[0],
+      Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt)));`,
       '    h[0] = Math.min(1, Math.max(0, (laneProgramAt(e.clientX) - a.t) / dt));',
     ]],
   },
@@ -9589,14 +9614,15 @@ try {
     // about what the numbers meant. The retime alone had closed this, through
     // `assertMonotonic`; look and camera tracks reached `restoreKey` and stopped there.
     //
-    // Both failures are silent, which is why they are worth a door. Descending abscissae
-    // break `easeParam`'s bisection without breaking it - it terminates and returns a
+    // Both failures are silent, which is why they are worth a door. A folding curve
+    // breaks `easeParam`'s bisection without breaking it - it terminates and returns a
     // value inside the range, so the take renders deterministically at the wrong times -
     // and a pose handle above the box asks `hermite` for a fraction past 1, so the camera
     // sails through the pose it was keyed at and swings back.
-    const withHandle = (where, handle) => page.evaluate(`(() => {
+    const withHandle = (where, handle, arriving) => page.evaluate(`(() => {
       const body = JSON.parse(${JSON.stringify(original)});
       const handle = ${JSON.stringify(handle)};
+      const arriving = ${JSON.stringify(arriving ?? null)};
       if (${JSON.stringify(where)} === 'camera') {
         // The pose comes from the registry rather than from the document, because the
         // document reaching this section has no camera keys in it - the first draft read
@@ -9605,8 +9631,10 @@ try {
         // params.get('camera') is the pose the page is holding, which is a real one.
         const seed = __kinect.params.get('camera');
         body.composition.camera = [{ t: 0, value: seed, easeOut: handle }, { t: 4, value: seed }];
+        if (arriving) body.composition.camera[1].easeIn = arriving;
       } else {
         body.look.tracks.bloom = [{ t: 0, value: 0.4, easeOut: handle }, { t: 4, value: 0.8 }];
+        if (arriving) body.look.tracks.bloom[1].easeIn = arriving;
       }
       try {
         __kinect.library.restoreProject(body);
@@ -9616,10 +9644,28 @@ try {
       }
     })()`);
 
-    const crossed = await withHandle('look', [[0.8, 0], [0.2, 0]]);
-    check(crossed.threw && /descend/.test(crossed.message ?? ''),
-      'a handle whose control points descend in x is refused by name, rather than rendering the move at the wrong times',
-      crossed.threw ? `"${String(crossed.message).slice(0, 110)}"` : 'it was accepted');
+    // **The fixture is a genuine fold, and being one takes both handles.** The old row
+    // here planted `easeOut [[0.8, 0], [0.2, 0]]` and asked for a refusal of descending
+    // control x - a rule that is sufficient for a fold and stricter than one, so it
+    // refused the legal crossed polygons `elevate` produces (the editor could save a
+    // document its own reload declined) and, asked one side at a time, it could not see
+    // a fold spanning the join at all. This pair ascends within each side and its x(u)
+    // runs backwards over roughly 30% of the segment: minimum dx/du is -0.41.
+    const folded = await withHandle('look', [[0.9, 0]], [[0.05, 0.5], [0.1, 1]]);
+    check(folded.threw && /folds/.test(folded.message ?? ''),
+      'a segment whose composed timing curve folds is refused by name, rather than rendering the move at the wrong times',
+      folded.threw ? `"${String(folded.message).slice(0, 110)}"` : 'it was accepted');
+
+    // The other half of the same claim, and the row that fails on the build this
+    // replaced: the exact polygon `elevate` makes out of the ordinary
+    // `easeOut [[0.9, 0.1]]` / `easeIn [[0.1, 0.9]]` pair, control points and all.
+    // Its control x descend, 0.675 then 0.5, and its curve is single-valued the whole
+    // way - minimum dx/du 0.15 - so a loader still refusing on the polygon takes this
+    // document away from the editor that saved it.
+    const crossedLegal = await withHandle('look', [[0.675, 0.075], [0.5, 0.5]], [[0.325, 0.925]]);
+    check(!crossedLegal.threw,
+      '  while the legal crossed polygon elevate produces still loads, because the curve is single-valued however its polygon crosses',
+      crossedLegal.threw ? `"${String(crossedLegal.message).slice(0, 110)}"` : 'accepted');
 
     const pastTheEnd = await withHandle('look', [[1.4, 0]]);
     check(pastTheEnd.threw && /outside the segment/.test(pastTheEnd.message ?? ''),

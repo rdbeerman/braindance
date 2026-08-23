@@ -308,11 +308,21 @@ function tangentAt(keys, i, axis) {
  * document is a caller like any other and it was the one caller taken on trust.
  *
  * Both refusals are about silence rather than about crashes, which is why they are worth
- * a door of their own. Descending abscissae break `easeParam`'s bisection without
- * breaking it: the loop still terminates and still returns a `u` inside `[0, 1]`, so the
- * take renders deterministically, repeatably, and at the wrong times. And y outside its
- * bound sends `hermite` past the key on an axis that is already a fraction, so a camera
- * sails through the pose it was keyed at and swings back to it.
+ * a door of their own. A point outside the segment pulls the curve past an end it is
+ * pinned to, and y outside its bound sends `hermite` past the key on an axis that is
+ * already a fraction, so a camera sails through the pose it was keyed at and swings back
+ * to it.
+ *
+ * **What this deliberately does not ask is whether the abscissae are ordered, and it
+ * used to.** Descending control x is *sufficient* for a fold and never necessary - a
+ * crossed polygon whose curve stays single-valued is a legal state, `elevate` produces
+ * one out of the ordinary `easeOut [[0.9, 0.1]]` / `easeIn [[0.1, 0.9]]` pair, and the
+ * per-side ordering rule refused it, so the editor could save a document the next
+ * reload declined to open. It was also too loose on the same axis: asked one side at a
+ * time it could not see a fold spanning the `easeOut`/`easeIn` boundary, which is the
+ * fold its own sentence was written about. The real invariant is a property of the
+ * whole segment's Bezier and lives in `foldRefusal` below, asked once per segment with
+ * both handles in hand.
  *
  * The y bound is a parameter rather than a constant here because it is not one number:
  * a look scalar may legitimately overshoot - a value that swings past its key and comes
@@ -323,19 +333,12 @@ function tangentAt(keys, i, axis) {
  * Returns null when there is nothing wrong, and a sentence naming the term when there is.
  */
 function handleRefusal(points, loY, hiY) {
-  let previous = 0;
   for (const [x, y] of points) {
     if (!(x >= 0 && x <= 1)) {
       return `a control point at x=${x}, outside the segment it shapes - the timing curve `
         + 'is a function of time within the segment, so a point past either end makes it '
         + 'fold back and run the value backwards through part of the move';
     }
-    if (x < previous) {
-      return `control points at x=${previous} then x=${x}, which descend - a crossed pair `
-        + 'leaves the curve single-valued nowhere and the bisection that samples it still '
-        + 'terminates, so the move renders at the wrong times rather than failing';
-    }
-    previous = x;
     if (!(y >= loY && y <= hiY)) {
       return `a control point at y=${y}, outside the [${loY}, ${hiY}] this kind of track allows`;
     }
@@ -343,8 +346,117 @@ function handleRefusal(points, loY, hiY) {
   return null;
 }
 
+/**
+ * Whether a segment's timing curve folds - whether x(u) ever runs backwards - and a
+ * sentence naming where when it does.
+ *
+ * Asked of the composed segment rather than of either handle, because the fold is a
+ * property neither side holds alone: `a` is the outgoing handle of the key being left
+ * and `b` the incoming handle of the key being arrived at, and a polygon that ascends
+ * within each side can still descend across the join. Asked about the *curve* rather
+ * than the control polygon, because ordered control x is sufficient for monotonicity
+ * and never necessary - the legal crossed polygons `elevate` produces are exactly the
+ * states an ordering rule wrongly refuses.
+ *
+ * A fold is worth refusing because it fails silently: `easeParam`'s bisection still
+ * terminates on a folding curve and still returns a `u` inside `[0, 1]`, so the take
+ * renders deterministically, repeatably, and at the wrong times. A curve whose x merely
+ * *stalls* is not a fold - a plateau is a hold, the bisection lands inside it, and
+ * refusing one would take a legitimate handle placement away - so the question is
+ * strictly "does dx/du go negative", not "does it reach zero".
+ *
+ * Answered exactly rather than by sampling. dx/du is itself a Bezier over the scaled
+ * differences of the control x, so the convex-hull property decides most polygons in
+ * one look - coefficients all non-negative can never dip below zero - and de Casteljau
+ * subdivision splits the rest until a piece's endpoint goes negative (a witness, since
+ * an endpoint is a point *on* the curve) or every piece's hull clears. A sampling loop
+ * would have been shorter and would have made the refusal a fact about the sample
+ * count; a fold narrower than the depth bound here is narrower than 2^-40 of a
+ * segment, which no renderer resolves and no handle can author.
+ */
+function foldRefusal(a, b) {
+  const n = 1 + a.length + b.length;
+  const d = [];
+  for (let i = 0; i < n; i++) d.push(n * (ctrl(a, b, i + 1, 0) - ctrl(a, b, i, 0)));
+  // Both tests carry one tolerance, and it is doing two jobs. A piece's first and
+  // last coefficients are values *on* the curve, computed through enough averaging
+  // that a legitimate tangent - dx/du touching zero, which `easeSlopeAt` names as a
+  // placement worth keeping - can land a machine epsilon below it, so the endpoint
+  // test must not read that as a fold. And the hull test needs the same allowance or
+  // it cannot terminate cheaply: the convex-hull property bounds the curve *below* by
+  // the least coefficient, so a piece whose coefficients all clear -1e-9 holds dx/du
+  // above -1e-9 everywhere and can run x backwards by less than a billionth of a
+  // segment - a plateau in every sense that renders. Without that allowance a segment
+  // sitting exactly on the boundary, which is the state `foldFreeX`'s bisection
+  // deliberately produces, recurses the full depth over an interval the strict test
+  // can never decide - measured at 1.4s for one call against microseconds for every
+  // ordinary one.
+  const witness = (coef, lo, hi, depth) => {
+    if (coef.every((c) => c >= -1e-9)) return null;
+    if (coef[0] < -1e-9) return lo;
+    if (coef[coef.length - 1] < -1e-9) return hi;
+    if (depth === 0) return null;
+    const mid = (lo + hi) / 2;
+    const left = [];
+    const right = [];
+    const level = [...coef];
+    for (let m = level.length; m > 0; m--) {
+      left.push(level[0]);
+      right.push(level[m - 1]);
+      for (let i = 0; i + 1 < m; i++) level[i] = (level[i] + level[i + 1]) / 2;
+    }
+    return witness(left, lo, mid, depth - 1) ?? witness(right.reverse(), mid, hi, depth - 1);
+  };
+  const u = witness(d, 0, 1, 40);
+  if (u === null) return null;
+  const slope = bezSlopeAxis(a, b, 0, u);
+  return `a timing curve that folds - its x runs backwards near ${Math.round(u * 100)}% of the way `
+    + `through the segment (dx/du ${slope.toFixed(2)}) - so the bisection that samples it still `
+    + 'terminates and the move renders at the wrong times rather than failing';
+}
+
+/**
+ * How far a control point's x may actually move toward `to` before the segment folds.
+ *
+ * The neighbour span the drag already applies is the ordering rule, and ordering is
+ * sufficient for a fold-free curve only when the polygon starts ordered. The legal
+ * crossed polygons `elevate` produces do not, and from one of those an adversarial
+ * sequence of drags - each individually inside its span - reaches a genuine fold:
+ * measured with a seeded search, six in-span drags from the twice-elevated crossed
+ * pair fold the curve, and about a sixth of the folded states ascend within each side,
+ * so no per-side reading of any strictness would have seen them coming. The span stays,
+ * because it is cheap and right about the ordinary polygon; this is the last word,
+ * asked of the curve itself.
+ *
+ * Sliding to the boundary rather than refusing the move, for the reason
+ * `clampRetimeKey` gives about its own clamp: a drag that stops early reads as the
+ * curve resisting, where a pointer event that throws reads as the editor breaking. The
+ * boundary is found by bisection from the last fold-free x, which the caller holds by
+ * induction - every earlier drag came through here. A starting state that already
+ * folds has nothing fold-free to preserve, so the drag is let through rather than
+ * fought; the loader refuses such a document at its own door.
+ */
+function foldFreeX(a, b, side, index, from, to) {
+  const probe = (x) => {
+    const list = (side === 'easeOut' ? a : b).map((p) => [p[0], p[1]]);
+    list[index] = [x, list[index][1]];
+    return foldRefusal(side === 'easeOut' ? list : a, side === 'easeOut' ? b : list) === null;
+  };
+  if (probe(to)) return to;
+  if (!probe(from)) return to;
+  let good = from;
+  let bad = to;
+  for (let i = 0; i < 30; i++) {
+    const mid = (good + bad) / 2;
+    if (probe(mid)) good = mid; else bad = mid;
+  }
+  return good;
+}
+
 export {
   handleRefusal,
+  foldRefusal,
+  foldFreeX,
   EASE_OUT_LINEAR,
   EASE_IN_LINEAR,
   SEGMENT_POINT_CEILING,
