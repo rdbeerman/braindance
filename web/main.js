@@ -10,7 +10,7 @@ import * as THREE from 'three';
 // refuse.
 import {
   DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, effectIdsIn, effectOf, snapScalar,
-  versionRefusal, captureFormatRefusal,
+  versionRefusal, captureFormatRefusal, requiresEntryRefusal, requiresListRefusal,
 } from './format.js';
 import { pollRecordState } from './record-poll.js';
 // The renderer and everything built directly on it. Imported before any other module of
@@ -180,6 +180,33 @@ const revSignature = (effects) => effects.map((e) => `${e.id} ${e.rev}`).join('\
  * moment, which is a page that publishes no `__kinect` at all.
  */
 const tornRead = (why) => Object.assign(new Error(why), { tornRead: true });
+
+/**
+ * A rebuild that failed because this build *refuses* the set, marked so the poll can tell
+ * that from a rebuild that failed because it could not read one.
+ *
+ * **The poll remembers the signature it failed on and stops asking about it, and it used
+ * to remember it for every failure there is.** That block is right for a refusal: the set
+ * on the server is one this build cannot assemble, cannot bind or cannot carry the open
+ * document onto, so the next tick would refetch every package, reassemble both programs,
+ * dispose the material the page is drawing with, reset the accumulators and arrive at the
+ * identical sentence, ten times a minute for as long as the store holds it. It is wrong for
+ * a read: a server restarting between the listing and one package fetch, a dropped
+ * connection, a proxy hiccup - each of those failed a perfectly good revision *once*, and
+ * the block then stood over that revision until something else moved the store. On a
+ * machine where nobody installs anything twice a day, that is a page drawing the build
+ * before last until somebody reloads it, with one console line six seconds after a network
+ * blip to say why.
+ *
+ * So the two are separated where the difference is known, which is at the throw. A read
+ * error carries no mark and the next tick tries again; a refusal carries this one and is
+ * asked once. **A property and not a subclass, and not a substring of the message**, for
+ * the reason `tornRead` above is one and one more besides: the sentences these errors carry
+ * are written for a person to read on a chip, so a classification that matched words in
+ * them would be re-decided by every edit to the prose. Declared up here beside `tornRead`
+ * for the temporal-dead-zone reason that note carries.
+ */
+const effectRefusal = (why) => Object.assign(new Error(why), { effectRefusal: true });
 
 /**
  * `GET /effects`, with the shape of the answer held to what every reader of it assumes.
@@ -3123,15 +3150,29 @@ async function reloadEffects() {
   let fetched;
   let programs;
   let open;
+  // **Two catches over what used to be one, and the split is the whole of what the poll
+  // reads afterwards.** Nothing has been written by either of them, so neither has anything
+  // to undo - what differs is whether asking again could ever answer differently. A fetch
+  // that did not work is a server restarting, a dropped socket, a proxy between two
+  // machines: the revision on the other side may be perfectly good and the next tick is
+  // what finds out. A set that does not assemble, or a document this page cannot serialise
+  // to carry across, is this build refusing what the store holds, and every tick after it
+  // refuses the same thing at the cost of a full refetch. See `effectRefusal`.
   try {
     fetched = await fetchEffectPackages();
+  } catch (err) {
+    // Unmarked, deliberately: the next tick asks again.
+    throw new Error(`the installed effects changed and this page could not read them: ${err.message}`);
+  }
+  try {
     programs = assembleShaders(SPINES, fetched);
     open = serialiseProjectBody();
   } catch (err) {
-    // Nothing has been written, so there is nothing to undo - only a sentence to frame.
     // The assembler's own message says what did not assemble and says nothing about why
-    // this page was asking, and the chip it lands on holds one line.
-    throw new Error(`the installed effects changed and this page could not read them: ${err.message}`);
+    // this page was asking, and the chip it lands on holds one line. The framing is the
+    // sentence this function has always composed here, kept identical across both branches
+    // because it is what a person reads - the classification travels on the property.
+    throw effectRefusal(`the installed effects changed and this page could not read them: ${err.message}`);
   }
 
   // **Asked again here, after the last await and before the first write.** The poll asks
@@ -3188,7 +3229,11 @@ async function reloadEffects() {
       // the pairing - and this page is now holding a registry it cannot restore anything
       // into. Nothing is repainted on the way out, because a panel repainted over a state
       // no document describes is a page that looks well and is not.
-      throw new Error(
+      //
+      // A refusal, so the poll asks once: the document and the set are both exactly what
+      // they were, and a retry is the same two failures at the cost of a second refetch on
+      // a page whose next honest instruction is to reload.
+      throw effectRefusal(
         'the installed effects changed, this page could not carry the open document across to them, '
         + `and it could not put itself back either - reload the page: ${stuck.message}`,
       );
@@ -3199,7 +3244,10 @@ async function reloadEffects() {
   // Thrown after the repaint rather than before it, so the page the operator is looking at
   // is the rolled-back one by the time the sentence describing it arrives.
   if (failure) {
-    throw new Error(
+    // A refusal for the reason the adoption's own failures are: the rollback landed, so the
+    // page is whole and the set on the server is still the one it cannot use. Asking again
+    // in six seconds refetches every package to reach this same sentence.
+    throw effectRefusal(
       'the server installed the effects it was asked for, but this page could not carry the open '
       + `document across to them, so it is still running the effects it had: ${failure.message}`,
     );
@@ -3329,7 +3377,18 @@ async function pollRebuild(listedSignature) {
     // what state that leaves this page in, and a prefix added here would say a third time
     // what the message already says twice - on a chip that ellipsises, where the width the
     // prefix takes is the width the refusal loses.
-    refusedEffectSignature = listedSignature;
+    //
+    // **And the block goes up only for a refusal, which is the half this used to get
+    // wrong.** It went up for every failure there is, so one server restart between the
+    // listing and a package fetch, or one dropped connection on a page reached over the
+    // LAN, blocked a revision that was never anything but good - until something else moved
+    // the store, which on a machine where an install is a thing somebody does a few times a
+    // year is until the page is reloaded. A read that did not work says nothing about
+    // whether this build can use what is on the other side of it, so the next tick asks
+    // again; a refusal is this build saying it cannot, and asking again costs a full
+    // refetch to be told so a second time. See `effectRefusal` for why the difference
+    // travels on a property rather than on the words.
+    if (err.effectRefusal) refusedEffectSignature = listedSignature;
     console.warn('could not rebuild from the installed effects:', err.message);
     say(err.message);
   }
@@ -10779,27 +10838,21 @@ function refuseRequires(what, requires, names) {
     }
     return;
   }
-  if (!Array.isArray(requires)) {
-    throw new Error(`${what} carries ${JSON.stringify(requires)} where its requires belong: a requires list is an array of { id, version } entries`);
-  }
+  const listShape = requiresListRefusal(what, requires);
+  if (listShape) throw new Error(listShape);
   const seen = new Set();
   for (const entry of requires) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      throw new Error(`${what} carries a requires entry ${JSON.stringify(entry)}: each entry is an object with an id and a version`);
-    }
-    const strays = Object.keys(entry).filter((k) => !['id', 'version', 'rev'].includes(k));
-    if (strays.length) {
-      throw new Error(`${what} carries ${strays.join(', ')} on a requires entry, which has no place there: an entry is id, version and optionally rev`);
-    }
-    if (typeof entry.id !== 'string' || !/^[a-z][a-z0-9]*$/.test(entry.id)) {
-      throw new Error(`${what} requires ${JSON.stringify(entry.id)}, which is not an effect id: an id is lowercase letters and digits, the prefix its parameters carry`);
-    }
-    if (typeof entry.version !== 'string' || entry.version.length === 0) {
-      throw new Error(`${what} requires ${entry.id} at version ${JSON.stringify(entry.version)}: a version is a non-empty string`);
-    }
-    if (entry.rev !== undefined && (typeof entry.rev !== 'string' || entry.rev.length === 0)) {
-      throw new Error(`${what} pins ${entry.id} to rev ${JSON.stringify(entry.rev)}: a rev is a non-empty string when it is there at all`);
-    }
+    // **The shape rules moved to `web/format.js` and the repeat rule did not**, which is
+    // the split between what one entry is and what a *list* of them may hold. The queue
+    // reads the first half of that on the way in - `server/jobs.js` asks it of the
+    // document a job carries, at the door, so a claim nobody can read is refused before a
+    // browser is launched to find out - and it cannot read this half, because it counts
+    // repeats with its own sentence about the version a render would end up on. Asked
+    // inside the loop rather than after it so the order the refusals arrive in is the
+    // order they were in when this was one block: a malformed entry beside a repeated one
+    // still reports the malformed entry.
+    const bad = requiresEntryRefusal(what, entry);
+    if (bad) throw new Error(bad);
     if (seen.has(entry.id)) {
       throw new Error(`${what} requires ${entry.id} twice: one entry per effect, because two versions of one effect cannot both be what the look was built from`);
     }

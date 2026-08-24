@@ -352,6 +352,67 @@ export const effectOf = (name) => {
 export const effectIdsIn = (names) => [...new Set(names.map(effectOf).filter(Boolean))];
 
 /**
+ * The id shape a `requires` entry names, which is the same shape a package directory and a
+ * parameter namespace carry.
+ *
+ * Module-local rather than exported, on the reasoning `server/effect-door.js` writes out
+ * where it restates the store's two patterns: this is one door asked at one moment - is
+ * this document's list readable - and the other spellings are different doors asked at
+ * different moments of an id's life. What must not happen is two readers of *this* rule,
+ * and there are two of those: the loader in `web/main.js` and the render queue in
+ * `server/jobs.js`.
+ */
+const REQUIRES_ID = /^[a-z][a-z0-9]*$/;
+
+/**
+ * Whether a `requires` list is a list at all, as a sentence or null.
+ *
+ * Separate from the entry rule below because the two callers ask them at different
+ * moments: the loader has already dealt with an absent list by the time it gets here, and
+ * the queue has to allow an absent one and refuse a present one that is not a list.
+ */
+export const requiresListRefusal = (what, requires) => (Array.isArray(requires) ? null
+  : `${what} carries ${JSON.stringify(requires)} where its requires belong: a requires list is an array of { id, version } entries`);
+
+/**
+ * One `requires` entry held to its shape, as a sentence or null.
+ *
+ * **Two doors read this list and only one of them used to check it.** `refuseRequires` in
+ * `web/main.js` has asked these five questions since the list existed, on the machine that
+ * opens the document; the render queue compared id *sets* and nothing else, so
+ * `requires: [{}]`, an entry with no version, an id that could never name a package and a
+ * stray key beside the two that belong were all queued without comment. What that costs is
+ * the thing the queue's envelope exists to prevent: the worker's own door reads the
+ * envelope, finds nothing missing in a claim nobody can read, resolves a take, launches a
+ * browser and spends a minute of GPU before the loader refuses the same document from the
+ * other end.
+ *
+ * A sentence rather than a throw because the two callers frame their own errors, and `what`
+ * is a noun phrase the caller owns for the same reason `versionRefusal` takes one - the
+ * loader is talking about a file somebody opened and the queue is talking about a job
+ * somebody posted.
+ */
+export function requiresEntryRefusal(what, entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return `${what} carries a requires entry ${JSON.stringify(entry)}: each entry is an object with an id and a version`;
+  }
+  const strays = Object.keys(entry).filter((k) => !['id', 'version', 'rev'].includes(k));
+  if (strays.length) {
+    return `${what} carries ${strays.join(', ')} on a requires entry, which has no place there: an entry is id, version and optionally rev`;
+  }
+  if (typeof entry.id !== 'string' || !REQUIRES_ID.test(entry.id)) {
+    return `${what} requires ${JSON.stringify(entry.id)}, which is not an effect id: an id is lowercase letters and digits, the prefix its parameters carry`;
+  }
+  if (typeof entry.version !== 'string' || entry.version.length === 0) {
+    return `${what} requires ${entry.id} at version ${JSON.stringify(entry.version)}: a version is a non-empty string`;
+  }
+  if (entry.rev !== undefined && (typeof entry.rev !== 'string' || entry.rev.length === 0)) {
+    return `${what} pins ${entry.id} to rev ${JSON.stringify(entry.rev)}: a rev is a non-empty string when it is there at all`;
+  }
+  return null;
+}
+
+/**
  * How many decimal places a number is written to, which is how far the registry rounds a
  * value after snapping it onto its slider's grid.
  *

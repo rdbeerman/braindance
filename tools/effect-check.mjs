@@ -65,6 +65,14 @@
 //     frame.** The door checks vocabulary and cannot compile GLSL, so identifier-valid text
 //     that is syntactically broken reaches the driver - where a link failure is a log line
 //     and not an exception. `a-broken-shader-is-warm` is the control.
+// 10. **A fork the door passed years ago is asked again at every start.** A package outlives
+//     the build it was installed on, and an upgrade that drops or renames a joint leaves a
+//     valid fork shadowing an upgraded builtin with nothing re-validating it - which is a
+//     page that throws while evaluating and a machine whose editor never opens again. So a
+//     doctored fork is written past the door, the server is restarted, and the store has to
+//     hand the id back to the builtin, keep the fork aside with its files intact, say which
+//     rule refused it, and let a page boot. `boot-adopts-a-stale-fork` is the control, and
+//     the row that matters under it is the page rather than the store.
 //
 // **What is deliberately not here.** The export door on a clip whose look this build
 // cannot draw, and the per-effect suppress beside it, belong to `export-check` - one
@@ -98,6 +106,8 @@
 //   node tools/effect-check.mjs --mutate poll-retries-a-refused-set      # must FAIL
 //   node tools/effect-check.mjs --mutate store-generation-never-moves    # must FAIL
 //   node tools/effect-check.mjs --mutate adopt-outside-the-transaction    # must FAIL
+//   node tools/effect-check.mjs --mutate every-failure-is-final          # must FAIL
+//   node tools/effect-check.mjs --mutate boot-adopts-a-stale-fork        # must FAIL
 //
 // It spawns its own server on a port nothing else in the suite uses and needs none
 // running. A GPU browser, a free port 8281, no capture, no sensor and no ffmpeg.
@@ -502,6 +512,44 @@ const MUTATIONS = {
   },
 
   /**
+   * `every-failure-is-final` puts the block above back on *every* way a rebuild can fail,
+   * which is how it shipped. A refusal and a read error are the same three lines from the
+   * poll's side and nothing else in the error can tell them apart, so one server restart
+   * between the listing and a package fetch - or one dropped socket on the two-machine shape
+   * this program documents - blocked a revision that was never anything but good, until
+   * something else moved the store.
+   *
+   * What must redden is the read-error pair at the end of section 9 and nothing beside it:
+   * a genuine refusal is still remembered on this build, so the rows that ask about one stay
+   * green, which is what separates the two halves of that block.
+   */
+  'every-failure-is-final': {
+    file: 'web/main.js',
+    edits: [[
+      '    if (err.effectRefusal) refusedEffectSignature = listedSignature;',
+      '    refusedEffectSignature = listedSignature;',
+    ]],
+  },
+
+  /**
+   * `boot-adopts-a-stale-fork` takes the store's boot gate off, which is every build of this
+   * program before the gate existed. A package that got through the door once is served
+   * forever, whatever this build's spines have done since - so a fork whose chunk names a
+   * joint an upgrade removed goes on shadowing the builtin it forks, and the page that
+   * fetches it throws inside `assembleShaders` while it is still evaluating.
+   *
+   * Aimed at the call rather than at the method body, so the gate is still there to be read
+   * and simply is not asked - which is the shape the defect had: nothing re-validated,
+   * rather than something validating wrongly. Section 12 is what must redden, and its last
+   * row is the one that matters, because the four before it are about a store and that one
+   * is about a page that will not boot.
+   */
+  'boot-adopts-a-stale-fork': {
+    file: 'server/effect-store.js',
+    edits: [['    this.refuseIncompatiblePackages();', '    void this.refuseIncompatiblePackages;']],
+  },
+
+  /**
    * `store-generation-never-moves` stops the store counting its own changes, and it is the
    * control the two client-side mutations above cannot be: both of those edit `web/main.js`,
    * and the arm that drives them fabricates a moved generation in an interception - so a build
@@ -615,6 +663,12 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
 const servers = [];
+// **What the last start said, kept where a row can read it.** The store's boot gate
+// announces a package it has refused, in the door's own sentence, and that announcement is
+// half of what section 12 asserts - a gate that quietly renamed somebody's fork aside would
+// satisfy every other row it has. Reset per start rather than accumulated, because the
+// question is always what *this* start did.
+let serverLog = '';
 const start = () => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [
     join(WORK, 'server/index.js'), '--port', String(PORT),
@@ -622,8 +676,10 @@ const start = () => new Promise((resolve, reject) => {
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   servers.push(child);
   const log = [];
+  serverLog = '';
   const onData = (c) => {
     log.push(c.toString());
+    serverLog = log.join('');
     if (log.join('').includes('viewer on')) setTimeout(resolve, 200);
   };
   child.stdout.on('data', onData);
@@ -849,6 +905,20 @@ const retunedProbe = () => {
   const pkg = probePackage();
   pkg.manifest.version = '1.0.1';
   pkg.manifest.params.hue.label = 'probe hue, retuned';
+  return pkg;
+};
+
+/**
+ * A third revision of the same package, for an arm that needs the store to move *again*
+ * after `retunedProbe` has already landed.
+ *
+ * A label and nothing else, like the one above it: the assembled programs are identical, so
+ * an arm using this is about whether the page noticed rather than about what a warm costs.
+ */
+const relabelledProbe = () => {
+  const pkg = probePackage();
+  pkg.manifest.version = '1.0.2';
+  pkg.manifest.params.hue.label = 'probe hue, once more';
   return pkg;
 };
 
@@ -1214,10 +1284,19 @@ try {
   browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1100, height: 760 } });
   const pageErrors = [];
+  // **Whether a package read is being failed on purpose right now.** One arm in section 9
+  // plants a transport failure on `/effects/probe` to stage a read error rather than a
+  // refusal, and the browser logs a failed request as a console error whatever the page then
+  // does with it - which is the whole subject of that arm, so it must not also be a fault
+  // reported by the row that asks whether the page complained about anything. Declared as a
+  // window the arm opens and closes rather than as a rule widened for the run, so every
+  // failed request outside it still counts.
+  let failingPackageRead = false;
   page.on('pageerror', (e) => pageErrors.push(String(e)));
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
     const where = m.location()?.url ?? '';
+    if (failingPackageRead && /\/effects\//.test(where)) return;
     // **A package read that 404s while this tool is removing packages is the store
     // changing under a reader, which is a thing this build handles rather than a fault.**
     // `fetchEffectPackages` lists the store and then reads each id, and a `DELETE` landing
@@ -2433,6 +2512,60 @@ try {
   ok('and a revision it has not refused is adopted, so the block is keyed to the set rather than latched on the page',
     unblocked === true, unblocked ? 'the page adopted the next revision' : 'the page never adopted it');
 
+  // ---- and a read that did not work is not a set this page has refused
+  //
+  // **The block above went up for every way a rebuild could fail, and only one of them is
+  // about the set.** A refusal is this build saying it cannot use what the store holds, and
+  // asking again costs a full refetch to be told so a second time. A *read* that did not
+  // work says nothing at all about the other side of it: a server restarting between the
+  // listing and one package fetch, a dropped socket, a proxy on the two-machine shape this
+  // program documents. Each of those failed a revision that was never anything but good,
+  // once, and the block then stood over it until something else moved the store - which on
+  // a machine where an install happens a few times a year is until somebody reloads the
+  // page. See `effectRefusal` in `web/main.js` for why the difference travels on a property
+  // rather than on the words of a message.
+  //
+  // **Planted on the package route and deliberately not on the listing.** The page's own
+  // six-second interval fetches `/effects` through any interception this tool installs, so a
+  // one-shot failure planted there is as likely to be spent on a tick as on the read it was
+  // meant for - `docs/instruments.md` carries the run that cost. Nothing but
+  // `fetchEffectPackages` asks for `/effects/probe`, so a failure planted there lands on the
+  // rebuild by construction.
+  //
+  // Driven through the poll rather than `reload`, for the reason the block above is: the
+  // signature is remembered by the tick that failed on it.
+  const signatureNow = async () => {
+    const listed = await getJson('/effects');
+    return (listed.body.effects ?? []).map((e) => `${e.id} ${e.rev}`).join('\n');
+  };
+  const moved = await put('probe', relabelledProbe());
+  const movedSignature = await signatureNow();
+  let failedReads = 0;
+  failingPackageRead = true;
+  const failOnce = async (route) => {
+    if (failedReads === 0) { failedReads += 1; return route.abort('failed'); }
+    return route.continue();
+  };
+  await page.route('**/effects/probe', failOnce);
+  await page.evaluate(() => globalThis.__kinect.effects.pollNow());
+  const afterFailedRead = await page.evaluate(() => globalThis.__kinect.effects.signature());
+  await page.unroute('**/effects/probe', failOnce);
+  failingPackageRead = false;
+  // The fixture's own delivery, before anything is read off it: exactly one package read
+  // was failed, and the page is still on the set it had. A row that skipped this would pass
+  // on a run where the abort never landed, which is the shape a green interception arm has.
+  ok('a revision this page has not seen is installed and one package read of it is failed, so the tick below follows a read error rather than a refusal',
+    moved.status === 200 && failedReads === 1 && afterFailedRead !== movedSignature,
+    `${moved.status}: ${moved.body.error ?? 'installed'}, ${failedReads} package read failed, and the page `
+    + `${afterFailedRead === movedSignature ? 'adopted the revision anyway' : 'held the set it had'}`);
+  await page.evaluate(() => globalThis.__kinect.effects.pollNow());
+  const retried = await page.waitForFunction(
+    (sig) => globalThis.__kinect.effects.signature() === sig, movedSignature, { timeout: 20000 },
+  ).then(() => true).catch(() => false);
+  ok('and the next tick adopts it, because a fetch that did not work is no evidence about the set on the other side of it',
+    retried === true,
+    retried ? 'the page came back to the store\'s current signature' : 'the page never came back to the store\'s signature');
+
   // ---- the uniform cells a half-migrated adoption leaves behind
   //
   // **Section 6 is about a rollback that works; this is about the table it rolls back
@@ -2666,6 +2799,101 @@ try {
     removedForGood.status === 200 && stillGone.status === 404,
     `after the restart the store answers ${stillGone.status} for probe, `
     + `user root ${userRootHolds().join(', ') || 'empty'} (was ${goneAsides.join(', ') || 'empty'})`);
+
+  // ============ 12. a fork that outlived the build it was installed on
+  //
+  // **A package gets through the door once, against the build that was running that day.**
+  // That is the whole of what an install door can promise, and a fork outlives the build it
+  // was made on: this program's spines gain, lose and rename joints, and its shipped
+  // packages gain parameters. Upgrade underneath a fork whose chunk names a joint the new
+  // spine has dropped and nothing about the fork changes and nothing re-asks - it goes on
+  // shadowing the upgraded builtin, so it is still what `/effects` answers with, and
+  // `assembleShaders` throws while `web/main.js` is evaluating. No `__kinect` at all,
+  // neither surface opening on that machine again, every tool here reporting DID NOT RUN,
+  // and the only evidence a line in a console nobody has open. The machine that upgraded is
+  // the machine that stops working.
+  //
+  // **The gate is the install door asked a second time rather than a second gate**, so
+  // there is nothing here that can drift from what an install accepts. What is staged is a
+  // fork *written past* that door, because the current door is exactly the thing that
+  // refuses it - which is also the only shape an upgrade leaves behind.
+  console.log('\n[effect] 12. a fork from an earlier build, met at the next start');
+
+  await stopAll();
+
+  // A fork of a *shipped* package rather than of `probe`, because the reading that says the
+  // gate did something rather than nothing is the id going back to answering with the
+  // builtin. The joint is renamed rather than the chunk broken, because that is the shape
+  // the finding is about: the package was correct when it landed and the spine moved under
+  // it. `witness.marker` is somebody's authored work standing in for all of it - the one
+  // thing this build may not do about a package it cannot use is destroy it.
+  const doctored = JSON.parse(readFileSync(join(BUILTIN_ROOT, 'thermal/manifest.json'), 'utf8'));
+  doctored.version = '2.0.0';
+  doctored.chunks = doctored.chunks.map((c) => ({ ...c, stage: 'f.thisjointwentaway' }));
+  const staleFork = join(USER_ROOT, 'thermal');
+  rmSync(staleFork, { recursive: true, force: true });
+  mkdirSync(staleFork, { recursive: true });
+  writeFileSync(join(staleFork, 'manifest.json'), `${JSON.stringify(doctored, null, 2)}\n`);
+  writeFileSync(join(staleFork, 'heat.frag.glsl'), readFileSync(join(BUILTIN_ROOT, 'thermal/heat.frag.glsl'), 'utf8'));
+  writeFileSync(join(staleFork, 'witness.marker'), 'the author\'s own copy of a package this build cannot use\n');
+  ok('a fork this build can no longer assemble is staged where a fork installed by an earlier build would be',
+    existsSync(join(staleFork, 'manifest.json')), `user root holds ${userRootHolds().join(', ')}`);
+
+  await start();
+
+  const servedThermal = await getJson('/effects/thermal');
+  ok('the next start hands the id back to the package this build ships, rather than serving a fork it cannot assemble',
+    servedThermal.status === 200 && servedThermal.body.builtin === true
+      && servedThermal.body.manifest?.version === '1.0.0',
+    `answered ${servedThermal.status}, builtin=${servedThermal.body.builtin}, `
+    + `version ${JSON.stringify(servedThermal.body.manifest?.version)}`);
+
+  const setAsides = userRootHolds().filter((n) => /^thermal\..*\.incompatible$/.test(n));
+  ok('and the fork is renamed aside rather than deleted, with its files exactly as they were',
+    setAsides.length === 1
+      && existsSync(join(USER_ROOT, setAsides[0], 'witness.marker'))
+      && readFileSync(join(USER_ROOT, setAsides[0], 'manifest.json'), 'utf8').includes('f.thisjointwentaway'),
+    `user root holds ${userRootHolds().join(', ') || 'empty'}`);
+
+  // The aside is invisible to every read for the same reason a half-written install is, and
+  // by the same rule: an effect id has no dot in it, so the listing drops the name and no
+  // per-id route can resolve it. Asserted rather than inherited, because the suffix is new
+  // and the rule it relies on is one line in a regular expression.
+  const asideRead = await getJson(`/effects/${setAsides[0] ?? 'thermal.0.incompatible'}`);
+  const listedAfterAside = await getJson('/effects');
+  ok('and the aside is a name no read resolves and no listing carries, by the rule that hides a half-written install',
+    setAsides.length === 1 && asideRead.status === 404
+      && !(listedAfterAside.body.effects ?? []).some((e) => e.id.includes('.')),
+    `the aside answered ${asideRead.status}, and the listing carries `
+    + `${(listedAfterAside.body.effects ?? []).length} ids, none of them dotted`);
+
+  ok('and the start said so, carrying the door\'s own sentence rather than a summary of it',
+    /effect thermal was installed by an earlier build/.test(serverLog)
+      && /does not assemble/.test(serverLog) && /\.incompatible/.test(serverLog),
+    (serverLog.split('\n').find((l) => /^effect thermal/.test(l))
+      ?? `nothing about thermal in ${serverLog.length} bytes of server log`).slice(0, 160));
+
+  // **The row the four above exist for.** Everything so far is HTTP against a store, and a
+  // store answering perfectly would still be beside the point if the surface it feeds did
+  // not come up - the failure this gate is about is the assembler throwing while
+  // `web/main.js` is still evaluating, which publishes no `__kinect` at all. So the last
+  // thing asked is the first thing that broke, and it is asked of a browser rather than of
+  // a route.
+  browser = await chromium.launch();
+  const bootPage = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  const bootErrors = [];
+  bootPage.on('pageerror', (e) => bootErrors.push(String(e)));
+  await bootPage.goto(`${BASE}/record`, { waitUntil: 'load' }).catch(() => {});
+  const booted = await bootPage.waitForFunction('Boolean(globalThis.__kinect)', null, { timeout: 20000 })
+    .then(() => bootPage.evaluate(() => globalThis.__kinect.params.names().includes('thermal.amount')))
+    .catch(() => null);
+  ok('and a page opened on that store boots, with the shipped package in its registry - which is the failure the whole gate is about',
+    booted === true,
+    booted === null
+      ? `no __kinect published: ${bootErrors[0]?.slice(0, 130) ?? 'nothing arrived on the page error channel'}`
+      : `__kinect published, thermal.amount ${booted ? 'in' : 'missing from'} the registry`);
+  await browser.close();
+  browser = null;
 } catch (err) {
   crashed = err;
   console.log(`\n  FAIL  the run did not finish: ${err.stack ?? err.message}`);

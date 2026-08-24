@@ -143,6 +143,23 @@ puts a `requires` entry for it into every document saved afterwards. The
 alternative is a package that installs cleanly and breaks the *next* page load, where the only
 evidence is a console nobody has open.
 
+**And the same door is asked again of what is already on disk, at every start.** A package got
+through it once, against the build that was running the day it was installed, and a fork outlives
+the build it was made on: upgrade the program and the spine may have dropped or renamed a joint
+that fork's GLSL names, or the builtin it shadows may have grown a parameter it does not carry.
+Nothing about the fork changes and it goes on shadowing the upgraded builtin, so the page fetches
+it and `assembleShaders` throws while `web/main.js` is still evaluating — no `__kinect`, neither
+surface opening, and the machine that upgraded is the machine that stops working. So the store's
+constructor re-runs `doorRefusal` and `forkRefusal` over every package in the *user* root, against
+this build's spines; a package either of them now refuses is renamed to
+`<id>.<seq>.incompatible`, which is invisible to every read by the rule the `.tmp` suffix relies
+on and is swept by nothing, and the shipped package answers for that id again. Renamed and never
+deleted, because a fork is authored work and "this build cannot use it" is not a reason to
+destroy it; announced in the log with the door's own sentence, because an id that used to answer
+with somebody's fork and now answers with the builtin is a change nobody asked for. Only the user
+root, because a builtin is this build's own package and one this build cannot assemble is a broken
+build rather than a migration.
+
 ### Assembly: a spine with joints, and the chunks that fill them
 
 `web/cloud-shader.js` and `web/grade-shader.js` each export a **spine** — verbatim GLSL segments

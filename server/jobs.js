@@ -22,7 +22,7 @@ import { listJsonNames } from './library.js';
 // `requires` from these namespaces on the way out and `enqueue` derives a job's envelope
 // from the same names on the way in, so a second spelling here would be two machines
 // disagreeing about which effect `sparkle.amount` belongs to.
-import { effectIdsIn } from '../web/format.js';
+import { effectIdsIn, requiresEntryRefusal, requiresListRefusal } from '../web/format.js';
 
 export const JOB_VERSION = 1;
 
@@ -227,7 +227,42 @@ export class JobStore {
       ? project.look : {};
     const shape = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o) : []);
     const used = effectIdsIn([...shape(look.params), ...shape(look.tracks)]);
-    const carried = Array.isArray(project.requires) ? project.requires : [];
+    // **The list's own shape, asked here rather than left to the machine that opens the
+    // document.** This read used to be `Array.isArray(project.requires) ? … : []`, which is
+    // a shape rule with no refusal in it: a `requires` that was an object read as claiming
+    // nothing, and an entry that was `{}`, or carried no version, or named something that
+    // could never be a package id, or carried a stray key beside the two that belong, read
+    // as claiming nothing about any id. The two comparisons below then agreed with it,
+    // because they are about which ids are claimed and an unreadable claim names none - so
+    // the job was queued with an envelope built out of a list nobody could read, the
+    // worker's own door found nothing missing in it, and the refusal arrived from
+    // `restoreProject` a take resolve, a browser and a minute of GPU later. That is the
+    // journey this door exists to shorten, reached through the one field it was not
+    // reading.
+    //
+    // The rule is the loader's own rather than a second statement of it: `refuseRequires`
+    // in `web/main.js` asks `requiresEntryRefusal` these same questions of these same
+    // entries, and two spellings of one shape at two doors is what `web/format.js` exists
+    // to refuse. What is *not* shared is the repeat rule below, because the two ends say
+    // different things about it - the loader is talking about a document that cannot
+    // describe one look, and this is talking about a version a render would land on by
+    // position.
+    //
+    // Asked before the comparisons rather than after, on the door's own ordering: shape
+    // before vocabulary, so a malformed list is reported as a malformed list instead of as
+    // a document that disagrees with itself.
+    if (project.requires !== undefined) {
+      const listShape = requiresListRefusal('a job\'s project', project.requires);
+      if (listShape) throw new Error(listShape);
+      for (const entry of project.requires) {
+        const bad = requiresEntryRefusal('a job\'s project', entry);
+        if (bad) throw new Error(bad);
+      }
+    }
+    // Absent stays allowed and is the only thing left to allow for, because everything
+    // else has just been refused by name. A second `Array.isArray` here would be a guard
+    // standing behind a door that has already answered.
+    const carried = project.requires ?? [];
     const claimed = carried.map((e) => (e && typeof e === 'object' ? e.id : undefined));
     // **One id, one entry, and the two comparisons below cannot ask it.** `unlisted` reads
     // membership and `unclaimed` reads a set, so a list carrying `sparkle` twice satisfies

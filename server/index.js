@@ -230,9 +230,16 @@ const PRESETS = new DocumentStore(
 // JSON body - a manifest beside the shader chunks the client assembles from - which
 // is why this is its own store class. The flags exist for the reason the preset
 // flags do: a check points the search path somewhere it controls.
+// The two spines every program on the page is assembled from, named once because two
+// doors read them: the install door below, and the store's own boot gate, which re-asks
+// that door of every package already on disk. Two spellings of this pair would be the two
+// gates disagreeing about which joints exist, which is exactly the disagreement the boot
+// gate is there to catch.
+const SPINES = { cloud: cloudSpine, grade: gradeSpine };
 const EFFECTS = new EffectStore(
   resolve(flag('--effects', join(ROOT, 'effects'))),
   resolve(flag('--builtin-effects', join(ROOT, 'effects-builtin'))),
+  SPINES,
 );
 // Version 2 dropped `outputFps`. The output rate is a property of the edit rather than of
 // one output of it - `programTime = k / outputFps` makes it the edit's own coordinate, and
@@ -1127,7 +1134,7 @@ async function serveEffectWrite(req, res, [id]) {
   const shadowed = candidate.manifest && typeof candidate.manifest === 'object' ? EFFECTS.builtin(id) : null;
   const refusal = doorRefusal(candidate, {
     beside: EFFECTS.loaded(id),
-    spines: { cloud: cloudSpine, grade: gradeSpine },
+    spines: SPINES,
   }) ?? (shadowed ? forkRefusal(candidate, shadowed) : null);
   if (refusal) return sendJson(res, { error: refusal }, 409);
   try {

@@ -18,13 +18,24 @@
 // What lands is what the door passed. `server/effect-door.js` is asked before a directory
 // exists, so a refused package never reaches the filesystem at all - there is no state
 // where a half-checked package sits where the store reads.
+//
+// **And it is asked again at every start, of what is already there, which is the same gate
+// and not a second one.** A package passed the door against the build that was installed
+// the day it landed, and a fork outlives the build it was made on: upgrade the program and
+// the spine may have lost or renamed a joint that fork's GLSL names, or the builtin it
+// shadows may have grown a parameter the fork does not carry. Nothing about the fork
+// changes, it goes on shadowing the upgraded builtin, and the failure is the one this
+// whole surface exists to move - `assembleShaders` throws while `web/main.js` is still
+// evaluating, no `__kinect` publishes, and neither the recorder nor the editor opens on
+// that machine again. See `refuseIncompatiblePackages`.
 
 import { createHash } from 'node:crypto';
 import {
   existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { doorRefusal, forkRefusal } from './effect-door.js';
 
 // The same shape `VALID_ID` enforces for takes, restated for effect ids and package
 // file names rather than imported: an id is the namespace prefix a parameter carries
@@ -45,15 +56,29 @@ export class EffectStore {
    * a broken deployment. The user root may be absent; it is where forks and installs
    * will land, and an empty directory and a missing one mean the same thing to a
    * reader.
+   *
+   * **The spines are demanded for the same reason the builtin root is**, and it is the
+   * same sentence one step along: the boot gate below asks the install door about every
+   * package already on disk, the door answers by running the assembler against the spines,
+   * and a store handed none of them could not ask. Refused rather than skipped, because a
+   * gate that quietly does nothing is worse than no gate - it is a gate everything
+   * downstream is written as though it had.
    */
-  constructor(dir, builtinDir) {
+  constructor(dir, builtinDir, spines) {
     if (!existsSync(builtinDir) || !statSync(builtinDir).isDirectory()) {
       throw new Error(`the shipped effect directory ${builtinDir} does not exist - `
         + 'this build cannot serve a build without its builtin effects, so it refuses to boot '
         + 'rather than answer an empty list that reads as nothing installed');
     }
+    if (!spines || typeof spines !== 'object' || Object.keys(spines).length === 0) {
+      throw new Error('the effect store is constructed with the spines this build assembles from - '
+        + 'they are what the install door runs the assembler against, so a store without them could '
+        + 'not re-ask that door of the packages already on disk, and a boot gate that cannot ask is '
+        + 'one nothing may be written as though it had');
+    }
     this.dir = dir;
     this.builtinDir = builtinDir;
+    this.spines = spines;
     // **How many times this store has changed, which is the one thing a revision cannot say.**
     //
     // A package rev is a hash of its bytes and the list of them is a hash of hashes, which is
@@ -86,6 +111,94 @@ export class EffectStore {
     // proof-tool fixtures standing a package up past the door on purpose.
     this.generation = 0;
     this.recoverInterruptedInstalls();
+    // After the recovery and not before it: a package the recovery puts back is a package
+    // this store now serves, so it is one the gate below has to have asked about. Neither
+    // of them moves the generation, and that is right rather than an omission - both run
+    // before anything can read this store, so there is no earlier number for a reader to
+    // have been holding.
+    this.refuseIncompatiblePackages();
+  }
+
+  /**
+   * Every persisted user package asked the install door again, against *this* build - and
+   * whatever it now refuses renamed aside rather than served.
+   *
+   * **A package got through the door once, against the build that was running the day it
+   * was installed.** That is the whole of what the door can promise, and a fork outlives
+   * the build it was made on: this program's spines gain, lose and rename joints, and its
+   * shipped packages gain parameters. Upgrade underneath a fork whose chunk names a joint
+   * the new spine has dropped - or whose shipped twin has grown a fifth key - and nothing
+   * about the fork changes and nothing re-asks. It still shadows the builtin, so it is
+   * still what `/effects` answers with, and `assembleShaders` throws while `web/main.js` is
+   * evaluating: no `__kinect` at all, both surfaces dark, every tool in the suite reporting
+   * DID NOT RUN, and the only evidence a line in a console nobody has open. The machine
+   * that upgraded is the machine that stops working, which is the failure the whole install
+   * design is arranged around, arriving through the one door nobody was asked at.
+   *
+   * **One gate asked twice rather than a second gate.** `doorRefusal` and `forkRefusal` are
+   * the same two functions `PUT /effects/:id` runs, on the same envelope shape, against the
+   * same set - so there is nothing here that can drift from what an install accepts. Only
+   * the *user* root is walked: a builtin is this build's own package, checked by
+   * `test/effect-door.test.mjs` running the whole shipped set through this door under bare
+   * node, and a builtin this build cannot assemble is a broken build rather than a
+   * migration.
+   *
+   * **Renamed aside and never deleted.** A fork is somebody's authored work - retuned
+   * bounds, hand-written GLSL - and the honest answer to "this build cannot use it" is not
+   * to destroy it. `<id>.<seq>.incompatible` is invisible to every read for the same reason
+   * `.tmp` is, by the same rule: `VALID_EFFECT_ID` has no dot in it, so `idsIn` drops the
+   * aside from the listing and `rootFor` cannot resolve the name. It is not swept either -
+   * `sweepTemporaries` matches `.tmp`, `.old` and `.gone` and nothing else - so the copy
+   * survives an install of the same id and is there to be moved back by hand once the
+   * package is fixed.
+   *
+   * **Two passes, and the first one exists because the second can be handed a corpse.**
+   * `packageOf` reads a manifest and its chunks off disk and throws on a package that
+   * cannot be read as one at all - no manifest, a manifest that does not parse, an id that
+   * disagrees with the directory, a chunk that is a link instead of a file. `loaded` walks
+   * every package to build the set the door is asked against, so a single unreadable
+   * package in the user root would throw while the door was being asked about an
+   * *innocent* one, and the boot failure would have moved into the gate written to prevent
+   * it. So pass one asides anything that cannot be read, and pass two asks the door of what
+   * is left - by which point the only thing `loaded` can still throw on is a builtin, which
+   * is the broken build the paragraph above declines to be helpful about.
+   *
+   * Announced rather than silent, in the voice `recoverInterruptedInstalls` uses and for
+   * the reason it does: an id that used to answer with somebody's fork and now answers with
+   * the shipped package is the correct outcome and is still a change nobody asked for, so
+   * it is worth a line carrying the door's own sentence in the log of the start that made
+   * it.
+   *
+   * It costs one assembly per *user* package, which is a string concatenation over the
+   * shipped set and is paid once at boot. A machine with no forks pays nothing at all,
+   * because the loop walks the user root and that root is where forks are.
+   */
+  refuseIncompatiblePackages() {
+    for (const id of this.idsIn(this.dir)) {
+      try {
+        this.packageOf(id);
+      } catch (err) {
+        this.setAside(id, `it cannot be read as a package at all: ${err.message}`);
+      }
+    }
+    for (const id of this.idsIn(this.dir)) {
+      const candidate = this.packageOf(id);
+      const shadowed = this.builtin(id);
+      const refusal = doorRefusal(candidate, { beside: this.loaded(id), spines: this.spines })
+        ?? (shadowed ? forkRefusal(candidate, shadowed) : null);
+      if (refusal) this.setAside(id, refusal);
+    }
+  }
+
+  /** One package out of the way, under a name no read resolves, with the reason said out loud. */
+  setAside(id, refusal) {
+    const aside = join(this.dir, `${id}.${process.pid}.${Date.now().toString(36)}.incompatible`);
+    renameSync(join(this.dir, id), aside);
+    console.warn(`effect ${id} was installed by an earlier build of this program and this one refuses it: `
+      + `${refusal} - the package has been renamed to ${basename(aside)} rather than deleted, so it is still `
+      + `there to be repaired and moved back, and ${existsSync(join(this.builtinDir, id))
+        ? 'the shipped package answers for that id again'
+        : 'nothing answers for that id now, so a document holding its values parks them'}`);
   }
 
   /**
@@ -273,25 +386,42 @@ export class EffectStore {
   loaded(except = null) {
     return this.list()
       .filter((e) => e.id !== except)
-      .map((e) => {
-        const { manifest } = this.read(e.id);
-        const chunks = {};
-        for (const c of manifest.chunks ?? []) {
-          const bytes = this.file(e.id, c.file);
-          // `file` answers null for a name that is not an ordinary file, and a manifest
-          // naming one is the one shape that reaches here: the store's own listing already
-          // drops it, so without this the next line would be a `null.toString` with a stack
-          // and no id in it. Named instead, because the set this assembles is what the
-          // install door is asked about and a door that crashed would refuse nothing.
-          if (!bytes) {
-            throw new Error(`effect ${e.id} names the chunk ${JSON.stringify(c.file)} and there is no ordinary `
-              + 'file of that name in its directory - a package file is what the install door wrote, and a link '
-              + 'or a directory standing in for one is not something this store will read');
-          }
-          chunks[c.file] = bytes.toString('utf8');
-        }
-        return { id: e.id, manifest, chunks };
-      });
+      .map((e) => this.packageOf(e.id));
+  }
+
+  /**
+   * One installed package in the shape the install door takes: the manifest, and the text
+   * of every chunk the manifest names.
+   *
+   * **Extracted out of `loaded` because the boot gate needs one package rather than the
+   * set**, and because a second construction of this shape is a second answer to what a
+   * package *is* on the way into the one function that refuses it. `refuseIncompatiblePackages`
+   * asks for a candidate and `loaded` asks for everything beside it, and both are this.
+   *
+   * The chunk map is built from what the manifest names rather than from what the directory
+   * holds, which is the same reading `builtin` makes and is deliberate here: a file the
+   * manifest does not name is text nothing splices, and the door's rule about one of those
+   * is about a package *arriving*, where an undeclared file is a stale copy somebody sent.
+   * Off disk it is a file to leave alone.
+   */
+  packageOf(id) {
+    const { manifest } = this.read(id);
+    const chunks = {};
+    for (const c of manifest.chunks ?? []) {
+      const bytes = this.file(id, c.file);
+      // `file` answers null for a name that is not an ordinary file, and a manifest
+      // naming one is the one shape that reaches here: the store's own listing already
+      // drops it, so without this the next line would be a `null.toString` with a stack
+      // and no id in it. Named instead, because the set this assembles is what the
+      // install door is asked about and a door that crashed would refuse nothing.
+      if (!bytes) {
+        throw new Error(`effect ${id} names the chunk ${JSON.stringify(c.file)} and there is no ordinary `
+          + 'file of that name in its directory - a package file is what the install door wrote, and a link '
+          + 'or a directory standing in for one is not something this store will read');
+      }
+      chunks[c.file] = bytes.toString('utf8');
+    }
+    return { id, manifest, chunks };
   }
 
   /**

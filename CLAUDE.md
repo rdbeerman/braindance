@@ -162,9 +162,13 @@ tool that finds a stranger already listening on its port is answered by the stra
 against whatever fixture *that* process staged, which is a green run proving nothing.
 `library-check`, `boot-check` and `effect-check` ask the kernel first and exit 2 naming what is
 held; everywhere else check `pgrep -f "tools/.*-check.mjs"` yourself, because another agent's run
-is the normal state on this machine. **`effect-check` is the only tool that writes packages**, so
-it hands its staged server both store roots by name rather than letting them resolve — a run whose
-user root resolved to the checkout would leave seventeen fixtures in `effects/`. `sensor-view-check` does both — `--url` for most of its run, and a private
+is the normal state on this machine. **Two tools write packages, and each keeps its user root off
+the checkout by a different mechanism** — a run whose user root resolved to the checkout would
+leave its fixtures in `effects/`. `effect-check` hands its staged server both store roots by name
+rather than letting them resolve; `jobs-check` forks one shipped package to move the store between
+two claims, and its server is spawned out of `.jobs-check/root`, so the root the flags default to
+is the staged tree it deletes on the way out. Anything that grows a third writer picks one of
+those and says which. `sensor-view-check` does both — `--url` for most of its run, and a private
 server on 8131 for the section needing its own capture.
 
 **`module-check` needs nothing at all** — no port, no browser, no install — because every failure

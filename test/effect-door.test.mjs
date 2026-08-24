@@ -102,6 +102,35 @@ test('the door names what it refuses, one rule at a time', () => {
   }
 });
 
+// **A field that is a list, handed something that is not one.** Every reader of `chunks`,
+// `varyings`, `panelGroups` and `hostDriven` inside the door walks the field, so a manifest
+// carrying an object, a string or a number where a list belongs reached `.map` or a
+// `for ... of` on something that has neither and threw a `TypeError` out of a function
+// whose whole contract is to answer a sentence. The install route reports that as a 500
+// with a stack in it where every other malformed manifest gets a 409 saying what to fix,
+// and the store's boot gate cannot survive it at all - a throw there is a server that does
+// not start, which is the failure that gate exists to prevent arriving through the gate.
+//
+// Both directions per field, because a rule that refused every value of the field would
+// pass the refusal half of this on all four and be a door that takes no package at all.
+test('a manifest field that is a list is refused when it is not one', () => {
+  const fields = [['thermal', 'chunks'], ['rain', 'varyings'], ['rain', 'panelGroups'], ['rain', 'hostDriven']];
+  for (const [id, field] of fields) {
+    // The package one field wrong is still the package: an identity edit has to come back
+    // null, or the rows below are being read off a fixture that was already refused.
+    assert.equal(brokenBy(id, () => {}), null, `the shipped ${id} is refused before this row changes anything`);
+    // `null` is in the list on purpose. `?? []` reads it as "no chunks at all", so a
+    // manifest that meant none and typed one would quietly have been taken - see the door's
+    // own note on why that is refused rather than read as absent.
+    for (const value of [{}, 'one', 3, null, true]) {
+      const refusal = brokenBy(id, (c) => { c.manifest[field] = value; });
+      assert.ok(refusal, `the door accepted ${id}'s ${field} as ${JSON.stringify(value)}`);
+      assert.match(refusal, new RegExp(`declares ${field} as `),
+        `the door refused ${id}'s ${field} as ${JSON.stringify(value)} for the wrong reason: ${refusal}`);
+    }
+  }
+});
+
 // The rules that are about a package as a whole rather than about one entry in it, and
 // they are written out separately because they are the ones the per-entry rules leave a
 // hole between: every rule above is satisfied as many times as a package repeats a correct

@@ -122,23 +122,38 @@ try {
   const renderer = await page.evaluate(() => globalThis.__kinect.export.rendererClass());
 
   /**
-   * The effect packages this worker's server holds, read once at start.
+   * The effect packages this worker's server holds, read once per job.
    *
    * Read off `/effects` rather than off the page, because that route is what the
    * registry itself assembles from - so this asks the same source the browser would,
    * one step earlier and without a document open.
-   */
-  const listing = (await (await fetch(`${URL_}/effects`)).json()).effects ?? [];
-  const installed = new Set(listing.map((e) => e.id));
-  /**
-   * What version of each of those this worker has, so the log line can say which build a
-   * job was authored against and which one is about to draw it.
    *
-   * The listing carries the manifest's own `version` per id, which is the same string the
-   * page's badge quotes, so the worker and the editor are reading one field rather than
-   * two spellings of a fact.
+   * **Per job and not once at start, which is the difference between a reading and a
+   * memory.** A worker takes up to sixteen jobs and a drain runs for as long as there is
+   * work, so a snapshot taken before the first claim is the answer given for every job
+   * after it - and `PUT /effects/:id` is a thing that happens to a running server. A
+   * package installed while the loop is going does not exist as far as the door below is
+   * concerned, so the job that needed it comes back "this worker has no rain" from a
+   * machine that has rain; a package retuned while the loop is going has the version it
+   * used to have, so the skew line quotes a build that was replaced an hour ago into the
+   * log somebody reads to decide whether a file is a render of what they asked for. The
+   * second is the worse one, because it is the path that runs with nobody watching and the
+   * artifact it leaves is a video.
+   *
+   * What it costs is one request against a listing the server already holds, once per job,
+   * beside a take resolution and a page load - which is nothing next to being wrong.
+   *
+   * The listing carries the manifest's own `version` per id, the same string the page's
+   * badge quotes, so the worker and the editor read one field rather than two spellings of
+   * a fact.
    */
-  const versions = new Map(listing.map((e) => [e.id, e.version]));
+  const readInstalledEffects = async () => {
+    const listing = (await (await fetch(`${URL_}/effects`)).json()).effects ?? [];
+    return {
+      installed: new Set(listing.map((e) => e.id)),
+      versions: new Map(listing.map((e) => [e.id, e.version])),
+    };
+  };
 
   /**
    * Whether this worker can render a job at all, answered off the job envelope before
@@ -165,7 +180,7 @@ try {
    * where that is wrong, the page's own refusal is what catches it, which is the reason
    * an additive field can mean "absent is allowed" here at all.
    */
-  const cannotResolve = (job) => {
+  const cannotResolve = (job, installed) => {
     const allowed = new Set(job.suppressEffects ?? []);
     return (job.requires ?? []).filter((e) => !installed.has(e.id) && !allowed.has(e.id));
   };
@@ -227,10 +242,17 @@ try {
     // lines is how one of them ends up being the one that forgets to null it.
     const stopBeating = () => { if (beat) { clearInterval(beat); beat = null; } };
     try {
+      // The store as it stands now, read before the gate that reads it rather than before
+      // the loop that reaches the gate - see `readInstalledEffects`. Inside the try, so a
+      // server that cannot be read is this job coming back `failed` with the fetch's own
+      // message rather than the worker dying before its first claim: a worker that cannot
+      // ask what is installed cannot honestly gate anything, and the queue's contract is
+      // that a claim ends in an outcome with a reason.
+      const { installed, versions } = await readInstalledEffects();
       // Asked first, because everything below it costs: a take resolution, a page load,
       // a settle and a render. A job this machine cannot draw whole is refused here with
       // the ids and versions its envelope names.
-      const unresolved = cannotResolve(job);
+      const unresolved = cannotResolve(job, installed);
       if (unresolved.length) {
         throw new Error(
           `this worker has no ${unresolved.map((e) => `${e.id} ${e.version}`).join(', ')}, which `

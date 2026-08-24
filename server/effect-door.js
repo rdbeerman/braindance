@@ -399,6 +399,37 @@ export function doorRefusal(candidate, { beside = [], spines }) {
     return `effect ${id} declares no title - the package list is what a person picks from, and an entry with no name is a row nobody can read`;
   }
 
+  // ---- the fields that are lists, asked before anything walks one
+  //
+  // **A non-list here crashed this door rather than being refused by it.** Every reader
+  // below reaches these fields as `(manifest.chunks ?? []).map` or as a `for ... of`, so a
+  // manifest carrying an object, a string or a number where a list belongs threw a
+  // `TypeError` out of a function whose whole contract is to answer a sentence - which the
+  // install route reports as a 500 with a stack in it, where every other malformed manifest
+  // gets a 409 saying what to fix. It is the same failure the boot gate in
+  // `server/effect-store.js` cannot afford at all: that one asks this door about packages
+  // already on disk, and a throw there is a server that will not start.
+  //
+  // Written as one loop over the four names rather than four rules, so a fifth list field
+  // is covered by being named here. `consumes` is deliberately not among them: nothing in
+  // this file walks it, the assembler does, and the assembler is already run inside a `try`
+  // a few hundred lines down - so a non-list there comes back as an assembly refusal with a
+  // sentence rather than as a crash.
+  //
+  // **An explicit `null` is refused too, and that is a decision rather than an oversight.**
+  // `?? []` reads it as "no chunks at all", so a manifest that meant none and typed one
+  // would quietly have been taken as a package with nothing to splice. Nothing this build
+  // ships writes any of these keys that way, so the cost is zero and what it buys is that a
+  // reader of a manifest and a reader of this door agree about what an absent list looks
+  // like.
+  for (const field of ['chunks', 'varyings', 'panelGroups', 'hostDriven']) {
+    if (manifest[field] === undefined || Array.isArray(manifest[field])) continue;
+    return `effect ${id} declares ${field} as ${JSON.stringify(manifest[field])} - a manifest's ${field} is a `
+      + 'list, and a package that has none of them leaves the key out rather than putting something else '
+      + 'there. Every reader of this field walks it, so a value that is not a list is a crash inside this '
+      + 'door instead of a refusal by it';
+  }
+
   // ---- the file names, held before any path is built out of them
   //
   // The store validates what it reads and this validates what it is about to write, and

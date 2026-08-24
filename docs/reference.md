@@ -440,6 +440,25 @@ A fork may add parameters and retune the ones it inherits. It may not **drop** o
 declaration order places every shipped parameter by hand, so a fork short of one is a build whose
 registry cannot assemble at all, and that is refused at the door with the names it dropped.
 
+**An upgrade can refuse a fork that was fine when you installed it, and it says so at startup
+rather than at the next page load.** A fork is held against the build it was installed on, and
+this program's shaders gain, lose and rename the joints a chunk can name — so a new build may not
+be able to assemble a fork an old one accepted, and the fork would still shadow the shipped
+package it forks. The store therefore asks the install door about every package in `effects/`
+each time it starts. One the door now refuses is renamed to `<id>.<seq>.incompatible`, the shipped
+package answers for that id again, and the log line names the id and the rule:
+
+```
+effect rain was installed by an earlier build of this program and this one refuses it: effect
+rain does not assemble into this build's shaders: ... - the package has been renamed to
+rain.4711.k2p9.incompatible rather than deleted, so it is still there to be repaired and moved
+back, and the shipped package answers for that id again
+```
+
+Nothing deletes that directory. Fix what the sentence names, rename it back to `<id>`, and
+restart — or install the repaired package over the top, which leaves the aside where it is for
+you to remove by hand.
+
 ## Levelling a canted mount
 
 A sensor bolted to a dashboard shoots a room that arrives on its side, and nothing measures

@@ -657,6 +657,29 @@ node tools/effect-check.mjs --mutate the-sweep-eats-the-last-copy # ... the swee
 node tools/effect-check.mjs --mutate package-files-follow-links # ... `statSync` back where `lstatSync` is, so the file route
                                                           #     asks what a name points at rather than what it is. Reddens one
                                                           #     row of section 10, and the ordinary file beside it stays green
+node tools/effect-check.mjs --mutate every-failure-is-final # ... the block on a refused set put back on *every* way a
+                                                          #     rebuild can fail, which is how it shipped: a refusal and a read
+                                                          #     error are the same three lines from the poll's side, so one
+                                                          #     server restart between the listing and a package fetch blocked
+                                                          #     a revision that was never anything but good until something
+                                                          #     else moved the store. Reddens **one** row, measured - the read
+                                                          #     error's "next tick adopts it" - and leaves the two refusal rows
+                                                          #     beside it green, which is what makes the pair a discrimination
+                                                          #     rather than two rows about one thing.
+                                                          #     `poll-retries-a-refused-set` is its mirror and fires the other
+                                                          #     row, measured, so the two terms separate exactly
+node tools/effect-check.mjs --mutate boot-adopts-a-stale-fork # ... the store's boot gate never asked, which is every build
+                                                          #     before it existed: a package that got through the door once is
+                                                          #     served forever, whatever this build's spines have done since,
+                                                          #     so a fork naming a joint an upgrade removed goes on shadowing
+                                                          #     the builtin it forks. Aimed at the call rather than at the
+                                                          #     method body, because the defect was that nothing re-validated
+                                                          #     rather than that something validated wrongly. Reddens **five**
+                                                          #     rows of section 12, measured, and the staging row above them
+                                                          #     stays green. The last of the five is the one the finding is
+                                                          #     about: a page opened on that store publishes no `__kinect` at
+                                                          #     all, because `assembleShaders` throws while `web/main.js` is
+                                                          #     still evaluating
 node tools/effect-conformance-check.mjs --url http://localhost:8080 # the plugin contract: every installed effect draws nothing at all when it is off
 node tools/effect-conformance-check.mjs --mutate leaks-at-zero # ... a floor under the rain's master, so the package contributes at
                                                           #     the term it is meant to be absent at. Served over an
@@ -730,6 +753,17 @@ node tools/jobs-check.mjs --mutate envelope-takes-a-repeated-requires-id # ... o
                                                           #     rest. A document claiming two versions of one effect was
                                                           #     recorded as whichever came first and refused late, at the
                                                           #     loader. Queue semantics, so `--no-render`. One row
+node tools/jobs-check.mjs --mutate queue-takes-any-requires-shape # ... the entries' own shape, read but never held to one,
+                                                          #     which is how this door shipped: the list was taken if it
+                                                          #     happened to be an array and dropped otherwise, and no entry
+                                                          #     in it was ever asked what it was. The comparisons beside it
+                                                          #     are about which *ids* a list claims and an unreadable entry
+                                                          #     claims none, so `[{}]`, an entry with no version, an id that
+                                                          #     could never name a package and a stray key all agreed with a
+                                                          #     document that names nothing. Queue semantics, so
+                                                          #     `--no-render`. Reddens **seven** rows - one per shape,
+                                                          #     measured - and leaves the twin beside them green, because a
+                                                          #     well-formed entry is taken on both builds
 node tools/jobs-check.mjs --mutate worker-door-waved-open # ... the worker's door on an effect it has not got. It needs a
                                                           #     render, like `heartbeat-stops-on-first-error`, and it
                                                           #     reddens **one** row: the *reason*. The state row beside it
@@ -738,6 +772,17 @@ node tools/jobs-check.mjs --mutate worker-door-waved-open # ... the worker's doo
                                                           #     way. That is the split stated as a measurement - the two
                                                           #     gates agree about whether the render happens and differ in
                                                           #     what they say and in what it cost to say it
+node tools/jobs-check.mjs --mutate preflight-snapshot-is-taken-once # ... the worker's `/effects` read memoised, which is
+                                                          #     how it shipped: one fetch before the first claim answering for
+                                                          #     every job the worker went on to take, so an install or a retune
+                                                          #     landing mid-run was invisible for the rest of it. It needs the
+                                                          #     render block, because the arm is two jobs one worker takes in
+                                                          #     sequence with the store forked between them - neither of them
+                                                          #     renders, since both name a capture no take here hashes and so
+                                                          #     fail one step past the line being read. Reddens **one** row,
+                                                          #     measured: the *second* job's version. The first job's is the
+                                                          #     control and stays green, because a worker that read the store
+                                                          #     once is right about the first job by construction
 node tools/module-check.mjs                               # the boundaries in web/: the import graph, what an import names, what crosses it
 node tools/module-check.mjs --mutate cycle-planted        # ... the import web/scene.js's own header says does not exist
 node tools/module-check.mjs --mutate cycle-through-a-second-spelling # ... and the same ring written the way the other page writes its imports
@@ -1392,20 +1437,22 @@ tool whose figures are in stage pixels now refuses a stage that is not the one i
 in, so the next thing that moves the furniture is a loud throw rather than three rows describing
 a feature that works as gone. Measured after: `stage 640x360`, **139 assertions, 0 failed**.
 
-**`jobs-check`** spawns its own server and renders two real jobs through
-`tools/render-worker.mjs`, so it needs a GPU browser and ffprobe. `--no-render` drops both rows
-and says so - the queue rows are seconds, each render is about a minute.
+**`jobs-check`** spawns its own server and drives real jobs through `tools/render-worker.mjs`,
+so it needs a GPU browser and ffprobe. `--no-render` drops that whole block and says so - the
+queue rows are seconds and each render is about a minute.
 
 **Its mutation runs are no longer all `--no-render`, and reading them as though they were is
-how a control gets recorded as green without running.** Every one but `heartbeat-stops-on-first-error`
-is queue semantics and wants `--no-render`; that one names a line in the worker's beat, is
-reached only by a render, and needs the browser and about two minutes. Take the names from the
-tool's own refusal rather than from a count written here - this sentence used to carry one and
-it was wrong, which is what a count in prose beside a list that grows does to itself, and
-enumerating from the refusal is what `sweep-all` already does for the same reason. That the
-split is by *which* mutation rather than by a number is the same argument arriving one level
-down: a reader who takes "its mutation runs use `--no-render`" as a rule runs the one that
-needs a render without one, and it passes.
+how a control gets recorded as green without running.** The split is by *which* mutation and
+never by a number: anything whose rows live in the render block needs the browser, and
+everything else is queue semantics and wants `--no-render`. Four are in the first group as this
+is written - `heartbeat-stops-on-first-error` and `worker-door-waved-open` name lines in the
+worker that only a claim reaches, and `preflight-snapshot-is-taken-once` is read off two jobs
+one worker takes in sequence, which needs the loop to run at all. Take the names from the tool's
+own refusal rather than from a count written here - this paragraph used to carry one and it was
+wrong, which is what a count in prose beside a list that grows does to itself, and enumerating
+from the refusal is what `sweep-all` already does for the same reason. A reader who takes "its
+mutation runs use `--no-render`" as a rule runs one that needs a render without one, and it
+passes.
 
 **The worker under test is the staged copy, not the repo's.** `jobs-check` copies `server/`,
 `web/` and `tools/render-worker.mjs` into `.jobs-check/root` and spawns from there, because a
