@@ -11,7 +11,7 @@
 // failure to the moment of the install, and about proving that a page which was up when
 // the install happened is still telling the truth afterwards.
 //
-// **Five claims, and each has something that must fail if it were not being done.**
+// **Six claims, and each has something that must fail if it were not being done.**
 //
 //  1. **A revision is a hash of the bytes on disk.** Per file and over the set, computed
 //     here from the staged tree and held against what the routes answer - so a store
@@ -41,6 +41,14 @@
 //     edit is what you can see. `reinstall-leaves-it-parked` is the control.
 //  5. **And a build with nothing missing says nothing.** A badge that appeared on every
 //     document would satisfy row 4's "the badge appeared" and mean nothing at all.
+//  6. **An install this page cannot adopt leaves it whole rather than half-migrated.** A
+//     fork adding a parameter makes the open document a subset of the new manifest, which
+//     the loader refuses per effect - correctly - *after* the registry has been swapped.
+//     The page has to go back: the registry it had, the signature it had, the pixels it
+//     drew, the pool it was holding, and a save that still writes the parked keys byte for
+//     byte. `rollback-keeps-the-new-registry` is the control, and it is worth reading which
+//     rows it reddens: not the picture, because the added parameter is inert at its
+//     default, and not the note, because the refusal is reported either way.
 //
 // **What is deliberately not here.** The export door on a clip whose look this build
 // cannot draw, and the per-effect suppress beside it, belong to `export-check` - one
@@ -51,6 +59,7 @@
 //   node tools/effect-check.mjs --mutate rebuild-skips-the-panel         # must FAIL
 //   node tools/effect-check.mjs --mutate install-skips-the-uniform-cells # must FAIL
 //   node tools/effect-check.mjs --mutate reinstall-leaves-it-parked      # must FAIL
+//   node tools/effect-check.mjs --mutate rollback-keeps-the-new-registry # must FAIL
 //
 // It spawns its own server on a port nothing else in the suite uses and needs none
 // running. A GPU browser, a free port 8281, no capture, no sensor and no ffmpeg.
@@ -99,6 +108,17 @@ const BASE = `http://127.0.0.1:${PORT}`;
  * value belonging to an effect that *is* installed parks anyway. The badge still appears
  * on the uninstall, which is what makes it worth having: a check reading only the badge
  * would call this build correct, and what fails is the restoration.
+ *
+ * `rollback-keeps-the-new-registry` is the half-rollback somebody writes who thinks of the
+ * failure as being about the document: the loader is run again, and the packages it is run
+ * against are the ones that just arrived rather than the ones this page had. The refusal is
+ * still reported and the badge still says what is parked, so a check reading only the note
+ * would call this build correct. What it leaves behind is the state the transaction exists
+ * to prevent - a registry the server's, a pool the page's - and the two rows that can see
+ * it are the registry's own contents and what a save writes, because the serialiser's
+ * filter drops parked keys the moment their prefix reads installed. The image cannot see
+ * it: the added parameter is inert at its default, so the picture is identical either way,
+ * which is exactly why a pixel row is not enough to hold this property.
  */
 const MUTATIONS = {
   'temporaries-are-visible': {
@@ -124,6 +144,13 @@ const MUTATIONS = {
     edits: [[
       '  return id !== null && !effectInstalled(id);',
       '  return id !== null;',
+    ]],
+  },
+  'rollback-keeps-the-new-registry': {
+    file: 'web/main.js',
+    edits: [[
+      '      adoptEffectPackages(heldPackages, heldPrograms, held);',
+      '      adoptEffectPackages(fetched, programs, held);',
     ]],
   },
 };
@@ -300,6 +327,42 @@ const probeChunks = () => ({
     + '  }\n',
 });
 const probePackage = () => ({ manifest: probeManifest(), chunks: probeChunks() });
+
+/**
+ * The same effect with one parameter more - the install a page holding this effect's
+ * values cannot be carried onto.
+ *
+ * **A fork that adds is the one shape that turns a good install into a bad page.** A
+ * document names every parameter of every effect it touches, because the loader's
+ * per-effect completeness rule refuses half of one; so a document written against the two
+ * parameters here names a subset of the three below, and the moment the third arrives the
+ * loader refuses that document by its own rule. Nothing is wrong with the package, nothing
+ * is wrong with the document, and the refusal is correct - what section 6 is about is
+ * where the page is left standing when it fires.
+ *
+ * The added parameter reaches a pixel and is inert at its default, both deliberately: it
+ * has to be a real parameter for the door to accept it and for the assembled program to
+ * declare its uniform, and it has to change nothing at zero so the image the rollback
+ * restores can be compared against the image before the install without the comparison
+ * turning into a question about the fork's own look.
+ */
+const forkedProbe = () => {
+  const pkg = probePackage();
+  pkg.manifest.version = '2.0.0';
+  pkg.manifest.params.glow = {
+    def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', label: 'probe glow',
+    panel: { group: 'probe', tab: 'look' },
+    bind: { on: 'points', uniform: 'probeGlow' },
+    under: 'amount',
+  };
+  pkg.chunks['decl.frag.glsl'] = 'uniform float probeAmount, probeHue, probeGlow;\n';
+  pkg.chunks['tone.frag.glsl'] =
+    '  if (probeAmount > 0.0) {\n'
+    + '    col = mix(col, vec3(probeHue, 1.0 - probeHue, probeHue * 0.5), probeAmount);\n'
+    + '    col += vec3(probeGlow * 0.25);\n'
+    + '  }\n';
+  return pkg;
+};
 const bent = (edit) => {
   const pkg = probePackage();
   edit(pkg);
@@ -743,16 +806,174 @@ try {
     quiet.hidden === true && quiet.missing.length === 0 && quiet.entries === 0,
     `hidden=${quiet.hidden}, ${quiet.missing.length} missing, ${quiet.entries} entries drawn`);
 
-  // =========================================== 6. what a crashed install leaves behind
+  // ================= 6. an install the open document cannot be carried onto, and the way back
+  //
+  // **The install that succeeds on the server and cannot be adopted by this page.** Every
+  // section above is about a rebuild that works; this one is about the one that does not,
+  // and the claim is that the page is left whole rather than half-migrated. A fork adding a
+  // parameter is the shape that produces it - the open document then names a subset of the
+  // new manifest, and the loader's per-effect completeness rule refuses it, correctly and by
+  // design. What must not happen is the page keeping the registry it just swapped in while
+  // its parked pool still describes the build before last: those two disagreeing about which
+  // names are live is a page no document can be saved from, and the serialiser reading a
+  // stale parked copy over a value the registry is rendering is how that costs somebody
+  // their work rather than their frame.
+  //
+  // **Driven through the poll rather than through `reload`**, because the note is one of the
+  // things being asserted and the poll is the only thing in the product that writes it. The
+  // rows below are the five separate facts a rollback has to leave true - the server did
+  // adopt the install, the page said so by name, the registry is the one it had, the pixels
+  // are the ones it drew, and a save is still byte-preserving per parked key - and they are
+  // separate rows because a build can get any four of them right.
+  console.log('\n[effect] 6. an install this page cannot carry the open document onto');
+
+  // The reading taken on both sides of the install, as one function handed to the page
+  // twice, so the before and the after cannot drift into being two different questions.
+  const readPage = async (positions) => {
+    const k = globalThis.__kinect;
+    const sha256 = async (bytes) => {
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+    };
+    k.drive.reset();
+    const hashes = [];
+    for (const t of positions) {
+      k.drive.stepTo(t);
+      hashes.push(await sha256(k.drive.readPixels()));
+    }
+    const badge = document.getElementById('tMissing');
+    const note = document.getElementById('tNote');
+    return {
+      hashes,
+      names: k.params.names(),
+      signature: k.effects.signature(),
+      pool: k.library.parkedLook(),
+      body: k.library.serialiseProjectBody(),
+      badgeHidden: badge?.hidden ?? null,
+      badgeText: badge?.textContent ?? '',
+      note: note?.textContent ?? '',
+    };
+  };
+
+  /** Everything a document says about the parked effect, as one comparable string. */
+  const parkedKeysOf = (body) => JSON.stringify({
+    params: Object.fromEntries(Object.entries(body.look.params).filter(([n]) => n.startsWith('probe.'))),
+    tracks: Object.fromEntries(Object.entries(body.look.tracks).filter(([n]) => n.startsWith('probe.'))),
+    requires: (body.requires ?? []).filter((e) => e.id === 'probe'),
+  });
+
+  // Caught in the page rather than allowed out, which is sections 3 and 4's shape and is
+  // load-bearing here for the same reason: a mutation that breaks the rebuild takes this
+  // driver down with it, and a run that stops on the way into this section stops before
+  // section 7 runs at all. `reinstall-leaves-it-parked` is the one that does it - it leaves
+  // a document the loader will not take in either direction, so the rollback's own refusal
+  // fires - and it should redden a row here and carry on, not end the run.
+  await del('probe');
+  const reParked = await page.evaluate(async () => {
+    try {
+      await globalThis.__kinect.effects.reload();
+      return { threw: null };
+    } catch (err) {
+      return { threw: String(err.message) };
+    }
+  });
+  ok('the effect comes off again and the page rebuilds without it', reParked.threw === null,
+    reParked.threw ?? 'no throw');
+  const beforeFork = await page.evaluate(readPage, POSITIONS);
+
+  ok('the effect is uninstalled again, so the document is holding it parked when the install below lands',
+    beforeFork.names.includes('probe.amount') === false
+      && Object.keys(beforeFork.pool.params).length === 2
+      && Object.keys(beforeFork.pool.tracks).length === 1
+      && beforeFork.badgeHidden === false,
+    `${Object.keys(beforeFork.pool.params).length} values and ${Object.keys(beforeFork.pool.tracks).length} tracks parked, `
+    + `badge hidden=${beforeFork.badgeHidden}`);
+  // **The control for the identity row below, and it is a cross-state one rather than the
+  // three-distinct-images row section 4 uses.** With the effect parked there is nothing
+  // keyed left to separate the three positions from each other: the pinned run is six
+  // frames at 33ms, so 0.6s and 1.2s both show the last of them and hash the same, and
+  // section 4's three images differed because `probe.amount` was ramping across them. What
+  // has to be shown here is that these hashes are a live reading of the look rather than a
+  // constant, so they are held against the same three positions taken while the effect was
+  // installed and raised - which is the state the rollback must *not* have left the page in.
+  ok('and the parked picture is not the picture the installed effect drew, so these hashes read the look rather than the frame',
+    JSON.stringify(beforeFork.hashes) !== JSON.stringify(authored.hashes),
+    `${beforeFork.hashes.map((h) => h.slice(0, 8)).join(' ')} against ${authored.hashes.map((h) => h.slice(0, 8)).join(' ')}`);
+
+  const fork = await put('probe', forkedProbe());
+  const forkServed = await getJson('/effects/probe');
+  ok('the fork installs: the server takes a package that is this effect with one parameter more',
+    fork.status === 200 && forkServed.status === 200 && forkServed.body.manifest?.version === '2.0.0',
+    `${fork.status}: ${fork.body.error ?? 'installed'}, the store now serves version ${forkServed.body.manifest?.version}`);
+
+  await page.evaluate(() => globalThis.__kinect.effects.pollNow());
+  const afterFork = await page.evaluate(readPage, POSITIONS);
+
+  ok('the page reports the refusal by name, and says which set it is still running',
+    /probe\.glow/.test(afterFork.note) && /still running the effects it had/.test(afterFork.note),
+    `"${afterFork.note.trim().slice(0, 120)}"`);
+  ok('and the registry is the one this page had rather than the one the server is serving',
+    JSON.stringify(afterFork.names) === JSON.stringify(beforeFork.names),
+    afterFork.names.includes('probe.glow')
+      ? 'probe.glow reached the registry, so the swap was kept'
+      : `${afterFork.names.length} parameters, the same ${beforeFork.names.length} as before the install`);
+  ok('and the signature with it, so nothing is left claiming to be assembled from a set it refused',
+    afterFork.signature === beforeFork.signature,
+    afterFork.signature === beforeFork.signature ? 'unchanged' : 'the page moved to the new set');
+  ok('the parked pool is exactly what it was: the same values, the same track, the same entry',
+    JSON.stringify(afterFork.pool) === JSON.stringify(beforeFork.pool),
+    `${Object.keys(afterFork.pool.params).length} values, ${Object.keys(afterFork.pool.tracks).length} tracks`);
+  ok('and the badge still quotes the version the edit was authored against rather than the one that just landed',
+    afterFork.badgeHidden === false && /probe 1\.0\.0/.test(afterFork.badgeText),
+    `hidden=${afterFork.badgeHidden}, "${afterFork.badgeText.trim().slice(0, 60)}"`);
+  ok('the three positions render the same three images they rendered before the install',
+    JSON.stringify(afterFork.hashes) === JSON.stringify(beforeFork.hashes),
+    afterFork.hashes.map((h, i) => `${h.slice(0, 8)}${h === beforeFork.hashes[i] ? '=' : '!='}${beforeFork.hashes[i].slice(0, 8)}`).join(' '));
+  ok('and a save afterwards writes the parked keys exactly as it wrote them before',
+    parkedKeysOf(afterFork.body) === parkedKeysOf(beforeFork.body) && /probe\.amount/.test(parkedKeysOf(beforeFork.body)),
+    parkedKeysOf(afterFork.body).slice(0, 110));
+
+  // The document the rolled-back page writes, handed back to the loader that refused the
+  // other one. A page whose pool and registry had gone out of step would write a document
+  // its own reader refuses - `refuseRequires` runs in both directions - so this asks the
+  // rollback for the property that actually matters rather than for the fields it left in
+  // place.
+  const reloadable = await page.evaluate(() => {
+    const k = globalThis.__kinect;
+    try {
+      k.library.restoreProject(k.library.serialiseProjectBody());
+      return { threw: null };
+    } catch (err) {
+      return { threw: String(err.message) };
+    }
+  });
+  ok('and the document it writes is one this same page will take back', reloadable.threw === null,
+    reloadable.threw ?? 'loaded');
+
+  // The fork off again, so the store and the page hold the same set before section 7 - and
+  // the row is worth having rather than being cleanup with an assertion stuck on it: the
+  // signature is how the poll decides there is anything to do, and a page that had quietly
+  // moved to the new set would converge here for the wrong reason.
+  await del('probe');
+  const converged = await page.evaluate(async () => {
+    await globalThis.__kinect.effects.pollNow();
+    return { signature: globalThis.__kinect.effects.signature() };
+  });
+  const storeNow = await getJson('/effects');
+  const storeSignature = storeNow.body.effects.map((e) => `${e.id} ${e.rev}`).join('\n');
+  ok('and with the fork taken back off, the page and the store are holding one set again',
+    converged.signature === storeSignature, converged.signature === storeSignature ? 'agreed' : 'still apart');
+
+  // =========================================== 7. what a crashed install leaves behind
   //
   // **Last, and the position is the finding rather than housekeeping.** Everything in
   // this block leaves a directory in the user root that is not a package, and under
   // `temporaries-are-visible` the store then cannot list at all - so a temporary staged
   // in section 1 would have reddened every row of every section after it with a fault
-  // whose cause is four sections away. Put here, the mutation reddens the two rows it is
+  // whose cause is five sections away. Put here, the mutation reddens the two rows it is
   // about and nothing else, which is the difference between a control that names a
   // property and one that fails everything.
-  console.log('\n[effect] 6. and what a crashed install leaves behind is invisible until it is swept');
+  console.log('\n[effect] 7. and what a crashed install leaves behind is invisible until it is swept');
 
   // Taken here rather than reused from section 1, because the probe is installed by now
   // and the count moved with it - a comparison against the boot listing would fail on a

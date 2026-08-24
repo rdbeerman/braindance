@@ -2758,21 +2758,93 @@ adoptEffectPackages(effectPackages, shaderPrograms);
  * sentence. That is the last line of defence behind the install door rather than a
  * duplicate of it: the door refuses the package on the machine it was installed on, and
  * this refuses a set that arrived some other way.
+ *
+ * **And nothing stays written unless every step lands, which is the half of it the
+ * assembly guard above could not reach.** The adoption is not the last thing that can
+ * throw: `restoreProject` runs after it and refuses a document for seventeen reasons, and
+ * one of them is reachable by exactly the gesture this function exists to serve. Install a
+ * fork that *adds* a parameter while a document holds that effect - parked or open - and
+ * the document then names a subset of the new manifest, which the per-effect completeness
+ * rule refuses. The page that came out of that was new registry, new panel, new programs,
+ * and a parked pool still describing the build before last: a state no document was ever
+ * saved from and none can be saved into, because the pool and the registry disagree about
+ * which names are live.
+ *
+ * So everything needed to come back is captured before the first mutation and the whole
+ * thing rolls back on any throw after it. The rollback is a second call to the same
+ * adoption with the packages and the programs this page was already running, followed by
+ * the same document going back through the same loader - **no fetch and no re-assembly**,
+ * because the moment there is nothing left to fall back to is the wrong moment to need the
+ * network, and because staying synchronous is what keeps the half-swapped state
+ * unobservable: from any other task the page is either the old set or the old set, never
+ * the pair mid-swap.
+ *
+ * **The completeness refusal stays a refusal**, and that is the decision this rollback is
+ * built around rather than a limitation of it. Filling the parameter the fork added from
+ * its default would be this build guessing at a look somebody else authored, which is the
+ * adaptation every other door here refuses; the honest answer is that the page cannot
+ * carry *this* document onto that package, said out loud, with the page still drawing what
+ * it drew.
  */
 async function reloadEffects() {
-  const fetched = await fetchEffectPackages();
-  const programs = assembleShaders(SPINES, fetched);
-  const open = serialiseProjectBody();
-  // Every value in flight, view state included, so an install does not move a slider.
+  // Captured before anything moves, and read from the live bindings rather than re-derived:
+  // these two are the objects the renderer is holding right now, so putting them back is a
+  // return rather than a reconstruction.
+  const heldPackages = effectPackages;
+  const heldPrograms = shaderPrograms;
+  // Every value in flight, view state included, so an install does not move a slider - and
+  // so the rollback restores the same values the forward attempt was handed.
   const held = params.values(params.names());
+  let fetched;
+  let programs;
+  let open;
+  try {
+    fetched = await fetchEffectPackages();
+    programs = assembleShaders(SPINES, fetched);
+    open = serialiseProjectBody();
+  } catch (err) {
+    // Nothing has been written, so there is nothing to undo - only a sentence to frame.
+    // The assembler's own message says what did not assemble and says nothing about why
+    // this page was asking, and the chip it lands on holds one line.
+    throw new Error(`the installed effects changed and this page could not read them: ${err.message}`);
+  }
+
   adoptEffectPackages(fetched, programs, held);
-  // The swapped programs and the additive variant, compiled here rather than on the frame
-  // that first reaches them - which is the same 83ms stall `warmPrograms` was written for,
-  // arriving at a moment nobody would connect to an install.
-  warmPrograms();
-  restoreProject(open);
+  let failure = null;
+  try {
+    // The swapped programs and the additive variant, compiled here rather than on the frame
+    // that first reaches them - which is the same 83ms stall `warmPrograms` was written for,
+    // arriving at a moment nobody would connect to an install.
+    warmPrograms();
+    restoreProject(open);
+  } catch (err) {
+    failure = err;
+    try {
+      adoptEffectPackages(heldPackages, heldPrograms, held);
+      restoreProject(open);
+    } catch (stuck) {
+      // **The corner where there is no repair, reported rather than papered over.** The
+      // document that could not be loaded onto the new registry could not be loaded back
+      // onto the old one either, which means the failure is in the document rather than in
+      // the pairing - and this page is now holding a registry it cannot restore anything
+      // into. Nothing is repainted on the way out, because a panel repainted over a state
+      // no document describes is a page that looks well and is not.
+      throw new Error(
+        'the installed effects changed, this page could not carry the open document across to them, '
+        + `and it could not put itself back either - reload the page: ${stuck.message}`,
+      );
+    }
+  }
   refreshGroups();
   requestRepaint();
+  // Thrown after the repaint rather than before it, so the page the operator is looking at
+  // is the rolled-back one by the time the sentence describing it arrives.
+  if (failure) {
+    throw new Error(
+      'the server installed the effects it was asked for, but this page could not carry the open '
+      + `document across to them, so it is still running the effects it had: ${failure.message}`,
+    );
+  }
   return fetched.map((p) => ({ id: p.id, version: p.manifest.version, rev: p.rev }));
 }
 
@@ -2816,9 +2888,17 @@ async function pollEffects() {
   } catch (err) {
     // Reported and not retried on a timer. The set on the server is the one this page
     // could not adopt, so a retry is the same failure once every six seconds; the
-    // signature is left alone so a later fix is picked up by the same comparison.
+    // signature is left alone so a later fix is picked up by the same comparison - and a
+    // rollback puts the old signature back by re-adopting the old set, so the two ways of
+    // failing converge on one behaviour rather than on two.
+    //
+    // **The sentence is the one the reload composed, printed rather than framed again.**
+    // Every way out of `reloadEffects` now carries a whole sentence naming what failed and
+    // what state that leaves this page in, and a prefix added here would say a third time
+    // what the message already says twice - on a chip that ellipsises, where the width the
+    // prefix takes is the width the refusal loses.
     console.warn('could not rebuild from the installed effects:', err.message);
-    say(`the installed effects changed and this page could not adopt them: ${err.message}`);
+    say(err.message);
   } finally {
     effectReloading = false;
   }
@@ -3662,6 +3742,37 @@ let parkedLook = { params: {}, tracks: {}, requires: [] };
  */
 let suppressedEffects = new Set();
 
+/**
+ * The parked pool as it may be written out - which is the pool less anything the registry
+ * has since started answering for.
+ *
+ * **Defence in depth against one shape of bug, and it is worth saying which.** The pool
+ * and the registry are disjoint by construction: `restoreProject` partitions the document
+ * once, on `isParkedName`, and assigns both halves in the same breath. Every way the
+ * registry moves goes back through that loader, so a name cannot be in the pool and in
+ * `PARAMS` at the same time - unless something swapped the registry and then failed to
+ * re-split the document, which is precisely the half-migrated page `reloadEffects` now
+ * rolls back rather than leaves behind.
+ *
+ * If that ever happens again, the write is where it would cost work rather than pixels. A
+ * stale parked copy of a name the build now has would be merged over the value the
+ * registry is rendering, so the file on disk would claim a look nobody is looking at, and
+ * the installed effect's own value - the one on screen, the one somebody just set - would
+ * be the copy that lost. Filtering here is the cheap half of that; `reloadEffects` is the
+ * half that stops the state existing.
+ *
+ * `requires` is filtered on the same fact, and it has to be filtered together with the
+ * keys rather than left alone: an entry for an effect whose parked keys have just been
+ * dropped is either a duplicate of the one `requiresFor` derives, or a claim on an effect
+ * the look no longer names - and `refuseRequires` refuses both, so a pool half-filtered
+ * would write a document this build's own loader would not take back.
+ */
+const writableParked = () => ({
+  params: Object.fromEntries(Object.entries(parkedLook.params).filter(([n]) => isParkedName(n))),
+  tracks: Object.fromEntries(Object.entries(parkedLook.tracks).filter(([n]) => isParkedName(n))),
+  requires: parkedLook.requires.filter((entry) => !effectInstalled(entry.id)),
+});
+
 // Everything an edit *is*, as one plain object. A project file, an undo snapshot
 // and step 6's export job all start here, which is why this is one function rather
 // than a serialiser per consumer that would each learn about a new track kind
@@ -3709,6 +3820,9 @@ function serialiseProjectBody({ suppressed = null } = {}) {
     for (const n of mine) delete lookParams[n];
   }
   const kept = Object.keys(lookParams);
+  // The pool, filtered down to the names this build genuinely cannot answer for - see
+  // `writableParked` for the state that filter is defence against.
+  const parked = writableParked();
   // **The parked effects' entries, whole, and appended rather than interleaved.** The
   // list is one entry per effect and `refuseRequires` reads it as a set, so position
   // carries nothing - what has to survive is the version, and the `rev` where a
@@ -3716,7 +3830,7 @@ function serialiseProjectBody({ suppressed = null } = {}) {
   // id being handed back to `requiresFor`. A parked effect keeps its entry because its
   // values are still in the document: the list stays derived from what the look names,
   // which is the property both directions of `refuseRequires` rest on.
-  const requires = [...requiresFor(kept), ...parkedLook.requires];
+  const requires = [...requiresFor(kept), ...parked.requires];
   return {
     version: PROJECT_VERSION,
     ...(requires.length ? { requires } : {}),
@@ -3730,18 +3844,23 @@ function serialiseProjectBody({ suppressed = null } = {}) {
       // be able to open a document, save it, and leave the parts it cannot read exactly
       // as it found them - anything else makes opening a clip on the wrong machine a
       // destructive act, and it destroys precisely the work nobody on that machine can
-      // redo. Spread after rather than before, so a parked name can never overwrite a
-      // registry value: the two sets are disjoint by construction, and if they ever
-      // stop being, the installed reading is the one that renders and so the one that
-      // must win.
-      params: { ...lookParams, ...parkedLook.params },
+      // redo.
+      //
+      // **The installed reading wins, and the filter above is what makes that true rather
+      // than the spread order.** The two sets are disjoint by construction and the spread
+      // is the cheap way to join them; what the spread cannot do is decide a collision, and
+      // it decides one the wrong way round - a parked copy landing second overwrites the
+      // value the registry is rendering. `writableParked` drops the collision instead of
+      // ordering it, so the sentence this comment has always made is enforced by the line
+      // above rather than asserted by this one.
+      params: { ...lookParams, ...parked.params },
       tracks: {
         ...Object.fromEntries(
           kept
             .filter((n) => tracks.has(n))
             .map((n) => [n, tracks.get(n).serialise()]),
         ),
-        ...parkedLook.tracks,
+        ...parked.tracks,
       },
     },
     composition: {

@@ -457,9 +457,9 @@ node tools/effect-check.mjs                               # installing an effect
 node tools/effect-check.mjs --mutate temporaries-are-visible # ... the id filter the store lists directories through, widened, so
                                                           #     a crashed install's `<id>.<seq>.tmp` becomes a package `/effects`
                                                           #     lists and `rootFor` resolves. Reddens exactly the two rows of
-                                                          #     section 6 that are about a half-written package, which is why
+                                                          #     section 7 that are about a half-written package, which is why
                                                           #     that section is last - staged earlier it would redden every
-                                                          #     section after it with a fault four sections away
+                                                          #     section after it with a fault five sections away
 node tools/effect-check.mjs --mutate rebuild-skips-the-panel # ... the panel built on the first run and never again, which is the
                                                           #     rebuild somebody writes who thinks of the panel as boot
                                                           #     furniture. `boot-check` stays green, because boot is the run
@@ -472,8 +472,19 @@ node tools/effect-check.mjs --mutate install-skips-the-uniform-cells # ... the J
 node tools/effect-check.mjs --mutate reinstall-leaves-it-parked # ... the parking predicate widened to every dotted name, so a
                                                           #     value belonging to an installed effect parks anyway. The badge
                                                           #     still appears on the uninstall, which is what makes it worth
-                                                          #     having: four rows across sections 4 and 5 redden and the
-                                                          #     badge-appeared row stays green
+                                                          #     having: nine rows redden, four across sections 4 and 5 and five
+                                                          #     more in section 6, and the badge-appeared row stays green. The
+                                                          #     document it leaves behind is one the loader refuses in both
+                                                          #     directions, so section 6's rebuild reddens on the rollback's own
+                                                          #     refusal rather than on the install's
+node tools/effect-check.mjs --mutate rollback-keeps-the-new-registry # ... the rollback runs the loader again and runs it against
+                                                          #     the packages that just arrived rather than the ones this page
+                                                          #     had - the half-rollback somebody writes who reads the failure as
+                                                          #     being about the document. Reddens exactly four rows of section 6:
+                                                          #     the sentence, the registry's contents, the signature, and what a
+                                                          #     save writes. The picture cannot see it, because the parameter the
+                                                          #     fork adds is inert at its default and the image is identical
+                                                          #     either way - which is why a pixel row is not enough to hold this
 node tools/effect-conformance-check.mjs --url http://localhost:8080 # the plugin contract: every installed effect draws nothing at all when it is off
 node tools/effect-conformance-check.mjs --mutate leaks-at-zero # ... a floor under the rain's master, so the package contributes at
                                                           #     the term it is meant to be absent at. Served over an
@@ -1826,11 +1837,33 @@ it, so seven rows fire and then the run stops — a verdict that put the crash f
 DID NOT RUN over a caught mutation, which is the census of exit codes `docs/instruments.md`
 already carries a case for.
 
-Baseline **43 assertions, 0 failed**, over six sections: the store's revisions against hashes
+Baseline **56 assertions, 0 failed**, over seven sections: the store's revisions against hashes
 the tool computes off the staged tree, seventeen hostile packages each refused with the sentence
 for its own rule, the hotload's registry-and-panel coherence including `boot-check`'s own
 control-vs-registry diff on a rebuilt page, the uninstall/reinstall pixel identity, the
-must-not-badge control, and — last, deliberately — what a crashed install leaves behind.
+must-not-badge control, an install this page cannot carry the open document onto, and — last,
+deliberately — what a crashed install leaves behind.
+
+**Section 6 is the one that asserts a failure.** It installs a fork of the probe package
+carrying one parameter more while the open document holds that effect parked, which makes the
+document a subset of the new manifest and so a document the loader refuses per effect — the
+refusal is correct and stays a refusal, because filling the added parameter from its default
+would be this build guessing at a look somebody else authored. What the thirteen rows hold is
+where the page is left standing: the server did take the install, the note names `probe.glow`
+and says which set the page is still running, the registry and the signature are the ones it
+had, the pool is untouched, the three pinned positions render the images they rendered before,
+a save still writes the parked keys byte for byte, and the document that save produces is one
+this same page will take back. **It is driven through `pollNow` rather than `reload`**, because
+the note is one of the things asserted and the poll is the only thing in the product that
+writes it.
+
+Its control row is a cross-state comparison rather than section 4's three-distinct-images, and
+the difference is worth keeping: with the effect parked there is nothing keyed left to separate
+the three positions from each other, so 0.6s and 1.2s both show the last of the six pinned
+frames and hash the same. The three images in section 4 differ because `probe.amount` is
+ramping across them. So the control here holds the parked hashes against the ones the same
+positions rendered while the effect was installed and raised — which is the state the rollback
+must not have left the page in.
 
 **`effect-conformance-check`** needs `--url` against a running server and a GPU browser, and no
 port of its own. Every hash is taken inside the run and none is written down: what it compares

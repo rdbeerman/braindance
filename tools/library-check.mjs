@@ -287,11 +287,11 @@ const MUTATIONS = {
   // byte-for-byte rows, the requires row, and the second-trip row.
   'save-forgets-the-parked-pool': { file: 'web/main.js', edits: [
     [
-      '      params: { ...lookParams, ...parkedLook.params },',
+      '      params: { ...lookParams, ...parked.params },',
       '      params: { ...lookParams },',
     ],
     [
-      '        ...parkedLook.tracks,\n      },',
+      '        ...parked.tracks,\n      },',
       '      },',
     ],
   ] },
@@ -308,7 +308,7 @@ const MUTATIONS = {
   // the values really do come back - which is the split that says this control and
   // `save-forgets-the-parked-pool` are asking different questions.
   'save-forgets-the-parked-requires': { file: 'web/main.js', edits: [[
-    '  const requires = [...requiresFor(kept), ...parkedLook.requires];',
+    '  const requires = [...requiresFor(kept), ...parked.requires];',
     '  const requires = [...requiresFor(kept)];',
   ]] },
   // **The capture format's band comes off.** A take whose hello declares a generation

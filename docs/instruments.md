@@ -3067,6 +3067,35 @@ Two lessons, and the second is the one that generalises:
   `raster.amount: 0.35` for this reason; the glitch had no such arm because nobody had asked what
   the shipped document turns on. **Ask what the shipped look names, and render there.**
 
+### The same shape one level up: the difference between two registries was a parameter at its default
+
+`effect-check`'s section 6 holds a page that refused an install to the state it was in before
+it: the registry it had, the signature it had, the pool it was holding, and the three pinned
+positions rendering the images they rendered. The pixel rows are the ones that read like proof,
+and they are the ones that cannot see the defect. `rollback-keeps-the-new-registry` — the
+rollback that reloads the document and reloads it against the packages that just arrived — leaves
+the page assembled from the fork, and the fork differs from what it forks by exactly one added
+parameter, which is inert at its default because the door refuses a master that is not. So the
+program has a chunk more in it, and the chunk draws nothing, and the three hashes are identical
+on both builds.
+
+What separates them is the registry's own contents, the signature, and what a save writes — the
+last of those because the serialiser drops a parked key the moment its prefix reads installed, so
+a page holding the new registry writes a document with the parked work missing from it. Three
+rows about bookkeeping catch what three rows about pixels cannot, which inverts this repo's usual
+order and is worth remembering as an order rather than a rule: **a pixel is the right probe for a
+value, and the wrong one for which set of parameters exists**, because the parameters that
+distinguish two sets are exactly the ones a well-behaved package leaves at zero.
+
+The section's own control had the same defect one layer down and was found by running it rather
+than by reading it. It was written as section 4's row — the three positions render three
+different images — and it went red on a correct build. With the effect parked there is nothing
+keyed left to separate the positions: the pinned run is six frames at 33ms, so 0.6s and 1.2s
+both show the last of them. Section 4's three images differ because `probe.amount` is ramping
+across them, which is a fact about section 4's state and not about the reading. The control that
+means something here is a cross-state one — the parked hashes against the hashes the same
+positions gave while the effect was installed and raised.
+
 ## A number written into a document does not fail
 
 The nine shipped looks each named a different subset of the look values, so picking one
