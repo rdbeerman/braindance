@@ -120,7 +120,12 @@ are.
 What may be written at all is decided before any of it: the door in
 `server/effect-door.js` runs the real assembler against the set that would exist after the
 install, and a package that would not assemble, would bind a uniform no program declares or would
-name an identifier this build has not got is refused with the reason and never reaches disk. The
+name an identifier this build has not got is refused with the reason and never reaches disk.
+A parameter whose `def` or `max` is not on the step grid its own `min` anchors is refused there
+too, and the door asks by running `snapScalar` — the arithmetic the registry snaps with — rather
+than by describing it: a default the snap would move is a number the manifest states and the
+program never holds, which makes an untouched effect read as modified from the first paint and
+puts a `requires` entry for it into every document saved afterwards. The
 alternative is a package that installs cleanly and breaks the *next* page load, where the only
 evidence is a console nobody has open.
 
@@ -183,10 +188,29 @@ The refusal splits three ways on one predicate. A bare name core does not know i
 dotted name whose package *is* installed but lacks the suffix is a half-package: both refuse. A
 dotted name whose prefix is not installed **parks** — the viewer loads, the installed part renders
 pixel-identically, and the values and tracks under that prefix go to a pool nothing evaluates and
-nothing destroys. The serialiser merges the pool back verbatim, so a load-save round trip through
-a build lacking the effect is byte-preserving per key, and `requires` carries the document's own
-entries whole so version and revision survive. Presets exclude the pool by construction: a project
-merges it back and a preset must not.
+nothing destroys. The serialiser merges the pool back without inspecting it, so a load-save round
+trip through a build lacking the effect returns every parked key holding exactly the value it
+arrived with — nothing renormalised, nothing rebuilt, nothing dropped and nothing added beside it
+— and `requires` carries the document's own entries whole so version and revision survive. Presets
+exclude the pool by construction: a project merges it back and a preset must not.
+
+**Per key and not per byte, which this page said the other way round for a while.** Two things in
+the round trip move bytes without touching a value: the parked keys are appended after the
+installed ones, so a document that interleaved them comes back re-ordered, and every number goes
+through `JSON.parse`, which reads `1e0` and writes `1`. A load and save on a machine missing an
+effect therefore changes the file and moves its revision. That is accepted — what the parking
+promises is that the work is intact, not that the file is the one it was — and the distinction is
+worth keeping straight, because `tools/library-check.mjs` proves the value property and no arm
+anywhere proves the byte one.
+
+**An effect that is here at another version is surfaced and never refused.** `requires` carries
+a version and the loader compares it against what is installed, but a version string says nothing
+about which direction is compatible, so refusing would make every retune of an effect a wall in
+front of every clip on the machine. The clip loads, the installed version draws it, and the bar
+carries `document requires glyph 1.0.0, installed is 2.0.0` — a line and no control, because
+there is nothing to decide and export is not refused for it. The notice does not survive the next
+save, which is the derived field working rather than a loss: the list records what the document
+was last built from, and this machine has now built it.
 
 Export refuses by default while anything is parked, naming the ids and versions, because a video
 leaves this machine and nothing in it says a layer of the look was absent. Suppressing is the

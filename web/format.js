@@ -327,16 +327,37 @@ export const DEPTH_H = 424;
 export const POINTS = DEPTH_W * DEPTH_H;
 
 /**
+ * The effect a dotted look name belongs to, or null for a core parameter - and it is a
+ * fact about the document format rather than about the registry, which is why it is here.
+ *
+ * The version 6 paragraph above is this function's whole specification: a version 5
+ * document said `glyphTone` and a version 6 document says `glyph.tone`, and the dot is
+ * what lets a reader tell a typo from an effect this machine has not got. Every consumer
+ * of that distinction has to split a name the same way or the three-way refusal splits
+ * differently at two doors - which is the drift this file exists to refuse, arriving in a
+ * parser rather than in a constant.
+ *
+ * **Its second reader is the render queue, and that is what moved it out of
+ * `web/main.js`.** `server/jobs.js` derives a job's `requires` from the namespaces its
+ * project's own values and tracks carry, and the page derives the same list from the same
+ * names on the way out; a server-side copy of `indexOf('.')` would be the second spelling
+ * of the one rule both ends have to agree about.
+ */
+export const effectOf = (name) => {
+  const dot = name.indexOf('.');
+  return dot > 0 ? name.slice(0, dot) : null;
+};
+
+/** The effect ids a set of look names touches, in first-appearance order. */
+export const effectIdsIn = (names) => [...new Set(names.map(effectOf).filter(Boolean))];
+
+/**
  * How many decimal places a number is written to, which is how far the registry rounds a
  * value after snapping it onto its slider's grid.
  *
- * **It is here rather than beside its one caller because it is the only piece of that
- * arithmetic a bare-node test can reach.** `normalise` in `web/main.js` snaps a value onto
- * `step` and then rounds to the decimals `min` and `step` imply, which is what keeps a
- * value set headlessly and the same value set through a slider from landing a hair apart -
- * and `web/main.js` is a browser module with a top-level fetch in it, so the rule could
- * only ever be exercised through a GPU browser. Pulled out, it is a pure function of a
- * number and `test/param-grid.test.mjs` holds it to the cases below.
+ * **It is here because `snapScalar` below needs it and because it is the half of that
+ * arithmetic whose cases can be written out.** `test/param-grid.test.mjs` holds it to them
+ * under bare node.
  *
  * **A dot in the decimal spelling was the whole of the rule and JavaScript stops writing
  * one.** `String(x)` switches to exponent notation below 1e-6, so `String(1e-7)` is
@@ -364,4 +385,34 @@ export const decimalsOf = (x) => {
   const dot = mantissa.indexOf('.');
   const fraction = dot < 0 ? 0 : mantissa.length - dot - 1;
   return Math.min(100, Math.max(0, fraction - Number(s.slice(e + 1))));
+};
+
+/**
+ * Where a scalar actually lands: clamped into its own bounds, snapped onto the step grid
+ * its `min` anchors, and rounded to the decimals `min` and `step` imply.
+ *
+ * **This used to live in `web/main.js` beside the registry, on the argument that the
+ * registry is the only thing that performs it. It has a second performer now.** The
+ * install door in `server/effect-door.js` refuses a manifest whose `def` or `max` this
+ * arithmetic would move, and the only way to ask that question exactly is to run the
+ * arithmetic: an epsilon on `(def - min) / step` is a *description* of where a value lands,
+ * and a description is the thing that drifts from the line it describes. So the door
+ * imports this, and "would the registry move it" is answered by moving it.
+ *
+ * The rounding is the half that is easy to leave out and the half that decides. A range
+ * input hands back a value already snapped and already rounded to the decimals its own
+ * attributes imply; a value set headlessly does not go through the DOM at all. Without the
+ * round trip through `toFixed`, `0 + 55 * 0.01` is 0.5500000000000001 where the slider says
+ * 0.55, and two runs of one project disagree by a hair with nothing recording why.
+ *
+ * The final clamp is what makes a `max` off its own grid the one case this cannot see:
+ * the snap can step past `max` and the clamp puts it back, so the value at the top of the
+ * range is always itself. The door asks that question by widening the ceiling rather than
+ * by adding a tolerance here - see the grid refusals there.
+ */
+export const snapScalar = (spec, value) => {
+  const clamped = Math.min(spec.max, Math.max(spec.min, value));
+  const snapped = spec.min + Math.round((clamped - spec.min) / spec.step) * spec.step;
+  const decimals = Math.max(decimalsOf(spec.min), decimalsOf(spec.step));
+  return Math.min(spec.max, Math.max(spec.min, Number(snapped.toFixed(decimals))));
 };

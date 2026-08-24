@@ -1,6 +1,16 @@
 import * as THREE from 'three';
+// `effectOf` and `snapScalar` were declared in this file and are imported now, and both
+// moves are worth the sentence. `effectOf` was written a thousand lines above the registry
+// on purpose, because the assertion under `PARAMS` asks it which half of the registry each
+// name came from and a `const` declared seven thousand lines further down is read in its own
+// dead zone - the fault this file has shipped twice. An import binding is initialised before
+// this module's body runs at all, so that hazard is gone rather than relocated. `snapScalar`
+// left because the install door has to ask the same question of a manifest it has never
+// seen, and two spellings of where a value lands is the drift `web/format.js` exists to
+// refuse.
 import {
-  DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, decimalsOf, versionRefusal, captureFormatRefusal,
+  DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, effectIdsIn, effectOf, snapScalar,
+  versionRefusal, captureFormatRefusal,
 } from './format.js';
 import { pollRecordState } from './record-poll.js';
 // The renderer and everything built directly on it. Imported before any other module of
@@ -1315,26 +1325,6 @@ const CORE_PANEL_GROUPS = [
 let PANEL_GROUPS;
 
 /**
- * The effect a dotted name belongs to, or null for a core parameter. The dot is the
- * namespace: `glyph.tone` is the glyph effect's tone key, `cell` is the core grid.
- * The split is what lets a reader tell a typo from an effect this build does not
- * have - a bare name the registry lacks is a typo, a dotted name whose prefix names
- * no effect is a document from a machine with something installed that this one
- * lacks. The two get different answers, and this is the line they divide on.
- *
- * It sits above the registry rather than beside the four functions built on it, because
- * the same line decides which half of the registry a name is declared in: the dotted ones
- * come out of the effect manifests and the bare ones are written out below. The
- * assertion under `PARAMS` asks both halves against this function, and an assertion cannot
- * call something declared seven thousand lines further down - that reach is a dead zone
- * rather than a forward reference, and it is the fault this file has shipped twice.
- */
-const effectOf = (name) => {
-  const dot = name.indexOf('.');
-  return dot > 0 ? name.slice(0, dot) : null;
-};
-
-/**
  * The write one effect parameter's binding describes, as the closure the registry stores.
  *
  * Forty-one parameters do the same thing - one number into one uniform - and they used to
@@ -1905,9 +1895,10 @@ function refuseRegistryDisagreement() {
 // has to do the same arithmetic rather than lean on the DOM for it - otherwise a
 // value set headlessly lands on the uniform unsnapped while the same value set
 // through a slider lands snapped, and two runs of the same project disagree by a
-// hair for reasons nothing records. `decimalsOf` is the half of it a bare-node test
-// can reach and lives in `web/format.js` for that reason; the snapping stays here,
-// beside the registry that is the only thing that performs it.
+// hair for reasons nothing records. That arithmetic is `snapScalar` in
+// `web/format.js` and this file is no longer the only thing that performs it: the
+// install door refuses a manifest whose `def` this build would move, and asks by
+// running the same function rather than by describing it.
 
 // Every value is checked for what it is rather than coerced into something. The
 // callers that matter are not the sliders - those hand over exactly what the
@@ -1974,10 +1965,7 @@ function normalise(name, spec, value) {
   if (typeof v !== 'number' || !Number.isFinite(v)) {
     throw new Error(`${name} is a scalar: it takes a finite number, got ${JSON.stringify(value)}`);
   }
-  const clamped = Math.min(spec.max, Math.max(spec.min, v));
-  const snapped = spec.min + Math.round((clamped - spec.min) / spec.step) * spec.step;
-  const decimals = Math.max(decimalsOf(spec.min), decimalsOf(spec.step));
-  return Math.min(spec.max, Math.max(spec.min, Number(snapped.toFixed(decimals))));
+  return snapScalar(spec, v);
 }
 
 const values = new Map();
@@ -2899,7 +2887,7 @@ adoptEffectPackages(effectPackages, shaderPrograms);
  * name whose effect is installed is validated and applied, a dotted name whose effect is
  * absent is parked. So the pair of writes below is the pair of reads that already exists:
  * `serialiseProjectBody` hands over the open document with the parked pool merged back
- * verbatim, the registry is replaced underneath it, and the loader re-splits the same
+ * value for value, the registry is replaced underneath it, and the loader re-splits the same
  * document against the new one. An effect that has just arrived finds its parked values
  * in `look.params` and applies them; an effect that has just left finds its values
  * unrecognised and parks them, with the `requires` entry the serialiser wrote on the way
@@ -3973,8 +3961,18 @@ function toggleKey(name) {
  * against the parameter's own spec - kind, bounds, step - and there is no spec for a
  * parameter this build has never declared. So a parked value is carried rather than
  * inspected, which is the only honest thing to do with a number whose meaning lives
- * in a package that is not here; `serialiseProjectBody` writes it back byte for byte
- * and a build that has the effect is the first reader that can say anything about it.
+ * in a package that is not here; `serialiseProjectBody` writes every key back holding
+ * exactly the value it arrived with, and a build that has the effect is the first reader
+ * that can say anything about it.
+ *
+ * **Per key, and not per byte.** The guarantee is that nothing under a parked prefix is
+ * renormalised, rebuilt, dropped or added to - what it is not is a promise about the file.
+ * The parked keys are appended after the installed ones, so a document that interleaved
+ * them comes back re-ordered, and every number goes through `JSON.parse`, which reads
+ * `1e0` and writes `1`. A load and save on a machine missing an effect therefore moves the
+ * document's revision, which is accepted: the work is intact and the bytes are not the
+ * claim. `tools/library-check.mjs`'s parked section is what holds the property that is
+ * actually promised.
  *
  * `requires` holds the document's own entries for the missing effects rather than
  * ids, because an entry carries the version - and the badge quotes it, so the person
@@ -3986,6 +3984,34 @@ function toggleKey(name) {
  * open document's rather than an accumulation across the documents a session opened.
  */
 let parkedLook = { params: {}, tracks: {}, requires: [] };
+
+/**
+ * The effects the open document was authored against at a version this build does not
+ * have installed - one entry per effect, saying which is which.
+ *
+ * **A skew is surfaced and never refused, and that is a decision rather than an
+ * oversight.** A version is a string a package author writes; nothing in it says which
+ * direction is compatible, and refusing a document because 2.0.0 is installed where
+ * 1.0.0 was authored would make every retune of an effect a wall in front of every clip
+ * on the machine. Parking is for an effect that is *absent*, where there is genuinely
+ * nothing to render; here the effect is present and renders, and the only honest thing
+ * missing is that nobody said so. So the document loads, the installed version draws it,
+ * and the badge says which pair it is - which is the one fact that lets somebody decide
+ * whether the difference matters, since only they know what changed between the two.
+ *
+ * **The notice does not survive the next commit, and that is the design working.**
+ * `requires` is derived from the installed set on every save, so the first
+ * `history.commit()` after this rewrites the entry to the version that is actually here
+ * and the skew is gone. That is what a derived field is: the document records what it
+ * was last built from, and this machine has now built it. A build that preserved the old
+ * entry would be carrying a claim about a package it does not have and cannot check, and
+ * `refuseRequires` would then be reading a list that no longer describes the values
+ * beside it.
+ *
+ * Replaced whole by `restoreProject` for the reason `parkedLook` is: it is a property of
+ * the open document, not an accumulation across the ones a session has seen.
+ */
+let effectVersionSkew = [];
 
 /**
  * The effects the operator has said to render without, which is session state and
@@ -4101,9 +4127,13 @@ function serialiseProjectBody({ suppressed = null } = {}) {
       // camera, so an undo snapshot or a render job does not carry render scale or
       // the free camera's orbit.
       //
-      // **And the parked pool merged back verbatim.** A build without an effect has to
-      // be able to open a document, save it, and leave the parts it cannot read exactly
-      // as it found them - anything else makes opening a clip on the wrong machine a
+      // **And the parked pool merged back, value for value.** A build without an effect
+      // has to be able to open a document, save it, and leave the parts it cannot read
+      // holding exactly what they held - the pool is spread rather than walked, so nothing
+      // here inspects or rebuilds a value on the way past. The keys land after the
+      // installed ones and the numbers go through `JSON.parse`, so the *file* is not the
+      // one it was and the revision moves; the values are, which is the promise. Anything
+      // less makes opening a clip on the wrong machine a
       // destructive act, and it destroys precisely the work nobody on that machine can
       // redo.
       //
@@ -4431,6 +4461,18 @@ function restoreProject(project) {
   // is parked has an entry here by construction and finding none would be that refusal
   // having stopped working rather than a document to accommodate.
   const parkedRequires = parkedIds.map((id) => (project.requires ?? []).find((e) => e.id === id));
+  // **And the entries for the effects that *are* here, compared against what is here.**
+  // `refuseRequires` holds the list and the values to each other and says nothing about
+  // versions, so a clip authored against `glyph` 1.0.0 opens perfectly on a machine
+  // carrying 2.0.0 and renders 2.0.0 without a word. That is the right behaviour - see
+  // the declaration of `effectVersionSkew` for why a refusal here would be worse - and it
+  // is the *silence* that is not, because the picture is then a look nobody authored with
+  // no way to find out. Collected here, in the phase that changes nothing, and assigned
+  // with the other writes below.
+  const versionSkew = (project.requires ?? [])
+    .filter((e) => typeof e?.id === 'string' && effectInstalled(e.id))
+    .map((e) => ({ id: e.id, wanted: e.version, installed: versionOf(e.id) }))
+    .filter((e) => e.wanted !== e.installed);
   // And each effect it touches, whole - the readings rule one namespace over. The
   // reset below hands an omitted parameter its default, so half a glyph field would
   // load as a blend of the document and the defaults that nothing on screen says is
@@ -4444,7 +4486,25 @@ function restoreProject(project) {
   // out, the honest statement is that nothing in this build knows how many parameters a
   // missing effect has, so there is no completeness to demand: the machine that has the
   // package is the first reader that can ask.
-  for (const id of effectIdsIn(Object.keys(project.look.params)).filter((n) => !parkedIds.includes(n))) {
+  //
+  // **Which effects a document *uses* is its values and its tracks, and asking the values
+  // alone left a whole shape outside the rule.** A document carrying a `glyph.tone` track,
+  // a `requires` entry for glyph and no glyph values at all named no glyph key in
+  // `look.params`, so this loop never reached the id and the completeness demand was
+  // simply not made. It loaded: the track's name is one the registry knows and its tag is
+  // `look`, so nothing below refused it either, and every glyph parameter came back at its
+  // default under a curve the document did author. The save then wrote them all out - the
+  // rule in `serialiseProjectBody` keeps an effect whose track has keys - so the file on
+  // disk gained four values nobody set, silently, on a machine that was only ever asked to
+  // open it. That is the same "an edit silently lost" the track refusals below are about,
+  // arriving through the one door that was asking about the wrong half of the document.
+  //
+  // The demand itself is unchanged and is still about the *values*: a track is a use of
+  // the effect and never a substitute for its value, since the evaluator writes through
+  // `params.set` and a parameter with no static value would restore to its default and be
+  // overwritten by the curve at every frame but the ones between keys.
+  const touched = effectIdsIn([...Object.keys(project.look.params), ...Object.keys(project.look.tracks)]);
+  for (const id of touched.filter((n) => !parkedIds.includes(n))) {
     const short = effectParamNames(id).filter((n) => !Object.hasOwn(project.look.params, n));
     if (short.length) {
       throw new Error(
@@ -4700,7 +4760,14 @@ function restoreProject(project) {
     tracks: parkedTracks,
     requires: parkedRequires,
   };
-  // Pruned rather than cleared, because undo arrives here too - see the declaration.
+  // Beside the pool and for the same reason: it describes this document and nothing else,
+  // so a refused load leaves the previous document's notice standing rather than half of
+  // one document's and half of another's.
+  effectVersionSkew = versionSkew;
+  // Pruned rather than cleared, because undo arrives here too - see the declaration. What
+  // *opens* a different document is `loadProjectNamed`, and that is where the clearing
+  // lives: this function is the door for a load, an undo, a hotload and a rollback alike,
+  // and three of those four are the same clip.
   suppressedEffects = new Set([...suppressedEffects].filter((id) => parkedIds.includes(id)));
   paintMissingEffects();
 
@@ -7740,8 +7807,27 @@ for (const rate of OUTPUT_RATES) ui.fps?.appendChild(new Option(String(rate), St
 function paintMissingEffects() {
   if (!ui.missing) return;
   const missing = missingEffects();
-  ui.missing.hidden = missing.length === 0;
-  ui.missing.replaceChildren(...missing.map((m) => {
+  const skew = effectVersionSkew;
+  ui.missing.hidden = missing.length === 0 && skew.length === 0;
+  // **The version notices share the chip and carry no control, and both halves of that
+  // are deliberate.** They share it because they are the same sentence to the same reader
+  // - what the clip asked for and what this machine has - and a second slot in the bar
+  // would be a second thing that can grow its height, which is the class this chip's own
+  // comment is about. They carry no control because there is nothing to decide: an export
+  // is not refused for a skew, so a button here would be a switch over a door that is
+  // already open. That also keeps them outside `editor-check`'s control sweep, which
+  // demands a driver for every input, select, button and anchor the editor renders - a
+  // notice with a button on it would owe one and would be claiming a gesture nobody has.
+  const notices = skew.map((s) => {
+    const entry = document.createElement('span');
+    entry.className = 'missingfx';
+    entry.dataset.skew = s.id;
+    const line = document.createElement('b');
+    line.textContent = `document requires ${s.id} ${s.wanted}, installed is ${s.installed}`;
+    entry.append(line);
+    return entry;
+  });
+  ui.missing.replaceChildren(...notices, ...missing.map((m) => {
     const entry = document.createElement('span');
     entry.className = 'missingfx';
     entry.dataset.effect = m.id;
@@ -10375,9 +10461,6 @@ function presetFromCurrentLook(names) {
 
 /** Every look parameter of one effect, in declaration order. */
 const effectParamNames = (id) => params.names('look').filter((n) => effectOf(n) === id);
-
-/** The effect ids a set of names touches, in first-appearance order. */
-const effectIdsIn = (names) => [...new Set(names.map(effectOf).filter(Boolean))];
 
 /** The ids of every effect the registry currently declares. */
 const effectIds = () => effectIdsIn(params.names('look'));
@@ -14663,6 +14746,24 @@ async function loadProjectNamed(name, offered = null) {
   const resume = timeline ? timeline.playing : false;
   if (resume) timeline.pause();
   restoreProject(doc.body);
+  // **Opening a document is what spends a suppression, and this line is the whole of that
+  // rule.** A suppression is the operator saying *this* render of *this* clip may go
+  // without an effect this machine lacks. `restoreProject` prunes rather than clears,
+  // correctly, because it is also the door an undo and a hotload rollback come through and
+  // those are the same clip - but it cannot tell those apart from a different file
+  // arriving, so the prune kept a decision made about project A alive over project B. Both
+  // documents are missing `sparkle`, B was never authorised by anybody, and B exported
+  // silently without it.
+  //
+  // Here rather than inside the loader because this is the only caller for which the
+  // document is a *different* one, and after the restore rather than before it because the
+  // loader refuses seventeen shapes: clearing first would spend the decision on a document
+  // that never opened, which is the one thing every refusal in there is arranged not to do.
+  // Repainted because the badge draws the latch state and the clear moved it.
+  if (suppressedEffects.size) {
+    suppressedEffects.clear();
+    paintMissingEffects();
+  }
   // The stack is restored from the file when it was saved; otherwise it restarts
   // from the loaded document. Undoing across a project load would walk back into an
   // edit of something else, which is the shape of undo people learn not to trust.
@@ -15787,6 +15888,15 @@ globalThis.__kinect = {
      * suggestion to parse the chip.
      */
     missingEffects,
+    /**
+     * The effects the open document was authored against at a version other than the one
+     * installed here - `{ id, wanted, installed }` per effect.
+     *
+     * A neighbour of `missingEffects` rather than a field on it, because the two are
+     * different states of the same question and a check that conflated them would go green
+     * on either. An effect can be missing, or present at another version, and never both.
+     */
+    effectVersionSkew: () => effectVersionSkew.map((s) => ({ ...s })),
     /** The parked pool itself, so a round-trip row can compare what went in and out. */
     parkedLook: () => JSON.parse(JSON.stringify(parkedLook)),
     marks: () => takeMarks.map((m) => ({ ...m })),

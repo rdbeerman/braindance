@@ -429,6 +429,19 @@ const MUTATIONS = {
     '      suppressEffects: [...suppressedEffects],',
     '      suppressEffects: [],',
   ]] },
+  // **The suppression outliving the document it was made about**, which is how it shipped:
+  // `restoreProject` prunes the set to whatever is still parked, and two documents missing
+  // the same effect are indistinguishable to a prune. It is aimed at the *clear*, not at
+  // the prune, and that is the split the rows measure - the prune has to stay, because it
+  // is what lets a suppression survive the undo stack.
+  //
+  // Must redden the leak row and the refusal row beside it, and leave the keep row green.
+  // A mutation that also reddened the keep row would be removing both halves and could not
+  // say which of the two questions this section is asking.
+  'suppression-outlives-its-document': { file: 'web/main.js', edits: [[
+    '  if (suppressedEffects.size) {\n    suppressedEffects.clear();\n    paintMissingEffects();\n  }',
+    '  // the clear this mutation removes',
+  ]] },
   // Only the split reverts, so the claim cannot be carried by the other two.
   'rgbsplit-absolute': { file: 'effects-builtin/rgbsplit/split.grade.glsl', edits: [[
     'vec2 off = dir * rgbSplit * texel * 8.0;',
@@ -3137,6 +3150,118 @@ const parkedRun = await onFreshPage('the missing-effect export run', async (page
       );
       return { pressed, note: await page.evaluate("document.getElementById('tExportNote').textContent") };
     })(),
+    // **A suppression is a decision about one document, and nothing was ending it.**
+    // `restoreProject` prunes the set to whatever is still parked, which is right for the
+    // three callers that are the *same* clip - an undo, a hotload, a rollback - and wrong
+    // for the one that is a different file. Two projects both missing `sparkle` therefore
+    // shared one authorisation: suppress it while A is open, open B, and B exports without
+    // it having been permitted by anybody. Worse than a stale toggle, because the thing it
+    // silently permits is a video leaving the machine short of a layer of its look.
+    //
+    // **Driven through the button and not through `export.run`**, which is the whole reason
+    // this row is here rather than beside the hook rows. `exportClip` takes the suppress set
+    // as an argument, so a call passing `[]` is refused on every build there is and would
+    // prove nothing; the set the leak was made of is the page's own, and the export button
+    // is the only thing that reads it.
+    leak: await (async () => {
+      // **The export dialog the block above left open, closed through its own control
+      // before anything here presses a thing behind it.** `#exportDialog` is modal, so the
+      // browser refuses pointer events to everything under it - the badge's suppress button
+      // included - and Playwright's click waits rather than failing: the first attempt at
+      // this block spent thirty seconds retrying against `<dialog open>` and ended the run
+      // with `page.click: Timeout 30000ms exceeded` and no failed assertion, which is the
+      // crash-wearing-the-shape-of-a-catch this suite has recorded three times. Driven
+      // through `#exportClose` rather than by calling `close()`, because a modal a person
+      // can open is a modal a person closes and that is the path this file drives.
+      await page.locator('#exportClose').click();
+      const pressedFor = (id) => page.evaluate(
+        `document.querySelector('#tMissing button[data-suppress="${id}"]')?.getAttribute('aria-pressed') ?? 'absent'`,
+      );
+      const restore = (doc) => page.evaluate(`(async (d) => {
+        globalThis.__kinect.library.restoreProject(d);
+        await globalThis.__kinect.timeline.settled();
+      })(${JSON.stringify(doc)})`);
+      // The complete document first, so this block starts from a page with nothing parked
+      // and therefore nothing suppressed - the prune empties the set on its way past. A
+      // block inheriting `throughTheUi`'s press would be asserting about a latch it did not
+      // set, which is a fixture rather than a claim.
+      await restore(one.base);
+      await restore(one.doc);
+      await page.click('#tMissing button[data-suppress="sparkle"]');
+      const inA = await pressedFor('sparkle');
+      // B is a *different document* that happens to miss the same effect, which is exactly
+      // the pair the leak needs: if the set were keyed on the effect rather than on the
+      // document, both look identical to it. Handed over rather than fetched, through the
+      // same `offered` parameter the resume chip uses, so this writes nothing into the
+      // store it is running against.
+      await page.evaluate(`globalThis.__kinect.library.loadProject('check-missing-leak', ${JSON.stringify(two.doc)})`);
+      await page.evaluate('globalThis.__kinect.timeline.settled()');
+      const inB = await pressedFor('sparkle');
+      // Where this block's own console noise starts. Marked before the press rather than
+      // matched by content afterwards, because `throughTheUi` above can produce the
+      // identical sentence on a mutated build - `export-button-drops-the-suppression`
+      // refuses the export it drives - and a drain matching on text alone would take that
+      // line out of the sweep too. That is not a tidier filter, it is this block silently
+      // exempting a *different* control's finding, which is the standing-exemption failure
+      // the drain exists to avoid rather than an instance of it.
+      const errorsBefore = pageErrors.length;
+      await page.locator('#outputMenuButton').click();
+      await page.locator('#menuExport').click();
+      await page.fill('#tExportName', 'check-missing-leak');
+      await page.locator('#tExport').click();
+      await page.waitForFunction(
+        `!/starting|frame /.test(document.getElementById('tExportNote').textContent)`,
+        null, { timeout: 180000 },
+      );
+      const note = await page.evaluate("document.getElementById('tExportNote').textContent");
+      // Closed again before the second half of the block presses anything, for the reason
+      // it was closed at the top: an export refused leaves the dialog standing, and a modal
+      // takes every later click in this file with it.
+      await page.locator('#exportClose').click();
+      // **And the sentence this block just provoked, taken out of the sweep by draining
+      // exactly one entry rather than by filtering it.** The refusal is the point of the
+      // rows above, and `showTimelineError` writes every sentence it shows the operator to
+      // `console.error` as well - so the `no page errors` row at the foot of this file
+      // collects it. A filter there would be standing rather than local: it would go on
+      // covering whatever the page said next that matched, and a build that stopped
+      // refusing would take the exemption with it in silence. Draining turns the noise into
+      // a claim - a build that does not refuse drains nothing and reddens the row below.
+      //
+      // Matched on the *shape* of the sentence rather than on `sparkle`, and that is not a
+      // widening for convenience. Under `suppression-outlives-its-document` the leaked
+      // suppression covers sparkle, so the refusal this export produces names drizzle
+      // instead - one line either way, and a drain keyed to the id would leave it in the
+      // sweep and add a red row about console noise to a control that is already saying
+      // what it has to say. The claim the count carries is unchanged: this block's export
+      // is refused, once.
+      // Removed by index from the tail, never by value: two identical sentences are two
+      // entries, and `indexOf` would take the earlier one - which is the same
+      // somebody-else's-line mistake as matching on text, arriving through the splice.
+      const drained = [];
+      for (let i = pageErrors.length - 1; i >= errorsBefore; i--) {
+        if (/this clip requires .* not installed here/.test(pageErrors[i])) {
+          drained.push(pageErrors.splice(i, 1)[0]);
+        }
+      }
+      // And the other half of one rule: within one document the prune is what makes undo
+      // survivable, so a restore of the same body has to leave the latch down. Without this
+      // row the fix could be "clear on every restore", which would spend the decision on
+      // every keystroke that enters the undo stack.
+      await restore(one.doc);
+      // **Pressed only if the latch is down**, which is the same discipline `editor-check`'s
+      // panel section keeps for the same reason: this is a toggle, so a blind press on a
+      // build where the state is already set turns it *off* and the row below then reads a
+      // fixture nobody built. That is not hypothetical - under
+      // `suppression-outlives-its-document` the leak half's suppression is still standing
+      // here, and a blind press made this row red about a claim the mutated build actually
+      // keeps, which is a control reddening a row it has nothing to do with.
+      if (await pressedFor('sparkle') !== 'true') {
+        await page.click('#tMissing button[data-suppress="sparkle"]');
+      }
+      const beforeUndo = await pressedFor('sparkle');
+      await restore(one.doc);
+      return { inA, inB, note, drained: drained.length, beforeUndo, afterUndo: await pressedFor('sparkle') };
+    })(),
   };
 });
 
@@ -3217,6 +3342,33 @@ if (!parkedRun.ok) {
     && !/refused|failed/.test(r.throughTheUi?.note ?? ''),
   'and a suppression pressed in the badge is the one the export button spends, driven through both controls',
   `aria-pressed ${r.throughTheUi?.pressed}, note ${JSON.stringify(r.throughTheUi?.note ?? null)}`);
+
+  // **The leak, and the row that says the fix did not go too far.** Two documents both
+  // missing `sparkle` used to share one authorisation, because the loader prunes the
+  // suppression set rather than clearing it - right for the undo and the rollback that
+  // arrive through the same door, wrong for a file somebody opened. Both halves are
+  // asserted from the latch itself and the leak half again from the export, because the
+  // latch is what the fix moves and the refusal is what it is for: a build that cleared the
+  // set and forgot to repaint would pass the second and fail the first.
+  check(r.leak?.inA === 'true' && r.leak?.inB === 'false',
+    'a suppression made on one document is not carried into the next document opened, even one missing the same effect',
+    `pressed in A: ${r.leak?.inA}, then in B: ${r.leak?.inB}`);
+  // `export failed` is the note's own word for a refusal and `refused` is not, which cost a
+  // round: the first spelling of this row asked for `/refus/i`, the build refused exactly as
+  // it should, and the row went red on the message rather than on the outcome. The mirror of
+  // the successful-export row above, which asks for a filename and the absence of this.
+  check(/sparkle/.test(r.leak?.note ?? '') && /export failed/.test(r.leak?.note ?? ''),
+    'and the export the second document asks for is refused again, naming the effect nobody authorised it to go without',
+    JSON.stringify(r.leak?.note ?? null));
+  // The drain asserted rather than performed silently, which is what keeps the sweep at the
+  // foot of this file honest: a build that stopped refusing writes nothing to the console,
+  // drains nothing, and reddens here - so the exemption cannot outlive the thing it exempts.
+  check(r.leak?.drained === 1,
+    'and that refusal is the one console line this block adds, taken back out of the sweep by name rather than filtered out of it',
+    `${r.leak?.drained} drained`);
+  check(r.leak?.beforeUndo === 'true' && r.leak?.afterUndo === 'true',
+    'while a restore of the same document keeps it, which is what makes the decision survive an undo',
+    `before ${r.leak?.beforeUndo}, after ${r.leak?.afterUndo}`);
 
   check(r.complete.ok === true, 'a complete document exports with no refusal at all',
     r.complete.ok ? `${r.complete.frames} frames to ${r.complete.output}` : r.complete.error);

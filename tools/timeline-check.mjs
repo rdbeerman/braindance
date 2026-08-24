@@ -599,6 +599,20 @@ if (MUTATE && mutantServed === 0) {
 // drawing buffer - but 640x360 is 16:9, the menu's own default, so there is no
 // letterbox and no offset to carry: the buffer comes out exactly 640x360.
 await page.evaluate('globalThis.__kinect.setOutputSize?.("640x360")');
+// The transport first, and the furniture after it - which is the fix for an intermittent
+// this file used to die on rather than a reordering for tidiness.
+//
+// **The strip is hidden until the take opens.** `#timeline` carries `hidden` until the
+// transport exists, so furniture measured before this wait reads a strip of zero on any
+// run where the take opens a beat late, the viewport comes out `360 + 0 + shell`, and the
+// stage is short by exactly the strip. Recorded twice, with the arithmetic both times: a
+// run reading `338x190` is `398 - 208`, where 398 is `360 + 0 + 38` and 208 is the
+// furniture the run then actually had; a run reading `533x300` is `508 - 208`, where 508
+// is the *initial* `360 + TIMELINE_H_GUESS` viewport, so there the resize had not reached
+// the drawing buffer rather than the strip being absent. One guard, two ways for the
+// measurement and the take to race, and both of them are answered by waiting for the thing
+// that makes the strip appear before asking how tall it is.
+await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
 // And the viewport is sized to whatever fixed furniture actually surrounds the stage,
 // measured rather than assumed. `TIMELINE_H` was a constant that went stale the moment
 // the bar became two rows, and the Pencil shell adds the same risk at the top: every
@@ -619,8 +633,22 @@ await page.evaluate('globalThis.__kinect.setOutputSize?.("640x360")');
     width: STAGE.width,
     height: STAGE.height + furniture.strip + furniture.shell,
   });
+  // **And then wait for the drawing buffer to follow, because `setViewportSize` returning
+  // is not the renderer having resized.** That is the second signature above: the viewport
+  // was right and the buffer had not caught up when it was read. The wait is an
+  // accommodation and the throw below is the guard, so a timeout here falls through to it
+  // rather than replacing it - a run that genuinely cannot reach this stage still dies
+  // loudly, naming the size it got.
+  //
+  // The predicate answers *false* on a page with no renderer rather than throwing, because
+  // a throw inside `waitForFunction` is not caught by it: the twenty seconds a wait is
+  // given are never spent, and the failure arrives instantly wearing the shape of a
+  // finding. `docs/instruments.md` records that costing a round on its own.
+  await page.waitForFunction((want) => {
+    const gl = globalThis.__kinect?.renderer?.getContext?.();
+    return !!gl && gl.drawingBufferWidth === want.w && gl.drawingBufferHeight === want.h;
+  }, { w: STAGE.width, h: STAGE.height }, { timeout: 15000 }).catch(() => {});
 }
-await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
 await page.evaluate(INSTALL);
 
 const gpu = await page.evaluate(() => {

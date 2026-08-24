@@ -155,6 +155,52 @@ test('a step has to be a grid this build can snap to', () => {
     'a step at the floor is not refused by it');
 });
 
+// **And the bounds have to sit on the grid the step declares, which the rule above cannot
+// see.** A step of 0.05 is a perfectly good grid and a default of 0.72 is inside perfectly
+// good bounds, and the pair still describes a position the registry never holds: `normalise`
+// snaps it to 0.70 on the first write, the panel compares the live value against the snapped
+// default and finds them equal, and `groupDefaults` compares the *declared* one and finds
+// them not - so an effect nobody touched reads as modified, its group derives open, and the
+// save rule keeps it, which puts a `requires` entry for it into every document saved after
+// the install.
+//
+// The door asks by running `snapScalar` - the same function the registry snaps with - rather
+// than by testing the division against an epsilon, so there is one answer to "where does
+// this land" and no second description of it to drift.
+test('a bound off its own step grid is a number the registry never holds', () => {
+  assert.match(brokenBy('noise', (c) => { c.manifest.params.speed.def = 0.72; }),
+    /declares def 0\.72 and the registry would hold it at 0\.7/,
+    'a default between two positions is refused, naming where it would actually land');
+  assert.equal(brokenBy('noise', (c) => { c.manifest.params.speed.def = 0.75; }), null,
+    'and a default on the grid is not - which is what says this rule is about the grid rather than about the value');
+
+  // The top of the range is the one bound `snapScalar` alone answers wrongly about: it
+  // clamps, so a `max` the snap steps past is put back onto itself. The door lifts the
+  // ceiling by a step to ask the question with the clamp out of the way, and this row is
+  // what says that lift is doing something - without it the assertion below passes on a
+  // rule that never looked.
+  assert.match(brokenBy('noise', (c) => { c.manifest.params.speed.max = 2.98; }),
+    /runs to 2\.98, which is not on the 0\.05 grid 0 anchors/,
+    'a ceiling off the grid is refused even though a value clamped to it is the ceiling');
+  assert.equal(brokenBy('noise', (c) => { c.manifest.params.speed.max = 2.95; }), null,
+    'and a ceiling on the grid is not');
+
+  // **`min` has no rule of its own and this row is why.** It anchors the grid, so the snap
+  // returns it unchanged and the final clamp returns it again even where the rounding would
+  // have moved it - a rule asking `min` could not go red on any input the checks above
+  // admit, which is the vacuous conjunct `docs/instruments.md` keeps recording. What a
+  // too-fine `min` actually breaks is every *other* value, because the decimals it implies
+  // are used for all of them, and the default is where that shows: on a 0.05 grid a `min` of
+  // 1e-101 takes a default of 0.7 to 0.7000000000000001, which the row above catches by
+  // name. The residual is stated rather than asserted, because a row asserting a hole is a
+  // row that has to be deleted to close it: a package whose `def` sits exactly *on* such a
+  // `min` gets through, and what it costs is that its values land on `n * step` without the
+  // rounding correction - which is where they would have landed anyway.
+  assert.match(brokenBy('noise', (c) => { c.manifest.params.speed.min = 1e-101; }),
+    /declares def 0\.7 and the registry would hold it at 0\.7000000000000001/,
+    'a floor finer than the rounding this build can express moves the default, and the default row catches it');
+});
+
 // **Where a row would land, which nothing asks until the registry has already swapped.**
 // Both of these throw inside `buildPanel` - after the new registry is in place - so on a
 // page they arrive as a rollback reporting that a document could not be carried across,

@@ -311,6 +311,31 @@ const MUTATIONS = {
     '  const requires = [...requiresFor(kept), ...parked.requires];',
     '  const requires = [...requiresFor(kept)];',
   ]] },
+  // **The version a document was authored against, compared with nothing.** This is how it
+  // shipped: `refuseRequires` holds the list and the values to each other in both
+  // directions and never looks at the version beside them, so a clip built on one build of
+  // an effect opened on another and rendered the other without a word. The comparison is
+  // left standing and its result thrown away, which is the smallest edit that puts the
+  // silence back - a build with the detection deleted outright would also stop the hook
+  // existing, and a row that fell over on `undefined` is a crash rather than a catch.
+  //
+  // Must redden the two rows about the mismatched document - the hook and the sentence on
+  // the bar - and leave the matched control green, because a build that reported nothing
+  // agrees with a correct one about a document that has nothing to report.
+  'skew-goes-unreported': { file: 'web/main.js', edits: [[
+    '    .filter((e) => e.wanted !== e.installed);',
+    '    .filter(() => false);',
+  ]] },
+  // **The completeness rule reading the values and not the tracks**, which is the build
+  // this branch found: an effect a document uses only through a track was outside the loop
+  // entirely, so the demand was never made and the file was rewritten on save. It reddens
+  // the track-only row alone - the values-truncation row beside it stays green, because
+  // that document names glyph in `look.params` and reaches the loop either way, and that
+  // split is what says the two rows are asking different questions rather than one twice.
+  'completeness-reads-the-values-only': { file: 'web/main.js', edits: [[
+    '  const touched = effectIdsIn([...Object.keys(project.look.params), ...Object.keys(project.look.tracks)]);',
+    '  const touched = effectIdsIn(Object.keys(project.look.params));',
+  ]] },
   // **The capture format's band comes off.** A take whose hello declares a generation
   // this build has never read is opened on this build's assumptions instead of being
   // refused - which is the whole of the failure the format number exists to prevent,
@@ -5692,26 +5717,48 @@ async function runChecks() {
     // drops the values writes a document the loader's own both-directions rule refuses -
     // which means the damage is not only a silent loss on the machine without the effect,
     // it is a file nothing anywhere can open afterwards. That is a different claim from
-    // the byte comparison below and it is the one that fires first.
+    // the value comparison below and it is the one that fires first.
     check(parked.reloaded === true,
       'and the file it saves is a document this build can open again',
       parked.reloadError ?? 'reopened');
 
-    // **The claim, read off the file on disk.** Compared as text in the document's own
-    // key order rather than field by field, because "byte-preserving" is what was
-    // promised: a comparison that rebuilt each value would pass a build that had
-    // renormalised them, which is exactly the damage a machine without the effect is not
-    // entitled to do.
+    // **The claim, read off the file on disk - and it is per-key value identity rather
+    // than byte identity, which these rows used to say and could not prove.** What the
+    // parking guarantees is that every key the pool holds comes back holding the same
+    // *value*, structure and all: the numbers are not renormalised, the ease handles are
+    // not rebuilt, no key is dropped and none is invented. What it does not guarantee is
+    // the bytes, and two things in the round trip see to that - the parked keys are
+    // appended after the installed ones, so a document that interleaved them comes back
+    // re-ordered, and every number goes through `JSON.parse`, which reads `1e0` and writes
+    // `1`. The document's revision therefore moves across a load and save on a machine
+    // missing an effect, and that is accepted behaviour; the promise being kept is that
+    // nothing this build cannot read is altered, dropped or reinterpreted.
+    //
+    // Compared as one string per side, in the fixture's own key order, rather than field
+    // by field: a comparison that walked each value and rebuilt it would pass a build that
+    // had renormalised them, which is exactly the damage a machine without the effect is
+    // not entitled to do. The order the two sides are read in is this file's, not the
+    // file's, which is the honest reading of what it holds - the file's own order is not
+    // part of the claim.
     const parkedFile = JSON.parse(readFileSync(join(WORK, 'projects/parked-round-trip.json'), 'utf8'));
     const pick = (from, keys) => JSON.stringify(Object.fromEntries(keys.map((k) => [k, from?.[k]])));
     const valueKeys = Object.keys(PARKED_VALUES);
     const trackKeys = Object.keys(PARKED_TRACKS);
     check(pick(parkedFile.look?.params, valueKeys) === pick(PARKED_VALUES, valueKeys),
-      'the parked values come back out of the saved file byte for byte',
+      'every parked value comes back out of the saved file holding exactly what went in, key for key',
       pick(parkedFile.look?.params, valueKeys));
     check(pick(parkedFile.look?.tracks, trackKeys) === pick(PARKED_TRACKS, trackKeys),
-      'and so do the parked tracks, ease handles and all',
+      'and so does every parked track, key times, values and ease handles alike',
       pick(parkedFile.look?.tracks, trackKeys).slice(0, 120));
+    // **And nothing under the pool's prefixes was invented on the way through**, which the
+    // two rows above cannot see: they ask about the keys the fixture named and would pass a
+    // build that had added a fifth `sparkle` value beside them. Read off the file rather
+    // than off the fixture, so the population is what the document actually holds.
+    const parkedIn = (o) => Object.keys(o ?? {}).filter((k) => k.startsWith('sparkle.')).sort();
+    check(JSON.stringify(parkedIn(parkedFile.look?.params)) === JSON.stringify(valueKeys.slice().sort())
+      && JSON.stringify(parkedIn(parkedFile.look?.tracks)) === JSON.stringify(trackKeys.slice().sort()),
+    'and the file carries those keys and no others under that prefix, so nothing was added beside them either',
+    `${JSON.stringify(parkedIn(parkedFile.look?.params))} / ${JSON.stringify(parkedIn(parkedFile.look?.tracks))}`);
     // The `requires` entry survives with them, because the values are still in the
     // document - a file that kept the values and dropped the claim would be refused by
     // its own next load, which is the loader's own rule read from the other side.
@@ -5817,6 +5864,35 @@ async function runChecks() {
       ['a suppressed list that is not a list', 'p.suppressed = "sparkle";'],
       ['a suppressed entry with no version', 'p.suppressed = [{ id: "sparkle" }];'],
       ['a suppressed entry whose id could not be an effect id', 'p.suppressed = [{ id: "Sparkle!", version: "1.0.0" }];'],
+      // **The completeness rule asked of the half of the document it used to skip.** A
+      // document owes every parameter of an effect it uses, and "uses" was read off
+      // `look.params` alone - so a clip whose only mention of the glyph field is a track on
+      // `glyph.tone` named no glyph value, reached the loop over no ids at all, and loaded.
+      // Nothing else refused it either: the track's name is one the registry knows and its
+      // tag is `look`. What it left was three glyph parameters restored to their defaults
+      // under a curve somebody did author, and a save that then wrote all four out, because
+      // the save rule keeps an effect whose track has keys. A file rewritten on the machine
+      // that only opened it, silently.
+      //
+      // Both truncations are here rather than one, because they reach the same refusal from
+      // opposite sides and a single row could be satisfied by a rule that only saw its own:
+      // the first names the effect in its values and leaves one out, the second names it
+      // only in its tracks and leaves all of them out.
+      // **The `requires` entry is replaced rather than appended, and that is not
+      // fastidiousness.** `refuse` builds each case out of whatever the page is currently
+      // holding, and a case that is ACCEPTED - which is exactly what a mutation of this
+      // rule produces - leaves the page holding it, so the next case serialises a document
+      // that already claims glyph. Appended, the entry then appears twice and the refusal
+      // that fires is the duplicate rule rather than the completeness rule these rows are
+      // about: a control reddening a row for a neighbouring reason, which reads as a catch
+      // and says nothing about the question. Measured, under
+      // `completeness-reads-the-values-only`, before this was written as a replacement.
+      ['a project naming part of an effect in its values',
+        "p.look.params['glyph.amount'] = 0.5; p.look.params['glyph.tone'] = 0.2; p.look.params['glyph.hash'] = 1;"
+        + " p.requires = [...(p.requires ?? []).filter((e) => e.id !== 'glyph'), { id: 'glyph', version: '1.0.0' }];"],
+      ['a project whose only use of an effect is a track',
+        "p.look.tracks['glyph.tone'] = [{ t: 0, value: 0.2 }, { t: 1, value: 0.6 }];"
+        + " p.requires = [...(p.requires ?? []).filter((e) => e.id !== 'glyph'), { id: 'glyph', version: '1.0.0' }];"],
     ];
     const results = [];
     for (const [label, source] of cases) results.push(await refuse(label, source));
@@ -5828,6 +5904,99 @@ async function runChecks() {
     const good = await refuse('an unmodified project', '');
     check(good.message === 'ACCEPTED', 'and an unmodified project still loads',
       good.message === 'ACCEPTED' ? '' : good.message.slice(0, 80));
+
+    // **The control the two truncation rows need, and it is not the row above.** An
+    // unmodified project names no effect at all - the save rule sheds every effect held at
+    // defaults - so it passes a loader whose completeness rule refuses every document that
+    // mentions one. The shape that says the rule discriminates is a document naming an
+    // effect *whole* and keying one of its parameters, which is the shape the two rows
+    // above are each one key short of.
+    //
+    // The parameter list is read off the registry rather than written here, so a fork that
+    // adds a fifth glyph key is asked by existing rather than by somebody remembering; the
+    // floor beside it is what stops the row passing on an empty list, which is how it would
+    // read if the prefix ever stopped naming an installed effect.
+    const wholeEffect = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const clean = k.library.serialiseProject();
+      const p = k.library.serialiseProject();
+      const names = k.params.names('look').filter((n) => n.startsWith('glyph.'));
+      // Read off the live registry rather than off \`spec\`, which answers with a projection
+      // carrying \`default\` and not \`def\` - a probe pointed at a field that has never existed
+      // reads \`undefined\` on a correct build, which is the shape docs/instruments.md files
+      // under a reading that is not a finding. \`get\` cannot answer with anything the
+      // parameter could not hold.
+      for (const n of names) p.look.params[n] = k.params.get(n);
+      p.look.tracks['glyph.tone'] = [{ t: 0, value: 0.2 }, { t: 1, value: 0.6 }];
+      // Replaced rather than appended, for the reason the two cases above carry: a mutation
+      // of this rule leaves an earlier case's document on the page, and an appended entry
+      // would then be a duplicate refused by a different rule entirely.
+      p.requires = [...(p.requires ?? []).filter((e) => e.id !== 'glyph'), { id: 'glyph', version: '1.0.0' }];
+      let threw = null;
+      try { k.library.restoreProject(p); } catch (e) { threw = String(e.message ?? e); }
+      k.library.restoreProject(clean);
+      return { threw, names };
+    })()`);
+    check(wholeEffect.threw === null && wholeEffect.names.length >= 4,
+      'while a project naming a whole effect and keying one of its parameters loads, which is what the two rows above are each one key short of',
+      wholeEffect.threw ?? `${wholeEffect.names.length} glyph parameters named: ${wholeEffect.names.join(', ')}`);
+
+    // **A document authored against another build of an effect this machine does have.**
+    // `requires` carries a version and nothing was comparing it, so a clip built on glyph
+    // 1.0.0 opened on a machine carrying 2.0.0 and rendered 2.0.0 without a word - the
+    // picture is a look nobody authored and the only evidence is a field nobody reads. It
+    // is surfaced rather than refused, because a version string says nothing about which
+    // direction is compatible and refusing would make every retune of an effect a wall in
+    // front of every clip; what the load owes is the sentence.
+    //
+    // The matched document is built by raising the parameter and letting the serialiser
+    // derive the entry, so the version it claims is whatever this build actually has rather
+    // than a literal that goes stale the first time a package is retuned. The mismatched
+    // one is that document with the version moved and nothing else, which is what makes the
+    // pair a comparison of one term.
+    const skew = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const chip = () => ({
+        hidden: document.getElementById('tMissing')?.hidden ?? null,
+        notices: [...document.querySelectorAll('#tMissing .missingfx[data-skew]')]
+          .map((e) => e.querySelector('b').textContent),
+      });
+      const clean = k.library.serialiseProject();
+      k.params.set('glyph.amount', 0.5);
+      const matched = k.library.serialiseProjectBody();
+      const authored = (matched.requires ?? []).find((e) => e.id === 'glyph')?.version ?? null;
+      const skewed = JSON.parse(JSON.stringify(matched));
+      skewed.requires = skewed.requires.map((e) => (e.id === 'glyph' ? { ...e, version: '0.9.0' } : e));
+      const out = { authored };
+      k.library.restoreProject(skewed);
+      out.mismatched = { hook: k.library.effectVersionSkew(), ...chip() };
+      k.library.restoreProject(matched);
+      out.matched = { hook: k.library.effectVersionSkew(), ...chip() };
+      k.library.restoreProject(clean);
+      return out;
+    })()`);
+    check(JSON.stringify(skew.mismatched?.hook) === JSON.stringify([
+      { id: 'glyph', wanted: '0.9.0', installed: skew.authored },
+    ]),
+    'a document naming an effect at a version this build has not got loads, and says which pair it is',
+    JSON.stringify(skew.mismatched?.hook ?? null));
+    // The sentence a person actually gets, read off the bar rather than off the hook. A
+    // build whose detection worked and whose painter did not would pass the row above and
+    // leave the operator with nothing at all - which is the same split the badge's own
+    // rows draw between `missingEffects()` and the chip.
+    check(skew.mismatched?.hidden === false
+      && JSON.stringify(skew.mismatched?.notices) === JSON.stringify([
+        `document requires glyph 0.9.0, installed is ${skew.authored}`,
+      ]),
+    'and the bar carries that sentence, one entry for the effect, where a person can read it',
+    `hidden ${skew.mismatched?.hidden}, ${JSON.stringify(skew.mismatched?.notices ?? null)}`);
+    // The control, and it is the half that would go unnoticed: a build that reported a skew
+    // on every document would satisfy both rows above and put a permanent notice on the bar.
+    check(JSON.stringify(skew.matched?.hook) === '[]'
+      && skew.matched?.hidden === true
+      && JSON.stringify(skew.matched?.notices) === '[]',
+    'while the same document at the version this build has says nothing, so the notice is about the disagreement rather than about the effect',
+    `hook ${JSON.stringify(skew.matched?.hook ?? null)}, hidden ${skew.matched?.hidden}, ${JSON.stringify(skew.matched?.notices ?? null)}`);
 
     // **The other half of the `suppressed` rule, and it is the half with no throw in it.**
     // A well-formed record has to load - it is what a deliverable's own document looks

@@ -18,6 +18,11 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { validateExport } from './export.js';
 import { listJsonNames } from './library.js';
+// The one statement of what the dot in a look name means. The page derives a document's
+// `requires` from these namespaces on the way out and `enqueue` derives a job's envelope
+// from the same names on the way in, so a second spelling here would be two machines
+// disagreeing about which effect `sparkle.amount` belongs to.
+import { effectIdsIn } from '../web/format.js';
 
 export const JOB_VERSION = 1;
 
@@ -197,13 +202,46 @@ export class JobStore {
     // not be routed by what a machine has installed the way it is already routed by the
     // rasteriser it has.
     //
-    // **It is derived here and never accepted from the caller**, which is what makes the
-    // second spelling safe: `enqueue` is the only writer, and it writes what the project
-    // itself says. A `requires` a caller could set is a job that can lie about the
-    // document it carries. The two are held equal by `jobs-check` rather than trusted,
-    // on the same reading `syntax-check` holds `CAPTURE_FORMAT` to the grabber - two
-    // copies that cannot be one, compared instead of hoped about.
-    const requires = Array.isArray(project.requires) ? project.requires.map((e) => ({ ...e })) : [];
+    // **It is derived from the look's own namespaces and never copied**, and the
+    // distinction is the whole of this rule. `enqueue` takes no `requires` argument, so
+    // for a long time the comment here read "never accepted from the caller" and the line
+    // under it copied `project.requires` - which *is* caller data, because the caller
+    // hands over the whole body. A job posted with a document naming `sparkle.amount` and
+    // an empty `requires` therefore recorded an empty list, the worker's door read that
+    // list, found nothing missing, resolved a take, launched a browser and spent a minute
+    // of GPU before `restoreProject` refused the document from the other end. That is the
+    // failure the door was built to move, and it was reachable through the one field
+    // nobody was deriving.
+    //
+    // What is derived here is the id **set**, which is all the server can know: the dot
+    // in a look name is the effect it belongs to and `effectIdsIn` is the one statement of
+    // that split, shared with the page rather than spelled again. Versions cannot be
+    // derived - the machine that queued the job is the one that knew which build of the
+    // effect the look was authored against - so the entries are taken from the document
+    // whole, and a document whose list does not name the set its own values name is
+    // refused rather than corrected. Refused, because the two readings disagreeing means
+    // the body is hand-edited or damaged, and a queue that quietly rewrote the claim would
+    // be the second implementation of `refuseRequires`, one machine away from the loader
+    // that has to agree with it.
+    const look = project.look && typeof project.look === 'object' && !Array.isArray(project.look)
+      ? project.look : {};
+    const shape = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o) : []);
+    const used = effectIdsIn([...shape(look.params), ...shape(look.tracks)]);
+    const carried = Array.isArray(project.requires) ? project.requires : [];
+    const claimed = carried.map((e) => (e && typeof e === 'object' ? e.id : undefined));
+    const unlisted = used.filter((id) => !claimed.includes(id));
+    const unclaimed = [...new Set(claimed)].filter((id) => typeof id === 'string' && !used.includes(id));
+    if (unlisted.length || unclaimed.length) {
+      throw new Error(
+        'a job\'s project disagrees with its own requires list, so the queue cannot say what this '
+        + `render needs: ${[
+          unlisted.length ? `it names ${unlisted.join(', ')} values that the list does not claim` : null,
+          unclaimed.length ? `the list claims ${unclaimed.join(', ')} and no value is named under ${unclaimed.length === 1 ? 'it' : 'them'}` : null,
+        ].filter(Boolean).join(', and ')} - the list is derived from the values on save, so a gap `
+        + 'between them is a hand edit to finish before the job is queued',
+      );
+    }
+    const requires = used.map((id) => ({ ...carried.find((e) => e?.id === id) }));
     // And what this job is allowed to render without. Unlike `requires` this *is* the
     // caller's, because it is a decision rather than a fact: somebody has said this
     // render may go ahead on a machine missing that effect. Held to the id shape the

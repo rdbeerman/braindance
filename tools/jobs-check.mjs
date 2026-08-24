@@ -193,8 +193,30 @@ const MUTATIONS = {
       "codec = 'h264', suppressEffects = [], requires: asked = null }) {",
     ],
     [
+      '    const requires = used.map((id) => ({ ...carried.find((e) => e?.id === id) }));',
+      '    const requires = asked ?? used.map((id) => ({ ...carried.find((e) => e?.id === id) }));',
+    ],
+  ] },
+  // **The other half of the same field, and the two are not one control.** The mutation
+  // above is about a `requires` arriving beside the document; this one is about the
+  // `requires` arriving *inside* it, which is the shape this door actually shipped: the
+  // comment said "derived" and the line copied `project.requires`, and a caller hands over
+  // the whole body. It restores that exactly - the document's list taken whole, with the
+  // comparison that would have caught the disagreement gone - so a job whose values name
+  // an effect its list does not claim is queued with an empty envelope and the worker's
+  // door finds nothing to refuse.
+  //
+  // Two edits for the reason the pair above has two: leaving the refusal standing would
+  // refuse the very documents this mutation exists to let through, so the run would be
+  // measuring a build nobody could reach.
+  'envelope-trusts-the-documents-requires': { file: 'server/jobs.js', edits: [
+    [
+      '    if (unlisted.length || unclaimed.length) {',
+      '    if (false) {',
+    ],
+    [
+      '    const requires = used.map((id) => ({ ...carried.find((e) => e?.id === id) }));',
       '    const requires = Array.isArray(project.requires) ? project.requires.map((e) => ({ ...e })) : [];',
-      '    const requires = asked ?? (Array.isArray(project.requires) ? project.requires.map((e) => ({ ...e })) : []);',
     ],
   ] },
   // The beat that stops for good after one dropped connection, which is how it
@@ -583,6 +605,41 @@ try {
     && JSON.stringify(lying.body.requires) === JSON.stringify(PARKED_PROJECT.requires),
   'and it is derived from the document rather than accepted from the caller, so a job cannot lie about what it needs',
   `asked for nothing 9.9.9, recorded ${JSON.stringify(lying.body.requires ?? lying.body.error)}`);
+  // **The lie the row above cannot see, because the caller owns the document too.** There
+  // is no `requires` argument, so the row above asks whether an unknown request field is
+  // ignored - which it is, and was before this door derived anything. The list that
+  // actually reached the envelope was `project.requires`, and that is caller data: a body
+  // whose values name `sparkle` and whose list claims nothing recorded an empty envelope,
+  // so the worker's door found nothing missing and spent a take resolve and a browser
+  // before `restoreProject` refused the same document from the other end. Both directions,
+  // because the derivation can disagree with the list either way round and a document with
+  // one of them is a hand edit halfway done.
+  const understated = await enqueue({
+    project: { ...PARKED_PROJECT, requires: [] },
+    output: 'check-parked-understated',
+  });
+  check(refusedBecause(understated, 'sparkle'),
+    'a project whose values name an effect its own requires list does not claim is refused at the queue, by name',
+    `${understated.status} ${(understated.body.error ?? JSON.stringify(understated.body.requires)).slice(0, 120)}`);
+  const overstated = await enqueue({
+    project: { ...PARKED_PROJECT, requires: [...PARKED_PROJECT.requires, { id: 'nothing', version: '9.9.9' }] },
+    output: 'check-parked-overstated',
+  });
+  check(refusedBecause(overstated, 'nothing'),
+    'and one whose list claims an effect no value is named under is refused the same way',
+    `${overstated.status} ${(overstated.body.error ?? JSON.stringify(overstated.body.requires)).slice(0, 120)}`);
+  // The positive twin, and it is not the row above it. A door refusing every disagreement
+  // is satisfied by a door refusing everything, so the thing that says this one discriminates
+  // is a document whose two readings agree keeping the *version* the document authored - which
+  // is the half the server cannot derive and has to carry across.
+  const carriedWhole = await enqueue({
+    project: { ...PARKED_PROJECT, requires: [{ id: 'sparkle', version: '2.5.0', rev: 'abc123' }] },
+    output: 'check-parked-pinned',
+  });
+  check(carriedWhole.status === 200
+    && JSON.stringify(carriedWhole.body.requires) === JSON.stringify([{ id: 'sparkle', version: '2.5.0', rev: 'abc123' }]),
+  'and where the two agree the document\'s own entry is carried whole, version and rev included, because neither is derivable here',
+  `${carriedWhole.status} ${JSON.stringify(carriedWhole.body.requires ?? carriedWhole.body.error)}`);
   // And the operator's half, which *is* the caller's because it is a decision rather
   // than a fact. Held to the id shape, because a suppression naming something that could
   // never be an effect id covers nothing and would read as covering something.
@@ -600,8 +657,14 @@ try {
   // unlinking the file rather than through a route, since there is no route that deletes
   // a job - and a record is a file, which is the same door the planted records further
   // down go through.
+  // The two disagreement rows are in this list even though a working build refuses both
+  // and leaves nothing to remove: under `envelope-trusts-the-documents-requires` they are
+  // queued, and a record left behind there would redden the "one job" precondition of the
+  // section below - a control fired at this block reaching four sections down, which is
+  // the blast radius `docs/instruments.md` says to keep a mutation out of.
   for (const id of [...strays, goodCodec.body.id, lossless.body.id,
-    withParked.body.id, lying.body.id, goodSuppress.body.id]) {
+    withParked.body.id, lying.body.id, understated.body.id, overstated.body.id,
+    carriedWhole.body.id, goodSuppress.body.id]) {
     if (typeof id === 'string') rmSync(join(jobsDir, `${id}.json`), { force: true });
   }
 

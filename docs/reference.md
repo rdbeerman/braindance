@@ -333,15 +333,28 @@ A look parameter is named after the effect it belongs to — `rain.speed`, `glyp
 document lists the effects it is built from. Open a clip whose list names one this machine
 does not have, and the clip **opens**: the installed part renders, and the values and keys
 under the missing effect are parked, which means they are carried and never evaluated. Saving
-writes them back exactly as they arrived, so working on somebody else's clip on a machine
-without their effects costs nothing and destroys nothing. A name this build simply does not
-know is still refused, and so is a name whose effect *is* here with a key that is not — a
-typo and a half-installed package are both broken, and only a whole effect that is absent
-gets parked.
+writes every parked key back holding exactly the value it arrived with, so working on somebody
+else's clip on a machine without their effects costs nothing and destroys nothing. It is the
+values that are preserved and not the file: the parked keys land after the installed ones and
+the numbers go through a JSON round trip, so the document's revision moves. A name this build
+simply does not know is still refused, and so is a name whose effect *is* here with a key that
+is not — a typo and a half-installed package are both broken, and only a whole effect that is
+absent gets parked. A document that names an effect only through a keyframe track and carries
+none of its values is refused too, on the same rule as a document that names half of one:
+every effect a clip uses arrives whole or not at all.
 
 The application bar says so while such a clip is open: `missing: rain 1.0.0 — 4 values, 2
 tracks parked`, one entry per missing effect, quoting the version the document was authored
 against and counting what is being carried. Beside each entry is a **suppress** toggle.
+
+**An effect that is here at another version gets a line on the same bar and nothing else**:
+`document requires glyph 1.0.0, installed is 2.0.0`. The clip loads and the installed version
+draws it, because a version string says nothing about which direction is compatible and
+refusing would put a wall in front of every clip on the machine the first time an effect was
+retuned. What the load owes is the sentence, since only the person reading it knows whether
+the difference matters. There is no toggle beside it and export is not refused for it. The
+notice goes on the next save, and that is the design rather than a bug: the list is derived
+from what is installed, so saving records the version this machine actually built with.
 
 **Export is refused while anything the clip needs is missing**, and the refusal names the
 effects and their versions. That is the point of parking rather than the price of it: a video
@@ -350,13 +363,20 @@ the one artifact that cannot explain itself is the one this build will not produ
 Pressing **suppress** on an entry is the operator saying that this render may go without that
 effect. It is per effect — suppress one while another is still missing and the export is still
 refused, naming the other — and it is session state rather than document state, so it never
-travels with the clip. The render's own record, the `.job.json` beside the video, carries a
+travels with the clip. **It is also per document**: opening another project ends every
+suppression, even one missing the same effect, because a decision about this render of this
+clip is not a decision about the next one. An undo keeps it, since an undo is the same clip.
+The render's own record, the `.job.json` beside the video, carries a
 `suppressed` list of the ids and versions it went without, and keeps the parked values, so the
 file says what was skipped instead of pretending the clip never asked.
 
 A queued render is the same rule with nobody watching. The job carries the effects its project
-requires, and a worker that has not got one of them **fails the job with a reason naming it**
-rather than rendering, unless the job was queued with `suppressEffects` covering it.
+requires — **derived at the queue from the namespaces the project's own values and tracks
+carry**, so a body whose list disagrees with its values is refused at enqueue by name rather
+than queued and discovered inside a render — and a worker that has not got one of them **fails
+the job with a reason naming it** rather than rendering, unless the job was queued with
+`suppressEffects` covering it. A version the worker has and the job did not ask for is logged
+and rendered, which is the same call the editor's notice makes.
 
 ### Installing an effect, and taking one away
 

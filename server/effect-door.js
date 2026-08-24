@@ -34,6 +34,7 @@ import {
   CORE_PANEL_GROUP_KEYS,
 } from '../web/effect-manifests.js';
 import { assembleShaders } from '../web/shader-assembly.js';
+import { snapScalar } from '../web/format.js';
 
 /**
  * How much of one package this build will take, as two numbers.
@@ -460,6 +461,57 @@ export function doorRefusal(candidate, { beside = [], spines }) {
         return `${name} defaults to ${spec.def}, outside its own ${spec.min}..${spec.max} - a default the bounds `
           + 'clamp is a parameter that never sits where its own manifest says it starts';
       }
+      // **The bounds asked whether this build would move them, by moving them.** The
+      // registry snaps every value onto the grid `min` anchors and rounds it to the
+      // decimals `min` and `step` imply, so a declaration off that grid is a number the
+      // manifest states and the program never holds. What that costs is not a wrong picture
+      // - the snapped value is a perfectly good value - it is that an *untouched* effect
+      // reads as modified: `groupDefaults` stores what `normalise` returns while the door
+      // and the manifest say something else, so the row offers a reset that changes nothing,
+      // the group derives open on a document nobody has edited, and `serialiseProjectBody`'s
+      // save rule then keeps the effect - which puts a `requires` entry for an effect the
+      // operator never raised into every document saved after the install, and sends it to
+      // machines that now have to have it.
+      //
+      // Asked by running `snapScalar` - the registry's own arithmetic - rather than by
+      // testing `(def - min) / step` against an epsilon, because the question is exactly
+      // "would the registry move this" and an epsilon is a second description of an answer
+      // that already has one.
+      const landed = snapScalar(spec, spec.def);
+      if (landed !== spec.def) {
+        return `${name} declares def ${spec.def} and the registry would hold it at ${landed} - `
+          + `every value is snapped onto the ${spec.step} grid ${spec.min} anchors and rounded to the `
+          + 'decimals that implies, so a default off its own grid is a number the manifest states and '
+          + 'the program never has: the parameter reads as modified from the first paint, and the '
+          + 'save rule then writes an effect nobody touched into the document';
+      }
+      // **`max` needs the ceiling lifted to be asked at all**, which is the one place this
+      // rule cannot reuse the shipped arithmetic unchanged. `snapScalar` clamps its result
+      // back into the bounds, so a `max` the snap steps *past* is put back onto itself and
+      // answers that it did not move. Widening the ceiling by one step is the same question
+      // with the clamp out of the way, and it is the question that matters: a slider whose
+      // top is off its own grid is one a range input stops a position short of, while a
+      // value arriving from a document clamps to the top - the two-runs-disagree failure
+      // this arithmetic exists to close, at the one end of the range nobody drags to.
+      const toppedOut = snapScalar({ ...spec, max: spec.max + spec.step }, spec.max);
+      if (toppedOut !== spec.max) {
+        return `${name} runs to ${spec.max}, which is not on the ${spec.step} grid ${spec.min} anchors - `
+          + `the nearest position is ${toppedOut}, so a range input stops short of the top of this `
+          + 'parameter while a value set from a document clamps to it, and the same look renders '
+          + 'two ways depending on which one wrote it';
+      }
+      // **`min` is not asked, and that is a fact rather than an omission.** It anchors the
+      // grid, so `Math.round((min - min) / step)` is zero and the snap returns it, and the
+      // final clamp returns it again even where the rounding would have moved it - a `min`
+      // finer than the hundred decimal places `toFixed` accepts rounds to zero and is put
+      // straight back. A rule asking it could not go red on any input the two above admit,
+      // which is the vacuous conjunct `docs/instruments.md` keeps recording. What a too-fine
+      // `min` breaks is every *other* value, since the decimals it implies are used for all
+      // of them, and the default is where that shows: measured, `min: 1e-101` on a 0.05 grid
+      // takes a default of 0.7 to 0.7000000000000001 and the row above catches it by name.
+      // The residual is a package whose `def` sits exactly on such a `min`, which gets
+      // through and whose values then land on `n * step` uncorrected - which is where they
+      // would have landed anyway. `test/effect-door.test.mjs` carries both readings.
     }
     const bind = spec.bind;
     if (!bind || typeof bind !== 'object') {

@@ -1174,7 +1174,7 @@ try {
   // things being asserted and the poll is the only thing in the product that writes it. The
   // rows below are the five separate facts a rollback has to leave true - the server did
   // adopt the install, the page said so by name, the registry is the one it had, the pixels
-  // are the ones it drew, and a save is still byte-preserving per parked key - and they are
+  // are the ones it drew, and a save still returns every parked key's own value - and they are
   // separate rows because a build can get any four of them right.
   console.log('\n[effect] 6. an install this page cannot carry the open document onto');
 

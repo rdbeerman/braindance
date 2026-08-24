@@ -382,8 +382,35 @@ not landed rather than the strip being absent. **One guard, two ways for the fur
 at the wrong moment**, and both of them are a race between the measurement and the take.
 
 That makes the fix a wait rather than a constant: measure the furniture after the strip is on
-screen, which is after the transport exists, rather than before it. Not made here — the runs were
-recovered by re-running, which the rate makes cheap — but the mechanism is no longer a suspicion.
+screen, which is after the transport exists, rather than before it.
+
+**Made, and it needed a second half the arithmetic above does not name.** The wait fixes the
+`338x190` signature, where the strip really was absent; `533x300` is the other term, where the
+viewport had been set correctly and the *drawing buffer* had not caught up. So the furniture is
+measured after the transport wait and a bounded `waitForFunction` then holds for the buffer to
+reach the stage before the guard is asked. The wait is the accommodation and the throw stays the
+guard — a timeout falls through to it rather than replacing it, so a run that genuinely cannot
+reach this stage still dies naming the size it got. The predicate answers `false` on a page with
+no renderer rather than throwing, because a throw inside `waitForFunction` is not caught by it
+and the timeout is then never spent, which this page records costing a round elsewhere.
+
+**And the same race was live in `keyframe-check` with a worse consequence, because that tool had
+no guard at all.** It measured the strip before the transport wait *and* never measured the
+application bar, so both subtract from the same place: the stage came out `360 - strip - shell`
+letterboxed to 16:9, measured on this rig at **270x152**, which is 0.42 of the size every figure
+in that file is written in. Nothing failed for it, because every image there is compared against
+another image from the same run — what failed was section 6b, whose drag into the top-down inset
+is arithmetic in stage pixels, and it failed reporting a working feature as gone. Three rows,
+byte-identical across four runs and reproduced on a tree one commit older, which is what said it
+was not a regression and never said what it *was*. With the wait, the bar included and the same
+buffer wait, the tool reads `stage 640x360` and **139 assertions, 0 failed**.
+
+**The general shape is the one worth carrying: a guard that fires is worth more than three rows
+that describe the consequence.** `timeline-check` had this assertion from the start and it is
+what made its version of the fault a loud crash to be chased; `keyframe-check` had the identical
+fault for its whole life and spent it measuring in the wrong units under a green-looking header
+that printed the wrong stage size on line two. The header was not lying and nobody was reading
+it, which is the difference between a number a tool prints and a number a tool enforces.
 
 ### A third intermittent in the same tool, and this one may not be the instrument at all
 

@@ -128,9 +128,17 @@ try {
    * registry itself assembles from - so this asks the same source the browser would,
    * one step earlier and without a document open.
    */
-  const installed = new Set(
-    ((await (await fetch(`${URL_}/effects`)).json()).effects ?? []).map((e) => e.id),
-  );
+  const listing = (await (await fetch(`${URL_}/effects`)).json()).effects ?? [];
+  const installed = new Set(listing.map((e) => e.id));
+  /**
+   * What version of each of those this worker has, so the log line can say which build a
+   * job was authored against and which one is about to draw it.
+   *
+   * The listing carries the manifest's own `version` per id, which is the same string the
+   * page's badge quotes, so the worker and the editor are reading one field rather than
+   * two spellings of a fact.
+   */
+  const versions = new Map(listing.map((e) => [e.id, e.version]));
 
   /**
    * Whether this worker can render a job at all, answered off the job envelope before
@@ -232,6 +240,20 @@ try {
           + 'Install the package on this worker, or queue the job with suppressEffects naming '
           + `${unresolved.length === 1 ? 'it' : 'each of them'}.`,
         );
+      }
+      // **And the effects this worker does have, at a version the job did not ask for -
+      // said out loud and then rendered anyway.** This is the same surfacing the page's
+      // badge does and the same reasoning behind it: a version is a string a package
+      // author writes, nothing in it says which direction is compatible, and refusing here
+      // would make every retune of an effect a wall in front of every queued job. What is
+      // not acceptable is the silence, because this is the path that runs with nobody
+      // watching and the artifact it leaves is a file. So the log carries the pair, the
+      // render proceeds on the version this machine has, and whoever reads the log has the
+      // one fact that lets them decide whether the difference mattered.
+      const skewed = (job.requires ?? [])
+        .filter((e) => installed.has(e.id) && versions.get(e.id) !== e.version);
+      if (skewed.length) {
+        console.log(`[worker] ${job.id} renders with ${skewed.map((e) => `${e.id} ${versions.get(e.id)} where the job asks for ${e.version}`).join(', ')} - proceeding on the installed version`);
       }
       // Reopened per job rather than once, because two jobs in a queue are two
       // edits and nothing says they are against the same footage. The page reloads

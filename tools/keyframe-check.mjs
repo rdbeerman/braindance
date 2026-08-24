@@ -889,20 +889,51 @@ if (MUTATE && mutantServed === 0) {
 // framing `restoreProject` refuses, and every undo in this file restores a document written
 // out of that framing.
 await page.evaluate(`globalThis.__kinect.setOutputSize?.("${STAGE.width}x${STAGE.height}")`);
-// The viewport is then sized to whatever the strip actually is, measured off the
-// page. `CHROME_H_GUESS` is a first guess and nothing more: it was 104 while the bar was
-// one row, the bar became two, and the stage quietly came out 570x356 while every
+// The transport first, and the furniture after it - which is the fix for a wrong stage
+// this file measured in for as long as it has existed, not a reordering for tidiness.
+//
+// **Two things were wrong and they compounded.** `#timeline` carries `hidden` until the
+// take opens, so a strip measured before this wait reads zero; and the strip was the only
+// furniture measured at all, while the application bar sits above the stage and takes its
+// own height. Both subtract from the same place, so the stage came out `360 - strip -
+// shell` and then letterboxed 16:9 inside it: measured on this rig at **270x152**, which
+// is 0.42 of the size every figure in this file is written in. Nothing failed, because
+// every image here is compared against another image from the same run - what failed was
+// section 6b, whose drag is aimed at the top-down inset by arithmetic in stage pixels, and
+// it failed reporting a feature that works as gone.
+await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
+// The viewport is then sized to whatever furniture actually surrounds the stage, measured
+// off the page. `CHROME_H_GUESS` is a first guess and nothing more: it was 104 while the
+// bar was one row, the bar became two, and the stage quietly came out 570x356 while every
 // number in this file - including the `insetPct` denominator near the end - went on
 // being computed against 640x400. Nothing failed, which is the point: the figures
 // were simply about a smaller picture than the one they named.
 {
-  const strip = await page.evaluate(`(() => {
-    const el = document.getElementById('timeline');
-    return el && !el.hidden ? Math.round(el.getBoundingClientRect().height) : 0;
+  const furniture = await page.evaluate(`(() => {
+    const strip = document.getElementById('timeline');
+    const appBar = document.getElementById('appBar');
+    return {
+      strip: strip && !strip.hidden ? Math.round(strip.getBoundingClientRect().height) : 0,
+      shell: appBar && !appBar.hidden ? Math.round(appBar.getBoundingClientRect().height) : 0,
+    };
   })()`);
-  await page.setViewportSize({ width: STAGE.width, height: STAGE.height + strip });
+  await page.setViewportSize({
+    width: STAGE.width,
+    height: STAGE.height + furniture.strip + furniture.shell,
+  });
+  // **And then wait for the drawing buffer to follow**, because `setViewportSize`
+  // returning is not the renderer having resized - which is the second way `timeline-check`
+  // has been recorded reading a short stage. The wait is the accommodation and the refusal
+  // below is the guard, so a timeout falls through to it rather than replacing it.
+  //
+  // The predicate answers *false* on a page with no renderer rather than throwing, because
+  // a throw inside `waitForFunction` is not caught by it and the timeout is then never
+  // spent: the failure arrives instantly and reads as a finding.
+  await page.waitForFunction((want) => {
+    const gl = globalThis.__kinect?.renderer?.getContext?.();
+    return !!gl && gl.drawingBufferWidth === want.w && gl.drawingBufferHeight === want.h;
+  }, { w: STAGE.width, h: STAGE.height }, { timeout: 15000 }).catch(() => {});
 }
-await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
 await page.evaluate(INSTALL);
 
 const gpu = await page.evaluate(() => {
@@ -918,6 +949,25 @@ if (/swiftshader|software|llvmpipe/i.test(gpu.renderer)) {
   throw new Error(`software rasteriser (${gpu.renderer}) - the result would prove nothing`);
 }
 if (!gpu.colorBufferFloat) throw new Error('no EXT_color_buffer_float: the surface memory is not running at float');
+// **And the stage is the stage this file's figures are in, asserted rather than assumed.**
+// Every geometric number here is in stage pixels - the plan's px/m scale, the inset's
+// fractions, the drag offsets section 6b builds - and a stage of another size makes each of
+// them a measurement of somewhere else. That is not a hypothetical: this tool spent its
+// whole life measuring on a 270x152 stage and section 6b spent it dragging outside the
+// inset, reporting the top-down as broken on a build with nothing wrong with it, because
+// nothing here refused a stage it had not got. `timeline-check` has carried this guard from
+// the start and it is what surfaced the same race there.
+//
+// A throw rather than a failed assertion, for the reason every refusal in this suite is
+// one: a red row on a mutation run reads as a catch, and a tool measuring in the wrong
+// units has not tested anything it can report on.
+if (gpu.buffer[0] !== STAGE.width || gpu.buffer[1] !== STAGE.height) {
+  throw new Error(
+    `the stage came out ${gpu.buffer.join('x')} and this file's figures are ${STAGE.width}x${STAGE.height}: `
+    + 'the strip height, the application bar or the letterbox moved, and every number below '
+    + 'would be measured somewhere else',
+  );
+}
 
 console.log(`[keyframe] ${gpu.renderer}`);
 console.log(`[keyframe] stage ${gpu.buffer.join('x')}, take ${TAKE}: ${TIMES.length} frames, `
