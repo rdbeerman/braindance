@@ -2,15 +2,15 @@
 // the two literals the file used to hold.
 //
 // **This is the gate the whole extraction rests on, and it is an equality rather than a
-// resemblance.** Moving GLSL out of one file and into eleven is a refactor exactly as long
+// resemblance.** Moving GLSL out of one file and into fifteen is a refactor exactly as long
 // as the text that reaches the driver does not move, and the ways it can move quietly are
 // not exotic: a chunk boundary off by one line, a blank line the spine keeps and the chunk
 // also carries, an indent normalised on the way through, a generated declaration written
 // `out float x;` where the file said something else. None of those breaks a compile and
 // none of them shows up in a picture anybody would look twice at - the shader still runs,
 // it just is not the shader that was graded. So the assembled strings are held byte for
-// byte against `git show`, and the falsification control below flips one byte in each of
-// the eleven chunk files in turn to prove the equality is reading them at all.
+// byte against `git show`, and the falsification control below flips one byte in each
+// chunk file in turn to prove the equality is reading them at all.
 //
 // **The revision is resolved by content and never by hash.** Preparing this repository for
 // release rewrote its history once already, which moved every hash after the first
@@ -115,7 +115,10 @@ test('the spine and the shipped packages assemble to the two programs the monoli
 test('one byte moved in any chunk moves the program it belongs to, and only that one', async () => {
   // The falsification control, and it flips a byte in **every** chunk rather than in one:
   // a chunk that never reached the output would leave the equality above green while
-  // contributing nothing, and one arm aimed at one file cannot see the other ten. The
+  // contributing nothing, and one arm aimed at one file cannot see the rest. The arms are
+  // enumerated from the manifests rather than listed here, so a package that declares a
+  // chunk is asked about it by existing - which is what kept this control whole when the
+  // glitch and the lattice moved out after the glyph field and the rain. The
   // direction is asserted as well as the difference, because a chunk spliced into the
   // wrong program is a thing this assembler could do and the equality alone would only say
   // that something moved.
@@ -144,6 +147,10 @@ test('one byte moved in any chunk moves the program it belongs to, and only that
       flipped++;
     }
   }
-  // The floor under the loop: a scan that found no chunks would run zero arms and pass.
-  assert.ok(flipped >= 11, `only ${flipped} chunk files were flipped, so this control ran on almost nothing`);
+  // The floor under the loop: a scan that found no chunks would run zero arms and pass. It
+  // is raised whenever a package moves its GLSL out, because a floor left at the count of
+  // the commit that wrote it stops being a floor the moment the next package arrives - a
+  // manifest that silently lost its `chunks` section would take four arms away and still
+  // clear eleven.
+  assert.ok(flipped >= 15, `only ${flipped} chunk files were flipped, so this control ran on almost nothing`);
 });

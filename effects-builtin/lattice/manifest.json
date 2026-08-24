@@ -21,5 +21,16 @@
       },
       "role": "master"
     }
-  }
+  },
+  "chunks": [
+    {
+      "stage": "v.displace",
+      "order": 200,
+      "file": "snap.vert.glsl"
+    },
+    {
+      "slot": "v.cellNorm",
+      "file": "energy.vert.glsl"
+    }
+  ]
 }

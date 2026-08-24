@@ -390,7 +390,7 @@ const MUTATIONS = {
   // the lattice - so if the glyph field is ever removed this control loses its subject and
   // will come back caught on the streak fixture alone.
   'lattice-ignored': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/lattice/snap.vert.glsl',
     edits: [[
       '  if (lattice > 0.0) {',
       '  if (false) {',
@@ -442,7 +442,7 @@ const MUTATIONS = {
   // reverted. A build that quietly lost it tears horizontally under a green run, which is
   // the whole of what this control was added to stop being the only option.
   'glitch-axis-ignored': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/glitch/tear.vert.glsl',
     edits: [[
       '      ? floor(mix(position.y, position.x, glitchAxis) / glitchBands)',
       '      ? floor(position.y / glitchBands)',
@@ -1120,7 +1120,7 @@ const MUTATIONS = {
   // `cell` can reach a pixel with the lattice at zero, which is the plainest
   // statement of "those eight documents render the frames they always did".
   'compensation-leaks-at-lattice-zero': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/lattice/energy.vert.glsl',
     edits: [[
       '  vCellNorm = max((1.0 - lattice) * (1.0 - lattice), min(1.0, spriteCells * spriteCells));',
       '  vCellNorm = max((1.0 - lattice) * (1.0 - lattice), spriteCells * spriteCells);',

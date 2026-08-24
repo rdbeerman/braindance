@@ -134,5 +134,17 @@
       "after": "signal",
       "order": 100
     }
+  ],
+  "chunks": [
+    {
+      "stage": "v.displace",
+      "order": 100,
+      "file": "tear.vert.glsl"
+    },
+    {
+      "stage": "f.tone",
+      "order": 100,
+      "file": "flare.frag.glsl"
+    }
   ]
 }
