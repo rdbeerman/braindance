@@ -145,6 +145,45 @@ const VIEWPORT = { width: 1512, height: 900 };
 // ------------------------------------------------------------------- mutations
 
 const MUTATIONS = {
+  // ---- section 15b, the badge for an effect this build has not got ----
+  //
+  // **The counts taken off the registry instead of off the pool**, which is the wrong
+  // implementation somebody would actually write: `effectParamNames` is the helper every
+  // other line in that neighbourhood reaches for, and for an effect that is not installed
+  // it answers the empty list. The badge then appears, names the right effect at the right
+  // version, and reports `0 values, 0 tracks parked` - which is exactly what a build that
+  // had *dropped* the values would print, so the one number that distinguishes carrying
+  // from discarding stops distinguishing them.
+  //
+  // Must redden: the exact-sentence row of 15b, alone. The badge still comes up, the
+  // toggle still works, and the round trip is `library-check`'s claim rather than this
+  // one's - so a control that reddened those too would be breaking the parking rather
+  // than the badge.
+  'badge-counts-the-registry': {
+    file: 'web/main.js',
+    edits: [[
+      "  values: Object.keys(parkedLook.params).filter((n) => effectOf(n) === entry.id).length,\n"
+      + "  tracks: Object.keys(parkedLook.tracks).filter((n) => effectOf(n) === entry.id).length,",
+      '  values: effectParamNames(entry.id).length,\n'
+      + '  tracks: effectParamNames(entry.id).filter((n) => tracks.has(n)).length,',
+    ]],
+  },
+
+  // The toggle that only goes one way. Pressing suppress works, the export proceeds, and
+  // there is no way back to requiring the effect short of reloading - which turns a
+  // decision about one render into a decision about the session, on the one control whose
+  // whole design is that it is per effect and revocable.
+  //
+  // Must redden: the press-it-again row of 15b, alone. The first press still lands, so
+  // every row above it holds.
+  'suppress-toggle-is-a-latch': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (suppressedEffects.has(id)) suppressedEffects.delete(id);\n  else suppressedEffects.add(id);',
+      '  suppressedEffects.add(id);',
+    ]],
+  },
+
   // ---- section 21, the collapsed panel and its dock ----
   //
   // The picture drawn full height under a bar drawn over it. `resize()` stops taking the
@@ -2560,6 +2599,19 @@ const DRIVER_RULES = [
     match: (row) => Boolean(row.reset),
   },
   {
+    key: 'suppress',
+    what: 'the control that lets a render go without an effect this build has not got',
+    // A rule rather than an id, because the badge draws one of these per missing effect
+    // and how many there are is a property of the document rather than of this file. Keyed
+    // on the effect the control carries, which is what makes it that kind of control -
+    // never on the chip around it, because a container rule adopts whatever the container
+    // grows next and the application bar's status slot is exactly where that has already
+    // happened twice, once to `appbar` and once to the row inside it.
+    by: 'section 15b stages a document naming a missing effect, presses this, and reads '
+      + 'the suppression back off the page and off the note',
+    match: (row) => Boolean(row.suppress),
+  },
+  {
     key: 'output',
     what: 'a program-out control',
     // Named because it is driven, not because it is exempt. `vcam-check` section 5
@@ -3029,6 +3081,22 @@ try {
   // door sections 4, 10 and 13 already use: `setMarks` writes no sidecar, so this
   // does not edit the take it measures.
   await page.evaluate("__kinect.editor.setMarks([{ id: 'sweep', sourceMs: 2000, label: 'sweep' }])");
+  // **And a missing effect, for exactly the reason the mark above is planted.** The
+  // badge's suppress toggle is a control that exists only on a document naming an effect
+  // this build has not got, and the fixture take names none - so a sweep of the page as
+  // it loads finds no such control, "no instance of this class" and "this class is not
+  // swept" read the same, and the rule written for it would sit here matching nothing.
+  // The document goes back the moment the sweep has been taken, and the row after the
+  // coverage rows asserts that it did: the parked pool reaches every later serialisation
+  // of this page, so leaving one behind is this file's own noise arriving in twenty
+  // sections' worth of documents.
+  const sweptClean = await page.evaluate('JSON.stringify(__kinect.library.serialiseProjectBody())');
+  await page.evaluate(`(() => {
+    const body = JSON.parse(${JSON.stringify(sweptClean)});
+    body.look.params['sparkle.amount'] = 0.6;
+    body.requires = [...(body.requires ?? []), { id: 'sparkle', version: '1.0.0' }];
+    __kinect.library.restoreProject(body);
+  })()`);
   const sweep = await page.evaluate(`(${((rules) => {
     // Anchors are in the list because the way out of this surface is two of them.
     // They were buttons calling `location.href` until the nav moved into the panel
@@ -3078,6 +3146,11 @@ try {
       // key with the empty string, so `??` keeps it and every reset would be credited
       // under the name of every other one.
       reset: el.dataset ? el.dataset.reset || null : null,
+      // The effect a suppress toggle is about, on the same terms as the two above: the
+      // badge draws one of these per missing effect, so there is no id to name and the
+      // property that makes it that kind of control is the effect it carries. `||` for
+      // the empty-string reason spelled out on `reset`.
+      suppress: el.dataset ? el.dataset.suppress || null : null,
       inTbar: Boolean(el.closest('.tbar')),
       // `.appmenu` is a class where the rest are ids, and it is here because the
       // `appbar` rule below needs to tell a menu from a button that merely shares the
@@ -3137,6 +3210,15 @@ try {
   check(unknown.length === 0,
     'every control the page renders is covered by a driver or a stated rule',
     unknown.length ? `${unknown.length} uncovered: ${unknown.map((r) => r.id || r.label).join(', ')}` : `${sweep.length} controls`);
+
+  // The staged missing effect goes back off, and the row says it did. Asserted rather
+  // than assumed for the reason section 14 gives about its own cleanup: what a left-behind
+  // pool costs is not visible here, it is visible twenty sections down as a `requires`
+  // entry in a document some other row is asserting about.
+  await page.evaluate(`__kinect.library.restoreProject(JSON.parse(${JSON.stringify(sweptClean)}))`);
+  check(await page.evaluate('__kinect.library.missingEffects().length') === 0,
+    'and the missing effect staged for that sweep is off the page again, so no later section serialises it',
+    'nothing parked');
   // The rule half of the claim, so a build that removed every panel control could not
   // satisfy the row above by having nothing left to cover.
   //
@@ -9809,6 +9891,121 @@ try {
     await settle();
   }
 
+  // ============ 15b. a document naming an effect this build has not got says so
+
+  console.log('\n[15b] the badge names the effects a document needs and this build has not got');
+
+  // **The refusals above and this are the two halves of one decision, and this is the
+  // half with a surface.** A look name whose dotted prefix names an effect that is not
+  // installed is not a typo and not a half-existing package - it is a document from a
+  // machine carrying something this one lacks - so it loads, the installed part renders,
+  // and what belongs to the missing effect is parked. The person at the screen then has
+  // no way at all to know a layer of the clip is being carried rather than drawn, unless
+  // something says so, and this badge is the something.
+  //
+  // Staged rather than uninstalled, because there is no uninstall in this build. The
+  // precondition row is what stops that being a hole: `sparkle` is a valid effect id and
+  // nothing ships under it, and the day something does, every row here would go on
+  // passing while asking nothing.
+  {
+    const original = await page.evaluate('JSON.stringify(__kinect.library.serialiseProjectBody())');
+    const declared = await page.evaluate(`(() => [...new Set(__kinect.params.names('look')
+      .filter((n) => n.includes('.')).map((n) => n.slice(0, n.indexOf('.'))))])()`);
+    check(!declared.includes('sparkle'),
+      'sparkle is not an effect this build has, which is what makes every row below about a missing one',
+      `${declared.length} installed: ${declared.join(', ')}`);
+
+    // **The must-not-badge control comes first**, on the document the editor is already
+    // holding: a badge that was always up would satisfy every row under it, and a badge
+    // read only after it has been made to appear cannot say it was ever absent.
+    const quiet = await page.evaluate(`(() => {
+      const el = document.getElementById('tMissing');
+      return { hidden: el.hidden, entries: el.querySelectorAll('.missingfx').length,
+        missing: __kinect.library.missingEffects().length };
+    })()`);
+    check(quiet.hidden === true && quiet.entries === 0 && quiet.missing === 0,
+      'a complete document badges nothing at all, so the bar is bare in the ordinary case',
+      `hidden ${quiet.hidden}, ${quiet.entries} entries, ${quiet.missing} missing`);
+
+    // Four values and two keyed tracks, which is the pair the badge has to count - and
+    // they are different numbers on purpose, because a painter that printed one count
+    // twice would read correctly against a fixture where they agree.
+    const staged = await page.evaluate(`(() => {
+      const body = JSON.parse(${JSON.stringify(original)});
+      body.look.params['sparkle.amount'] = 0.6;
+      body.look.params['sparkle.size'] = 3.25;
+      body.look.params['sparkle.hue'] = 210;
+      body.look.params['sparkle.jitter'] = 0.125;
+      body.look.tracks['sparkle.amount'] = [{ t: 0, value: 0 }, { t: 2, value: 0.9 }];
+      body.look.tracks['sparkle.hue'] = [{ t: 0.5, value: 10 }];
+      body.requires = [...(body.requires ?? []), { id: 'sparkle', version: '1.0.0' }];
+      try { __kinect.library.restoreProject(body); } catch (err) { return { threw: String(err?.message ?? err) }; }
+      const el = document.getElementById('tMissing');
+      return {
+        threw: null,
+        hidden: el.hidden,
+        entries: [...el.querySelectorAll('.missingfx')].map((e) => ({
+          effect: e.dataset.effect,
+          text: e.querySelector('b').textContent,
+          pressed: e.querySelector('button').getAttribute('aria-pressed'),
+        })),
+      };
+    })()`);
+    check(staged.threw === null,
+      'a document naming an effect this build has not got loads rather than being refused',
+      staged.threw ?? 'loaded');
+    check(staged.hidden === false && staged.entries.length === 1,
+      '  and the badge comes up, one entry for the one effect that is missing',
+      `hidden ${staged.hidden}, ${staged.entries?.length ?? 0} entries`);
+    // **The exact sentence, counts and all.** The counts are the part of this line that
+    // is evidence rather than decoration: a build that parked nothing would draw the
+    // identical picture and print zeroes here, and this is the only place the difference
+    // is visible before somebody saves the file over the top of the values.
+    check(staged.entries?.[0]?.text === 'missing: sparkle 1.0.0 — 4 values, 2 tracks parked',
+      '  and it reads the effect, the version out of the document\'s own requires entry, and what is parked under it',
+      JSON.stringify(staged.entries?.[0]?.text ?? null));
+    check(staged.entries?.[0]?.pressed === 'false',
+      '  with its suppress control up and not pressed, because nobody has said this render may go without it',
+      String(staged.entries?.[0]?.pressed));
+
+    // The control beside it, driven through the real button rather than through the set
+    // it writes: this is the credit `DRIVER_RULES` gives it, and a rule crediting a
+    // driver that does not drive is the attribution failure this file's own table has
+    // three case files about.
+    await page.click('#tMissing button[data-suppress="sparkle"]');
+    const pressed = await page.evaluate(`(() => ({
+      pressed: document.querySelector('#tMissing button[data-suppress="sparkle"]').getAttribute('aria-pressed'),
+      suppressed: __kinect.library.missingEffects()[0]?.suppressed ?? null,
+      note: document.getElementById('tNote').textContent,
+    }))()`);
+    check(pressed.pressed === 'true' && pressed.suppressed === true,
+      '  and pressing it is a suppression the page holds, rather than a control that only lights up',
+      `aria-pressed ${pressed.pressed}, suppressed ${pressed.suppressed}`);
+    // Read where a person would, because the consequence of this press is at the export
+    // and the export is a menu away - a switch whose effect only shows up when you next
+    // press something else is a switch nobody can check they pressed.
+    check(/sparkle/.test(pressed.note ?? '') && /without/.test(pressed.note ?? ''),
+      '  and it says so on the note, since what it changes is what the next export does',
+      JSON.stringify(pressed.note ?? null));
+    // And back, so the toggle is a toggle rather than a latch.
+    await page.click('#tMissing button[data-suppress="sparkle"]');
+    const released = await page.evaluate(`document.querySelector('#tMissing button[data-suppress="sparkle"]').getAttribute('aria-pressed')`);
+    check(released === 'false', '  and pressing it again requires the effect back', String(released));
+
+    // The cleanup, asserted rather than assumed, for the reason section 14 gives about
+    // its own: every section below this one serialises whatever the page is holding, and
+    // a pool left behind would put a `requires` entry into each of those documents.
+    await page.evaluate(`__kinect.library.restoreProject(JSON.parse(${JSON.stringify(original)}))`);
+    await settle();
+    const after = await page.evaluate(`(() => ({
+      missing: __kinect.library.missingEffects().length,
+      hidden: document.getElementById('tMissing').hidden,
+    }))()`);
+    check(after.missing === 0 && after.hidden === true,
+      '  and putting the clip back takes the badge away, which is the must-not-badge claim read a second time from the other side',
+      `${after.missing} missing, hidden ${after.hidden}`);
+  }
+
   // ================================ 16. a panel group is open because the clip says so
 
   console.log('\n[16] which panel groups are open is derived, and only disagreements are stored');
@@ -10195,6 +10392,16 @@ try {
       'a group shut while it is in use and a quiet one pinned open are two disagreements to survive, or the rows below test nothing',
       `stored ${JSON.stringify(beforeReload)}`);
     await page.reload({ waitUntil: 'load' });
+    // **`__kinect` first, which the two other reloads in this file already do and this one
+    // did not.** Since the effect packages moved onto the wire the handle publishes after
+    // the `load` event `reload` waits for, so the predicate below can run against a page
+    // where `globalThis.__kinect` is still undefined - and a predicate that *throws* is
+    // not caught by `waitForFunction`, so the thirty seconds it was given are never spent
+    // and the run dies with `Cannot read properties of undefined (reading 'timeline')`.
+    // Seen here at 475 of the run's assertions, taking every section from 16 onward with
+    // it. `docs/instruments.md` carries the class; the repair is the guarded read that
+    // leaves the timeout reachable, which is what these two lines are.
+    await page.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
     await page.waitForFunction('!!globalThis.__kinect.timeline.transport()', null, { timeout: 30000 });
     await settle();
     // Read straight out of storage, before anything else touches the page. This is the

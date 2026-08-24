@@ -166,6 +166,37 @@ const MUTATIONS = {
     '  const spec = Object.hasOwn(CODECS, codec) ? CODECS[codec] : null;\n  if (!spec) throw new Error(`unknown codec ${codec}`);',
     '  const spec = CODECS[codec];\n  if (!CODECS[codec]) throw new Error(`unknown codec ${codec}`);',
   ]] },
+  // **The worker's door waved open.** The job still fails, because `exportClip` refuses
+  // the same clip from the other end - so the *outcome* rows on either side of this stay
+  // green and only the reason row moves. That is the point of aiming it here: the two
+  // gates agree about whether the render happens and differ in what they say and in what
+  // it cost to say it, and the row that carries the claim is the one asserting the
+  // sentence. A control reddening the state row as well would mean this door was the only
+  // thing standing between a missing effect and a file, which it is not and must not be
+  // mistaken for.
+  'worker-door-waved-open': { file: 'tools/render-worker.mjs', edits: [[
+    "    return (job.requires ?? []).filter((e) => !installed.has(e.id) && !allowed.has(e.id));",
+    '    return [];',
+  ]] },
+  // The envelope's own half, and it is aimed at the derivation rather than at the field.
+  // Taking the caller's list instead of the document's leaves every job this file queues
+  // recorded correctly - none of them asks for one - and admits a job that can lie about
+  // what it needs, which is a worker's door answered by the thing it is a door against.
+  //
+  // Two edits, because the caller's list has to be let into the function before it can be
+  // preferred: a spec that only rewrote the derivation would be reading a name that is
+  // not in scope, which is a mutated build that does not run rather than one that runs
+  // wrong.
+  'envelope-takes-the-callers-requires': { file: 'server/jobs.js', edits: [
+    [
+      "codec = 'h264', suppressEffects = [] }) {",
+      "codec = 'h264', suppressEffects = [], requires: asked = null }) {",
+    ],
+    [
+      '    const requires = Array.isArray(project.requires) ? project.requires.map((e) => ({ ...e })) : [];',
+      '    const requires = asked ?? (Array.isArray(project.requires) ? project.requires.map((e) => ({ ...e })) : []);',
+    ],
+  ] },
   // The beat that stops for good after one dropped connection, which is how it
   // shipped: any rejection cleared the interval and nothing ever re-armed it. It is
   // aimed at the one line both the interval and the first beat go through, so a
@@ -337,6 +368,37 @@ const PROJECT = {
   outputSize: '1280x720',
   appliedPreset: null,
 };
+// **The same project with four values and two keyed tracks under an effect nothing here
+// has ever shipped**, which is how a document from a machine carrying something this one
+// lacks is staged without an uninstall to do it with. `sparkle` is a syntactically valid
+// effect id and no package in `effects-builtin/` is called that; the render section
+// asserts as much before it leans on it, because the day somebody ships one every row
+// about a missing effect stops asking anything while still printing a pass.
+//
+// It is a *loadable* document rather than a broken one - `restoreProject` parks these and
+// opens the clip - which is the whole point: the worker's door is about a job it cannot
+// draw whole, not about a job it cannot read.
+const PARKED_PROJECT = {
+  ...PROJECT,
+  requires: [{ id: 'sparkle', version: '1.0.0' }],
+  look: {
+    params: {
+      ...PROJECT.look.params,
+      'sparkle.amount': 0.6,
+      'sparkle.size': 3.25,
+      'sparkle.hue': 210,
+      'sparkle.jitter': 0.125,
+    },
+    tracks: {
+      'sparkle.amount': [
+        { t: 0, value: 0, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+        { t: 2, value: 0.9, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+      ],
+      'sparkle.hue': [{ t: 0.5, value: 10, easeOut: [[0.1, 0.2]], easeIn: [[0.3, 0.4]] }],
+    },
+  },
+};
+
 // Version 2, and no `outputFps`. The rate moved onto the project, so a deliverable naming
 // one is a version 1 document - and this fixture was one, which mattered more than it
 // looks: `applyDeliverable` refuses those, the worker used to adopt with a bare assignment
@@ -500,13 +562,47 @@ try {
   check(lossless.status === 200,
     'and lossless takes the odd dimension it has no reason to refuse, so that rule is a property of the codec rather than of every export',
     `${lossless.status} ${(lossless.body.error ?? '').slice(0, 40)}`);
+  // **The effects a job's look is built from, on the envelope, derived rather than
+  // taken.** A worker has to answer "can this machine draw this at all" before it opens
+  // a page, and it cannot do that from a field buried inside a document body - so the
+  // record carries the list, and it carries the *project's* list rather than one the
+  // caller supplied. That is a second spelling of a fact the record already holds, which
+  // is the shape this repo refuses everywhere it can and compares everywhere it cannot:
+  // `syntax-check` holds `CAPTURE_FORMAT` to the grabber the same way. So the row asks
+  // for the two to be equal entry for entry, and the row beside it asks what happens
+  // when a caller tries to write its own.
+  const withParked = await enqueue({ project: PARKED_PROJECT, output: 'check-parked-envelope' });
+  check(withParked.status === 200
+    && JSON.stringify(withParked.body.requires) === JSON.stringify(PARKED_PROJECT.requires),
+  'a job\'s envelope carries the effects its project requires, entry for entry',
+  `${withParked.status} ${JSON.stringify(withParked.body.requires ?? withParked.body.error)}`);
+  const lying = await enqueue({
+    project: PARKED_PROJECT, output: 'check-parked-lying', requires: [{ id: 'nothing', version: '9.9.9' }],
+  });
+  check(lying.status === 200
+    && JSON.stringify(lying.body.requires) === JSON.stringify(PARKED_PROJECT.requires),
+  'and it is derived from the document rather than accepted from the caller, so a job cannot lie about what it needs',
+  `asked for nothing 9.9.9, recorded ${JSON.stringify(lying.body.requires ?? lying.body.error)}`);
+  // And the operator's half, which *is* the caller's because it is a decision rather
+  // than a fact. Held to the id shape, because a suppression naming something that could
+  // never be an effect id covers nothing and would read as covering something.
+  const badSuppress = await enqueue({ project: PARKED_PROJECT, output: 'check-parked-bad', suppressEffects: ['Sparkle!'] });
+  const goodSuppress = await enqueue({ project: PARKED_PROJECT, output: 'check-parked-good', suppressEffects: ['sparkle'] });
+  check(refusedBecause(badSuppress, 'suppressEffects')
+    && goodSuppress.status === 200
+    && JSON.stringify(goodSuppress.body.suppressEffects) === '["sparkle"]',
+  'a suppression is a list of effect ids, refused when it is not one and carried when it is',
+  `${badSuppress.status} ${(badSuppress.body.error ?? '').slice(0, 60)}; then ${goodSuppress.status} `
+  + `${JSON.stringify(goodSuppress.body.suppressEffects ?? goodSuppress.body.error)}`);
+
   // Everything this block queued goes back off, records and all, because the section
   // below reasons about exactly what is queued and asserts it is one job. Removed by
   // unlinking the file rather than through a route, since there is no route that deletes
   // a job - and a record is a file, which is the same door the planted records further
   // down go through.
-  for (const id of [...strays, goodCodec.body.id, lossless.body.id]) {
-    rmSync(join(jobsDir, `${id}.json`), { force: true });
+  for (const id of [...strays, goodCodec.body.id, lossless.body.id,
+    withParked.body.id, lying.body.id, goodSuppress.body.id]) {
+    if (typeof id === 'string') rmSync(join(jobsDir, `${id}.json`), { force: true });
   }
 
   section('the queue hands a job only to a machine that can reproduce it');
@@ -777,6 +873,65 @@ try {
     check(/version 1/.test(String(refusedRecord.error ?? '')),
       '  and the reason it carries is the version rather than something it failed at later',
       String(refusedRecord.error ?? 'no reason recorded').slice(0, 100));
+    // **The other job this build cannot read, and it fails for a different reason at a
+    // different moment.** The version gate above is about a document whose shape this
+    // build cannot place; this is about a document it can place perfectly and cannot
+    // *draw* - the look names an effect nothing here has installed, so the values under
+    // it would be parked and the file would come out missing a layer with nothing in it
+    // to say so.
+    //
+    // The precondition first, because a fixture that cannot hold the property proves
+    // nothing while looking exactly like a proof: if `sparkle` is ever shipped, both rows
+    // below stop being about a missing effect and go on passing.
+    const packages = (await get('/effects')).effects ?? [];
+    check(!packages.some((p) => p.id === 'sparkle'),
+      'sparkle is not a package this build ships, which is what makes the two rows below about a missing effect',
+      `${packages.length} installed: ${packages.map((p) => p.id).join(', ')}`);
+    const missingJob = await enqueue({
+      capture: take.hash, output: 'jobs-check-missing', width: 320, height: 180, project: PARKED_PROJECT,
+    });
+    check(missingJob.status === 200,
+      'a job whose look names an effect this worker has not got is queued, because the queue is not where that is decided either',
+      missingJob.body.id ?? missingJob.body.error);
+    const doorman = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', URL_, '--name', 'jobs-check-missing', '--drain', '--max', '1'], { stdio: 'ignore' });
+    await new Promise((done) => doorman.on('close', done));
+    const missingRecord = await get(`/jobs/${missingJob.body.id}`);
+    check(missingRecord.state === 'failed',
+      '  and the worker refuses it rather than rendering a file with a layer of the look absent',
+      `state ${missingRecord.state}${missingRecord.error ? `, ${missingRecord.error.slice(0, 80)}` : ''}`);
+    // **The reason is the assertion and not the outcome**, and that is what keeps this
+    // door separable from the page's own refusal. `exportClip` refuses the same clip from
+    // the other end, so a build with this door waved open still comes back `failed` - the
+    // rows would agree and one of the two gates would be doing all the work. What differs
+    // is the sentence and what it cost to produce: the door names the ids and versions off
+    // the envelope before a take is resolved or a page is loaded.
+    check(/sparkle 1\.0\.0/.test(String(missingRecord.error ?? ''))
+      && /this worker has no/.test(String(missingRecord.error ?? '')),
+    '  and the reason enumerates the effect and the version off the envelope, before any page was opened',
+    String(missingRecord.error ?? 'no reason recorded').slice(0, 120));
+
+    // The positive twin, in this file's own idiom: a door that refused everything would
+    // satisfy both rows above. Trimmed by its deliverable so the twin costs a handful of
+    // frames rather than a second whole take.
+    const allowedJob = await enqueue({
+      capture: take.hash,
+      output: 'jobs-check-suppressed',
+      width: 320,
+      height: 180,
+      project: PARKED_PROJECT,
+      deliverable: { ...DELIVERABLE, out: 0.5 },
+      suppressEffects: ['sparkle'],
+    });
+    const allowed = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', URL_, '--name', 'jobs-check-suppressed', '--drain', '--max', '1'], { stdio: 'ignore' });
+    await new Promise((done) => allowed.on('close', done));
+    const allowedRecord = await get(`/jobs/${allowedJob.body.id}`);
+    check(allowedRecord.state === 'done' && Number(allowedRecord.frames) > 0,
+      '  while the same job carrying suppressEffects for it renders, so the door refuses a job rather than every job',
+      `state ${allowedRecord.state}, ${allowedRecord.frames ?? 0} frames`
+      + `${allowedRecord.error ? `, ${allowedRecord.error.slice(0, 70)}` : ''}`);
+
     let probed = '';
     try {
       probed = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,nb_frames',

@@ -122,6 +122,47 @@ try {
   const renderer = await page.evaluate(() => globalThis.__kinect.export.rendererClass());
 
   /**
+   * The effect packages this worker's server holds, read once at start.
+   *
+   * Read off `/effects` rather than off the page, because that route is what the
+   * registry itself assembles from - so this asks the same source the browser would,
+   * one step earlier and without a document open.
+   */
+  const installed = new Set(
+    ((await (await fetch(`${URL_}/effects`)).json()).effects ?? []).map((e) => e.id),
+  );
+
+  /**
+   * Whether this worker can render a job at all, answered off the job envelope before
+   * a page is opened.
+   *
+   * **This is a second gate over the same condition the page refuses on, and saying so
+   * is the honest description.** `exportClip` refuses a clip whose look it cannot draw
+   * whole, and it is the gate that cannot be got round - it sees what was actually
+   * parked after the document was restored, so a job reaching it is refused there
+   * whatever this function did. What this one buys is not a second opinion on the
+   * outcome. It is the *sentence* and the *cost*: a job refused here comes back naming
+   * the effects and versions the envelope declares, before a take is resolved, a page
+   * is loaded and a minute of GPU is spent producing the identical refusal from the
+   * other end. A queue that only finds out inside the render is a queue that cannot
+   * report why a machine is the wrong machine.
+   *
+   * The two are separable by a run rather than by argument, which is what stops this
+   * being the two-gates-that-agree shape: `jobs-check` asserts *which* refusal a job
+   * came back with, so a build with this door waved open fails with the page's sentence
+   * and a build with it fails with this one.
+   *
+   * **An absent `requires` is nothing required.** A job queued before the envelope
+   * carried the field is a job whose look names no effect this build has to have - and
+   * where that is wrong, the page's own refusal is what catches it, which is the reason
+   * an additive field can mean "absent is allowed" here at all.
+   */
+  const cannotResolve = (job) => {
+    const allowed = new Set(job.suppressEffects ?? []);
+    return (job.requires ?? []).filter((e) => !installed.has(e.id) && !allowed.has(e.id));
+  };
+
+  /**
    * A job names its capture by content hash, and the page opens a take by id, so
    * this is where one becomes the other.
    *
@@ -178,6 +219,20 @@ try {
     // lines is how one of them ends up being the one that forgets to null it.
     const stopBeating = () => { if (beat) { clearInterval(beat); beat = null; } };
     try {
+      // Asked first, because everything below it costs: a take resolution, a page load,
+      // a settle and a render. A job this machine cannot draw whole is refused here with
+      // the ids and versions its envelope names.
+      const unresolved = cannotResolve(job);
+      if (unresolved.length) {
+        throw new Error(
+          `this worker has no ${unresolved.map((e) => `${e.id} ${e.version}`).join(', ')}, which `
+          + `${unresolved.length === 1 ? 'is' : 'are'} required by this job's look: the values under `
+          + `${unresolved.length === 1 ? 'it' : 'them'} would be parked and nothing would draw them, `
+          + 'so the render would be a file missing part of the look with nothing in it to say so. '
+          + 'Install the package on this worker, or queue the job with suppressEffects naming '
+          + `${unresolved.length === 1 ? 'it' : 'each of them'}.`,
+        );
+      }
       // Reopened per job rather than once, because two jobs in a queue are two
       // edits and nothing says they are against the same footage. The page reloads
       // at `/edit` with the take in the query, which is the same door the editor uses.
@@ -338,6 +393,12 @@ try {
           codec: j.codec,
           in: j.deliverable?.in,
           out: j.deliverable?.out,
+          // The job's own list, handed to the same parameter the export button hands
+          // the badge's. Without it a suppressed job reaches the page and is refused
+          // there - the door above having let it through on the operator's say-so, and
+          // the render still not happening, which is a suppression that suppresses
+          // nothing.
+          suppressEffects: j.suppressEffects ?? [],
         });
       }, job);
       if (errors.length) throw new Error(`the page errored during the render: ${errors[0]}`);

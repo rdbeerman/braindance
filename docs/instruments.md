@@ -2595,6 +2595,31 @@ arrived", because those are different findings. What it is *not* is a fixed `wai
 shape their own comments refuse, and a sleep tuned on this machine is a pass waiting for a
 slower one.
 
+**And the same publish race has a second door, where the guard is vacuous rather than
+absent.** `library-check` waited on
+`globalThis.__kinect?.timeline?.transport() !== null` after opening the editor. Read it
+against a page that has not published the handle: the optional chain answers `undefined`, and
+`undefined !== null` is **true**, so the wait resolves on its first tick having proved nothing
+and the unguarded read on the next line throws `Cannot read properties of undefined (reading
+'timeline')`. It was harmless for exactly as long as `load` meant the page was up. Measured
+when it bit: the run ended at 234 assertions with the section's own rows unasked, on a machine
+that had just finished two other proof tools, and `Boolean(...)` in place of the comparison
+took the same tool to 495 with none failed. Three waits in that file were written the same way
+and all three moved together.
+
+`editor-check` had the absent-guard form of it at one of its three reloads, and the two
+neighbours are what said so: the other two wait for `!!globalThis.__kinect` and *then* for the
+transport, and the third went straight at the transport. It died at 475 of 545 assertions,
+taking sections 16 through 22 with it, and printed `DID NOT RUN` — the honest verdict, and an
+expensive one, since the run before it had cost twenty minutes.
+
+**The general shape is worth more than either instance: a guard written with `?.` and compared
+against `null` is not a guard.** `?.` short-circuits to `undefined`, and every comparison
+except `== null` and `!= null` treats that as a value like any other — so the operator that
+looks like it is protecting the read is the operator that makes the predicate pass before the
+thing exists. Ask of any wait whether its predicate is *false* on a page that has not booted;
+if it is true, the timeout is unreachable and the wait is a comment.
+
 **A contended machine fails a check in a way that reads as a finding.** Two worktrees running
 proof tools at once produced four failed runs, and the quiet one is the dangerous one: under
 contention the preset-apply evaluate dies with `Resulting promise was garbage collected`, a

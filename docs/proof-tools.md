@@ -130,6 +130,14 @@ node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, 
 node tools/export-check.mjs --mutate pointsize-absolute   # ... and must FAIL mutated
 node tools/export-check.mjs --mutate cropoutside-reaches-the-export # ... the crop box's faint pass, one edit from being in a deliverable
 node tools/export-check.mjs --mutate faint-survives-at-zero # ... and a cut point kept at alpha zero, invisible and still occluding
+node tools/export-check.mjs --mutate export-ignores-missing-effects # ... the door on a clip whose look this build cannot draw
+                                                          #     whole. Reddens the refusal row and the still-refused-for-the-other
+                                                          #     row, and leaves the suppress, record and complete rows green
+node tools/export-check.mjs --mutate suppress-is-global   # ... and the same door answering a per-effect question globally,
+                                                          #     which only the two-missing-effects row can see - with one
+                                                          #     missing, both implementations refuse nothing
+node tools/export-check.mjs --mutate deliverable-forgets-suppressed # ... and the record's half: a file that went without a
+                                                          #     layer of the look and does not say so. One row
 node tools/export-check.mjs --mutate bloom-buffer-sized   # ... the glow's chain following the buffer, which is the only live catcher
                                                           #     in this suite for the reference the chain is frozen at. Its sibling
                                                           #     `bloom-reference-1080` is NOT caught by anything here and is not a
@@ -223,6 +231,15 @@ node tools/library-check.mjs --mutate one-refusal-for-older-versions # ... one s
                                                                    #     older, later, and a version field that is
                                                                    #     not a number at all
 node tools/library-check.mjs --mutate open-ignores-format          # ... the capture's generation, at all four doors at once
+node tools/library-check.mjs --mutate save-forgets-the-parked-pool # ... a document opened on a machine without one of its
+                                                                   #     effects and saved back with that effect's values gone,
+                                                                   #     which is the destructive shape parking exists to
+                                                                   #     prevent. Reddens the reopen row and the three file rows;
+                                                                   #     the two load rows stay green, because the load half is
+                                                                   #     untouched - read the rows
+node tools/library-check.mjs --mutate save-forgets-the-parked-requires # ... and the same merge's other half, keeping the values
+                                                                   #     and dropping the claim. Reddens the entry row, the
+                                                                   #     reopen row, and the second-trip row that stands on it
 node tools/library-check.mjs --mutate shipped-look-drops-a-value   # ... a shipped look with a hole in it, which is the last look staying under the next one
 node tools/library-check.mjs --mutate complete-look-drops-a-group  # ... and the definition those documents are written against, which is code where they are data
 node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g # the editor's controls: that they exist, that pressing them changes something
@@ -239,6 +256,15 @@ node tools/editor-check.mjs --mutate aspect-skips-the-letterbox --no-render # ..
                                                                        #     the button that was just pressed, so a build
                                                                        #     that lights the control and reframes nothing
                                                                        #     fails here and passes on the attribute
+node tools/editor-check.mjs --mutate badge-counts-the-registry --no-render # ... the badge for a missing effect counting off
+                                                                       #     the registry rather than off the parked pool,
+                                                                       #     which prints `0 values, 0 tracks parked` - the
+                                                                       #     same line a build that *dropped* them would
+                                                                       #     print. Reddens the exact-sentence row of 15b
+node tools/editor-check.mjs --mutate suppress-toggle-is-a-latch --no-render # ... and the toggle beside it going only one
+                                                                       #     way, so a decision about one render becomes a
+                                                                       #     decision about the session. Reddens the
+                                                                       #     press-it-again row alone
 node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
 node tools/editor-check.mjs --mutate plant-unswept-control --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate ends-reaches-the-selection --no-render # ... `ends` shaping the selected key instead of the
@@ -475,6 +501,18 @@ node tools/jobs-check.mjs                                 # step 8: the queue, t
                                                           #   come back failed rather than rendered - the batch path
                                                           #   adopted past the version gate until it did
 node tools/jobs-check.mjs --mutate claim-ignores-renderer # ... and must FAIL mutated
+node tools/jobs-check.mjs --mutate envelope-takes-the-callers-requires # ... the effects a job needs, taken from the caller
+                                                          #     instead of derived from its project - a job that can lie
+                                                          #     about what it needs. Queue semantics, so `--no-render`.
+                                                          #     One row
+node tools/jobs-check.mjs --mutate worker-door-waved-open # ... the worker's door on an effect it has not got. It needs a
+                                                          #     render, like `heartbeat-stops-on-first-error`, and it
+                                                          #     reddens **one** row: the *reason*. The state row beside it
+                                                          #     stays green, because `exportClip` refuses the same clip
+                                                          #     from the other end and the job comes back failed either
+                                                          #     way. That is the split stated as a measurement - the two
+                                                          #     gates agree about whether the render happens and differ in
+                                                          #     what they say and in what it cost to say it
 node tools/module-check.mjs                               # the boundaries in web/: the import graph, what an import names, what crosses it
 node tools/module-check.mjs --mutate cycle-planted        # ... the import web/scene.js's own header says does not exist
 node tools/module-check.mjs --mutate cycle-through-a-second-spelling # ... and the same ring written the way the other page writes its imports

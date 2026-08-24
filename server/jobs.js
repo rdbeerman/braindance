@@ -163,7 +163,7 @@ export class JobStore {
    * the original" is a claim about identified footage, and a job naming a take by
    * id would reproduce whatever is at that id today.
    */
-  async enqueue({ project, deliverable = null, capture, renderer = null, output, width, height, fps, codec = 'h264' }) {
+  async enqueue({ project, deliverable = null, capture, renderer = null, output, width, height, fps, codec = 'h264', suppressEffects = [] }) {
     // The project is the document *body* - what `serialiseProject()` returns and
     // what `restoreProject` takes - not the `{ name, rev, body }` envelope the
     // document store hands back. One shape, checked here, because accepting both
@@ -190,6 +190,32 @@ export class JobStore {
         + `got ${JSON.stringify(renderer)} - and a pin nothing can equal is a job nothing can claim`,
       );
     }
+    // **The effects the job's look is built from, lifted out of the document at the
+    // door.** A worker has to answer "can this machine render this at all" before it
+    // opens a page, and a job whose answer lives inside a document body is a job the
+    // queue cannot reason about - it could not report a blocked job, and a claim could
+    // not be routed by what a machine has installed the way it is already routed by the
+    // rasteriser it has.
+    //
+    // **It is derived here and never accepted from the caller**, which is what makes the
+    // second spelling safe: `enqueue` is the only writer, and it writes what the project
+    // itself says. A `requires` a caller could set is a job that can lie about the
+    // document it carries. The two are held equal by `jobs-check` rather than trusted,
+    // on the same reading `syntax-check` holds `CAPTURE_FORMAT` to the grabber - two
+    // copies that cannot be one, compared instead of hoped about.
+    const requires = Array.isArray(project.requires) ? project.requires.map((e) => ({ ...e })) : [];
+    // And what this job is allowed to render without. Unlike `requires` this *is* the
+    // caller's, because it is a decision rather than a fact: somebody has said this
+    // render may go ahead on a machine missing that effect. Held to the id shape the
+    // packages use, because a name that could not be an effect id can never match one
+    // and would be a suppression that silently covers nothing.
+    if (!Array.isArray(suppressEffects)
+      || !suppressEffects.every((id) => typeof id === 'string' && /^[a-z][a-z0-9]*$/.test(id))) {
+      throw new Error(
+        `a job's suppressEffects is a list of effect ids, got ${JSON.stringify(suppressEffects)} - `
+        + 'an id is lowercase letters and digits, the prefix an effect\'s parameters carry',
+      );
+    }
     // All the export rules run at enqueue, so the queue refuses work it already
     // knows cannot run. The worker and the export socket must not be the place a
     // bad width, an odd h264 dimension, or an unknown codec is first discovered.
@@ -211,6 +237,8 @@ export class JobStore {
         version: JOB_VERSION,
         project,
         deliverable,
+        requires,
+        suppressEffects: [...suppressEffects],
         capture,
         renderer: renderer ?? null,
         output: String(output),

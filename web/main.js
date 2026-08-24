@@ -3241,6 +3241,53 @@ function toggleKey(name) {
 
 // ------------------------------------------------------------------- the project
 
+/**
+ * The values and tracks of effects this build does not have, held exactly as the
+ * document wrote them.
+ *
+ * **A document naming an effect that is not installed is not a broken document, and
+ * this pool is what says so.** The three answers a look name can get are decided by
+ * one line - `isParkedName` - and only the third comes here: a bare name the registry
+ * does not know is a typo and is refused, a dotted name whose effect *is* installed
+ * but whose key is not is refused too, because a package cannot half-exist, and a
+ * dotted name whose effect is simply absent is parked. The viewer then loads, the
+ * installed part renders, and what belongs to the missing effect is never evaluated
+ * and never destroyed.
+ *
+ * **Never evaluated is why nothing here is validated.** A key's shape is checked
+ * against the parameter's own spec - kind, bounds, step - and there is no spec for a
+ * parameter this build has never declared. So a parked value is carried rather than
+ * inspected, which is the only honest thing to do with a number whose meaning lives
+ * in a package that is not here; `serialiseProjectBody` writes it back byte for byte
+ * and a build that has the effect is the first reader that can say anything about it.
+ *
+ * `requires` holds the document's own entries for the missing effects rather than
+ * ids, because an entry carries the version - and the badge quotes it, so the person
+ * reading it learns which build of the effect the clip was authored against rather
+ * than only that something is absent. An entry may also carry a `rev`, which is why
+ * the entry is kept whole instead of being rebuilt from an id.
+ *
+ * Replaced whole by `restoreProject` and by nothing else, so the pool is always the
+ * open document's rather than an accumulation across the documents a session opened.
+ */
+let parkedLook = { params: {}, tracks: {}, requires: [] };
+
+/**
+ * The effects the operator has said to render without, which is session state and
+ * deliberately not in the document.
+ *
+ * An export whose project requires an effect this build lacks is refused, and this is
+ * the answer to that refusal: a decision about *this render on this machine*, which is
+ * the same kind of thing the deliverable is and not the same kind of thing the clip is.
+ * A suppression written into the project would travel to the machine that has the
+ * effect and quietly render there without it, which is the failure the refusal exists
+ * to prevent arriving through the document.
+ *
+ * Pruned rather than cleared when a document loads, because every undo goes through
+ * `restoreProject` and clearing would spend the operator's decision on each one.
+ */
+let suppressedEffects = new Set();
+
 // Everything an edit *is*, as one plain object. A project file, an undo snapshot
 // and step 6's export job all start here, which is why this is one function rather
 // than a serialiser per consumer that would each learn about a new track kind
@@ -3260,7 +3307,17 @@ function toggleKey(name) {
 // ordinary look parameters now, so `params.values(params.names('look'))` carries them
 // and there is no second list to forget.
 
-function serialiseProjectBody() {
+/**
+ * `suppressed` is the one option, and it is for the export path alone: a deliverable
+ * rendered without an effect this build lacks records which ones it went without, so
+ * the file's own record says what it is a render *of* rather than leaving somebody to
+ * compare its look against a document that claims more than the render contains.
+ *
+ * It is not a project field. `history.snapshot` and every save call this with nothing,
+ * so no document on disk ever grows the key, and a suppression stays what it is - a
+ * decision about one render on one machine.
+ */
+function serialiseProjectBody({ suppressed = null } = {}) {
   const lookNames = params.names('look');
   const lookParams = params.values(lookNames);
   // The save rule, the same one `presetFromCurrentLook` applies and for the same
@@ -3278,20 +3335,40 @@ function serialiseProjectBody() {
     for (const n of mine) delete lookParams[n];
   }
   const kept = Object.keys(lookParams);
-  const requires = requiresFor(kept);
+  // **The parked effects' entries, whole, and appended rather than interleaved.** The
+  // list is one entry per effect and `refuseRequires` reads it as a set, so position
+  // carries nothing - what has to survive is the version, and the `rev` where a
+  // document pins one, which is why the document's own entry is carried instead of an
+  // id being handed back to `requiresFor`. A parked effect keeps its entry because its
+  // values are still in the document: the list stays derived from what the look names,
+  // which is the property both directions of `refuseRequires` rest on.
+  const requires = [...requiresFor(kept), ...parkedLook.requires];
   return {
     version: PROJECT_VERSION,
     ...(requires.length ? { requires } : {}),
+    ...(suppressed ? { suppressed } : {}),
     look: {
       // Look parameters only; the registry separates look from view and from the
       // camera, so an undo snapshot or a render job does not carry render scale or
       // the free camera's orbit.
-      params: lookParams,
-      tracks: Object.fromEntries(
-        kept
-          .filter((n) => tracks.has(n))
-          .map((n) => [n, tracks.get(n).serialise()]),
-      ),
+      //
+      // **And the parked pool merged back verbatim.** A build without an effect has to
+      // be able to open a document, save it, and leave the parts it cannot read exactly
+      // as it found them - anything else makes opening a clip on the wrong machine a
+      // destructive act, and it destroys precisely the work nobody on that machine can
+      // redo. Spread after rather than before, so a parked name can never overwrite a
+      // registry value: the two sets are disjoint by construction, and if they ever
+      // stop being, the installed reading is the one that renders and so the one that
+      // must win.
+      params: { ...lookParams, ...parkedLook.params },
+      tracks: {
+        ...Object.fromEntries(
+          kept
+            .filter((n) => tracks.has(n))
+            .map((n) => [n, tracks.get(n).serialise()]),
+        ),
+        ...parkedLook.tracks,
+      },
     },
     composition: {
       // Retime is the source-to-program mapping, and the camera track is the one
@@ -3581,12 +3658,39 @@ function restoreProject(project) {
     ...Object.keys(project.look.params),
     ...Object.keys(project.look.tracks),
   ]);
+  // **Where the missing-effect split happens, and it is one predicate rather than a
+  // load-time special case.** Everything below asks `isParkedName`, which answers on
+  // the one fact that decides: the dotted prefix names an effect this build has not
+  // installed. A bare name the registry does not know is a typo and still throws at
+  // `params.spec`; a dotted name whose effect *is* here but whose key is not throws
+  // there too, because a package cannot half-exist and half a package is a build that
+  // is wrong rather than a build that is short. Only the third case parks, and it parks
+  // through this set so that uninstalling an effect later - which is the same condition
+  // arriving from the other direction - reaches the same code by being the same
+  // question.
+  const parkedNames = new Set(
+    [...Object.keys(project.look.params), ...Object.keys(project.look.tracks)].filter(isParkedName),
+  );
+  const parkedIds = [...new Set([...parkedNames].map(effectOf))];
+  // The entries the document itself wrote for those effects. `refuseRequires` above has
+  // already held the list and the values to each other in both directions, so an id that
+  // is parked has an entry here by construction and finding none would be that refusal
+  // having stopped working rather than a document to accommodate.
+  const parkedRequires = parkedIds.map((id) => (project.requires ?? []).find((e) => e.id === id));
   // And each effect it touches, whole - the readings rule one namespace over. The
   // reset below hands an omitted parameter its default, so half a glyph field would
   // load as a blend of the document and the defaults that nothing on screen says is
   // a blend. The writer saves whole effects, so the reader demands what the writer
   // meets.
-  for (const id of effectIdsIn(Object.keys(project.look.params))) {
+  //
+  // **Asked of the installed effects only, and the exclusion is a fact rather than a
+  // convenience.** `effectParamNames` filters the registry, so for an effect that is not
+  // here it answers the empty list and this loop would pass an effect vacuously - which
+  // is the shape `docs/instruments.md` calls a hole with a justification on it. Written
+  // out, the honest statement is that nothing in this build knows how many parameters a
+  // missing effect has, so there is no completeness to demand: the machine that has the
+  // package is the first reader that can ask.
+  for (const id of effectIdsIn(Object.keys(project.look.params)).filter((n) => !parkedIds.includes(n))) {
     const short = effectParamNames(id).filter((n) => !Object.hasOwn(project.look.params, n));
     if (short.length) {
       throw new Error(
@@ -3610,8 +3714,20 @@ function restoreProject(project) {
   // since this step - a quaternion that is not of unit length. Routing keys through
   // it is the whole of why a hand-edited camera track cannot reach `poseAt`.
   const restoredLook = [];
+  const parkedTracks = {};
   for (const [name, keys] of Object.entries(project.look.tracks)) {
     if (!Array.isArray(keys)) throw new Error(`look track ${name} is not an array of keys`);
+    // **A track under a missing effect is parked before it is asked anything.** The
+    // shape checks below - the kind, the bounds, the ease handles, the fold - are all
+    // asked of `params.spec(name)`, and there is no spec for a parameter this build has
+    // never declared. So the keys are carried rather than inspected: this build cannot
+    // evaluate them and cannot judge them either, and the one thing it can do without
+    // guessing is hand them back unchanged. The array is not copied, and that is the
+    // point - `serialiseProjectBody` writes exactly the object it was given.
+    if (parkedNames.has(name)) {
+      parkedTracks[name] = keys;
+      continue;
+    }
     // Names the registry does not know are refused rather than dropped. A track
     // silently discarded is an edit silently lost, and the file is more likely to
     // be from a build this one cannot read than to be harmlessly extra.
@@ -3675,7 +3791,23 @@ function restoreProject(project) {
   // and `apply` cannot, because it is itself one of the writes. A project carrying a
   // parameter this build has since removed has to be refused with nothing touched, and
   // that is earlier than the registry can see.
-  for (const name of Object.keys(project.look.params)) params.spec(name);
+  //
+  // **The parked half is split out here rather than filtered at the write**, because
+  // this loop is the refusal and the write below is the consequence: a name that skips
+  // the refusal has to skip the write too, and one partition taken once is what stops
+  // those two lists being able to disagree. `applied` is what reaches the registry;
+  // `parkedValues` is what nothing in this build will look at again until it is written
+  // back out.
+  const applied = {};
+  const parkedValues = {};
+  for (const [name, value] of Object.entries(project.look.params)) {
+    if (parkedNames.has(name)) {
+      parkedValues[name] = value;
+      continue;
+    }
+    params.spec(name);
+    applied[name] = value;
+  }
 
   const restoredCamera = project.composition.camera.map((k) => {
     const key = restoreKey('track camera', k, params.spec('camera').kind);
@@ -3706,6 +3838,28 @@ function restoreProject(project) {
   const stamp = project.appliedPreset ?? null;
   if (stamp !== null && (typeof stamp.name !== 'string' || typeof stamp.rev !== 'string')) {
     throw new Error(`appliedPreset is ${JSON.stringify(stamp)}: it is null, or a name and a rev`);
+  }
+
+  // **A deliverable's embedded document carries what its render went without, and this
+  // reader checks it and then leaves it alone.** `suppressed` is a record about a file
+  // rather than a statement about the clip: adopting it here would mean opening a render
+  // record and silently inheriting somebody else's decision to go without an effect,
+  // which is the export refusal being answered by a document instead of by a person. So
+  // the shape is refused when it is wrong - a malformed record is a document this build
+  // cannot place, exactly as a malformed `requires` is - and a well-formed one changes
+  // nothing, which is why there is no branch below reading it.
+  if (project.suppressed !== undefined) {
+    const ok = Array.isArray(project.suppressed) && project.suppressed.every((e) => e
+      && typeof e === 'object' && !Array.isArray(e)
+      && typeof e.id === 'string' && /^[a-z][a-z0-9]*$/.test(e.id)
+      && typeof e.version === 'string' && e.version.length > 0);
+    if (!ok) {
+      throw new Error(
+        `this project carries ${JSON.stringify(project.suppressed)} where its suppressed list belongs: `
+        + 'it is a list of { id, version } entries naming the effects a render was allowed to go '
+        + 'without, and it is a record of that render rather than anything this editor adopts',
+      );
+    }
   }
 
   // A saved project may carry its undo history. Undo snapshots and render jobs do
@@ -3778,8 +3932,23 @@ function restoreProject(project) {
   }
 
   params.reset(params.names('look'));
-  params.apply(project.look.params);
+  params.apply(applied);
   appliedPreset = stamp;
+  // **The pool is replaced whole, here, with the rest of the writes.** Nothing above
+  // this line has changed anything, so a document refused for any of the seventeen
+  // reasons up there leaves the editor holding the clip it already had - including
+  // whatever that clip had parked. Assigned rather than merged for the same reason
+  // `params.reset` precedes `params.apply`: what is parked is a property of the open
+  // document, and a pool that accumulated across documents would be carrying values
+  // from a clip nobody has open into the next file somebody saves.
+  parkedLook = {
+    params: parkedValues,
+    tracks: parkedTracks,
+    requires: parkedRequires,
+  };
+  // Pruned rather than cleared, because undo arrives here too - see the declaration.
+  suppressedEffects = new Set([...suppressedEffects].filter((id) => parkedIds.includes(id)));
+  paintMissingEffects();
 
   tracks.clear();
   for (const [name, keys] of restoredLook) trackFor(name).keys = keys;
@@ -6497,6 +6666,45 @@ function parseSize(text) {
 async function exportClip(options = {}) {
   if (!timeline) throw new Error('there is no clip open to export');
   if (exporting) throw new Error('an export is already running');
+  // **A clip whose look this build cannot render whole is refused before anything is
+  // encoded, and the file is the reason.** The editor can carry a missing effect: the
+  // parked values sit there, nothing evaluates them, and the person at the screen has a
+  // badge saying so. A deliverable carries none of that. It is a video, it leaves this
+  // machine, and nothing in it says a layer of the look was absent when it was made - so
+  // an export that quietly went ahead would produce exactly the artifact that cannot be
+  // told from a correct one, which is the failure this program refuses everywhere else it
+  // appears.
+  //
+  // **Suppress is the answer to it and it is per effect, deliberately.** The decision a
+  // person is actually making is "this render may go without *that*", and a global
+  // override would answer a question nobody asked - it would carry past the next missing
+  // effect, which by then might be the one that matters. So the list is intersected with
+  // what is missing rather than consulted as a flag, and an effect that is still missing
+  // and still unsuppressed refuses the export naming itself.
+  //
+  // The list arrives as an argument rather than being read off `suppressedEffects` here,
+  // because two callers each own their own answer: the export button hands over what the
+  // badge holds, and `tools/render-worker.mjs` hands over what the job carries. One rule,
+  // two callers, and neither of them is a second implementation of the rule.
+  const suppress = new Set(options.suppressEffects ?? []);
+  const missing = missingEffects();
+  const blocking = missing.filter((m) => !suppress.has(m.id));
+  if (blocking.length) {
+    throw new Error(
+      `this clip requires ${blocking.map((m) => `${m.id} ${m.version}`).join(', ')}, which `
+      + `${blocking.length === 1 ? 'is' : 'are'} not installed here: its values are parked and `
+      + 'nothing is drawing them, so a render would be a file missing part of the look with '
+      + `nothing in it to say so. Install ${blocking.length === 1 ? 'it' : 'them'}, or suppress `
+      + `${blocking.length === 1 ? 'it' : 'each of them'} in the badge to render without.`,
+    );
+  }
+  // What this render is going without, recorded in the document the deliverable embeds.
+  // Only the effects that were actually missing here: a suppression naming an effect this
+  // build has is a decision about nothing, and writing it down would make the record claim
+  // a hole the file does not have.
+  const suppressed = missing
+    .filter((m) => suppress.has(m.id))
+    .map(({ id, version }) => ({ id, version }));
   ensureActiveDeliverable();
   const d = activeDeliverable;
   // **The one place the two halves of the split are checked against each other.** The
@@ -6605,7 +6813,7 @@ async function exportClip(options = {}) {
       // worker restoring it renders the file that was asked for rather than the one the
       // project would produce today. It also means `trails`, whose length is counted in
       // output frames, decays over the same span on the replay as it did here.
-      project: serialiseProjectBody(),
+      project: serialiseProjectBody(suppressed.length ? { suppressed } : {}),
       capture: timeline.source.index.hash,
       renderer: rendererClass(),
     });
@@ -6724,6 +6932,7 @@ const ui = {
   resume: document.getElementById('tResume'),
   resumeWhen: document.getElementById('tResumeWhen'),
   resumeOpen: document.getElementById('tResumeOpen'),
+  missing: document.getElementById('tMissing'),
   recGo: document.getElementById('recGo'),
   recMark: document.getElementById('recMark'),
   recNote: document.getElementById('recNote'),
@@ -6734,6 +6943,87 @@ const ui = {
 // The rates, built from `OUTPUT_RATES` rather than written into the markup, so the list
 // the validator refuses against and the list the control offers are one object.
 for (const rate of OUTPUT_RATES) ui.fps?.appendChild(new Option(String(rate), String(rate)));
+
+/**
+ * The badge that says which effects this document names and this build has not got, and
+ * the one control beside each of them.
+ *
+ * **A person looking at the picture has no other way to know.** The clip renders, and
+ * what renders is the installed part of it - so without this the surface is a document
+ * quietly missing a layer, which is the failure the whole parking design exists to
+ * replace with a sentence. The line quotes the version out of the document's own
+ * `requires` entry rather than saying only that something is absent, because the useful
+ * next step is installing a particular build of a particular effect.
+ *
+ * **The counts come from the pool and are the point of the line**, not decoration: they
+ * are what says the values were kept. A build that dropped them on the way in would draw
+ * the identical picture and print `0 values, 0 tracks parked` here, which is the one
+ * place the difference is visible before somebody saves the file and loses the work.
+ *
+ * The toggle is `aria-pressed` with a constant label, which is `camView`'s shape and the
+ * app's ordinary voice for a switch. What it buys is stated in the `title` rather than in
+ * a second line of text: an export is refused while an effect the clip needs is missing,
+ * and pressing this is the person saying that this render may go without that one. Per
+ * effect and never global - suppressing one while another is still missing leaves the
+ * export refused, naming the other, which is the whole reason the state is a set of ids
+ * rather than a flag.
+ *
+ * Rebuilt rather than patched, because the set it draws changes only when a document is
+ * loaded or a toggle is pressed, and a painter that edited in place would be a second
+ * statement of which effects are missing.
+ *
+ * **One entry per missing effect, laid along the bar rather than stacked, and the reason
+ * is the bar's height.** Each effect gets its own `.missingfx` element carrying its own
+ * sentence and its own control, which is what "one line per effect" is for - nothing is
+ * concatenated and no version or count belongs to two effects at once. What it is not is
+ * a column: this chip lives in the application bar's status slot, which is one ellipsised
+ * row, and a chip that grew downward would take the bar's height with it. That moves
+ * every fixed overlay on the page, which `docs/instruments.md` records costing four proof
+ * tools a round each when the letterbox did it. Two missing effects at once is the rare
+ * case and it ellipsises; the badge's job is to say that something is parked, and the
+ * hook beside it is what anything needing the whole list should read.
+ */
+function paintMissingEffects() {
+  if (!ui.missing) return;
+  const missing = missingEffects();
+  ui.missing.hidden = missing.length === 0;
+  ui.missing.replaceChildren(...missing.map((m) => {
+    const entry = document.createElement('span');
+    entry.className = 'missingfx';
+    entry.dataset.effect = m.id;
+    const line = document.createElement('b');
+    const values = `${m.values} value${m.values === 1 ? '' : 's'}`;
+    const parked = `${m.tracks} track${m.tracks === 1 ? '' : 's'} parked`;
+    line.textContent = `missing: ${m.id} ${m.version} — ${values}, ${parked}`;
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.dataset.suppress = m.id;
+    go.textContent = 'suppress';
+    go.setAttribute('aria-pressed', String(m.suppressed));
+    go.title = m.suppressed
+      ? `Exports may render without ${m.id}. Press again to require it.`
+      : `Export is refused while ${m.id} is missing. Press to let a render go without it.`;
+    entry.append(line, go);
+    return entry;
+  }));
+}
+
+// One listener on the chip rather than one per button, because the buttons are rebuilt
+// by the painter above every time this fires - a handler bound to the element would be
+// binding to the element it is about to replace.
+ui.missing?.addEventListener('click', (event) => {
+  const id = event.target?.dataset?.suppress;
+  if (!id) return;
+  if (suppressedEffects.has(id)) suppressedEffects.delete(id);
+  else suppressedEffects.add(id);
+  paintMissingEffects();
+  // Said on the note beside it, because the consequence of this press is at the export
+  // and the export is a menu away: a switch whose effect is only visible when you next
+  // press something else is a switch nobody trusts.
+  say(suppressedEffects.has(id)
+    ? `${id} suppressed: an export will render without it`
+    : `${id} required again: an export is refused while it is missing`);
+});
 
 aspectButtons = buildAspectSegments(ui.projectAspects);
 
@@ -9274,6 +9564,17 @@ let appliedPreset = null;
  * door to pick between: one subset in, one subset out.
  */
 function presetFromCurrentLook(names) {
+  // **The parked pool is not in here, and it is absent by construction rather than by a
+  // filter.** `params.values` walks registry names, and a parked value never reached the
+  // registry - so there is nothing to exclude and no list that could fall out of step.
+  // The reason it must stay absent is worth stating anyway, because the merge two hundred
+  // lines up does the opposite for a project. A project is *this clip*, and a clip that
+  // opened on a machine without an effect is still a clip that uses it, so carrying the
+  // values back out is what keeps the file whole. A preset is *a look somebody chose to
+  // reuse*, authored out of what is on screen - and what is on screen has none of this in
+  // it. Writing them into a preset would ship a document whose `requires` names an effect
+  // nobody here can render, applied to clips nobody can check it against, out of values
+  // this build never bound-checked because it has no spec to check them with.
   const values = params.values(names ?? params.names('look'));
   // The save rule: a whole look sheds every effect it holds at defaults. Lossless by
   // construction rather than by argument - an effect's master defaults inert, and the
@@ -9326,6 +9627,50 @@ const effectIdsIn = (names) => [...new Set(names.map(effectOf).filter(Boolean))]
 
 /** The ids of every effect the registry currently declares. */
 const effectIds = () => effectIdsIn(params.names('look'));
+
+/**
+ * Whether an effect id names a package this build actually has.
+ *
+ * Read off the registry rather than off the `/effects` listing the page fetched, and
+ * the difference is what a document cares about: a value has to reach `PARAMS` to do
+ * anything at all, so a package that was served and whose parameters did not land is
+ * not installed as far as any document is concerned. One reading, so the thing that
+ * parks a value and the thing that refuses one cannot disagree about what is here.
+ */
+const effectInstalled = (id) => effectIds().includes(id);
+
+/**
+ * Whether a look name belongs to an effect this build does not have - the one line the
+ * three-way split turns on.
+ *
+ * `effectOf` answers null for a bare name, which is why a typo can never reach here: a
+ * core parameter the registry does not know is refused at `params.spec` as it always
+ * was. What this separates is the two dotted cases, and the separation is the whole
+ * design - a prefix that is installed with a suffix that is not is a half-existing
+ * package and stays a refusal, and a prefix that is simply absent is a document from a
+ * machine carrying something this one lacks.
+ */
+const isParkedName = (name) => {
+  const id = effectOf(name);
+  return id !== null && !effectInstalled(id);
+};
+
+/**
+ * What the open document needs and this build has not got, as the badge reads it: the
+ * document's own `requires` entry per missing effect, with what is parked under it
+ * counted.
+ *
+ * Counted off the pool rather than off the document, because the pool *is* what was
+ * parked - a count taken from the file would be a second reading of the same question
+ * and would go on printing four when the parking had dropped one.
+ */
+const missingEffects = () => parkedLook.requires.map((entry) => ({
+  id: entry.id,
+  version: entry.version,
+  values: Object.keys(parkedLook.params).filter((n) => effectOf(n) === entry.id).length,
+  tracks: Object.keys(parkedLook.tracks).filter((n) => effectOf(n) === entry.id).length,
+  suppressed: suppressedEffects.has(entry.id),
+}));
 
 /**
  * The core half of a whole look: the look tag less its framing and less every
@@ -12572,6 +12917,11 @@ ui.exportGo.addEventListener('click', async () => {
   sayExport(`export ${outputSize ?? '1920x1080'} starting`);
   try {
     const done = await exportClip({
+      // What the badge holds, at the moment of the press. The set is session state and
+      // the press is the gesture that spends it, so it is read here rather than reached
+      // for inside `exportClip` - which is what leaves the worker free to hand over the
+      // job's own list through the same parameter.
+      suppressEffects: [...suppressedEffects],
       onProgress: (n, total) => {
         sayExport(`export ${Math.round((n / total) * 100)}% · frame ${n}/${total}`);
       },
@@ -14585,6 +14935,19 @@ globalThis.__kinect = {
      * finding. Measured exactly once, on `editor-check` at 238 of 274.
      */
     presetGestureRunning: () => presetGesture,
+    /**
+     * What the open document names that this build has not got, as the badge reads it -
+     * id, version, and how much is parked under each.
+     *
+     * Published because a check has no other way to ask the question at its own scale.
+     * The badge's text is the same facts rendered, so a row reading only the badge is a
+     * row about the painter; a row reading only this is a row about the pool. Both are
+     * worth having and they fail differently, which is why this is a hook rather than a
+     * suggestion to parse the chip.
+     */
+    missingEffects,
+    /** The parked pool itself, so a round-trip row can compare what went in and out. */
+    parkedLook: () => JSON.parse(JSON.stringify(parkedLook)),
     marks: () => takeMarks.map((m) => ({ ...m })),
     markHere,
     takeId: () => openTakeId,

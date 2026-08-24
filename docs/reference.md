@@ -316,6 +316,37 @@ handed to the deliverable, so it renders exactly what it rendered before. A hand
 of a shape the table has nothing for keeps its own size and lights no shape button, which is
 honest rather than tidy — the stage really is that shape.
 
+### A clip that needs an effect this build has not got
+
+A look parameter is named after the effect it belongs to — `rain.speed`, `glyph.tone` — and a
+document lists the effects it is built from. Open a clip whose list names one this machine
+does not have, and the clip **opens**: the installed part renders, and the values and keys
+under the missing effect are parked, which means they are carried and never evaluated. Saving
+writes them back exactly as they arrived, so working on somebody else's clip on a machine
+without their effects costs nothing and destroys nothing. A name this build simply does not
+know is still refused, and so is a name whose effect *is* here with a key that is not — a
+typo and a half-installed package are both broken, and only a whole effect that is absent
+gets parked.
+
+The application bar says so while such a clip is open: `missing: rain 1.0.0 — 4 values, 2
+tracks parked`, one entry per missing effect, quoting the version the document was authored
+against and counting what is being carried. Beside each entry is a **suppress** toggle.
+
+**Export is refused while anything the clip needs is missing**, and the refusal names the
+effects and their versions. That is the point of parking rather than the price of it: a video
+leaves this machine and nothing in it says a layer of the look was absent when it was made, so
+the one artifact that cannot explain itself is the one this build will not produce by accident.
+Pressing **suppress** on an entry is the operator saying that this render may go without that
+effect. It is per effect — suppress one while another is still missing and the export is still
+refused, naming the other — and it is session state rather than document state, so it never
+travels with the clip. The render's own record, the `.job.json` beside the video, carries a
+`suppressed` list of the ids and versions it went without, and keeps the parked values, so the
+file says what was skipped instead of pretending the clip never asked.
+
+A queued render is the same rule with nobody watching. The job carries the effects its project
+requires, and a worker that has not got one of them **fails the job with a reason naming it**
+rather than rendering, unless the job was queued with `suppressEffects` covering it.
+
 ## Levelling a canted mount
 
 A sensor bolted to a dashboard shoots a room that arrives on its side, and nothing measures

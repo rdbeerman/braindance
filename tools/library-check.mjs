@@ -275,6 +275,42 @@ const MUTATIONS = {
     '  if (project.version !== PROJECT_VERSION) {',
     '  if (false) {',
   ]] },
+  // **The parked pool never reaching the file again.** The clip still opens, the badge
+  // still says what is missing, the installed half still renders and still round-trips -
+  // and the save quietly drops the one part of the document this machine had no business
+  // touching. That is the destructive shape parking exists to prevent, and it is silent
+  // by construction: nothing on screen changes and the loss only shows up on the machine
+  // that had the effect.
+  //
+  // Aimed at the merge rather than at the pool, so the load half stays exactly as it is
+  // and the rows about parking-on-load stay green. What must redden is the file: the two
+  // byte-for-byte rows, the requires row, and the second-trip row.
+  'save-forgets-the-parked-pool': { file: 'web/main.js', edits: [
+    [
+      '      params: { ...lookParams, ...parkedLook.params },',
+      '      params: { ...lookParams },',
+    ],
+    [
+      '        ...parkedLook.tracks,\n      },',
+      '      },',
+    ],
+  ] },
+  // The other half of the same merge, and it has its own control because the row about
+  // the `requires` entry stays green under the one above: that mutation keeps the entry
+  // and drops the values, this one keeps the values and drops the entry. Both write a
+  // file the loader refuses on its next read, for opposite reasons - which is the
+  // both-directions rule in `refuseRequires` being the thing that catches each of them.
+  //
+  // **Three rows, and the third is the fixture rather than the claim.** The entry row and
+  // the reopen row carry it; the second-trip row goes with them because that reload is
+  // what it reads, and a mutation that stops the file reopening takes every row standing
+  // on the reopened document with it. The two byte-comparison rows stay green, because
+  // the values really do come back - which is the split that says this control and
+  // `save-forgets-the-parked-pool` are asking different questions.
+  'save-forgets-the-parked-requires': { file: 'web/main.js', edits: [[
+    '  const requires = [...requiresFor(kept), ...parkedLook.requires];',
+    '  const requires = [...requiresFor(kept)];',
+  ]] },
   // **The capture format's band comes off.** A take whose hello declares a generation
   // this build has never read is opened on this build's assumptions instead of being
   // refused - which is the whole of the failure the format number exists to prevent,
@@ -5442,7 +5478,21 @@ async function runChecks() {
     // are genuinely about a take run on a page that has one.
     {
       const { page: takePage, errors: takeErrors } = await openPage(browser, editorPage(macUrl, 'local-clip'), { width: 640, height: 400 });
-      await takePage.waitForFunction('globalThis.__kinect?.timeline?.transport() !== null', null, { timeout: 40000 });
+      // **`!== null` here was vacuously true and the wait returned before the page had
+      // booted.** `globalThis.__kinect?.timeline?.transport()` answers `undefined` while
+      // the module is still evaluating, and `undefined !== null` is true - so the guard
+      // resolved on its first tick and the unguarded read on the next line threw
+      // `Cannot read properties of undefined (reading 'timeline')`, which ends the run
+      // with the section's own rows unasked. It was harmless for as long as `load` meant
+      // the page was up; `docs/instruments.md` records the commit that stopped being
+      // true, when the effect packages moved onto the wire and `__kinect` began
+      // publishing after the event `goto` waits for. Measured here at 234 of the run's
+      // assertions, on a machine that had just finished two other proof tools.
+      //
+      // `Boolean(...)` is the whole fix and it keeps the timeout reachable, which is what
+      // separates a page that is slow from a page that never boots. Three waits in this
+      // file were written the same way and all three moved together.
+      await takePage.waitForFunction('Boolean(globalThis.__kinect?.timeline?.transport())', null, { timeout: 40000 });
       await takePage.evaluate('globalThis.__kinect.timeline.settled()');
       check(await takePage.evaluate('globalThis.__kinect.library.takeHash()')
         === (await getJson(`${macUrl}/library/takes`)).takes.find((t) => t.id === 'local-clip').hash,
@@ -5559,6 +5609,136 @@ async function runChecks() {
     check(JSON.parse(readFileSync(join(WORK, 'projects/own-footage.json'), 'utf8')).take?.hash?.startsWith('sha256:'),
       'and a project saved from the editor names its footage by content hash rather than by path');
 
+    // ---- a document naming an effect this build has not got
+    //
+    // **The round trip that has to be lossless is the one this build cannot read.** A
+    // machine without an effect still has to be able to open a clip, work on the part it
+    // does have, and save - and if the parts it cannot read do not come back out of that
+    // save exactly as they went in, opening a colleague's clip is a destructive act, and
+    // it destroys precisely the work nobody on this machine can redo.
+    //
+    // Staged rather than uninstalled, because there is no uninstall here: `sparkle` is a
+    // valid effect id and no package ships under it. The row asserting that comes first,
+    // since an arm whose missing effect turned out to be installed would pass every row
+    // below by never parking anything.
+    const installedIds = await page.evaluate(`(() => [...new Set(globalThis.__kinect.params.names('look')
+      .filter((n) => n.includes('.')).map((n) => n.slice(0, n.indexOf('.'))))])()`);
+    check(!installedIds.includes('sparkle'),
+      'sparkle is not an effect this build has, which is what makes the rows below about a missing one',
+      `${installedIds.length} installed: ${installedIds.join(', ')}`);
+
+    // Four values and two keyed tracks, one of the tracks carrying ease handles, because
+    // a handle is the part of a key this build cannot check and therefore the part most
+    // likely to be quietly rewritten by something that thought it understood it.
+    const PARKED_VALUES = {
+      'sparkle.amount': 0.6,
+      'sparkle.size': 3.25,
+      'sparkle.hue': 210,
+      'sparkle.jitter': 0.125,
+    };
+    const PARKED_TRACKS = {
+      'sparkle.amount': [
+        { t: 0, value: 0, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+        { t: 2, value: 0.9, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+      ],
+      'sparkle.hue': [{ t: 0.5, value: 10, easeOut: [[0.1, 0.2]], easeIn: [[0.3, 0.4]] }],
+    };
+    const parkedFixture = { values: PARKED_VALUES, tracks: PARKED_TRACKS, id: 'sparkle', version: '1.0.0' };
+    // **Each step's outcome is reported separately, because they fail for different
+    // reasons and a shared flag makes one row answer for another.** The first version of
+    // this returned one `error` for the whole block, so a build that loaded the document
+    // perfectly and then saved a file its own next load refuses reddened the row saying
+    // the document *loads* - a row whose sentence stayed true while it went red, which is
+    // the shape `docs/instruments.md` names as a defect in the row rather than a finding.
+    // The reload is where that damage shows, so the reload gets a row.
+    const parked = await page.evaluate(`(async (f) => {
+      const k = globalThis.__kinect;
+      const clean = k.library.serialiseProject();
+      const doc = JSON.parse(JSON.stringify(clean));
+      Object.assign(doc.look.params, f.values);
+      Object.assign(doc.look.tracks, f.tracks);
+      doc.requires = [...(doc.requires ?? []), { id: f.id, version: f.version }];
+      const out = { clean };
+      try {
+        k.library.restoreProject(doc);
+        out.loaded = true;
+        out.missing = k.library.missingEffects();
+      } catch (e) { out.loaded = false; out.loadError = String(e.message ?? e); return out; }
+      const body = k.library.serialiseProject();
+      out.put = (await fetch('/projects/parked-round-trip', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })).status;
+      // And straight back in, so what the rows below compare is a document that has been
+      // through the loader twice rather than one the serialiser happened to hand back.
+      const again = await (await fetch('/projects/parked-round-trip')).json();
+      try {
+        k.library.restoreProject(again.body);
+        out.reloaded = true;
+        out.second = k.library.serialiseProjectBody();
+      } catch (e) { out.reloaded = false; out.reloadError = String(e.message ?? e); }
+      return out;
+    })(${JSON.stringify(parkedFixture)})`);
+
+    check(parked.loaded === true,
+      'a document with values and tracks under an effect this build has not got loads rather than being refused',
+      parked.loadError ?? `PUT ${parked.put}`);
+    check(JSON.stringify(parked.missing) === JSON.stringify([{
+      id: 'sparkle', version: '1.0.0', values: 4, tracks: 2, suppressed: false,
+    }]),
+    'and what it could not read is parked rather than dropped - four values, two tracks, at the version the document asked for',
+    JSON.stringify(parked.missing ?? null));
+    // **The file it saves has to open again, and on a build that sheds the pool it does
+    // not.** `requires` is derived from the values, so a save that keeps the entry and
+    // drops the values writes a document the loader's own both-directions rule refuses -
+    // which means the damage is not only a silent loss on the machine without the effect,
+    // it is a file nothing anywhere can open afterwards. That is a different claim from
+    // the byte comparison below and it is the one that fires first.
+    check(parked.reloaded === true,
+      'and the file it saves is a document this build can open again',
+      parked.reloadError ?? 'reopened');
+
+    // **The claim, read off the file on disk.** Compared as text in the document's own
+    // key order rather than field by field, because "byte-preserving" is what was
+    // promised: a comparison that rebuilt each value would pass a build that had
+    // renormalised them, which is exactly the damage a machine without the effect is not
+    // entitled to do.
+    const parkedFile = JSON.parse(readFileSync(join(WORK, 'projects/parked-round-trip.json'), 'utf8'));
+    const pick = (from, keys) => JSON.stringify(Object.fromEntries(keys.map((k) => [k, from?.[k]])));
+    const valueKeys = Object.keys(PARKED_VALUES);
+    const trackKeys = Object.keys(PARKED_TRACKS);
+    check(pick(parkedFile.look?.params, valueKeys) === pick(PARKED_VALUES, valueKeys),
+      'the parked values come back out of the saved file byte for byte',
+      pick(parkedFile.look?.params, valueKeys));
+    check(pick(parkedFile.look?.tracks, trackKeys) === pick(PARKED_TRACKS, trackKeys),
+      'and so do the parked tracks, ease handles and all',
+      pick(parkedFile.look?.tracks, trackKeys).slice(0, 120));
+    // The `requires` entry survives with them, because the values are still in the
+    // document - a file that kept the values and dropped the claim would be refused by
+    // its own next load, which is the loader's own rule read from the other side.
+    check(JSON.stringify((parkedFile.requires ?? []).find((e) => e.id === 'sparkle')) === '{"id":"sparkle","version":"1.0.0"}',
+      'and the requires entry stays with them, at the version the document was authored against',
+      JSON.stringify(parkedFile.requires ?? null));
+    // Twice through the loader, so the property is stability rather than one lucky pass.
+    check(pick(parked.second?.look?.params, valueKeys) === pick(PARKED_VALUES, valueKeys)
+      && pick(parked.second?.look?.tracks, trackKeys) === pick(PARKED_TRACKS, trackKeys),
+    'and a second trip through the loader moves them no further than the first did',
+    pick(parked.second?.look?.params, valueKeys));
+
+    // **And the page goes back to a document with nothing parked in it, asserted rather
+    // than assumed.** Every row below this one serialises whatever the page is holding,
+    // and a pool left behind puts a `requires` entry into each of those documents - so
+    // under a build that sheds the pool on save, the refusals block's own positive
+    // control reddens for a reason that has nothing to do with it. That is this file's
+    // own noise reaching a later sweep, and the rule is to move the noise: section 14 of
+    // `editor-check` asserts its cleanup landed for exactly this reason, and so does this.
+    const cleaned = await page.evaluate(`(async (clean) => {
+      globalThis.__kinect.library.restoreProject(clean);
+      return globalThis.__kinect.library.missingEffects();
+    })(${JSON.stringify(parked.clean ?? null)})`);
+    check(Array.isArray(cleaned) && cleaned.length === 0,
+      'and putting the clip back leaves nothing parked, so the rows below serialise a document with no missing effect in it',
+      JSON.stringify(cleaned));
+
     // ---- the three refusals, built as source rather than through JSON, because
     // JSON.stringify turns NaN and undefined into null and a case labelled NaN
     // would silently be testing null a second time.
@@ -5629,6 +5809,14 @@ async function runChecks() {
       ['a reading that is not a number', 'p.look.params.readBlackwall = "1";'],
       ['a retime rate of zero or less', 'p.composition.retime.rate = 0;'],
       ['a preset stamp that is not a name and a rev', 'p.appliedPreset = { name: 42 };'],
+      // The record a deliverable's embedded document carries, which arrives here whenever
+      // somebody opens a render's own `.job.json` body. It is a list of `{ id, version }`
+      // naming the effects that render went without, and a malformed one is a document
+      // this build cannot place for the same reason a malformed `requires` is - the two
+      // are the same kind of claim about the same namespace.
+      ['a suppressed list that is not a list', 'p.suppressed = "sparkle";'],
+      ['a suppressed entry with no version', 'p.suppressed = [{ id: "sparkle" }];'],
+      ['a suppressed entry whose id could not be an effect id', 'p.suppressed = [{ id: "Sparkle!", version: "1.0.0" }];'],
     ];
     const results = [];
     for (const [label, source] of cases) results.push(await refuse(label, source));
@@ -5640,6 +5828,27 @@ async function runChecks() {
     const good = await refuse('an unmodified project', '');
     check(good.message === 'ACCEPTED', 'and an unmodified project still loads',
       good.message === 'ACCEPTED' ? '' : good.message.slice(0, 80));
+
+    // **The other half of the `suppressed` rule, and it is the half with no throw in it.**
+    // A well-formed record has to load - it is what a deliverable's own document looks
+    // like - and it has to change nothing, because it is a statement about a render that
+    // already happened rather than a decision this editor inherits. A build that adopted
+    // it would answer the export refusal with a file somebody else wrote, so the row reads
+    // the suppression back off the page rather than only checking that nothing threw.
+    const adopted = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const p = k.library.serialiseProject();
+      p.suppressed = [{ id: 'sparkle', version: '1.0.0' }];
+      try { k.library.restoreProject(p); } catch (e) { return { threw: String(e.message ?? e) }; }
+      return {
+        threw: null,
+        suppressed: k.library.missingEffects().filter((m) => m.suppressed).length,
+        body: Object.hasOwn(k.library.serialiseProjectBody(), 'suppressed'),
+      };
+    })()`);
+    check(adopted.threw === null && adopted.suppressed === 0 && adopted.body === false,
+      'a well-formed suppressed record loads and is not adopted - it says what a render went without, not what this editor may skip',
+      adopted.threw ?? `${adopted.suppressed} suppressed on the page, key written back: ${adopted.body}`);
 
     // Straight at the registry, because the load path is one of four doors into it
     // and the other three were gated the same wrong way. `spec`, `get`, `normalise`
@@ -5688,7 +5897,7 @@ async function runChecks() {
   console.log('\n[library] presets carry look and a provenance stamp');
   {
     const { page, errors } = await openPage(browser, editorPage(macUrl, 'local-clip'), { width: 640, height: 400 });
-    await page.waitForFunction('globalThis.__kinect?.timeline?.transport() !== null', null, { timeout: 40000 });
+    await page.waitForFunction('Boolean(globalThis.__kinect?.timeline?.transport())', null, { timeout: 40000 });
     await page.evaluate('globalThis.__kinect.timeline.settled()');
 
     // A preset saved off a Blackwall clip whose values have then been moved away from
@@ -6053,7 +6262,7 @@ async function runChecks() {
   console.log('\n[library] marks on the editor\'s scrubber, through the retime curve');
   {
     const { page, errors } = await openPage(browser, editorPage(macUrl, 'local-clip'), { width: 1100, height: 700 });
-    await page.waitForFunction('globalThis.__kinect?.timeline?.transport() !== null', null, { timeout: 40000 });
+    await page.waitForFunction('Boolean(globalThis.__kinect?.timeline?.transport())', null, { timeout: 40000 });
     await page.evaluate('globalThis.__kinect.timeline.settled()');
 
     // **`timeline.settled()` settles the transport, and the marks are not on it.**

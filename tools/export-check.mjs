@@ -385,6 +385,50 @@ const MUTATIONS = {
   // matters found the tolerances moving by nothing at all under a divergent chain, which
   // is the reading that says these rows have one guard rather than two.
   //
+  // **The export door on a clip whose look this build cannot draw whole.** The refusal
+  // goes and everything else stays, so the parking, the badge and the record are all
+  // still correct - what is left is a render that writes a file with a layer of the look
+  // absent and nothing in the file saying so, which is the artifact this whole band
+  // exists to refuse. It must redden the refusal row and the still-refused-for-the-other
+  // row, and leave the suppress-proceeds, the record and the complete-document rows
+  // green: a mutation that reddened those too would be breaking the export rather than
+  // the door.
+  'export-ignores-missing-effects': { file: 'web/main.js', edits: [[
+    '  const blocking = missing.filter((m) => !suppress.has(m.id));',
+    '  const blocking = [];',
+  ]] },
+  // And the same door answering a per-effect question globally, which is the reachable
+  // wrong implementation rather than an invented one: suppress reads naturally as a
+  // switch, and written as one it lets the *second* missing effect through on the
+  // strength of a decision somebody made about the first. Invisible with one effect
+  // missing - both implementations refuse nothing - so only the two-effect row can see
+  // it, and that is the row it must redden alone.
+  'suppress-is-global': { file: 'web/main.js', edits: [[
+    '  const blocking = missing.filter((m) => !suppress.has(m.id));',
+    '  const blocking = suppress.size ? [] : missing;',
+  ]] },
+  // The record's own half. The render still refuses and still proceeds in the right
+  // cases, and the file it writes carries no note that a layer was skipped - so the one
+  // artifact that leaves this machine stops being able to say what it is a render of.
+  // One row, the deliverable's record.
+  'deliverable-forgets-suppressed': { file: 'web/main.js', edits: [[
+    '      project: serialiseProjectBody(suppressed.length ? { suppressed } : {}),',
+    '      project: serialiseProjectBody(),',
+  ]] },
+  // The wiring between the badge and the door, which every other row here steps over by
+  // calling `export.run` with a list of its own. The rule is unchanged and the badge is
+  // unchanged; what goes is the click handler handing over what the badge holds, so an
+  // operator can suppress an effect, watch the toggle light, press Export and be refused.
+  //
+  // Must redden two: the row that names it, and the `no page errors` sweep at the foot.
+  // The second is the refusal itself - `showTimelineError` writes every sentence it shows
+  // the operator to `console.error` as well - so it is noise this mutation creates rather
+  // than a second finding, and it exists only on the mutated build: the clean run reports
+  // no page errors at all, so there is nothing here to drain and nothing to exempt.
+  'export-button-drops-the-suppression': { file: 'web/main.js', edits: [[
+    '      suppressEffects: [...suppressedEffects],',
+    '      suppressEffects: [],',
+  ]] },
   // Only the split reverts, so the claim cannot be carried by the other two.
   'rgbsplit-absolute': { file: 'effects-builtin/rgbsplit/split.grade.glsl', edits: [[
     'vec2 off = dir * rgbSplit * texel * 8.0;',
@@ -2982,6 +3026,205 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
     await server.close();
     await noEncoder.close();
     rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+// ------------------------ 7. a clip needing an effect this build has not got
+
+console.log('\n[8] an export is refused while the clip needs an effect this build lacks, and a suppression is per effect');
+
+// **The missing effect is staged rather than uninstalled, and it has to be.** There is
+// no uninstall in this build - that arrives later - so the shape under test is reached
+// the way a document from another machine reaches it: a look name whose dotted prefix is
+// a perfectly valid effect id that nothing here has ever shipped. `sparkle` and
+// `drizzle` are those, and the first row of this section is that they really are absent,
+// because the day somebody ships a package under either name every row below stops
+// asking anything while still printing a pass.
+//
+// Two of them rather than one, because the claim that separates a per-effect suppression
+// from a global one cannot be made with a single missing effect: suppressing the only
+// one there is looks identical under both implementations.
+const MISSING_A = { id: 'sparkle', version: '1.0.0' };
+const MISSING_B = { id: 'drizzle', version: '2.1.0' };
+
+/**
+ * The document under test, built out of the page's own serialiser rather than typed
+ * here.
+ *
+ * A hand-written project is a fixture that stops being what `restoreProject` accepts the
+ * first time the loader gains a rule - `jobs-check` has that lesson written into its own
+ * fixture twice over - so this takes whatever the open clip currently is and adds the one
+ * thing under test: four values and two keyed tracks under an effect that is not here,
+ * with the `requires` entry the writer would have derived for them.
+ */
+const PARKED_ARM = `((opts) => {
+  const k = globalThis.__kinect;
+  const base = k.library.serialiseProjectBody();
+  const doc = JSON.parse(JSON.stringify(base));
+  for (const m of opts.missing) {
+    doc.look.params[m.id + '.amount'] = 0.6;
+    doc.look.params[m.id + '.size'] = 3.25;
+    doc.look.params[m.id + '.hue'] = 210;
+    doc.look.params[m.id + '.jitter'] = 0.125;
+    doc.look.tracks[m.id + '.amount'] = [
+      { t: 0, value: 0, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+      { t: 2, value: 0.9, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+    ];
+    doc.look.tracks[m.id + '.hue'] = [{ t: 0.5, value: 10, easeOut: [[0.1, 0.2]], easeIn: [[0.3, 0.4]] }];
+    doc.requires = [...(doc.requires ?? []), { id: m.id, version: m.version }];
+  }
+  return { base, doc };
+})`;
+
+const parkedRun = await onFreshPage('the missing-effect export run', async (page) => {
+  const attempt = async (project, options) => page.evaluate(`(async (a) => {
+    globalThis.__kinect.library.restoreProject(a.project);
+    await globalThis.__kinect.timeline.settled();
+    try {
+      const done = await globalThis.__kinect.export.run(a.options);
+      return { ok: true, output: done.output, frames: done.frames, frameHashes: done.frameHashes };
+    } catch (err) {
+      return { ok: false, error: String(err.message ?? err) };
+    }
+  })(${JSON.stringify({ project: project, options: options })})`);
+
+  // The effect ids this build actually declares, read off the registry the way the page
+  // itself decides what is installed - so the precondition row below is asking the same
+  // question the parking asks rather than a second reading of it.
+  const declared = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    return [...new Set(k.params.names('look').filter((n) => n.includes('.')).map((n) => n.slice(0, n.indexOf('.'))))];
+  })()`);
+  const one = await page.evaluate(`${PARKED_ARM}(${JSON.stringify({ missing: [MISSING_A] })})`);
+  const two = await page.evaluate(`${PARKED_ARM}(${JSON.stringify({ missing: [MISSING_A, MISSING_B] })})`);
+
+  const shot = { width: STAGE.width, height: STAGE.height, fps: EXPORT_FPS, from: 0, to: 2, codec: 'lossless' };
+  return {
+    declared,
+    // The complete document first, so the pictures the rows below compare against were
+    // taken on the same page with the same camera and the same playhead.
+    complete: { ...await attempt(one.base, { ...shot, name: 'check-missing-none' }), doc: one.base },
+    refused: await attempt(one.doc, { ...shot, name: 'check-missing-refused' }),
+    suppressed: await attempt(one.doc, { ...shot, name: 'check-missing-suppressed', suppressEffects: [MISSING_A.id] }),
+    partial: await attempt(two.doc, { ...shot, name: 'check-missing-partial', suppressEffects: [MISSING_A.id] }),
+    badge: await page.evaluate(`(() => [...document.querySelectorAll('#tMissing .missingfx')]
+      .map((e) => ({ effect: e.dataset.effect, text: e.querySelector('b').textContent })))()`),
+    // **The one seam every row above steps over: what the export *button* hands the
+    // rule.** `exportClip` takes the suppression as an argument so that the page and the
+    // render worker can each supply their own, and the page's answer is read at the click
+    // - so a build whose handler forgot to pass the badge's set would satisfy every row
+    // that calls `export.run` directly and refuse every export a person could ask for.
+    // Driven through the two controls a hand uses, in the order the surface allows.
+    throughTheUi: await (async () => {
+      await page.evaluate(`(() => {
+        globalThis.__kinect.library.restoreProject(${JSON.stringify(one.doc)});
+      })()`);
+      await page.evaluate('globalThis.__kinect.timeline.settled()');
+      await page.click('#tMissing button[data-suppress="sparkle"]');
+      const pressed = await page.evaluate(
+        `document.querySelector('#tMissing button[data-suppress="sparkle"]').getAttribute('aria-pressed')`,
+      );
+      await page.locator('#outputMenuButton').click();
+      await page.locator('#menuExport').click();
+      await page.fill('#tExportName', 'check-missing-ui');
+      await page.locator('#tExport').click();
+      // The note is where the export reports itself, refusal and success alike, so it is
+      // the one place a driver can read which of the two happened without asking the
+      // function it just pressed a button to reach.
+      await page.waitForFunction(
+        `!/starting|frame /.test(document.getElementById('tExportNote').textContent)`,
+        null, { timeout: 180000 },
+      );
+      return { pressed, note: await page.evaluate("document.getElementById('tExportNote').textContent") };
+    })(),
+  };
+});
+
+if (!parkedRun.ok) {
+  check(false, 'the missing-effect run completed', parkedRun.error);
+} else {
+  const r = parkedRun.value;
+  // The precondition, and it is a row rather than an assumption for the reason
+  // `docs/instruments.md` gives about a fixture that cannot hold the property: an arm
+  // whose "missing" effect turned out to be installed would pass every refusal row by
+  // never producing one.
+  const clash = [MISSING_A.id, MISSING_B.id].filter((id) => r.declared.includes(id));
+  check(clash.length === 0,
+    'the two effects these rows are about really are absent from this build',
+    `${r.declared.length} installed: ${r.declared.join(', ')}${clash.length ? ` - and ${clash.join(', ')} is among them` : ''}`);
+
+  check(r.refused.ok === false
+    && String(r.refused.error).includes(`${MISSING_A.id} ${MISSING_A.version}`),
+  'a clip whose requires name a missing effect refuses to export, naming the id and the version',
+  r.refused.ok ? 'the export ran' : r.refused.error);
+
+  // And the badge said so on the surface, with the version out of the document's own
+  // requires entry - the same fact the refusal quotes, read where a person would.
+  const said = r.badge.find((e) => e.effect === MISSING_B.id);
+  check(r.badge.length === 2 && said?.text.includes(`${MISSING_B.id} ${MISSING_B.version}`),
+    'and the badge names each of them with the version the document asked for',
+    r.badge.map((e) => e.text).join(' | ') || 'no badge entries');
+
+  check(r.suppressed.ok === true,
+    'and with that effect suppressed the export proceeds and writes a file',
+    r.suppressed.ok ? `${r.suppressed.frames} frames to ${r.suppressed.output}` : r.suppressed.error);
+
+  if (r.suppressed.ok) {
+    const record = JSON.parse(readFileSync(`${r.suppressed.output}.job.json`, 'utf8'));
+    const got = record.project?.suppressed;
+    check(Array.isArray(got) && got.length === 1
+      && got[0].id === MISSING_A.id && got[0].version === MISSING_A.version,
+    'and the deliverable\'s own document records what that render went without',
+    JSON.stringify(got ?? null));
+    // The parked values are still in the record, which is the half a reader of the file
+    // needs: `suppressed` says what was left out of the *render*, and the document is
+    // still the document. A record that had shed them would say the clip never wanted
+    // the effect at all.
+    const kept = Object.keys(record.project?.look?.params ?? {}).filter((n) => n.startsWith(`${MISSING_A.id}.`));
+    check(kept.length === 4,
+      'and it still carries the parked values, so the record says what was skipped rather than rewriting the clip',
+      `${kept.length} parked keys in the deliverable's document: ${kept.join(', ')}`);
+  }
+
+  // **The installed part of the look really rendered**, asserted as an equality against
+  // the same document without the parked keys. Bit-identical rather than close: the
+  // parked values never reach the registry, so the two documents leave it in exactly the
+  // same state and any difference at all would mean one of them had touched something.
+  if (r.suppressed.ok && r.complete.ok) {
+    const a = r.complete.frameHashes ?? [];
+    const b = r.suppressed.frameHashes ?? [];
+    const same = a.length > 0 && a.length === b.length && a.every((h, i) => h === b[i]);
+    check(same, 'and what it drew is the same picture the document without those keys draws',
+      `${a.filter((h, i) => h === b[i]).length}/${a.length} frames identical`);
+  }
+
+  check(r.partial.ok === false
+    && String(r.partial.error).includes(`${MISSING_B.id} ${MISSING_B.version}`)
+    && !String(r.partial.error).includes(`${MISSING_A.id} `),
+  'suppressing one missing effect leaves the export refused for the other, and names only the other',
+  r.partial.ok ? 'the export ran' : r.partial.error);
+
+  // The falsification control for every row above: a build that simply refused to export
+  // would satisfy all three refusals, and one that recorded a suppression unconditionally
+  // would satisfy the record row. A complete document has to go straight through and has
+  // to leave no `suppressed` key behind it.
+  // And the same suppression made through the surface a person has, spent by the button
+  // a person presses. The note is the whole assertion: a build whose handler dropped the
+  // badge's set prints the refusal here instead of a filename, with every row above it
+  // still green.
+  check(r.throughTheUi?.pressed === 'true'
+    && /check-missing-ui/.test(r.throughTheUi?.note ?? '')
+    && !/refused|failed/.test(r.throughTheUi?.note ?? ''),
+  'and a suppression pressed in the badge is the one the export button spends, driven through both controls',
+  `aria-pressed ${r.throughTheUi?.pressed}, note ${JSON.stringify(r.throughTheUi?.note ?? null)}`);
+
+  check(r.complete.ok === true, 'a complete document exports with no refusal at all',
+    r.complete.ok ? `${r.complete.frames} frames to ${r.complete.output}` : r.complete.error);
+  if (r.complete.ok) {
+    const record = JSON.parse(readFileSync(`${r.complete.output}.job.json`, 'utf8'));
+    check(!Object.hasOwn(record.project ?? {}, 'suppressed'),
+      'and its deliverable records no suppression, because there was nothing to suppress',
+      `suppressed ${JSON.stringify(record.project?.suppressed ?? null)}`);
   }
 }
 

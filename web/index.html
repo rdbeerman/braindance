@@ -764,6 +764,12 @@
   #tNote:empty { display: none; }
   #tResume { border: none; background: none; padding: 0; }
   #tResumeOpen { padding: 5px 10px; }
+  /* One missing effect, one entry: its sentence and the control that lets a render go
+     without it, kept together so two of them cannot read as one. `inline-flex` rather
+     than `block` for the same reason the chip around it is one - the button has to sit
+     on the text's baseline, and the chip stays a single row of the application bar
+     whatever it holds. `paintMissingEffects` carries why it does not stack. */
+  .missingfx { display: inline-flex; align-items: center; gap: 7px; }
   /* `hidden` on a chip, which needs saying because `.tchip` already sets a display and
      an author rule beats the `[hidden] { display: none }` in the browser's own sheet.
      Without this a chip marked hidden stays on screen with nothing in it, which is the
@@ -1165,11 +1171,20 @@
          `openTake` is the only caller that can decide it, because deciding needs the
          take's hash.
 
+         `#tMissing` is the effects this document names that this build has not got. It
+         is the fourth thing in the slot and it belongs here for the reason `#tResume`
+         does: it is a statement about the session, and it is the only place the person
+         at the screen is told that part of the clip is being carried rather than drawn.
+         Empty it hides itself the way the note does, so an ordinary document leaves the
+         bar exactly as bare as it was; `paintMissingEffects` fills it, one line per
+         missing effect, each with the toggle that lets an export go without that one.
+
          `#appStatus` is the sensor and the rate coming in. `paintStatus` has been writing
          it since the bar arrived and there was nothing here to write to. -->
     <div class="appstatus" id="appStatusSlot">
       <span class="tchip" id="tNote"></span>
       <span class="tchip" id="tResume" hidden><b id="tResumeWhen"></b><button id="tResumeOpen" type="button">restore autosave</button></span>
+      <span class="tchip warn" id="tMissing" hidden></span>
       <span id="appStatus"></span>
     </div>
   </header>
