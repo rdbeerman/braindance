@@ -295,10 +295,14 @@ if (MUTATE && !MUTATIONS[MUTATE]) {
 let assertions = 0;
 let failures = 0;
 let crashed = null;
+// Kept as well as counted, because a run that ends early is read by which rows
+// fired and not by how many did - a mutation is only caught if the rows that
+// reddened are the ones its entry above says it is about.
+const fired = [];
 const check = (ok, label, detail = '') => {
   assertions++;
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`);
-  if (!ok) failures++;
+  if (!ok) { failures++; fired.push(label.trim()); }
   return ok;
 };
 const section = (title) => console.log(`\n[jobs] ${title}`);
@@ -1340,14 +1344,40 @@ try {
 }
 
 console.log(`\n[jobs] ${assertions} assertions, ${failures} failed`);
-// Before any other verdict, a run that threw has not earned a verdict either way.
+/**
+ * **The count decides, and it decides before the crash does.**
+ *
+ * A mutation here damages the queue the rows below it go on to drive, and the damage is
+ * the point: `finish-accepts-any-state` lets a queued job be marked done, so the claim two
+ * rows later is handed nothing and `held.id` throws, and `requeue-refuses-all-running`
+ * leaves the rescued job running, so the claim after it throws the same way. Both had
+ * already reddened the two rows their entry above says they are about. Putting the crash
+ * first reports `DID NOT RUN` over a caught mutation, which is the census-of-exit-codes
+ * shape `docs/instruments.md` files: the tool reads as broken while it is doing its job,
+ * and the operator re-runs it forever.
+ *
+ * So a mutated run with failures is caught however it ended, and it says that it ended
+ * early, because the rows after the crash never ran and the count is a floor rather than
+ * the whole picture. A run with no failures is the other way round: crashed means
+ * `DID NOT RUN`, and finishing cleanly means the mutation was not caught at all. The
+ * ordering is `tools/effect-check.mjs`'s, and the reasoning there is the same reasoning.
+ *
+ * The null dereferences themselves stay. A guard at either claim runs on a clean build
+ * too, where a claim answering nothing is a real failure, and it would turn that into a
+ * row that quietly did not run - an assertion that cannot fail, bought with a number.
+ */
+if (MUTATE && failures > 0) {
+  console.log(`[jobs] caught, as required (${failures} assertion${failures === 1 ? '' : 's'} fired)`);
+  if (crashed) console.log(`[jobs] and the run ended early: ${crashed.message} - the count is a floor`);
+  console.log(`[jobs] rows that fired: ${fired.join(' | ')}`);
+  process.exit(1);
+}
 if (crashed) {
   console.log(`[jobs] DID NOT RUN - ${crashed.message}. Nothing here is a finding: re-run it.`);
   process.exit(2);
 }
 if (MUTATE) {
-  if (failures === 0) { console.log('[jobs] NOT CAUGHT - the check passed a queue it should have rejected'); process.exit(1); }
-  console.log(`[jobs] caught, as required (${failures} assertion${failures === 1 ? '' : 's'} fired)`);
+  console.log('[jobs] NOT CAUGHT - the check passed a queue it should have rejected');
   process.exit(1);
 }
 console.log(failures === 0 ? '[jobs] PASS' : `[jobs] FAIL (${failures})`);
