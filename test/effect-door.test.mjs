@@ -26,6 +26,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { doorRefusal, forkRefusal } from '../server/effect-door.js';
+import { snapScalar } from '../web/format.js';
 import { cloudSpine } from '../web/cloud-shader.js';
 import { gradeSpine } from '../web/grade-shader.js';
 
@@ -122,6 +123,59 @@ test('the door bounds how much of a package it will take', () => {
   });
   assert.equal(heavy(1024), null, 'a package inside the byte bound is not refused by it');
   assert.match(heavy(256 * 1024), /bytes of chunk text/, 'a package past the byte bound is refused by name');
+
+  // **And how much of it there is once it is spliced, which neither bound above can see.**
+  // A file counts once in both of them - the set and the map each hold one entry per name -
+  // while the assembler emits a chunk once per descriptor naming it. So the carried size and
+  // the assembled size come apart the moment a manifest names one file twice, and the arm is
+  // built to sit *inside* both of the bounds above and outside this one: sixty files of
+  // three kilobytes is 61 files and about 180KB carried, and putting each of them on two
+  // stages doubles what a driver compiles.
+  const spliced = (times) => brokenBy('thermal', (c) => {
+    for (let i = 0; i < 60; i++) {
+      c.chunks[`pad${i}.frag.glsl`] = `// ${'x'.repeat(3000)}\n`;
+      for (let t = 0; t < times; t++) {
+        c.manifest.chunks.push({ stage: t === 0 ? 'f.tone' : 'f.decl', order: 500 + i, file: `pad${i}.frag.glsl` });
+      }
+    }
+  });
+  assert.equal(spliced(1), null, 'the same bytes spliced once are inside every bound this door has');
+  assert.match(spliced(2), /splices \d+ bytes of chunk text/,
+    'and the same bytes spliced twice are refused, which is the multiplier the carried size cannot show');
+
+  // The exact repeat, which the bound above deliberately does not have to catch: it is
+  // refused for being a repeat rather than for being large, so a thousand descriptors over
+  // one small chunk fails here rather than passing every bound in this file. Reported through
+  // the assembler, because that is where the rule lives - a package written into the store
+  // past this door meets it on the page.
+  assert.match(brokenBy('thermal', (c) => {
+    c.manifest.chunks.push({ ...c.manifest.chunks[0], order: 900 });
+  }), /heat\.frag\.glsl is spliced into "f\.tone" twice/,
+  'one joint naming one file twice is refused, whatever the orders say');
+  assert.equal(brokenBy('thermal', (c) => {
+    c.manifest.chunks.push({ stage: 'f.decl', order: 900, file: 'heat.frag.glsl' });
+  }), null, 'and two different joints naming one file is not, which is what the rule above is a distinction from');
+});
+
+// **Which program a binding is checked against, which is a question the door used to answer
+// by not asking.** Every chunk's uniforms were credited to every assembled program, so a
+// binding naming the wrong table found its uniform anyway: the control moves, three.js writes
+// the key, and no shader on that program ever reads it.
+test('a binding is checked against the program its own table names', () => {
+  assert.match(brokenBy('rain', (c) => { c.manifest.params.amount.bind.on = 'grade'; }),
+    /rain\.amount binds the uniform "rain" and the assembled grade program declares no such uniform/,
+    'a binding moved to the other table is refused, because the chunk declaring it feeds the cloud');
+  assert.equal(brokenBy('rain', (c) => { c.manifest.params.amount.bind.on = 'points'; }), null,
+    'and the shipped binding is not, which is what says the rule is about the program rather than the name');
+});
+
+// A package colliding with itself, which the core and beside-package collisions cannot see:
+// `panelGroups` is read into a set, so one key declared twice is one group here and two
+// spliced entries in `withEffectGroups`, and the generator then emits that group's rows twice.
+test('a package may not declare one panel group key twice', () => {
+  assert.match(brokenBy('rain', (c) => {
+    c.manifest.panelGroups.push({ ...c.manifest.panelGroups[0], label: 'Rain again', order: 200 });
+  }), /declares the panel group "rain" twice/, 'one key declared twice is refused by name');
 });
 
 // **Both ends of a binding, and the type is the end nothing downstream checks.** The rule
@@ -185,20 +239,43 @@ test('a bound off its own step grid is a number the registry never holds', () =>
   assert.equal(brokenBy('noise', (c) => { c.manifest.params.speed.max = 2.95; }), null,
     'and a ceiling on the grid is not');
 
-  // **`min` has no rule of its own and this row is why.** It anchors the grid, so the snap
-  // returns it unchanged and the final clamp returns it again even where the rounding would
-  // have moved it - a rule asking `min` could not go red on any input the checks above
-  // admit, which is the vacuous conjunct `docs/instruments.md` keeps recording. What a
-  // too-fine `min` actually breaks is every *other* value, because the decimals it implies
-  // are used for all of them, and the default is where that shows: on a 0.05 grid a `min` of
-  // 1e-101 takes a default of 0.7 to 0.7000000000000001, which the row above catches by
-  // name. The residual is stated rather than asserted, because a row asserting a hole is a
-  // row that has to be deleted to close it: a package whose `def` sits exactly *on* such a
-  // `min` gets through, and what it costs is that its values land on `n * step` without the
-  // rounding correction - which is where they would have landed anyway.
+  // **`min` still has no *grid* rule of its own and this row is why.** It anchors the grid, so
+  // the snap returns it unchanged and the final clamp returns it again even where the rounding
+  // would have moved it - a grid rule asking `min` could not go red on any input the checks
+  // above admit, which is the vacuous conjunct `docs/instruments.md` keeps recording. What a
+  // too-fine `min` actually breaks is every *other* value, because the places it implies are
+  // used for all of them: on a 0.05 grid a `min` of 1e-101 takes a default of 0.7 to
+  // 0.7000000000000001.
+  //
+  // **That reading used to be this row's assertion, and it is the symptom rather than the
+  // fault.** It also left a residual written down instead of closed - a package whose `def`
+  // sits exactly *on* such a `min` snaps to itself and got through. Both are the same
+  // question, which is whether the number naming a bound is one this build's rounding can
+  // express, and `MIN_PARAM_PLACES` asks it directly. So the refusal names `min` now, and the
+  // reading that used to stand here is asserted one row down where it is still the truth
+  // about the arithmetic.
   assert.match(brokenBy('noise', (c) => { c.manifest.params.speed.min = 1e-101; }),
-    /declares def 0\.7 and the registry would hold it at 0\.7000000000000001/,
-    'a floor finer than the rounding this build can express moves the default, and the default row catches it');
+    /declares min as 1e-101, which needs 100 decimal places/,
+    'a floor finer than the rounding this build can express is refused by name rather than through its symptom');
+  assert.match(brokenBy('noise', (c) => { c.manifest.params.speed.min = 1e-101; c.manifest.params.speed.def = 1e-101; }),
+    /declares min as 1e-101/,
+    'and a default sitting exactly on such a floor is refused too, which is the residual this rule closed');
+  // The arithmetic the row above used to assert, kept because the place rule is only worth
+  // having if what it prevents is real. Run directly rather than through the door, since the
+  // door now refuses the manifest before `snapScalar` is ever asked about it.
+  assert.equal(snapScalar({ min: 1e-101, max: 3, step: 0.05 }, 0.7), 0.7000000000000001,
+    'a floor past the rounding cap moves every other value, which is what the refusal is about');
+  assert.equal(snapScalar({ min: 0, max: 3, step: 0.05 }, 0.7), 0.7,
+    'and the same value on an ordinary floor does not, so the reading above is about the floor');
+
+  // The bound is a place count rather than a magnitude, so a small number written in few
+  // places is fine and a number needing seven is not - which is the distinction that would
+  // vanish if this were a comparison against 1e-6.
+  assert.equal(brokenBy('noise', (c) => { c.manifest.params.speed.min = 0.000001; c.manifest.params.speed.step = 0.000001; c.manifest.params.speed.def = 0.000002; c.manifest.params.speed.max = 0.000005; }), null,
+    'a parameter at the finest grid this build snaps to is not refused by the place rule');
+  assert.match(brokenBy('noise', (c) => { c.manifest.params.speed.max = 2.9500001; }),
+    /declares max as 2\.9500001, which needs 7 decimal places/,
+    'and one place past it is refused, naming the field and the count');
 });
 
 // **Where a row would land, which nothing asks until the registry has already swapped.**

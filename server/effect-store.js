@@ -54,6 +54,37 @@ export class EffectStore {
     }
     this.dir = dir;
     this.builtinDir = builtinDir;
+    // **How many times this store has changed, which is the one thing a revision cannot say.**
+    //
+    // A package rev is a hash of its bytes and the list of them is a hash of hashes, which is
+    // exactly what a client wants for "am I holding the current package" and is silent about
+    // the question underneath it: has the store moved *since I started reading*. Those two
+    // come apart when a change is undone. Install a fork and delete it again - which restores
+    // the shipped package, so the bytes are the bytes they were - and every revision on both
+    // sides of that pair is identical. A page whose read straddles it opened on the shipped
+    // package, fetched some of its chunks out of the fork, closed on the shipped package
+    // again, and found both listings in perfect agreement. The mixed set then assembles into
+    // a program nobody wrote, adopts, records the revision it opened with, and no later poll
+    // ever disagrees with itself about it.
+    //
+    // A counter is what closes that, because the missing dimension is the store's own history
+    // rather than its contents: `A -> B -> A` is three generations however many times the
+    // bytes repeat. It is not durable and does not need to be - a restart drops it to zero, a
+    // read straddling the restart sees two different numbers and retries, and the attempt
+    // after it is answered wholly by the new process. Failing toward a retry is the direction
+    // that costs an interval rather than a wrong program.
+    //
+    // **What it does not see is narrower than it first reads, and the narrowing is worth
+    // writing down rather than leaving somebody to be reassured by the wide version.** A
+    // change made to these directories by something that is *not* this store moves no counter,
+    // so an edit and its undo are invisible here - but only where the sole requests answered
+    // out of the changed state are chunk fetches. A listing that lands there disagrees on the
+    // revisions, and a package read that lands there answers for a revision the opening
+    // listing did not name, which the client holds it to. So the residual is one window,
+    // between the manifest and the chunks, on a store nothing in the product writes to:
+    // `install` and `remove` are the only writers, and the two places anything else does are
+    // proof-tool fixtures standing a package up past the door on purpose.
+    this.generation = 0;
     this.recoverInterruptedInstalls();
   }
 
@@ -319,6 +350,11 @@ export class EffectStore {
       throw err;
     }
     if (replaced) rmSync(aside, { recursive: true, force: true });
+    // Bumped after the swap rather than before it, so the number a reader sees and the
+    // directory it resolves are never one change apart in the direction that reads as
+    // settled: a generation that moved before the rename would claim a change that had not
+    // landed, where one that moves after it claims a change that has.
+    this.generation += 1;
     return { ...this.read(id), replaced };
   }
 
@@ -362,6 +398,10 @@ export class EffectStore {
     // rather than over however long it takes to unlink a directory of files.
     renameSync(mine, aside);
     rmSync(aside, { recursive: true, force: true });
+    // The id stops resolving at the rename above, so the generation moves with it for the
+    // same reason it moves after an install's second rename: what a reader is being told is
+    // that the answer to every question about this store has changed since the last number.
+    this.generation += 1;
     return { removed: id, restored: existsSync(join(this.builtinDir, id)) };
   }
 

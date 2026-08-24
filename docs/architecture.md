@@ -85,7 +85,8 @@ package is a directory of files, so a revision has to be computed over the set a
 say which files exist before a client can fetch them one at a time.
 
 ```
-GET    /effects              every id either root holds, each with its files and revisions
+GET    /effects              { effects: [ every id either root holds, with its files and
+                               revisions ], generation: how many times this store has changed }
 GET    /effects/:id          one package: the parsed manifest, the file index, the revision
 GET    /effects/:id/file/:n  one file's bytes, as text/plain
 PUT    /effects/:id          { manifest, chunks: { <file>: <text> } }  installs into effects/
@@ -95,6 +96,19 @@ DELETE /effects/:id          removes the user's copy only
 A revision is a hash of the bytes: `sha256` per file, and the package's own over the sorted
 `name hash` lines. Never a re-serialisation — a manifest that round-trips through `JSON.parse`
 is a different byte stream with the same meaning, and provenance is about bytes.
+
+**The generation is beside the list because a hash of bytes cannot say that a change was
+undone.** A client assembles a set out of one listing, a request per package and a request per
+chunk, and the thing it has to be sure of is that all of those came from one revision of the
+store — which it asks by listing again at the end and requiring the answer to be the one it
+started from. Contents alone cannot answer it: install a fork and delete it again, which
+restores the shipped package rather than removing anything, and every revision on both sides of
+that pair is identical while the store answered as something else in between. A read straddling
+it passes the comparison by construction, assembles a program out of two revisions, and records
+the revision it opened with, so nothing later ever disagrees either. The counter is the store's
+own history rather than its contents, which is the axis that pair moves along; it is bumped by
+`install` and `remove` and by nothing else, and it is not durable, because a restart makes the
+two listings disagree and the client retries.
 
 **An install is atomic because a package is a directory.** The whole thing is written under
 `<id>.<seq>.tmp`, any existing copy is renamed to `<id>.<seq>.old`, the new one is renamed in and

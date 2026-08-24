@@ -4020,6 +4020,15 @@ It would make the rows deterministic and it would make them rows about a build n
 which is the trade `docs/measurement.md` records under screening measurements that remove the
 effect they are measuring.
 
+**And the same interval is what makes a row asserting that nothing happened need a second
+number.** The arm for "a set this page has already refused is not fetched again" counts package
+reads in a window and requires zero — which is satisfied perfectly by a build that has stopped
+polling, by a `pollNow` the reentrancy guard turned away, and by a page that has crashed. So the
+row counts the *listing* reads in the same window and requires at least two of them, and the
+window is bounded by waiting for that count rather than by a pause. **A row whose subject is an
+absence has to name something present in the same breath**, or the strongest evidence for it is
+the tool having stopped working.
+
 ## `params.spec` answers with the bounds and not the words
 
 A row asserting that a retuned package's new label reached the registry read
@@ -4061,3 +4070,187 @@ believing it was missed; the specific shape worth naming is **a rule that is rea
 where the second one catches what the first was edited to let through**. A guard downstream of
 the line you edited makes a mutation a no-op, and a no-op mutation is indistinguishable in the
 output from an instrument that cannot see.
+
+**And the same entry took a third edit when the listing grew a field.** The shape rule now asks
+for a generation as well as an array, and writing that as a second `if` would have put a fresh
+guard downstream of the line this mutation edits — the nonsense body would be refused by the new
+condition, the mutated build would behave like the fixed one again, and the run would come back
+`NOT CAUGHT` for the third time on a mutation that had reproduced nothing. It is one condition
+for that reason rather than for tidiness. **When a rule gains a term, ask which mutation anchors
+on it**, because the cheapest place to put the term is usually in front of the thing the control
+is aimed at.
+
+## An interception that counts reads is sharing the route with whatever else reads it
+
+`effect-check`'s coherent-read arm stages an install landing mid-read by intercepting
+`GET /effects` and moving a revision in the *closing* listing, and it identified that listing by
+parity — every second read. The page's own six-second interval fetches the same URL through the
+same interception, so a tick landing between the driver's two reads shifts the count and the
+closing read comes back untouched: the rebuild succeeds and the row reddens on a build with
+nothing wrong with it. Seen as a second red row under `--mutate rebuild-forgets-the-tab`, five
+sections away from anything that mutation touches, which is the tell — **a red row in a section
+the mutation has no business in is a fixture problem before it is a finding.**
+
+The handle that works is the order *inside* one read rather than a count across the run: the
+opening listing is asked before any package is and the closing one after all of them, so a flag
+set by the package route marks the next listing as the closing one.
+
+**And the first version of that repair was wrong in the more interesting way, which is that the
+row went green for the wrong rule.** The read retries once, so "every listing after a package
+read" moves the *opening* listing of the second attempt too — and a moved rev in an opening
+listing is caught one request later by the package that answers for a revision the listing did
+not name, which is a different rule entirely. Measured: the row was green on a clean build for
+the neighbouring rule's reason and went **red under `package-read-need-not-match-the-list`**, a
+mutation about the rule next door. Clearing the marker as each closing read passes puts every
+attempt back on an untouched opening listing, and the three terms then separate exactly:
+`reads-need-not-agree` reddens two rows, `list-reads-need-not-agree-on-generation` one, and
+`package-read-need-not-match-the-list` one, each of them the row its own sentence names.
+
+The row carries its delivery beside its claim now — `closingReads === 2`, because the read
+retries once, so a run that refused for this reason moved a rev in exactly two closing listings.
+**A count that says where the fixture landed is what separates a refusal for the right reason
+from a refusal**, and this row had neither until a mutation about something else went red.
+
+## A verification of content is a refusal of every harness that substitutes content
+
+An external review asked for the tighter of two possible fixes to a coherent read: have the page
+hash every chunk it fetched, with `crypto.subtle`, against the per-file `sha256` the store's own
+file index declares. That verifies content rather than timestamps, so it closes the window
+completely, and it is the right instinct. It cannot ship here, for two independent reasons and
+neither of them is about the rule.
+
+**The first is the boot path, and it was measured rather than reasoned about.** `crypto.subtle`
+is undefined outside a secure context; `--host 0.0.0.0` with a browser reaching a capture node
+at an address literal is this program's documented two-machine shape, and its origin guard
+*requires* an address rather than a name, so the LAN case is never a secure context by
+construction. The read in question runs inside `web/main.js`'s top-level await. So the page
+would have thrown while evaluating on exactly the deployment the design is built around,
+published no `__kinect`, and taken every tool in this suite to DID NOT RUN. Measured on this
+build, one server on `0.0.0.0` and two origins: `http://127.0.0.1:8506/record` reads
+`isSecureContext true` with `crypto.subtle` an object, and `http://10.31.158.148:8506/record`
+reads `false` and `undefined`, both pages otherwise booting cleanly.
+
+**The second is the one worth the entry, because no amount of care about the API would have
+found it.** Three tools in this suite deliver mutations by *serving altered chunk bytes* at
+`/effects/:id/file/:name` — `registry-check` stages about twenty specs into
+`effects-builtin/<id>/<file>` and serves them through `servedAt`, `export-check` three more, and
+`effect-conformance-check` intercepts every chunk fetch on every run, mutated or not, so that
+the two paths differ in one function call rather than in whether a route exists. A page that
+hashed those bytes against the index would refuse all of them. The rule would have been correct,
+the tools would have been correct, and about thirty falsification controls would have stopped
+running — in the loudest possible way for `conformance`, which would never boot a page again,
+and as `DID NOT RUN` for the rest.
+
+**So the question to ask before adding any check on the content of something fetched is who else
+is allowed to rewrite that content.** A proof harness is a legitimate rewriter by design, and it
+is invisible from the code being hardened. The general form is the delivery entries above read
+from the other end: those are about a mutation that fails to arrive, and this is about a mutation
+that arrives and is *refused by the product* — same silence, opposite cause, and the second one
+gets worse the more thorough the check is.
+
+What shipped instead closes the same window from outside the bytes: the store carries a
+generation it bumps on install and remove, the two listings either side of a read must agree on
+it as well as on their contents, and each package read must answer for the revision the listing
+named it at. Neither is a claim about bytes, so no interception can trip either — and the pair
+catches what the contents comparison structurally cannot, which is a change that was *undone*
+while the page was reading. `list-reads-need-not-agree-on-generation` and
+`package-read-need-not-match-the-list` are the two controls, and they are separate specs because
+a build with no comparison and a build comparing the wrong thing fail differently.
+
+**The residual is stated rather than closed, and it is narrower than the obvious wording.** A
+change made to the package directories by something that is *not* this store moves no counter,
+so an edit and its undo are invisible to it — but only where the sole requests answered out of
+the changed state are chunk fetches. A listing landing there disagrees on the revisions and a
+package read landing there answers for a revision the opening listing did not name, so both of
+those are caught by the terms above. The hole is one window, between a package's manifest and
+its chunks, on directories nothing in the product writes to. `effect-check` asserts the
+behaviour rather than describing it: section 1 flips a byte on disk, the revisions move and the
+generation does not, which is this paragraph as a row.
+
+**And the arm for the whole term had a hole of its own that the clean run could not show.** The
+change-and-undo is staged by moving the generation inside a route interception, which measures
+what the *client* does with the number and is perfectly satisfied by a store that never moves
+it — at which point every listing agrees forever and the read is back to comparing bytes. Two
+rows now read it off the real store across the real install and uninstall section 2 already
+performs, and the second is the design in one measurement: `probe` is not a builtin, so removing
+it leaves the store holding the identical packages at the identical revisions, and the only
+thing separating that moment from the one before the install is a number that went up twice.
+`store-generation-never-moves` is the control, and what makes it a control rather than a fourth
+way of saying the same thing is that it must leave the interception-fed arm green — the two
+measure opposite ends of one wire.
+
+## A row whose message described the defect, agreeably, for as long as it passed
+
+`effect-check`'s grade-gate section ends by uninstalling a grade effect and asking that the pass
+shuts again. The row read:
+
+```
+and taking it off shuts the pass again, on a uniform cell that is still carrying the value it
+was raised to      grade.enabled=false, probeGradeAmount still 0.6
+```
+
+The claim that row carries is about the *gate* — a build that derived its gate list once at boot
+leaves the pass open over a term the registry no longer has — and that half was right and had its
+own mutation. The other half of the predicate, `ungated.value === 0.6`, was written from what the
+tool observed the build doing, and what the build was doing was the defect: nothing writes a
+uniform except the parameter bound to it, so a package coming off leaves its term standing at
+whatever the slider last put there, and the chunk that reads it does not stop. It is one line of
+GLSL from a grade nobody can switch off, and the instrument had it written down as expected
+behaviour, in a sentence, in the passing message.
+
+Nothing was going to find that by reading the row, because the row is about something else and
+its sentence is accurate. What found it was a review asking a different question — what happens
+to a uniform a *rebinding* abandons — and the uninstall turning out to be the same question with
+a plainer fixture.
+
+Two things to carry. **A conjunct added because it was true when the row was written is a claim
+about the build, and it needs the same "should this be true" that the row's own subject got.**
+The tell here is that the two halves of the predicate are about different subjects: one names the
+pass and one names a cell, and only the first is in the row's sentence.
+
+And the shape of the repair matters, because the tempting one is to drop the conjunct. The value
+is worth reading — it is the plainest observable of a departed binding there is — so it stays and
+its expectation inverts, which turns the row into a second live arm for the new rule rather than
+a row with a term deleted out of it. **A conjunct you cannot justify is either wrong or is a claim
+nobody has made yet; deleting it loses the reading either way.**
+
+## A new arm lengthens the fixture chain it is dropped into, and an old mutation pays for it
+
+Two arms went into `effect-check` section 6, next to the fixture they wanted: a page holding an
+install it had refused. They belong there by subject and the placement was wrong, and the reading
+that said so is one nobody would get from the clean run, which was 107 of 107.
+
+Section 6 leaves the page carrying a document, and the sections after it drive `reload()` at six
+call sites with no `try` around any of them — so a mutation that makes a rebuild throw ends the
+run at the first of those rather than reddening a row. Three existing mutations break exactly
+that. With the two new blocks in, `reinstall-leaves-it-parked` had more parked wreckage to leave
+behind and went from **nine red rows to fourteen**, the five extra being cascades off a document
+its own defect had already made unloadable. `rollback-keeps-the-new-registry` went from six to
+ten on the same reasoning — the new arms are second rollback fixtures — but that one is the
+honest cascade and this one was not, because nine is the number its Must-redden line promises.
+
+**The first reading of it was wrong, and it is worth keeping the wrong version visible because
+it is the reading a diff invites.** It looked as though the new blocks had stopped that mutation
+surviving section 7, which the run supports: 60 assertions of the 107 the tool had at that
+moment. They had not. A worktree at `4b63f80` under the same mutation ends at **52 of 91 with
+nine red**, so it has always ended early at exactly the same place and no line anywhere said so.
+Ten minutes of `git worktree` is what separates "my change did this" from "this was always here"
+— a rule this page states about a red row, and just as true of a *number* that moved.
+
+**The cost is the sections that stop being measured, and that cost was there before and after.**
+A truncated mutation run is the shape this page already records twice: every row read
+individually looks like a catch, and a third of the suite's claims were never put to that build
+at all. What the placement changed is how many rows go red on the way there, which is the part a
+reader checks against the promise.
+
+Both blocks moved to the end of section 9, which is two short sections from the end and one of
+those closes the browser. The fixture is re-staged there rather than inherited — the fork is
+installed again and driven through `pollNow` — which costs one precondition row and buys back the
+old blast radius exactly.
+
+**The rule is worth stating on its own, because "put the arm next to its fixture" is otherwise
+good advice.** *A block's position is a claim about what it costs every mutation that has to
+survive it*, and the way to check it is to re-run the mutations whose fixture chain now runs
+through the new block, not the ones the new block is about. The repair that would make position
+stop mattering is the one this page already prescribes and this tool has not had: guard every
+driver call a mutation can make throw, at all six sites rather than at the one that failed.

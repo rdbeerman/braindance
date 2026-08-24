@@ -198,6 +198,40 @@ test('the numbers place the text, and the order the packages arrive in does not'
     'the assembler placed the chunks by the order the packages arrived in rather than by the numbers they declare');
 });
 
+test('a stage takes any number of chunks, and any number means any number of different ones', () => {
+  // **The one joint kind that had nothing saying a repeat is a repeat.** A slot holds at most
+  // one chunk and a service one block per consumer, and both refuse a second claim by name; a
+  // stage is documented as taking any number, which is right - two packages both adding
+  // declarations is the ordinary case - and left one package naming one file on one stage as
+  // many times as it liked. What that costs is not a wrong picture but a multiplier nothing
+  // upstream can see: the install door bounds a package by the bytes it *carries*, one entry
+  // per file name, while this loop emits the text once per descriptor. A thousand entries over
+  // one 493-byte chunk is 493 bytes at the door and half a megabyte at the driver.
+  //
+  // A fixture rather than the shipped set, because the shipped set answers this by having no
+  // package that repeats a descriptor - which is a fact about sixteen manifests today and not
+  // a rule. The control beside it is the shape that has to keep working: one file on two
+  // joints is what a declaration shared between a vertex and a fragment block looks like, and
+  // `readEffectPackages` de-duplicates the *fetch* for exactly that reason.
+  const spines = { only: { vertex: [{ stage: 'a' }, { stage: 'b' }], fragment: [{ text: '' }] } };
+  const twice = {
+    id: 'repeat',
+    manifest: { chunks: [{ stage: 'a', order: 1, file: 'x.glsl' }, { stage: 'a', order: 2, file: 'x.glsl' }] },
+    chunks: { 'x.glsl': 'X\n' },
+  };
+  assert.throws(() => assembleShaders(spines, [twice]),
+    /repeat's x\.glsl is spliced into "a" twice/,
+    'one stage naming one file twice assembled without complaint, so the same text is compiled twice');
+
+  const shared = {
+    id: 'shared',
+    manifest: { chunks: [{ stage: 'a', order: 1, file: 'x.glsl' }, { stage: 'b', order: 1, file: 'x.glsl' }] },
+    chunks: { 'x.glsl': 'X\n' },
+  };
+  assert.equal(assembleShaders(spines, [shared]).only.vertexShader, 'X\nX\n',
+    'and one file on two joints is still spliced into both, which is what the rule above is a distinction from');
+});
+
 test('a joint name means one place across every spine, so a second spine cannot shadow one', () => {
   // The refusal the one-call shape exists for, asserted rather than described. Two spines
   // offering the same joint name is not a conflict either of them can see on its own - each

@@ -168,6 +168,20 @@ import { assembleShaders } from './shader-assembly.js';
 const revSignature = (effects) => effects.map((e) => `${e.id} ${e.rev}`).join('\n');
 
 /**
+ * A read that met the store mid-change, marked so the read above it can tell that from a
+ * fetch that simply failed.
+ *
+ * The difference decides what happens next and nothing else in the error can carry it: a
+ * store being written to while it is read is answered by asking again, where a 404 or a body
+ * this build cannot parse is answered by leaving the page on the set it has. A property
+ * rather than a subclass because the only reader is one `if`, and **declared up here beside
+ * `revSignature` for the reason that note carries** - the coherent read runs inside the
+ * module's top-level await, and a declaration below it is in its temporal dead zone at that
+ * moment, which is a page that publishes no `__kinect` at all.
+ */
+const tornRead = (why) => Object.assign(new Error(why), { tornRead: true });
+
+/**
  * `GET /effects`, with the shape of the answer held to what every reader of it assumes.
  *
  * **A 200 carrying a body this build cannot read used to escape every guard there was.**
@@ -183,9 +197,9 @@ async function listEffects() {
   const res = await fetch('/effects');
   if (!res.ok) throw new Error(`GET /effects answered ${res.status} - the registry cannot assemble without its packages`);
   const body = await res.json();
-  if (!body || !Array.isArray(body.effects)) {
-    throw new Error('GET /effects answered a body with no effects array in it - this page reads a list of '
-      + 'installed packages there, and something else at that address is not a store this build can converge on');
+  if (!body || !Array.isArray(body.effects) || !Number.isFinite(body.generation)) {
+    throw new Error('GET /effects answered a body that is not a list of installed packages and a generation - '
+      + 'this page reads both of those there, and something else at that address is not a store this build can converge on');
   }
   for (const entry of body.effects) {
     if (!entry || typeof entry.id !== 'string' || typeof entry.rev !== 'string') {
@@ -193,7 +207,11 @@ async function listEffects() {
         + 'revision of the package behind it, and the comparison that decides whether this page is up to date is over exactly those two');
     }
   }
-  return body.effects;
+  // Both, because they answer different questions and only one of them is about this page
+  // being up to date. `effects` is what the page is assembled from and what the signature
+  // compares; `generation` is how many times the store has changed, which is what the read
+  // below needs and what a revision cannot say - see `EffectStore`'s constructor.
+  return { effects: body.effects, generation: body.generation };
 }
 
 // A function rather than the expression it was, because there are two callers now and
@@ -203,10 +221,21 @@ async function listEffects() {
 // package that half-arrived - and the failure it produced would be a program with a
 // block missing, on a page that had been fine a second earlier.
 async function readEffectPackages(effects) {
-  return Promise.all(effects.map(async ({ id }) => {
+  return Promise.all(effects.map(async ({ id, rev }) => {
     const res = await fetch(`/effects/${encodeURIComponent(id)}`);
     if (!res.ok) throw new Error(`GET /effects/${id} answered ${res.status} - the registry cannot assemble without its packages`);
     const pkg = await res.json();
+    // **The package that came back has to be the one the list named**, which is the half of a
+    // coherent read the two listings either side of it cannot cover. A revision installed and
+    // removed again between the opening list and this request leaves both listings agreeing
+    // and hands this page the *other* package's manifest and file index - a set the closing
+    // comparison then blesses, because by the time it runs the store is back where it was.
+    // The rev is a hash over the package's whole file index, so holding it to the one the
+    // list declared pins the manifest and the names it carries to a single revision.
+    if (pkg?.rev !== rev) {
+      throw tornRead(`effect ${id} was listed at revision ${rev} and answered for at ${pkg?.rev} - `
+        + 'the store changed between the list this read opened with and the package it then asked for');
+    }
     // Named once and fetched once. A manifest may point two joints at one file, and a
     // second request for the same bytes would be a second answer to a question with one.
     const names = [...new Set((pkg.manifest.chunks ?? []).map((c) => c.file))];
@@ -231,21 +260,57 @@ async function readEffectPackages(effects) {
  * and draws something nobody wrote. Nothing downstream can see it, because every byte
  * arrived with a 200 and the assembled text is perfectly well-formed.
  *
- * So the list is asked again at the end and the signature has to be the one the read
- * started from. One retry, because the shape this closes is a single install racing a
- * single read and a second attempt clears it; two failures in a row is a store being
- * written to faster than it can be read, and the honest answer there is to say so and
- * leave the page holding the set it has rather than to spin.
+ * So the list is asked again at the end and the store has to be where the read started
+ * from. One retry, because the shape this closes is a single install racing a single read
+ * and a second attempt clears it; two failures in a row is a store being written to faster
+ * than it can be read, and the honest answer there is to say so and leave the page holding
+ * the set it has rather than to spin.
+ *
+ * **The two listings are compared on their generation as well as on their contents, and the
+ * contents alone were not enough.** A revision is a hash of bytes, so a change that is undone
+ * hashes back to what it was: install a fork and delete it again - which restores the shipped
+ * package rather than removing anything - and the opening list, the closing list and every
+ * revision in both of them are identical across a window in which the store answered as
+ * something else. A read straddling that pair passes a contents comparison by construction,
+ * adopts a set assembled out of two revisions, and records the signature it opened with, so
+ * no later poll ever finds anything to disagree with. The generation is the store's own count
+ * of how many times it has changed, which is the axis that pair moves along and the contents
+ * do not.
+ *
+ * **What is deliberately not here is the page hashing the bytes it fetched.** Verifying each
+ * chunk against the revision its file index declares is the tighter rule and this build
+ * cannot have it: `crypto.subtle` is undefined outside a secure context, `--host 0.0.0.0`
+ * with a browser at an address literal is this program's documented two-machine shape, and
+ * this function runs inside the module's top-level await - so a page reached over the network
+ * the design is built around would fail to evaluate at all, publish no `__kinect`, and take
+ * every proof tool in the suite with it. Measured rather than assumed, on this build:
+ * `http://127.0.0.1:8506/record` reads `isSecureContext true` with `crypto.subtle` an object,
+ * and `http://10.31.158.148:8506/record` reads `false` and `undefined`.
  */
 async function fetchEffectPackages() {
+  // What the last attempt disagreed about, so the sentence below names the package and the
+  // revisions rather than only the class of failure. A run that succeeds never reads it.
+  let disagreement = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const opened = await listEffects();
-    const packages = await readEffectPackages(opened);
-    if (revSignature(await listEffects()) === revSignature(opened)) return packages;
+    let packages;
+    try {
+      packages = await readEffectPackages(opened.effects);
+    } catch (err) {
+      // A package that answered for a revision the list did not name is this same failure one
+      // request in, so it is a retry rather than a throw - and anything else is a fetch that
+      // did not work, which no second attempt improves.
+      if (!err.tornRead) throw err;
+      disagreement = err.message;
+      continue;
+    }
+    const closed = await listEffects();
+    if (closed.generation === opened.generation && revSignature(closed.effects) === revSignature(opened.effects)) return packages;
+    disagreement = `the store was at generation ${opened.generation} when this read opened and ${closed.generation} when it closed`;
   }
   throw new Error('the installed effects moved while this page was reading them, twice - a set read across '
     + 'an install is one package from before it beside another from after, which assembles into a program '
-    + 'nobody wrote, so this page keeps the set it has and asks again');
+    + `nobody wrote, so this page keeps the set it has and asks again (${disagreement})`);
 }
 
 // **`let` and not `const`, which is the whole of what an install changes about this
@@ -2756,6 +2821,22 @@ function buildPanel() {
 let effectSignature;
 
 /**
+ * The store signature this page has already tried and failed to be rebuilt from, or null.
+ *
+ * Read by the poll and written by it, and declared here beside the signature it is a
+ * counterpart to rather than beside the poll, for the reason the note above carries: both of
+ * these are read from inside code that runs while this module is still evaluating, and a
+ * declaration further down the file is in its temporal dead zone at that moment.
+ *
+ * **It is cleared by a rebuild that lands rather than only by the comparison against it.** A
+ * store can return to a signature it has held before - deleting a fork restores the shipped
+ * package, so the bytes and the revisions are the ones they were - and a block left standing
+ * over a signature the page has since adopted by hand would skip a set that is now perfectly
+ * good. So the successful path clears it, wherever the success came from.
+ */
+let refusedEffectSignature = null;
+
+/**
  * A uniform cell for every binding the registry holds, minted where the tables have none.
  *
  * **The one thing a package cannot bring with it.** A manifest declares the GLSL that
@@ -2776,13 +2857,98 @@ let effectSignature;
  * The `axisDeg` transform is the one shape that cannot be a bare number: it writes
  * `.value.set(sin, cos)` into a two-component cell, so a cell holding `0` would throw on
  * the first write with a message about `set` rather than about a uniform.
+ *
+ * **A cell that is already there is reshaped rather than skipped, and skipping it is what
+ * made a rollback able to die.** The shape a cell has to be is a fact about the binding the
+ * *current* manifest declares, and a manifest is a thing an install replaces - so an
+ * adoption that only ever minted what was missing left every cell whose binding had changed
+ * shape holding the shape from the build before. That is reachable in one install: a fork
+ * that turns one `axisDeg` parameter into a plain one and a later parameter from plain into
+ * `axisDeg` writes a number over the first cell's `Vector2` and then throws on `.set()` at
+ * the second, which is the failure the transaction is there to roll back from - except that
+ * the rollback re-adopts through this same function, finds both cells present, skips them,
+ * and dies on the number the forward attempt left behind. The page is then holding a
+ * registry no document can be loaded into and the only sentence left to print is the one
+ * asking for a reload.
+ *
+ * So both directions of the adoption pass through here and a half-mutated table is
+ * re-normalised by either. A cell whose shape already fits is left exactly as it is, which
+ * matters because these tables are what three.js uploads from and the shipped set binds
+ * uniforms the spine's own hand-written tables declare: replacing an object that was already
+ * right would be churn on every install for no reason.
  */
+const uniformCellFits = (cell, bind) => Boolean(cell)
+  && (cell.value instanceof THREE.Vector2) === (bind.transform === 'axisDeg');
+
 function seedUniformCells() {
   for (const name of Object.keys(EFFECT_PARAMS)) {
     const bind = EFFECT_PARAMS[name];
     const table = bind.on === 'grade' ? grade.uniforms : uniforms;
-    if (Object.hasOwn(table, bind.uniform)) continue;
+    if (uniformCellFits(table[bind.uniform], bind)) continue;
     table[bind.uniform] = { value: bind.transform === 'axisDeg' ? new THREE.Vector2() : 0 };
+  }
+}
+
+/**
+ * Which uniform every parameter of a registry writes, as one comparable set.
+ *
+ * Keyed on the table as well as the name, because the two uniform tables are separate
+ * namespaces: a `grade` uniform and a `points` uniform can share a spelling and be two
+ * different cells, and treating them as one would have an install on one side answer for the
+ * other.
+ */
+const boundUniforms = (table) => new Map(Object.values(table ?? {})
+  .map((bind) => [`${bind.on} ${bind.uniform}`, bind]));
+
+/**
+ * What each uniform table held before any parameter had ever been written into it.
+ *
+ * Captured once, here, because there is exactly one moment at which it is available: the
+ * first adoption's value walk writes every binding a moment later and there is no way back to
+ * these numbers afterwards. `Vector2`s are cloned going in and cloned coming out, because a
+ * snapshot handing back the object it stored would be handing `axisDeg`'s own `.set()` a live
+ * reference into this map - which would make the pristine value follow the slider and the
+ * whole thing silently useless.
+ */
+const snapshotUniformValues = (table) => new Map(Object.entries(table)
+  .map(([name, cell]) => [name, cell?.value instanceof THREE.Vector2 ? cell.value.clone() : cell?.value]));
+const PRISTINE_UNIFORMS = {
+  points: snapshotUniformValues(uniforms),
+  grade: snapshotUniformValues(grade.uniforms),
+};
+
+/**
+ * Every uniform a parameter used to write and no parameter writes now, put back where it
+ * started.
+ *
+ * **A binding is a manifest field, so an install can move one - and the uniform it moves off
+ * keeps whatever the slider last left in it.** Nothing else ever writes these cells: a
+ * parameter's `apply` is the only writer, so a uniform the registry has stopped binding is a
+ * value frozen at the moment the binding left. The shader does not stop reading it. A fork
+ * that rebinds one parameter onto a different live uniform, with not a byte of its GLSL
+ * changed, therefore leaves the term it used to drive running at whatever it was set to, for
+ * the life of the page, with no control anywhere that can move it and nothing on screen that
+ * says why the picture will not go back.
+ *
+ * The set is exactly the uniforms a parameter *bound*, which is what makes this safe to do at
+ * all: every value in it was written by `effectApply` and is a number or a two-component
+ * vector. A uniform the render loop drives - the rain's phase - is host-driven and binds no
+ * parameter, and the ones the spine writes for itself, `focal` and `center` and the rest, are
+ * bound by nothing either. Neither can be in this set by construction.
+ *
+ * A cell the spine declared goes back to the value the spine declared it with; a cell this
+ * build minted for a binding that has now gone goes back to the inert value it was minted at,
+ * which is what its old transform says that is.
+ */
+function restoreDepartedUniforms(was, now) {
+  for (const [key, bind] of was) {
+    if (now.has(key)) continue;
+    const table = bind.on === 'grade' ? grade.uniforms : uniforms;
+    const cell = table[bind.uniform];
+    if (!cell) continue;
+    const pristine = PRISTINE_UNIFORMS[bind.on]?.get(bind.uniform);
+    if (pristine === undefined) cell.value = bind.transform === 'axisDeg' ? new THREE.Vector2() : 0;
+    else cell.value = pristine instanceof THREE.Vector2 ? pristine.clone() : pristine;
   }
 }
 
@@ -2812,6 +2978,9 @@ function seedUniformCells() {
  * `writeControl` paints the row the walk is about.
  */
 function adoptEffectPackages(packages, programs, held = {}) {
+  // Read before the registry is replaced, because the question below is which uniforms the
+  // build being left behind was writing - and one line down there is no way to ask it.
+  const wasBound = boundUniforms(EFFECT_PARAMS);
   effectPackages = packages;
   shaderPrograms = programs;
   // What the store looked like when these packages were read, so the poll below compares
@@ -2840,6 +3009,11 @@ function adoptEffectPackages(packages, programs, held = {}) {
   READINGS = Object.keys(PARAMS).filter((n) => PARAMS[n].reading);
   refuseRegistryDisagreement();
   seedUniformCells();
+  // And the other end of the same bookkeeping: the value walk below writes every uniform the
+  // new registry binds, and this is what answers for the ones it has stopped binding. It runs
+  // after the seeding rather than before it, because a uniform that departed one parameter and
+  // arrived at another is in neither set and must be left for the walk.
+  restoreDepartedUniforms(wasBound, boundUniforms(EFFECT_PARAMS));
 
   // Values the registry no longer declares, dropped. `params.get` refuses an unknown
   // name, so a stale entry is unreachable through the door - but `values` is what
@@ -3030,6 +3204,10 @@ async function reloadEffects() {
       + `document across to them, so it is still running the effects it had: ${failure.message}`,
     );
   }
+  // A set this page has carried a document onto is a set it is not blocked on, whichever door
+  // asked for the rebuild - see `refusedEffectSignature` for why the comparison alone would
+  // leave a stale block standing over a store that came back to where it was.
+  refusedEffectSignature = null;
   return fetched.map((p) => ({ id: p.id, version: p.manifest.version, rev: p.rev }));
 }
 
@@ -3103,14 +3281,29 @@ async function pollEffects() {
       return;
     }
     lastPollComplaint = null;
-    if (revSignature(listed) === effectSignature) return;
-    await pollRebuild();
+    const listedSignature = revSignature(listed.effects);
+    if (listedSignature === effectSignature) return;
+    // **The set this page has already failed to adopt, asked once rather than every six
+    // seconds.** A rollback puts the old signature back, deliberately, so the comparison a
+    // line above goes on saying the store has moved - which is true and is not a reason to
+    // try the same rebuild again. What that cost was a page that fetched every package,
+    // reassembled two programs, disposed the material it had, reset the accumulators, failed
+    // in the same place and printed the same sentence, ten times a minute for as long as the
+    // store held a package this build cannot use.
+    //
+    // Keyed on the server's signature rather than on a flag, so the block lifts by itself the
+    // moment anything about the store changes - a fix installed, the offending package
+    // removed, anything. What it does not lift for is a change on *this* page: an operator
+    // who has opened a different document and thinks the install would land now asks for it
+    // with `__kinect.effects.reload()`, which goes nowhere near this.
+    if (listedSignature === refusedEffectSignature) return;
+    await pollRebuild(listedSignature);
   } finally {
     effectReloading = false;
   }
 }
 
-async function pollRebuild() {
+async function pollRebuild(listedSignature) {
   try {
     // Null is the rebuild standing down rather than failing - an export started while it
     // was reading, most likely - and it has written nothing and moved no signature, so the
@@ -3119,17 +3312,24 @@ async function pollRebuild() {
     if (await reloadEffects() === null) return;
     say('the installed effects changed - this page has been rebuilt from them');
   } catch (err) {
-    // Reported and not retried on a timer. The set on the server is the one this page
-    // could not adopt, so a retry is the same failure once every six seconds; the
-    // signature is left alone so a later fix is picked up by the same comparison - and a
-    // rollback puts the old signature back by re-adopting the old set, so the two ways of
-    // failing converge on one behaviour rather than on two.
+    // **Reported once and then not asked again until the store moves.** The set on the
+    // server is the one this page could not adopt, so a retry is the same failure with the
+    // same sentence - and it is not free: every attempt refetches every package, reassembles
+    // both programs, disposes the material the page is drawing with and resets the
+    // accumulators, all of it to arrive at the same refusal. Remembering the signature that
+    // failed is what turns "the page cannot use this install" from a loop into an event.
+    //
+    // The signature the page is *assembled* from is still left alone, which is what keeps a
+    // rollback and an assembly failure converging on one behaviour: neither moves it, so the
+    // comparison a tick makes on its way in goes on saying the store has moved, and the block
+    // below is what decides whether that is worth acting on.
     //
     // **The sentence is the one the reload composed, printed rather than framed again.**
     // Every way out of `reloadEffects` now carries a whole sentence naming what failed and
     // what state that leaves this page in, and a prefix added here would say a third time
     // what the message already says twice - on a chip that ellipsises, where the width the
     // prefix takes is the width the refusal loses.
+    refusedEffectSignature = listedSignature;
     console.warn('could not rebuild from the installed effects:', err.message);
     say(err.message);
   }

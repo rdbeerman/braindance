@@ -14,7 +14,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decimalsOf } from '../web/format.js';
+import { decimalsOf, snapScalar } from '../web/format.js';
 
 test('a decimal spelling is counted after the point', () => {
   assert.equal(decimalsOf(1), 0);
@@ -52,6 +52,31 @@ test('the count stays inside what toFixed will accept', () => {
   // parameters declared inside this repo rather than about a package.
   assert.equal(decimalsOf(1e-300), 100);
   assert.doesNotThrow(() => (0.5).toFixed(decimalsOf(1e-300)));
+});
+
+test('past the cap the rounding rewrites a bound rather than refusing it', () => {
+  // **What the cap costs, written down because there is exactly one reader left.** The
+  // install door refuses a `min`, `max` or `def` needing more places than the finest step it
+  // takes, so no package can reach this any more - and a parameter declared inside this repo
+  // comes through no door at all, which is the population this arm is about.
+  //
+  // Rounding at the hundredth place is not a small correction to a number that lives past it.
+  // Both readings are here because they fail differently and only one of them looks like a
+  // rounding: a bound can move to a different number of the same size, or it can vanish.
+  assert.equal(Number((1.5e-100).toFixed(decimalsOf(1.5e-100))), 2e-100,
+    'a bound needing 101 places is written to 100, so it is a different bound');
+  assert.equal(Number((1e-101).toFixed(decimalsOf(1e-101))), 0,
+    'and one further out is written as zero, so the parameter has a floor its manifest never named');
+  assert.equal(Number((1e-100).toFixed(decimalsOf(1e-100))), 1e-100,
+    'while a bound the cap can still express is itself, which is what says the two above are the cap rather than toFixed');
+
+  // And what a floor past the cap does to every *other* value, which is the reading the
+  // door's refusal is written from: the places `min` implies are used for the whole
+  // parameter, so a floor nobody can express moves a default nobody touched.
+  assert.equal(snapScalar({ min: 1e-101, max: 3, step: 0.05 }, 0.7), 0.7000000000000001,
+    'a floor past the cap moves a value that is exactly on the grid');
+  assert.equal(snapScalar({ min: 0, max: 3, step: 0.05 }, 0.7), 0.7,
+    'and the same value on an ordinary floor does not, which is what makes the row above about the floor');
 });
 
 test('the rounding the registry performs keeps a fine grid rather than collapsing it', () => {

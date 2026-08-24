@@ -1721,7 +1721,10 @@ const ROUTES = [
   // changes what every page of this build compiles, which is the largest consequence any
   // route here has. `PUT` writes into the user root and `DELETE` removes from it, so the
   // shipped packages are unreachable from the network in both directions.
-  { path: '/effects', pattern: /^\/effects\/?$/, read: (req, res) => sendJson(res, { effects: EFFECTS.list() }) },
+  // `generation` beside the list, because the list alone cannot answer the question a client
+  // reading a set across several dozen requests has to ask. See `EffectStore`'s constructor
+  // for what a revision is silent about and why a counter is what says it.
+  { path: '/effects', pattern: /^\/effects\/?$/, read: (req, res) => sendJson(res, { effects: EFFECTS.list(), generation: EFFECTS.generation }) },
   {
     path: '/effects/:id',
     pattern: /^\/effects\/([^/]+)$/,

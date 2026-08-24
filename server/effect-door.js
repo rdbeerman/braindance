@@ -34,7 +34,7 @@ import {
   CORE_PANEL_GROUP_KEYS,
 } from '../web/effect-manifests.js';
 import { assembleShaders } from '../web/shader-assembly.js';
-import { snapScalar } from '../web/format.js';
+import { decimalsOf, snapScalar } from '../web/format.js';
 
 /**
  * How much of one package this build will take, as two numbers.
@@ -71,6 +71,24 @@ const MAX_PACKAGE_BYTES = 256 * 1024;
  * rather than have its manifest silently reinterpreted.
  */
 const MIN_PARAM_STEP = 1e-6;
+
+/**
+ * The most decimal places a bound may need, derived from the step floor rather than written
+ * again.
+ *
+ * `normalise` rounds every value to the places `min` and `step` imply, and `decimalsOf` caps
+ * that count at the hundred `toFixed` accepts - so a bound finer than a hundred places is not
+ * refused by the arithmetic, it is silently rewritten: on a 0.05 grid `1.5e-100` rounds to
+ * `2e-100` and `1e-101` rounds to zero. The cap belongs where it is, because a core parameter
+ * declared in this repo comes through no door at all and a `RangeError` on the first write is
+ * worse than a rounded grid. What it must not do is stand behind a door that could have said
+ * so, which is what this bound is.
+ *
+ * The number is `decimalsOf(MIN_PARAM_STEP)` and not a literal, because it is the same
+ * statement the step floor already makes read from the other end: six decimal places is what a
+ * 1e-6 grid needs and about what a 32-bit float carries.
+ */
+const MIN_PARAM_PLACES = decimalsOf(MIN_PARAM_STEP);
 
 // The same two shapes `server/effect-store.js` enforces on what it reads, restated here
 // rather than imported, because the door runs *before* the store has anything to read and
@@ -282,6 +300,29 @@ const spineTextByProgram = (spines) => Object.fromEntries(
  */
 const PROGRAM_OF_TABLE = { points: 'cloud', grade: 'grade' };
 
+/**
+ * Which program each joint belongs to, read off the spines rather than decided here.
+ *
+ * A chunk names a joint and never a program, so the only thing that says which program a
+ * package's GLSL lands in is which spine holds the joint it names - and that is data this
+ * file is already handed. Reading it is not the assembler reimplemented: none of the rules
+ * that make assembly hard are here, no collision is detected, no order is decided and no gate
+ * is generated. It is one lookup over the same two lists `spineTextByProgram` walks, and a
+ * build that grew a third spine gains its joints by existing.
+ */
+const programByJoint = (spines) => {
+  const where = {};
+  for (const [program, spine] of Object.entries(spines)) {
+    for (const stage of [spine.vertex, spine.fragment]) {
+      for (const entry of stage) {
+        const joint = entry.stage ?? entry.service ?? entry.slot;
+        if (joint !== undefined) where[joint] = program;
+      }
+    }
+  }
+  return where;
+};
+
 const isInert = (value) => value === 0 || value === false;
 
 /**
@@ -406,6 +447,25 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       + 'the largest package that ships is under 17 kilobytes, and this text is spliced into two programs '
       + 'a driver has to compile on every page that adopts the install';
   }
+  // And how much of it there would be once it is *assembled*, which neither bound above can
+  // see. Both of those count a file once - `declaredFiles` is a set and `chunks` is a map -
+  // while the assembler emits a chunk once per descriptor that names it. So the two numbers
+  // come apart the moment a manifest names one file twice, and they come apart without limit:
+  // a thousand descriptors over one 493-byte chunk reads as one file and 493 bytes here and
+  // arrives as half a megabyte of fragment shader on every page that adopts the install.
+  //
+  // Measured against the same ceiling as the carried text, because it is the same cost
+  // reached through a different multiplier - what a driver compiles is the expansion and not
+  // the archive. The exact repeat is refused by the assembler a rule further down, so what is
+  // left for this bound is a manifest that reaches the same size out of descriptors that are
+  // each legitimately distinct.
+  const expandedBytes = (manifest.chunks ?? [])
+    .reduce((sum, c) => sum + Buffer.byteLength(chunks[c?.file] ?? '', 'utf8'), 0);
+  if (expandedBytes > MAX_PACKAGE_BYTES) {
+    return `effect ${id} splices ${expandedBytes} bytes of chunk text into this build's shaders and this build `
+      + `takes ${MAX_PACKAGE_BYTES} - a chunk is emitted once for every descriptor naming it, so a manifest can `
+      + 'ask for far more assembled text than it carries, and the assembled text is what a driver compiles';
+  }
 
   // ---- the parameters
   if (!manifest.params || typeof manifest.params !== 'object' || Array.isArray(manifest.params)
@@ -457,6 +517,29 @@ export function doorRefusal(candidate, { beside = [], spines }) {
           + 'the value is rounded to the decimals this step implies and then written into a 32-bit float, '
           + 'so a finer grid is one neither the arithmetic nor the uniform can tell the positions of apart';
       }
+      // **And a bound this build's own rounding cannot express, which the step floor above
+      // cannot ask.** The floor is about the *gap* between two positions; this is about the
+      // numbers that name them. `normalise` rounds to the places `min` and `step` imply and
+      // `decimalsOf` caps that count, so a bound past the cap is not refused by the
+      // arithmetic - it is quietly rewritten into a different number, and the parameter then
+      // has a grid nobody declared. See `MIN_PARAM_PLACES` for why the cap stays and why this
+      // is the door's business rather than the arithmetic's.
+      //
+      // Asked before the two grid rules below rather than after, because it names the cause
+      // where they name a symptom: a `min` of `1e-101` on a 0.05 grid takes a default of 0.7
+      // to 0.7000000000000001, and "your default is not where you put it" sends an author
+      // looking at the default. It also reaches the one case the grid rules cannot - a `def`
+      // sitting exactly *on* such a `min`, which snaps to itself and was the residual this
+      // door carried written down.
+      for (const field of ['min', 'max', 'def']) {
+        const places = decimalsOf(spec[field]);
+        if (places > MIN_PARAM_PLACES) {
+          return `${name} declares ${field} as ${spec[field]}, which needs ${places} decimal places and this `
+            + `build rounds a value to at most ${MIN_PARAM_PLACES} - every value of this parameter is rounded `
+            + `to the places ${spec.min} and ${spec.step} imply, so a bound finer than that is not the grid it `
+            + 'says it is: it is that grid rounded, and the number the manifest states is one the program never holds';
+        }
+      }
       if (spec.def < spec.min || spec.def > spec.max) {
         return `${name} defaults to ${spec.def}, outside its own ${spec.min}..${spec.max} - a default the bounds `
           + 'clamp is a parameter that never sits where its own manifest says it starts';
@@ -500,18 +583,21 @@ export function doorRefusal(candidate, { beside = [], spines }) {
           + 'parameter while a value set from a document clamps to it, and the same look renders '
           + 'two ways depending on which one wrote it';
       }
-      // **`min` is not asked, and that is a fact rather than an omission.** It anchors the
-      // grid, so `Math.round((min - min) / step)` is zero and the snap returns it, and the
-      // final clamp returns it again even where the rounding would have moved it - a `min`
-      // finer than the hundred decimal places `toFixed` accepts rounds to zero and is put
-      // straight back. A rule asking it could not go red on any input the two above admit,
-      // which is the vacuous conjunct `docs/instruments.md` keeps recording. What a too-fine
-      // `min` breaks is every *other* value, since the decimals it implies are used for all
-      // of them, and the default is where that shows: measured, `min: 1e-101` on a 0.05 grid
-      // takes a default of 0.7 to 0.7000000000000001 and the row above catches it by name.
-      // The residual is a package whose `def` sits exactly on such a `min`, which gets
-      // through and whose values then land on `n * step` uncorrected - which is where they
-      // would have landed anyway. `test/effect-door.test.mjs` carries both readings.
+      // **`min` gets no grid rule of its own, and that is still a fact rather than an
+      // omission.** It anchors the grid, so `Math.round((min - min) / step)` is zero and the
+      // snap returns it, and the final clamp returns it again even where the rounding would
+      // have moved it. A *grid* rule asking `min` could not go red on any input the two above
+      // admit, which is the vacuous conjunct `docs/instruments.md` keeps recording.
+      //
+      // What a too-fine `min` breaks is every *other* value, since the places it implies are
+      // used for all of them - and that is a question about the number rather than about the
+      // grid, which is why it is asked further up as a place count. This paragraph used to end
+      // by recording the residual that left: a package whose `def` sits exactly on such a
+      // `min` snapped to itself and got through. `MIN_PARAM_PLACES` is what closed it, and the
+      // reading the residual rested on is still worth having - measured, `min: 1e-101` on a
+      // 0.05 grid takes a default of 0.7 to 0.7000000000000001. `test/effect-door.test.mjs`
+      // carries both, the place rule firing first and the grid rule still firing on a default
+      // that is merely between two positions.
     }
     const bind = spec.bind;
     if (!bind || typeof bind !== 'object') {
@@ -577,8 +663,22 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       + 'row for every parameter and then refuses a row whose group nothing holds, which it does after the '
       + 'registry has already swapped';
   }
+  // **And a package colliding with *itself*, which the two collisions below cannot see.**
+  // `ownGroupKeys` is a set, so a manifest declaring one key twice reads as one group here
+  // and as two entries in `withEffectGroups`, which splices both - at which point the
+  // generator emits that group's rows twice and throws on the count, on every page that
+  // adopts the install and after the registry has already swapped. The same failure the core
+  // and beside-package rules stand in front of, arriving from the one direction a set cannot
+  // report.
+  const declaredGroupKeys = new Set();
   for (const g of manifest.panelGroups ?? []) {
     if (!g || typeof g.key !== 'string') continue;
+    if (declaredGroupKeys.has(g.key)) {
+      return `effect ${id} declares the panel group ${JSON.stringify(g.key)} twice - a group key is how the `
+        + 'panel finds its rows, so two entries under one key are spliced as two groups and every row of that '
+        + 'group is emitted twice';
+    }
+    declaredGroupKeys.add(g.key);
     if (CORE_PANEL_GROUP_KEYS.includes(g.key)) {
       return `effect ${id} declares the panel group ${JSON.stringify(g.key)} and this build's own spine already `
         + 'holds one under that key - two groups under one key are spliced as two entries, so every row of that '
@@ -667,15 +767,27 @@ export function doorRefusal(candidate, { beside = [], spines }) {
     programUniforms[program] = new Map();
     absorb(program, text);
   }
+  // **A chunk's uniforms are credited to the one program its joint belongs to, and crediting
+  // them to every program is what this used to do.** The argument for the loose reading was
+  // that a chunk names a joint rather than a program and that resolving one to the other here
+  // would be the assembler reimplemented - which is true of assembly and false of this
+  // lookup, and the looseness was not a conservative approximation. It made the rule below
+  // answer for the wrong program: move a parameter's `bind.on` from `points` to `grade` and
+  // the cloud chunk's `uniform float rain` was credited to the grade pass as well, so the
+  // binding passed both halves of the check while the slider wrote into a table no grade
+  // shader reads. The control moves, the value lands, and the picture does not change - which
+  // is the exact failure the two ends of a binding exist to refuse, reached through the door
+  // that refuses it.
+  //
+  // Every joint here is one some spine holds, because `assembleShaders` ran above and refuses
+  // one that is not; the skip below is a guard on that rather than a rule of its own.
+  const jointProgram = programByJoint(spines);
   for (const pkg of packages) {
-    for (const text of Object.values(pkg.chunks ?? {})) {
-      // A chunk names a joint and never a program, so which program its uniforms land in
-      // is decided by which spine holds that joint - and asking that here would be the
-      // assembler reimplemented. Every chunk's uniforms are credited to every program
-      // instead, which is looser in the direction that produces no false refusal: a
-      // binding is being asked whether the value has anywhere to go, and a uniform
-      // declared in the cloud and bound on the grade would pass here and fail the driver.
-      for (const program of Object.keys(spineText)) absorb(program, text);
+    for (const c of pkg.manifest?.chunks ?? []) {
+      const text = pkg.chunks?.[c?.file];
+      const program = jointProgram[c?.slot ?? c?.stage];
+      if (typeof text !== 'string' || program === undefined) continue;
+      absorb(program, text);
     }
   }
   const boundHere = new Set();

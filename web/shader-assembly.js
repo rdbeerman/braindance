@@ -184,8 +184,31 @@ export function assembleShaders(spines, packages) {
     }
 
     const filled = new Map();
+    // **A package may point two joints at one file and may not point one joint at a file
+    // twice**, and the difference is what a chunk costs when it is spliced. The first is
+    // ordinary - one piece of text belonging in a declaration block and in a body - and
+    // `readEffectPackages` fetches it once for exactly that reason. The second is the same
+    // text compiled twice into one place, which nothing legitimate wants and which no bound
+    // upstream of here can see: a package is measured by the bytes it *carries*, and the
+    // descriptor list is what decides how many times those bytes are emitted. A thousand
+    // entries naming one 493-byte chunk carries 493 bytes and assembles into half a megabyte
+    // of fragment shader.
+    //
+    // Refused here rather than at the install door because the door asks this assembler,
+    // so the rule covers a package written into the store past the door as well - which is
+    // the state `effect-check` section 9 stands up on purpose. The slot and service joints
+    // already refuse their own repeats a few lines down; a stage takes any number of chunks
+    // and so had nothing saying that any number means any number of *different* ones.
+    const claimed = new Set();
     for (const c of manifest.chunks ?? []) {
       const text = chunkText(pkg, c.file);
+      const claim = `${c.slot !== undefined ? 'slot' : 'stage'} ${c.slot ?? c.stage} ${c.file}`;
+      if (claimed.has(claim)) {
+        throw new Error(`effect ${pkg.id}'s ${c.file} is spliced into ${JSON.stringify(c.slot ?? c.stage)} twice - `
+          + 'a manifest may point two joints at one file, and one joint at one file twice is the same text '
+          + 'compiled twice into one place');
+      }
+      claimed.add(claim);
       if (c.slot !== undefined) {
         if (!joints.slots.has(c.slot)) {
           throw new Error(`effect ${pkg.id}'s ${c.file} claims the slot ${JSON.stringify(c.slot)}, which this shader spine does not hold`);

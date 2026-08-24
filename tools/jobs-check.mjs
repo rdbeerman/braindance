@@ -219,6 +219,17 @@ const MUTATIONS = {
       '    const requires = Array.isArray(project.requires) ? project.requires.map((e) => ({ ...e })) : [];',
     ],
   ] },
+  // **One id claimed twice, which the two comparisons beside it read as claimed once.**
+  // `unlisted` asks whether a used id appears in the list and `unclaimed` asks a set, so
+  // neither can count - and the envelope resolves each used id with `find`, which keeps the
+  // first entry and drops every other. A document claiming two versions of one effect is
+  // therefore recorded as whichever came first, and the worker's door then answers about a
+  // version nobody chose. This puts that back: one edit, because the rule is one `if` and
+  // nothing downstream of it stands in the way.
+  'envelope-takes-a-repeated-requires-id': { file: 'server/jobs.js', edits: [[
+    '    if (duplicated.length) {',
+    '    if (false) {',
+  ]] },
   // The beat that stops for good after one dropped connection, which is how it
   // shipped: any rejection cleared the interval and nothing ever re-armed it. It is
   // aimed at the one line both the interval and the first beat go through, so a
@@ -628,6 +639,23 @@ try {
   check(refusedBecause(overstated, 'nothing'),
     'and one whose list claims an effect no value is named under is refused the same way',
     `${overstated.status} ${(overstated.body.error ?? JSON.stringify(overstated.body.requires)).slice(0, 120)}`);
+  // **And one id twice, which neither disagreement row above can see.** `unlisted` asks for
+  // membership and the overstated row asks about a set, so a list carrying `sparkle` twice
+  // satisfies both exactly as well as a list carrying it once - and the envelope then keeps
+  // whichever entry came first and drops the other, so a document claiming two versions of
+  // one effect is recorded as one of them by position. It was refused, late, on the machine
+  // that opens the document; the point of this door is that it is refused here.
+  const repeated = await enqueue({
+    project: {
+      ...PARKED_PROJECT,
+      requires: [{ id: 'sparkle', version: '1.0.0' }, { id: 'sparkle', version: '2.0.0' }],
+    },
+    output: 'check-parked-repeated',
+  });
+  check(refusedBecause(repeated, 'sparkle')
+    && /more than once/.test(repeated.body.error ?? ''),
+  'a project claiming one effect twice in its requires list is refused at the queue, naming the id',
+  `${repeated.status} ${(repeated.body.error ?? JSON.stringify(repeated.body.requires)).slice(0, 130)}`);
   // The positive twin, and it is not the row above it. A door refusing every disagreement
   // is satisfied by a door refusing everything, so the thing that says this one discriminates
   // is a document whose two readings agree keeping the *version* the document authored - which
@@ -664,7 +692,7 @@ try {
   // the blast radius `docs/instruments.md` says to keep a mutation out of.
   for (const id of [...strays, goodCodec.body.id, lossless.body.id,
     withParked.body.id, lying.body.id, understated.body.id, overstated.body.id,
-    carriedWhole.body.id, goodSuppress.body.id]) {
+    repeated.body.id, carriedWhole.body.id, goodSuppress.body.id]) {
     if (typeof id === 'string') rmSync(join(jobsDir, `${id}.json`), { force: true });
   }
 

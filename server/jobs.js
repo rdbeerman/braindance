@@ -229,6 +229,26 @@ export class JobStore {
     const used = effectIdsIn([...shape(look.params), ...shape(look.tracks)]);
     const carried = Array.isArray(project.requires) ? project.requires : [];
     const claimed = carried.map((e) => (e && typeof e === 'object' ? e.id : undefined));
+    // **One id, one entry, and the two comparisons below cannot ask it.** `unlisted` reads
+    // membership and `unclaimed` reads a set, so a list carrying `sparkle` twice satisfies
+    // both of them exactly as well as a list carrying it once - and the envelope built at the
+    // bottom of this door then resolves each used id with `find`, which takes the first entry
+    // and drops the rest. Two entries claiming different *versions* of one effect is the
+    // shape that costs something: the queue records one of them by position, the worker's door
+    // reads the recorded one, and whichever the document meant is a coin toss nobody spelled.
+    // The loader refuses this document too, on the machine that opens it - which is a minute
+    // of GPU and a render later, and is the failure this whole door exists to move.
+    const duplicated = [...new Set(
+      claimed.filter((id, at) => typeof id === 'string' && claimed.indexOf(id) !== at),
+    )];
+    if (duplicated.length) {
+      throw new Error(
+        `a job's project claims ${duplicated.join(', ')} more than once in its requires list, so there is no `
+        + 'one answer to which version of ' + (duplicated.length === 1 ? 'that effect' : 'those effects')
+        + ' this render needs - the list is derived from the values on save, one entry per effect, and a '
+        + 'repeat is a hand edit to finish before the job is queued',
+      );
+    }
     const unlisted = used.filter((id) => !claimed.includes(id));
     const unclaimed = [...new Set(claimed)].filter((id) => typeof id === 'string' && !used.includes(id));
     if (unlisted.length || unclaimed.length) {

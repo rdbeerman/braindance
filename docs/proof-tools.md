@@ -500,7 +500,13 @@ node tools/effect-check.mjs --mutate reinstall-leaves-it-parked # ... the parkin
                                                           #     more in section 6, and the badge-appeared row stays green. The
                                                           #     document it leaves behind is one the loader refuses in both
                                                           #     directions, so section 6's rebuild reddens on the rollback's own
-                                                          #     refusal rather than on the install's
+                                                          #     refusal rather than on the install's.
+                                                          #     **It ends the run early and always has**, which this line did
+                                                          #     not say: the document it leaves behind makes section 7's first
+                                                          #     unguarded `reload()` throw. Measured 2026-08-24 at both ends of
+                                                          #     this round's changes - 52 of the 91 assertions the tool had at
+                                                          #     `4b63f80`, and 55 of 111 now, nine red either way. The count is
+                                                          #     a floor and the tool says so
 node tools/effect-check.mjs --mutate rollback-keeps-the-new-registry # ... the rollback runs the loader again and runs it against
                                                           #     the packages that just arrived rather than the ones this page
                                                           #     had - the half-rollback somebody writes who reads the failure as
@@ -509,7 +515,12 @@ node tools/effect-check.mjs --mutate rollback-keeps-the-new-registry # ... the r
                                                           #     save writes - and the two rollbacks of section 9. The picture
                                                           #     cannot see it, because the parameter the fork adds is inert at
                                                           #     its default and the image is identical either way, which is why
-                                                          #     a pixel row is not enough to hold this
+                                                          #     a pixel row is not enough to hold this.
+                                                          #     **Ten now, measured 2026-08-24**: the four extra are the two
+                                                          #     blocks at the end of section 9, which are second rollback
+                                                          #     fixtures and go red with the first. Six at `4b63f80`, so the
+                                                          #     four are this round's and the line above was right about its
+                                                          #     own tree
 node tools/effect-check.mjs --mutate rebuild-remakes-the-buttons # ... the memo taken off the two closures that emit the framing
                                                           #     group's hand-written rows, so every rebuild makes fresh buttons
                                                           #     carrying the right ids and none of the wiring. Reddens three rows
@@ -564,7 +575,68 @@ node tools/effect-check.mjs --mutate poll-guards-late      # ... the reentrancy 
                                                           #     win. Reddens one row of section 8
 node tools/effect-check.mjs --mutate reads-need-not-agree  # ... the verification read taken off the end of the package fetch,
                                                           #     so a set read across an install is one package from before it
-                                                          #     beside another from after. Reddens one row of section 8
+                                                          #     beside another from after. Reddens **two** rows of section 8,
+                                                          #     measured 2026-08-24: it takes the whole comparison out, so
+                                                          #     both the moved-revision row and the generation row below it
+                                                          #     go. This line read "one row" for as long as there was one
+                                                          #     term to remove
+node tools/effect-check.mjs --mutate list-reads-need-not-agree-on-generation # ... the generation term dropped from that
+                                                          #     same comparison, leaving the contents term it had before.
+                                                          #     A revision is a hash of bytes, so a change that is
+                                                          #     *undone* hashes back to what it was: a fork installed and
+                                                          #     deleted again restores the shipped package, and both
+                                                          #     listings are then identical across a window the page read
+                                                          #     some of its chunks out of. Its own spec rather than a
+                                                          #     second edit of the row above, because no comparison and
+                                                          #     the wrong comparison fail differently. Reddens one row of
+                                                          #     section 8
+node tools/effect-check.mjs --mutate package-read-need-not-match-the-list # ... and the same window one request further
+                                                          #     in, where neither listing can reach: a package answering
+                                                          #     for a revision the list did not name hands this page that
+                                                          #     package's manifest and file index out of the other
+                                                          #     revision. Reddens one row of section 8
+node tools/effect-check.mjs --mutate door-takes-any-expansion # ... the bound on how much text a manifest asks to have
+                                                          #     spliced, leaving the two that count what it carries. A
+                                                          #     file counts once in each of those and once per descriptor
+                                                          #     in the assembler, so the two numbers come apart without
+                                                          #     limit. Reddens two rows of section 2 - the refusal and
+                                                          #     the residue, because the package now lands on disk - and
+                                                          #     the sweep after them is what keeps it to two rather than
+                                                          #     carrying a sixty-file fixture into every section below
+node tools/effect-check.mjs --mutate seeding-skips-existing-cells # ... the uniform seeding back to minting only what is
+                                                          #     missing, so a cell whose binding changed shape keeps the
+                                                          #     shape from the build before. Reddens four rows at the end
+                                                          #     of section 9 and the run still finishes: the rollback dies inside
+                                                          #     the table it is rolling back through and prints the
+                                                          #     reload-the-page sentence, `probeShapeAxis is a number`
+                                                          #     where the registry demands a vector, and three values are
+                                                          #     left parked by a page that never got its document back
+node tools/effect-check.mjs --mutate departed-uniforms-keep-their-value # ... a uniform the registry has stopped binding
+                                                          #     left holding whatever the slider last put there. Nothing
+                                                          #     else ever writes those cells and the chunk reading it
+                                                          #     does not stop, so the term runs on with no control
+                                                          #     anywhere that can move it. Reddens three rows of section
+                                                          #     8, and the third is the one worth reading: with every
+                                                          #     control back at its default the picture is the one the
+                                                          #     raised term drew, hash for hash. The first is the grade
+                                                          #     gate's uninstall row, which asserted this defect
+                                                          #     approvingly until this round - see docs/instruments.md
+node tools/effect-check.mjs --mutate store-generation-never-moves # ... the store no longer counting its own changes,
+                                                          #     which is the control neither client-side mutation above
+                                                          #     can be: the arm that drives them fabricates a moved
+                                                          #     generation in an interception, so a store that never
+                                                          #     moved the number would satisfy every one of them while
+                                                          #     the coherent read compared equal numbers forever.
+                                                          #     Reddens the two rows of section 2 that read it off the
+                                                          #     real store, and must leave section 8's arm green -
+                                                          #     the two measure opposite ends of one wire
+node tools/effect-check.mjs --mutate poll-retries-a-refused-set # ... the block on a set this page has already failed to
+                                                          #     adopt. A rollback puts the old signature back on purpose,
+                                                          #     so the tick's own comparison goes on saying the store has
+                                                          #     moved and the same rebuild is attempted every six seconds
+                                                          #     forever - every package refetched, both programs
+                                                          #     reassembled, the material disposed, the accumulators
+                                                          #     reset. Reddens one row at the end of section 9
 node tools/effect-check.mjs --mutate adopt-outside-the-transaction # ... the adoption put back outside the `try` the rollback
                                                           #     hangs off, so a throw out of the adoption itself - a package
                                                           #     written into the store past the door, naming a panel group
@@ -577,7 +649,11 @@ node tools/effect-check.mjs --mutate a-broken-shader-is-warm # ... the throw dro
 node tools/effect-check.mjs --mutate the-sweep-eats-the-last-copy # ... the sweep removing every aside it finds and the recovery
                                                           #     pass removed with it, so a crash between an install's two
                                                           #     renames loses the package to the next install of that id.
-                                                          #     Reddens two rows of section 11
+                                                          #     Reddens **three** rows of section 11, measured 2026-08-24 at
+                                                          #     `4b63f80` as well as here: the copy that does not come back,
+                                                          #     the aside left beside nothing, and the uninstall row under
+                                                          #     them, which needs a package to have been there to remove.
+                                                          #     This line said two for as long as nobody had counted
 node tools/effect-check.mjs --mutate package-files-follow-links # ... `statSync` back where `lstatSync` is, so the file route
                                                           #     asks what a name points at rather than what it is. Reddens one
                                                           #     row of section 10, and the ordinary file beside it stays green
@@ -646,6 +722,14 @@ node tools/jobs-check.mjs --mutate envelope-trusts-the-documents-requires # ... 
                                                           #     whole, and the caller hands over the whole body. Reddens the
                                                           #     two document-disagreement rows and leaves the row above's
                                                           #     and the carried-whole row green - the two are not one control
+node tools/jobs-check.mjs --mutate envelope-takes-a-repeated-requires-id # ... one id claimed twice in a document's
+                                                          #     requires list, which the two disagreement rules beside it
+                                                          #     read as claimed once: one asks membership and the other
+                                                          #     asks a set, and the envelope then resolves each used id
+                                                          #     with `find`, keeping the first entry and dropping the
+                                                          #     rest. A document claiming two versions of one effect was
+                                                          #     recorded as whichever came first and refused late, at the
+                                                          #     loader. Queue semantics, so `--no-render`. One row
 node tools/jobs-check.mjs --mutate worker-door-waved-open # ... the worker's door on an effect it has not got. It needs a
                                                           #     render, like `heartbeat-stops-on-first-error`, and it
                                                           #     reddens **one** row: the *reason*. The state row beside it
@@ -2036,8 +2120,8 @@ it, so seven rows fire and then the run stops — a verdict that put the crash f
 DID NOT RUN over a caught mutation, which is the census of exit codes `docs/instruments.md`
 already carries a case for.
 
-Baseline **91 assertions, 0 failed**, over eleven sections: the store's revisions against hashes
-the tool computes off the staged tree, seventeen hostile packages each refused with the sentence
+Baseline **111 assertions, 0 failed**, over eleven sections: the store's revisions against hashes
+the tool computes off the staged tree, twenty-two hostile packages each refused with the sentence
 for its own rule, the hotload's registry-and-panel coherence including `boot-check`'s own
 control-vs-registry diff on a rebuilt page, the uninstall/reinstall pixel identity, the
 must-not-badge control, an install this page cannot carry the open document onto, everything on
@@ -2046,6 +2130,14 @@ package whose GLSL every rule here accepts and no driver will compile, what a cr
 leaves behind, and — last, after the browser is closed — what somebody plants in the user root
 and an install interrupted between its two renames.
 
+**Section 2 sweeps the user root after the residue row rather than trusting that nothing
+landed.** On a clean build there is nothing there and the sweep is a no-op; on a build whose door
+has stopped refusing something the finding is already recorded by the two rows above it, and what
+would otherwise be left is a hostile fixture still installed when section 3 opens a page and
+counts its parameters. `door-takes-any-expansion` is the mutation that produces exactly that —
+it reddens the refusal row and the residue row and nothing else, where without the sweep the same
+run would have carried a sixty-file package into every section after it.
+
 **Section 7 is the one whose subject is invisible.** Sections 3 and 4 ask whether the parameters
 arrived and whether their values are right, and a build can get both of those completely right
 while the buttons beside them are dead, the tab that was showing has stopped being applied, the
@@ -2053,6 +2145,39 @@ collapse headers are painted for elements that no longer exist and the preset su
 statement of the registry from before the install. None of that throws, none of it moves a
 pixel, and each of the four has its own mutation because each is a separate way of rebuilding
 the panel and forgetting something.
+
+**Two arms sit at the end of section 9, and where they sit was measured rather than chosen.**
+Both leave the page in a state a mutation can make unwell, and both wanted section 6's fixture —
+a page holding an install it has refused. Put there they widened what three existing mutations
+already break: `reinstall-leaves-it-parked` went from nine red rows to fourteen, all five of the
+new ones cascades off a document its own defect had already made unloadable. It ends the run
+early either way and always has — measured at `4b63f80`, 52 of 91 with nine red, against 55 of
+111 with nine red here — so what moved was the blast radius rather than the finishing, and the
+early end is a pre-existing gap this page had not recorded. Sections 10
+and 11 are short and the second closes the browser anyway, so the cost of a block that leaves the
+page unwell is smallest here. The refused fixture is re-staged rather than inherited: the fork is
+installed again and driven through `pollNow`, because the block under test is the *poll's* and a
+`reload` an operator asks for goes nowhere near it.
+
+The first counts what the poll does next. A rollback puts the old signature back on purpose, so
+the comparison a tick makes on its way in goes on saying the store has moved, and without a block
+that is the same rebuild attempted every six seconds forever — every package refetched, both
+programs reassembled, the material disposed, the accumulators reset. The row counts package reads
+in a window and requires zero, *and* counts listings in the same window and requires two, because
+a zero on its own is what a page that has stopped polling also produces. A revision the page has
+not refused then has to land, which is what says the block is keyed to the set rather than
+latched on the page.
+
+The second is about the uniform table rather than the registry. A cell is a number for a plain
+binding and a two-component vector for an `axisDeg` one, and which it has to be is a fact about
+the manifest — so a fork exchanging two bindings' shapes writes a number over one cell and then
+throws on `.set()` at the other, mid-walk, with the registry already swapped. That throw is what
+the transaction is for, and until this round it met an adoption that minted only *missing* cells:
+the rollback found both present, skipped them, and died on the number the forward attempt had
+left, so a page came out of a rollback holding a registry no document loads into. The fixture is
+`probeshape`, its own package with its own uniform names, and it adds a parameter as well as
+swapping the shapes — without the addition a build that reshapes both cells adopts the fork
+cleanly, nothing rolls back, and the row would be asserting nothing.
 
 **Section 11 restarts the server and closes the browser first**, which is the only place in this
 tool that does either. The recovery it asks about is a fact about constructing the store, so it

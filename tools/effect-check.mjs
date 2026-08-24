@@ -90,6 +90,13 @@
 //   node tools/effect-check.mjs --mutate poll-takes-any-body             # must FAIL
 //   node tools/effect-check.mjs --mutate poll-guards-late                # must FAIL
 //   node tools/effect-check.mjs --mutate reads-need-not-agree            # must FAIL
+//   node tools/effect-check.mjs --mutate list-reads-need-not-agree-on-generation # must FAIL
+//   node tools/effect-check.mjs --mutate package-read-need-not-match-the-list    # must FAIL
+//   node tools/effect-check.mjs --mutate door-takes-any-expansion        # must FAIL
+//   node tools/effect-check.mjs --mutate seeding-skips-existing-cells    # must FAIL
+//   node tools/effect-check.mjs --mutate departed-uniforms-keep-their-value      # must FAIL
+//   node tools/effect-check.mjs --mutate poll-retries-a-refused-set      # must FAIL
+//   node tools/effect-check.mjs --mutate store-generation-never-moves    # must FAIL
 //   node tools/effect-check.mjs --mutate adopt-outside-the-transaction    # must FAIL
 //
 // It spawns its own server on a port nothing else in the suite uses and needs none
@@ -367,8 +374,14 @@ const MUTATIONS = {
     // mutation that had not reproduced anything. Both have to go for the shipped shape to
     // come back: `listEffects` answers `undefined`, and the signature comparison a line
     // later is outside every catch there is.
+    //
+    // **Re-anchored when the listing grew its generation**, and the shape rule had to be one
+    // condition rather than two for the reason this whole entry is about: a generation check
+    // written as a second `if` would be a guard downstream of the line this edits, so the
+    // mutated build would refuse the nonsense body anyway and the run would come back NOT
+    // CAUGHT on a mutation that reproduced nothing.
     edits: [
-      ['  if (!body || !Array.isArray(body.effects)) {', '  if (body === undefined) {'],
+      ['  if (!body || !Array.isArray(body.effects) || !Number.isFinite(body.generation)) {', '  if (body === undefined) {'],
       ['  for (const entry of body.effects) {', '  for (const entry of body.effects ?? []) {'],
     ],
   },
@@ -385,8 +398,8 @@ const MUTATIONS = {
     edits: [
       ['  if (effectReloading || effectRebuildBlocked()) return;\n  effectReloading = true;\n  try {',
         '  if (effectReloading || effectRebuildBlocked()) return;\n  try {'],
-      ['    if (revSignature(listed) === effectSignature) return;\n    await pollRebuild();',
-        '    if (revSignature(listed) === effectSignature) return;\n    effectReloading = true;\n    await pollRebuild();'],
+      ['    if (listedSignature === refusedEffectSignature) return;\n    await pollRebuild(listedSignature);',
+        '    if (listedSignature === refusedEffectSignature) return;\n    effectReloading = true;\n    await pollRebuild(listedSignature);'],
     ],
   },
 
@@ -398,8 +411,118 @@ const MUTATIONS = {
    */
   'reads-need-not-agree': {
     file: 'web/main.js',
-    edits: [['    if (revSignature(await listEffects()) === revSignature(opened)) return packages;',
+    edits: [['    if (closed.generation === opened.generation && revSignature(closed.effects) === revSignature(opened.effects)) return packages;',
       '    if (opened) return packages;']],
+  },
+
+  /**
+   * `list-reads-need-not-agree-on-generation` drops the generation term from that same
+   * comparison and leaves the contents term standing, which is what the coherent read was
+   * before it had one. The two are one line and two claims, and only this half can see a
+   * change that is *undone*: a revision installed and removed again restores the bytes, so
+   * every rev in the opening list and the closing list is identical across a window the page
+   * read some of its chunks out of. The contents comparison passes that pair by construction
+   * and the run then records the signature it opened with, so nothing later disagrees either.
+   *
+   * It is a separate spec from `reads-need-not-agree` rather than a second edit of it,
+   * because a build with no comparison at all and a build comparing the wrong thing fail
+   * differently and only one of them is the shape this term was added for.
+   */
+  'list-reads-need-not-agree-on-generation': {
+    file: 'web/main.js',
+    edits: [['    if (closed.generation === opened.generation && revSignature(closed.effects) === revSignature(opened.effects)) return packages;',
+      '    if (revSignature(closed.effects) === revSignature(opened.effects)) return packages;']],
+  },
+
+  /**
+   * `package-read-need-not-match-the-list` stops holding each package read to the revision
+   * the list named it at, which is the half of a coherent read the two listings cannot cover
+   * between them. A revision installed and removed again inside that one request hands the
+   * page the other package's manifest and file index, and both listings still agree - so this
+   * fails in exactly the window the generation term above closes from the outside, one
+   * request in.
+   */
+  'package-read-need-not-match-the-list': {
+    file: 'web/main.js',
+    edits: [['    if (pkg?.rev !== rev) {', '    if (false) {']],
+  },
+
+  /**
+   * `door-takes-any-expansion` drops the bound on how much text a manifest asks to have
+   * spliced, leaving the two that count what it carries. A file counts once in both of those
+   * and once per descriptor in the assembler, so a package can name a size neither of them
+   * measures - and the fixture in section 2 is inside both of them and outside this one.
+   */
+  'door-takes-any-expansion': {
+    file: 'server/effect-door.js',
+    edits: [['  if (expandedBytes > MAX_PACKAGE_BYTES) {', '  if (false) {']],
+  },
+
+  /**
+   * `seeding-skips-existing-cells` puts the uniform seeding back to minting only what is
+   * missing, which is what it did while a binding's shape could not change. It can: a fork
+   * that turns one `axisDeg` parameter plain and a later one plain into `axisDeg` writes a
+   * number over the first cell's `Vector2` and then throws on `.set()` at the second - and
+   * the rollback that exists for exactly that throw re-adopts through this same function,
+   * finds both cells present, skips them, and dies on the number the forward attempt left.
+   * The page is then holding a registry no document loads into and the only sentence left is
+   * the one asking for a reload.
+   */
+  'seeding-skips-existing-cells': {
+    file: 'web/main.js',
+    edits: [['    if (uniformCellFits(table[bind.uniform], bind)) continue;',
+      '    if (Object.hasOwn(table, bind.uniform)) continue;']],
+  },
+
+  /**
+   * `departed-uniforms-keep-their-value` stops putting back a uniform the registry has
+   * stopped binding. Nothing else writes those cells - a parameter's `apply` is the only
+   * writer - so the term the departed binding used to drive runs at whatever the slider last
+   * left in it, for the life of the page, with no control anywhere that can move it. The
+   * shader text does not have to change for this: a manifest that rebinds one parameter onto
+   * a different live uniform is the whole of it.
+   */
+  'departed-uniforms-keep-their-value': {
+    file: 'web/main.js',
+    edits: [['  restoreDepartedUniforms(wasBound, boundUniforms(EFFECT_PARAMS));',
+      '  void wasBound;']],
+  },
+
+  /**
+   * `poll-retries-a-refused-set` removes the block on a set this page has already failed to
+   * adopt. The rollback puts the old signature back, deliberately, so the comparison above it
+   * goes on saying the store has moved - and without this the same rebuild is attempted every
+   * six seconds forever: every package refetched, both programs reassembled, the material
+   * disposed, the accumulators reset, the same sentence printed, for as long as the store
+   * holds a package this build cannot use.
+   */
+  'poll-retries-a-refused-set': {
+    file: 'web/main.js',
+    edits: [['    if (listedSignature === refusedEffectSignature) return;\n', '']],
+  },
+
+  /**
+   * `store-generation-never-moves` stops the store counting its own changes, and it is the
+   * control the two client-side mutations above cannot be: both of those edit `web/main.js`,
+   * and the arm that drives them fabricates a moved generation in an interception - so a build
+   * whose store never moved the number would satisfy every one of them while the coherent read
+   * compared equal numbers forever and a real change-and-undo sailed through it. What must
+   * redden is the pair of rows in section 2 that read it off the store across a real install
+   * and a real uninstall, and what must stay green is section 8's arm, because the two measure
+   * opposite ends of one wire.
+   *
+   * Two edits because there are two writers and each has to go: leaving either standing means
+   * the pair of rows still sees a number move, on a store that has stopped counting half of
+   * what it does.
+   */
+  'store-generation-never-moves': {
+    file: 'server/effect-store.js',
+    edits: [
+      ['    this.generation += 1;\n    return { ...this.read(id), replaced };',
+        '    return { ...this.read(id), replaced };'],
+      ['    this.generation += 1;\n    return { removed: id, restored: existsSync(join(this.builtinDir, id)) };',
+        '    return { removed: id, restored: existsSync(join(this.builtinDir, id)) };'],
+    ],
   },
 };
 
@@ -618,6 +741,101 @@ const bent = (edit) => {
 };
 
 /**
+ * A package holding one uniform cell of each shape there is, and the fork that swaps them.
+ *
+ * **The two shapes are the whole fixture.** A binding writes either a bare number or, under
+ * `axisDeg`, `.value.set(sin, cos)` into a two-component cell - so the JavaScript object a
+ * uniform table holds is a number for one and a `Vector2` for the other, and which one it has
+ * to be is a fact about the *current* manifest. A manifest is a thing an install replaces,
+ * and until this fixture existed nothing in the suite ever changed one of those shapes.
+ *
+ * Its own id and its own uniform names, because it has to be installed and removed inside a
+ * section that is holding `probe` parked and section 7 primes state on top of what is left:
+ * a fixture that reached for `probeHue` would be two packages binding one cell and the arm
+ * would be about the collision rather than about the shape.
+ */
+const shapedProbe = () => ({
+  manifest: {
+    format: 1,
+    id: 'probeshape',
+    version: '1.0.0',
+    title: 'Probe Shape',
+    params: {
+      amount: {
+        def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', label: 'probe shape',
+        panel: { group: 'post', tab: 'look' },
+        bind: { on: 'points', uniform: 'probeShapeAmount' },
+        role: 'master',
+      },
+      angle: {
+        def: 0, min: 0, max: 360, step: 1, kind: 'scalar', label: 'probe shape angle',
+        panel: { group: 'post', tab: 'look' },
+        bind: { on: 'points', uniform: 'probeShapeAxis', transform: 'axisDeg' },
+        under: 'amount',
+      },
+      tone: {
+        def: 0.5, min: 0, max: 1, step: 0.01, kind: 'scalar', label: 'probe shape tone',
+        panel: { group: 'post', tab: 'look' },
+        bind: { on: 'points', uniform: 'probeShapeTone' },
+        under: 'amount',
+      },
+    },
+    chunks: [
+      { stage: 'f.decl', order: 910, file: 'decl.frag.glsl' },
+      { stage: 'f.tone', order: 910, file: 'tone.frag.glsl' },
+    ],
+  },
+  chunks: {
+    'decl.frag.glsl': 'uniform float probeShapeAmount, probeShapeTone;\nuniform vec2 probeShapeAxis;\n',
+    'tone.frag.glsl':
+      '  if (probeShapeAmount > 0.0) {\n'
+      + '    col = mix(col, vec3(probeShapeTone, probeShapeAxis.x, probeShapeAxis.y), probeShapeAmount);\n'
+      + '  }\n',
+  },
+});
+
+/**
+ * The same package with its two shapes exchanged and a parameter added, which is the install
+ * a page holding this effect's values cannot be carried onto.
+ *
+ * **Both halves are load-bearing and they answer different halves of the claim.** The swap is
+ * what corrupts the table: the value walk reaches `angle` first and writes a plain number
+ * over a cell that was a `Vector2`, then reaches `tone` and calls `.set()` on a cell that was
+ * a number. The added `glow` is what makes the *fixed* build reach the rollback at all -
+ * without it a build that reshapes both cells adopts the fork cleanly, nothing rolls back,
+ * and the row about a rollback surviving a reshaped table would be asserting nothing. With
+ * it, the open document names three of four parameters, the loader's completeness rule
+ * refuses it after the swap has landed, and the rollback runs back through cells the forward
+ * attempt left in the fork's shapes - which is the state under test.
+ *
+ * Both uniforms are redeclared at the type their new binding writes, because the door refuses
+ * a plain binding onto a `vec2` and an `axisDeg` binding onto a `float`. A fork that only
+ * moved the transform would never be installed, so it could never reach the page.
+ */
+const reshapedProbe = () => {
+  const pkg = shapedProbe();
+  const p = pkg.manifest;
+  p.version = '2.0.0';
+  delete p.params.angle.bind.transform;
+  Object.assign(p.params.angle, { min: 0, max: 1, step: 0.01, def: 0 });
+  p.params.tone.bind.transform = 'axisDeg';
+  Object.assign(p.params.tone, { min: 0, max: 360, step: 1, def: 0 });
+  p.params.glow = {
+    def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', label: 'probe shape glow',
+    panel: { group: 'post', tab: 'look' },
+    bind: { on: 'points', uniform: 'probeShapeGlow' },
+    under: 'amount',
+  };
+  pkg.chunks['decl.frag.glsl'] = 'uniform float probeShapeAmount, probeShapeAxis, probeShapeGlow;\nuniform vec2 probeShapeTone;\n';
+  pkg.chunks['tone.frag.glsl'] =
+    '  if (probeShapeAmount > 0.0) {\n'
+    + '    col = mix(col, vec3(probeShapeTone.x, probeShapeAxis, probeShapeTone.y), probeShapeAmount);\n'
+    + '    col += vec3(probeShapeGlow * 0.25);\n'
+    + '  }\n';
+  return pkg;
+};
+
+/**
  * The same package with a different version and byte-identical chunks - a rev that moves
  * and two programs that do not.
  *
@@ -804,6 +1022,16 @@ try {
     `${beforeFlip.body.rev.slice(7, 19)} -> ${afterFlip.body.rev.slice(7, 19)}`);
   ok('and leaves every other package where it was, so a revision is about its own bytes',
     witnessBefore.body.rev === witnessAfter.body.rev, witnessAfter.body.rev.slice(7, 19));
+  // The other half of the same flip, and it is the residual of the coherent read stated as
+  // behaviour rather than left in prose. A revision follows the bytes whoever wrote them, so
+  // the rows above move for a write this store did not make; the generation follows the
+  // *store*, so it does not. That is the whole of what a page reading across an out-of-band
+  // edit and its undo cannot see, and it is the price of a counter rather than a content hash
+  // - which `docs/instruments.md` carries the argument for.
+  const genAfterFlip = (await getJson('/effects')).body.generation;
+  ok('and the generation beside them does not move, because nothing this store did made that byte change',
+    genAfterFlip === listed.body.generation,
+    `generation ${listed.body.generation} before the flip and ${genAfterFlip} after it`);
   writeFileSync(victim, original);
   const restored = await getJson('/effects/thermal');
   ok('and putting the byte back puts the revision back', restored.body.rev === beforeFlip.body.rev,
@@ -812,7 +1040,9 @@ try {
   // ================================================================= 2. the door
   console.log('\n[effect] 2. the door, and the package that has to get through it');
 
+  const beforeInstall = (await getJson('/effects')).body;
   const accepted = await put('probe', probePackage());
+  const afterInstall = (await getJson('/effects')).body;
   ok('a well-formed package lands - the row that stops every refusal below passing on a door that refuses everything',
     accepted.status === 200 && accepted.body.id === 'probe', `answered ${accepted.status}: ${accepted.body.error ?? 'installed'}`);
   const onDisk = existsSync(join(USER_ROOT, 'probe')) ? readdirSync(join(USER_ROOT, 'probe')).sort() : [];
@@ -823,9 +1053,37 @@ try {
     shadowCheck.status === 200 && shadowCheck.body.builtin === false, `builtin=${shadowCheck.body.builtin}`);
 
   await del('probe');
+  const afterRemove = (await getJson('/effects')).body;
   const cleanRoot = userRootHolds();
   ok('and removing it leaves the user root empty, so the refusals below start from nothing',
     cleanRoot.length === 0, cleanRoot.join(', ') || 'empty');
+
+  // ---- and the number the listing carries beside those revisions
+  //
+  // **The store's own count of how many times it has changed, asserted against the store
+  // rather than against a page.** Section 8 stages a change-and-undo by moving this number in
+  // an interception, which measures what the *client* does with it and would pass perfectly on
+  // a store that never moved it at all - at which point every listing agrees forever and the
+  // read the whole term exists for is back to comparing bytes. So the two rows here read it
+  // off the real thing, across the real install and the real uninstall this section already
+  // performs.
+  //
+  // The second row is the whole design in one measurement: `probe` is not a builtin, so
+  // removing it leaves the store holding exactly the packages and exactly the revisions it
+  // held before the install - identical bytes on both sides of a window in which it answered
+  // as something else - and the only thing that can tell the two moments apart is a number
+  // that went up twice.
+  const listingSignature = (body) => (body.effects ?? []).map((e) => `${e.id} ${e.rev}`).join('\n');
+  ok('an install moves the store\'s generation and so does an uninstall',
+    afterInstall.generation > beforeInstall.generation && afterRemove.generation > afterInstall.generation,
+    `${beforeInstall.generation} -> ${afterInstall.generation} -> ${afterRemove.generation}`);
+  ok('and the pair leaves every revision exactly where it was, which is the reading the generation exists to carry',
+    listingSignature(afterRemove) === listingSignature(beforeInstall)
+      && afterRemove.generation !== beforeInstall.generation,
+    listingSignature(afterRemove) === listingSignature(beforeInstall)
+      ? `${beforeInstall.effects.length} packages hashing identically across a change and its undo, `
+        + `generation ${beforeInstall.generation} against ${afterRemove.generation}`
+      : 'the revisions moved, so this pair is not the change-and-undo the row is about');
 
   // The shipped noise, whole, for the fork row.
   //
@@ -882,6 +1140,36 @@ try {
       m.version = '2.0.0';
       delete m.params.speed;
     }), /drops noise\.speed/],
+    // **The five rules about a package as a whole, which every rule above is satisfied by
+    // however many times a package repeats a correct entry.** Each of these is refused under
+    // bare node in `test/effect-door.test.mjs` as well, where the shipped sixteen are the
+    // must-accept control; what these rows add is that the refusal happens on disk, through
+    // the route, and leaves nothing behind.
+    ['one joint naming one file over and over', 'probe', bent((p) => {
+      // The reported shape: a thousand descriptors over one 493-byte chunk, which carries
+      // 493 bytes and asks a driver to compile half a megabyte. It is refused for being a
+      // repeat rather than for being large, so the count here is about reaching the rule.
+      for (let i = 0; i < 1000; i++) p.manifest.chunks.push({ stage: 'f.tone', order: 500 + i, file: 'tone.frag.glsl' });
+    }), /spliced into "f\.tone" twice/],
+    ['a manifest asking for more assembled text than it carries', 'probe', bent((p) => {
+      // Sixty distinct files of three kilobytes on two stages each: 62 files and about 180KB
+      // carried, both inside the bounds above, and about 360KB spliced, which is outside the
+      // one that counts what a driver compiles.
+      for (let i = 0; i < 60; i++) {
+        p.chunks[`pad${i}.frag.glsl`] = `// ${'x'.repeat(3000)}\n`;
+        p.manifest.chunks.push({ stage: 'f.tone', order: 600 + i, file: `pad${i}.frag.glsl` });
+        p.manifest.chunks.push({ stage: 'f.decl', order: 600 + i, file: `pad${i}.frag.glsl` });
+      }
+    }), /splices \d+ bytes of chunk text/],
+    ['a binding checked against the program its own table does not name', 'probe', bent((p) => {
+      p.manifest.params.hue.bind.on = 'grade';
+    }), /assembled grade program declares no such uniform/],
+    ['a package declaring one panel group key twice', 'probe', bent((p) => {
+      p.manifest.panelGroups.push({ ...p.manifest.panelGroups[0], label: 'Probe again', order: 901 });
+    }), /declares the panel group "probe" twice/],
+    ['a bound finer than this build\'s own rounding can write', 'probe', bent((p) => {
+      p.manifest.params.hue.min = 1e-101;
+    }), /declares min as 1e-101, which needs 100 decimal places/],
   ];
 
   let refusedCount = 0;
@@ -890,7 +1178,10 @@ try {
   for (const [what, id, body, matches] of hostile) {
     const answer = await put(id, body);
     if (answer.status === 409 && matches.test(answer.body.error ?? '')) refusedCount++;
-    else wrongReason ??= `${what}: ${answer.status} ${answer.body.error ?? JSON.stringify(answer.body)}`;
+    // Truncated, because a door that accepted one of these answers with the whole package it
+    // just stored - and one of the fixtures here carries sixty files, so an un-cut detail
+    // line buries the row name that says which rule stopped firing under a wall of revisions.
+    else wrongReason ??= `${what}: ${answer.status} ${(answer.body.error ?? JSON.stringify(answer.body)).slice(0, 200)}`;
     const held = userRootHolds();
     if (held.length !== 0) residue ??= `${what} left ${held.join(', ')}`;
   }
@@ -898,6 +1189,14 @@ try {
     refusedCount === hostile.length, wrongReason ?? `${refusedCount} of ${hostile.length}`);
   ok('and none of them reaches the filesystem: no package, no .tmp, no .old left behind',
     residue === null, residue ?? `user root ${userRootHolds().join(', ') || 'empty'}`);
+  // **Swept after the row that measures it, so a caught mutation cannot become a crash five
+  // sections away.** On a clean build there is nothing here and this is a no-op; on a build
+  // whose door has stopped refusing something the finding is already recorded above, and what
+  // is left is a package the sections below never asked for - section 3 opens a page and
+  // reads how many parameters it has, so a hostile fixture still installed would redden rows
+  // about a page that is behaving correctly given what it was handed. The same reasoning
+  // section 11 states for writing its own fixtures rather than inheriting them.
+  for (const held of userRootHolds()) rmSync(join(USER_ROOT, held), { recursive: true, force: true });
 
   const stillShipped = await getJson('/effects');
   ok('and the shipped set is exactly what it was before the door was pushed at',
@@ -1500,9 +1799,17 @@ try {
   // build. What it is here for is the state that has no gated parameter left at all,
   // which no mutation of this tree can reach and which the line in `adoptEffectPackages`
   // is what covers.
-  ok('and taking it off shuts the pass again, on a uniform cell that is still carrying the value it was raised to',
-    ungated.enabled === false && ungated.value === 0.6,
-    `grade.enabled=${ungated.enabled}, probeGradeAmount still ${ungated.value}`);
+  //
+  // **The second half of this row used to read `probeGradeAmount still 0.6` and that was the
+  // defect, asserted.** Nothing writes a uniform except the parameter bound to it, so a
+  // package coming off left its term standing at whatever the slider had last put there - and
+  // this row said so approvingly, because the claim it carries is about the *gate* and the
+  // cell was only ever incidental detail beside it. It is a live reading now: the uninstall
+  // is the plainest case of a binding departing, and the pass being shut over a term still
+  // holding 0.6 is one line of GLSL away from a grade nobody can switch off.
+  ok('and taking it off shuts the pass again, on a uniform cell put back to the value it started at',
+    ungated.enabled === false && ungated.value === 0,
+    `grade.enabled=${ungated.enabled}, probeGradeAmount reads ${ungated.value}`);
 
   // ---- the warm, and the accumulators it clears
   //
@@ -1717,14 +2024,44 @@ try {
   // A set read across an install, staged by answering the *verification* read with a
   // signature that has moved. What the page must not do is assemble the two halves.
   await put('probe', recompiledProbe(5));
+  // **The closing read is the first listing taken after a package read, and it used to be
+  // "every second one".** Parity is the wrong handle because this arm shares the route with
+  // the page: `pollNow` is the interval's own body and the interval never stops, so a tick
+  // landing between the driver's two reads shifts the count and the closing read comes back
+  // unmoved - at which point the rebuild succeeds and this row reddens on a build with
+  // nothing wrong with it. Seen once, under `--mutate rebuild-forgets-the-tab`, as a second
+  // red row five sections away from the mutation. The order inside one read is what actually
+  // marks the two apart: the opening listing is asked before any package is, and the closing
+  // one after all of them.
+  //
+  // **And the change has to be one only this comparison can see, which took a second reading
+  // to get right.** The read retries once, so "every listing after the first package read"
+  // moves the *opening* listing of the second attempt as well - and a rev in an opening
+  // listing is caught one request later by the package that answers for a different revision,
+  // which is the rule next door. Measured: with that spelling the row was green on a clean
+  // build for the pin's reason and went red under `package-read-need-not-match-the-list`, a
+  // mutation it has nothing to do with. So the marker is cleared as each closing read passes
+  // and every attempt opens on an untouched listing, which puts the refusal back on the
+  // comparison this row is named for.
+  //
+  // The residual is one microsecond-wide window: the page's own interval shares this route,
+  // and a tick landing between the driver's last package read and its closing listing would
+  // take the mutation instead. It cannot rebuild there - a tick's own listing is untouched,
+  // so its signature matches and it stands down - and if it ever did steal one the row goes
+  // red rather than quietly green, which is the direction to be wrong in.
   let listReads = 0;
+  let closingReads = 0;
+  let listAfterPackages = false;
+  await page.route('**/effects/probe', async (route) => { listAfterPackages = true; await route.continue(); });
   await page.route('**/effects', async (route) => {
     listReads += 1;
     const res = await route.fetch();
     const body = await res.json();
-    // Every second read is the one taken after the packages have been fetched, and moving
-    // a rev in it is exactly what an install landing mid-read looks like from here.
-    if (listReads % 2 === 0) body.effects[0].rev = `${body.effects[0].rev}-moved`;
+    if (listAfterPackages) {
+      body.effects[0].rev = `${body.effects[0].rev}-moved`;
+      listAfterPackages = false;
+      closingReads += 1;
+    }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
   const incoherent = await page.evaluate(async () => {
@@ -1735,11 +2072,16 @@ try {
     return { threw, held: k.effects.signature() === was, knows: k.params.names().includes('probe.hue') };
   });
   await page.unroute('**/effects');
+  await page.unroute('**/effects/probe');
+  // `closingReads === 2` is the delivery half: the read retries once, so a run that refused
+  // for this reason moved a rev in exactly two closing listings. A number other than two says
+  // the fixture did not land where the sentence says it did, whatever the refusal reads like.
   ok('a store that moves while the page is reading it is refused rather than assembled from both halves',
     incoherent.threw !== null && /moved while this page was reading them/.test(incoherent.threw ?? '')
-      && incoherent.held === true,
-    incoherent.threw ? `"${incoherent.threw.slice(0, 110)}", the signature ${incoherent.held ? 'held' : 'moved'}`
-      : 'the rebuild reported success on a set read across two revisions');
+      && incoherent.held === true && closingReads === 2,
+    incoherent.threw ? `"${incoherent.threw.slice(0, 100)}", the signature ${incoherent.held ? 'held' : 'moved'}, `
+      + `${closingReads} of ${listReads} listings moved`
+      : `the rebuild reported success on a set read across two revisions (${closingReads} of ${listReads} listings moved)`);
   const coherent = await page.evaluate(async () => {
     const k = globalThis.__kinect;
     await k.effects.reload();
@@ -1747,6 +2089,172 @@ try {
   });
   ok('and the same set read with nothing moving is adopted, so the rule above is a distinction rather than a refusal to read at all',
     coherent === true, coherent ? 'the fifth recompiled chunk reached the assembled program' : 'the page did not adopt it');
+
+  // ---- and a change the store made and unmade while the page was reading it
+  //
+  // **The row above compares revisions, and a revision is a hash of bytes, so a change that
+  // is *undone* hashes back to what it was.** Install a fork and delete it again - which
+  // restores the shipped package rather than removing anything - and the opening listing, the
+  // closing listing and every revision in both of them are identical across a window in which
+  // the store answered as something else. A read straddling that pair passes the comparison
+  // by construction, assembles a program out of two revisions, and records the signature it
+  // opened with, so no later tick ever finds anything to disagree with either. What the store
+  // gained for it is a count of how many times it has changed, which is the axis that pair
+  // moves along and the bytes do not.
+  //
+  // Staged by giving every read its own generation and leaving every revision exactly as the
+  // store sent it, which is what an install and its undo look like from here. **Every read
+  // rather than the closing one**, for the reason its neighbour above carries: the interval
+  // on the page shares this route, so a tick landing between the driver's two reads shifts
+  // any parity the interception counts on. A number that only goes up makes any two reads
+  // disagree, which is what the row is about, and it is the shape a real counter has.
+  let genReads = 0;
+  const generationRoute = async (route) => {
+    genReads += 1;
+    const res = await route.fetch();
+    const body = await res.json();
+    body.generation += genReads;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  };
+  await page.route('**/effects', generationRoute);
+  const undone = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const was = k.effects.signature();
+    let threw = null;
+    try { await k.effects.reload(); } catch (err) { threw = String(err.message); }
+    return { threw, held: k.effects.signature() === was };
+  });
+  await page.unroute('**/effects', generationRoute);
+  ok('a change the store made and unmade while the page was reading is refused, though every revision on both sides of it is identical',
+    /moved while this page was reading them/.test(undone.threw ?? '')
+      && /generation/.test(undone.threw ?? '') && undone.held === true,
+    undone.threw ? `"${undone.threw.slice(-90)}", the signature ${undone.held ? 'held' : 'moved'}`
+      : 'the rebuild reported success on a set read across a change and its undo');
+
+  // The same window one request in, where neither listing can reach: a revision installed and
+  // removed again inside the read of one package hands this page that package's manifest and
+  // file index out of the other revision, and both listings still agree about everything.
+  const movedRevRoute = async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    body.rev = `${body.rev}-moved`;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  };
+  await page.route('**/effects/probe', movedRevRoute);
+  const strayPackage = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const was = k.effects.signature();
+    let threw = null;
+    try { await k.effects.reload(); } catch (err) { threw = String(err.message); }
+    return { threw, held: k.effects.signature() === was };
+  });
+  await page.unroute('**/effects/probe', movedRevRoute);
+  ok('and a package answering for a revision the listing did not name is refused too, naming the package and both revisions',
+    /moved while this page was reading them/.test(strayPackage.threw ?? '')
+      && /effect probe was listed at revision/.test(strayPackage.threw ?? '') && strayPackage.held === true,
+    strayPackage.threw ? `"${strayPackage.threw.slice(-110)}", the signature ${strayPackage.held ? 'held' : 'moved'}`
+      : 'the rebuild reported success on a package from another revision');
+
+  // The control for both, and it is the same two interceptions with nothing moved. Without it
+  // each row above passes on a build that refused any read it could see being intercepted,
+  // and neither row would be about the disagreement it names.
+  const passThroughList = async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(await res.json()) });
+  };
+  await page.route('**/effects', passThroughList);
+  await page.route('**/effects/probe', passThroughList);
+  const untouched = await page.evaluate(async () => {
+    let threw = null;
+    try { await globalThis.__kinect.effects.reload(); } catch (err) { threw = String(err.message); }
+    return { threw, knows: globalThis.__kinect.params.names().includes('probe.hue') };
+  });
+  await page.unroute('**/effects', passThroughList);
+  await page.unroute('**/effects/probe', passThroughList);
+  ok('while the same two reads with nothing moved are adopted, so both refusals are about the disagreement rather than about being read through',
+    untouched.threw === null && untouched.knows === true,
+    untouched.threw ?? 'the page adopted the set it was handed');
+
+  // ---- a rebinding that abandons the uniform it used to drive
+  //
+  // **A binding is a manifest field, so an install can move one - and nothing writes a
+  // uniform except the parameter bound to it.** A fork that points one parameter at a
+  // different live uniform, with not one byte of its GLSL changed, therefore leaves the term
+  // it used to drive frozen at whatever the slider last put there: the chunk goes on reading
+  // it every frame, the control that could move it is now writing somewhere else, and there
+  // is no gesture anywhere that puts the picture back.
+  //
+  // The shipped `thermal` is the fixture rather than a package written for it, because the
+  // failure needs a uniform the *spine* declares: a package's own uniform left bound to
+  // nothing is refused at the door one rule earlier, so a fixture that declared its own would
+  // be testing that rule instead. `edges` is the other end - a live float on the same table,
+  // bound by the shipped edges package, so the value has somewhere real to land.
+  console.log('    (and a rebinding that leaves the uniform it moved off)');
+  const thermalDir = join(BUILTIN_ROOT, 'thermal');
+  const thermalManifest = JSON.parse(readFileSync(join(thermalDir, 'manifest.json'), 'utf8'));
+  const reboundThermal = () => {
+    const manifest = JSON.parse(JSON.stringify(thermalManifest));
+    manifest.version = '2.0.0';
+    manifest.params.amount.bind.uniform = 'edges';
+    return {
+      manifest,
+      chunks: Object.fromEntries((thermalManifest.chunks ?? [])
+        .map((c) => [c.file, readFileSync(join(thermalDir, c.file), 'utf8')])),
+    };
+  };
+
+  // `drive.reset` before every `hashes`, because the pinned source refuses a backward step
+  // over accumulators that have already consumed a later frame - which is the transport
+  // saying, correctly, that a hash taken without it would be of a different state.
+  const atRest = await page.evaluate(async (positions) => {
+    globalThis.__kinect.params.reset();
+    globalThis.__kinect.drive.reset();
+    return globalThis.__kinect.drive.hashes(positions);
+  }, POSITIONS);
+  const raisedThermal = await page.evaluate(async (positions) => {
+    globalThis.__kinect.params.set('thermal.amount', 0.6);
+    globalThis.__kinect.drive.reset();
+    return {
+      hashes: await globalThis.__kinect.drive.hashes(positions),
+      uniform: globalThis.__kinect.uniforms.thermal.value,
+    };
+  }, POSITIONS);
+  ok('the term this rebinding abandons is one the picture can see, raised and reading its uniform',
+    raisedThermal.uniform === 0.6 && JSON.stringify(raisedThermal.hashes) !== JSON.stringify(atRest),
+    `thermal at ${raisedThermal.uniform}, ${raisedThermal.hashes.map((h) => h.slice(0, 8)).join(' ')} `
+    + `against ${atRest.map((h) => h.slice(0, 8)).join(' ')} at rest`);
+
+  await put('thermal', reboundThermal());
+  const rebound = await page.evaluate(async (positions) => {
+    const k = globalThis.__kinect;
+    let threw = null;
+    try { await k.effects.reload(); } catch (err) { threw = String(err.message); }
+    // Back to the default the picture above was taken at, so what is left in the frame is
+    // whatever the departed uniform is still holding rather than the value the control has.
+    k.params.set('thermal.amount', 0);
+    const departed = k.uniforms.thermal.value;
+    const arrived = k.uniforms.edges.value;
+    k.drive.reset();
+    return { threw, departed, arrived, hashes: await k.drive.hashes(positions) };
+  }, POSITIONS);
+  ok('the fork that rebinds one parameter onto another live uniform installs and is adopted',
+    !rebound.threw && rebound.arrived === 0, rebound.threw ?? `edges reads ${rebound.arrived}`);
+  ok('the uniform the binding left reads the value the spine declared it with, rather than the one the slider last put there',
+    rebound.departed === 0, `thermal reads ${rebound.departed} after the binding moved off it`);
+  ok('and the picture follows the registry: with every control back at its default it is the picture the defaults drew',
+    JSON.stringify(rebound.hashes) === JSON.stringify(atRest),
+    rebound.hashes.map((h, i) => `${h.slice(0, 8)}${h === atRest[i] ? '=' : '!='}${atRest[i].slice(0, 8)}`).join(' '));
+
+  await del('thermal');
+  const thermalBack = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    let threw = null;
+    try { await k.effects.reload(); } catch (err) { threw = String(err.message); }
+    k.params.reset();
+    return { threw, uniform: k.uniforms.thermal.value };
+  });
+  ok('and the shipped package comes back when the fork is removed, with its own uniform driven again',
+    thermalBack.threw === null && thermalBack.uniform === 0, thermalBack.threw ?? `thermal reads ${thermalBack.uniform}`);
 
   // ================================ 9. a package this build can store and cannot compile
   //
@@ -1861,6 +2369,157 @@ try {
   });
   ok('and removing it lets the page rebuild again, so the refusal is a state to leave rather than one to be stuck in',
     afterOutside.threw === null, afterOutside.threw ?? `${afterOutside.names} parameters`);
+
+  // ---- and a set this page has refused is not asked about again every six seconds
+  //
+  // **A rollback puts the old signature back, which is what makes the poll's comparison go on
+  // saying the store has moved.** That is true and it is not a reason to try the same rebuild
+  // again: every attempt refetches every package, reassembles both programs, disposes the
+  // material the page is drawing with and resets the accumulators, to arrive at the same
+  // refusal and print the same sentence. Ten times a minute, for as long as the store holds a
+  // package this build cannot use.
+  //
+  // **Placed here rather than beside the refusal in section 6, and the position is a measured
+  // decision.** These two blocks lengthen whatever fixture chain they sit in, and section 6's
+  // chain is the one three existing mutations are already breaking - with them here,
+  // `reinstall-leaves-it-parked` reached the first unguarded `reload()` in section 7 and ended
+  // the run at 60 of 107 assertions, where it had been finishing. Sections 10 and 11 are short
+  // and the second of them closes the browser anyway, so a block that leaves the page unwell
+  // costs least at the end of section 9. `docs/instruments.md` carries the reading.
+  //
+  // **Driven through the poll rather than `reload`, because the block is the poll's**: the
+  // signature that failed is remembered by the tick that failed on it, and a `reload` an
+  // operator asks for goes nowhere near it.
+  const refusedFork = await put('probe', forkedProbe());
+  await page.evaluate(() => globalThis.__kinect.effects.pollNow());
+  await page.waitForFunction(
+    "/probe\\.glow/.test(document.getElementById('tNote')?.textContent ?? '')", null, { timeout: 20000 },
+  ).catch(() => {});
+  const refusedNote = await page.evaluate(() => document.getElementById('tNote')?.textContent ?? '');
+  ok('the fork the page cannot carry its document onto is installed again and refused again, which is the state the block is about',
+    refusedFork.status === 200 && /probe\.glow/.test(refusedNote),
+    `${refusedFork.status}: ${refusedFork.body.error ?? 'installed'}, the note reads "${refusedNote.trim().slice(0, 70)}"`);
+
+  // **The rebuild attempts are counted in the driver rather than read off the page**, because
+  // what is being asked is how many times the store was read - and the reading that separates
+  // "no rebuild" from "no poll" is that the *listing* is still being fetched while the package
+  // reads stay at zero. Without that half, a `pollNow` the reentrancy guard turned away would
+  // pass this row on a build that had stopped polling entirely.
+  let refusedListReads = 0;
+  let refusedPackageReads = 0;
+  await page.route('**/effects', async (route) => { refusedListReads += 1; await route.continue(); });
+  await page.route('**/effects/probe', async (route) => { refusedPackageReads += 1; await route.continue(); });
+  await page.evaluate(() => globalThis.__kinect.effects.pollNow());
+  // Two listings rather than a fixed pause, because the interval is six seconds and the
+  // driver's own call can be answered by the guard: what the row needs is a window in which
+  // the poll demonstrably ran, and waiting for the listing is waiting for exactly that.
+  for (let waited = 0; waited < 20000 && refusedListReads < 2; waited += 100) await wait(100);
+  await page.evaluate(() => globalThis.__kinect.effects.pollNow());
+  await wait(500);
+  await page.unroute('**/effects');
+  await page.unroute('**/effects/probe');
+  ok('a set this page has already refused is not fetched again on every tick, while the poll itself goes on running',
+    refusedListReads >= 2 && refusedPackageReads === 0,
+    `${refusedListReads} listings read and ${refusedPackageReads} package reads in the window`);
+
+  // The other direction, and it is what says the block is a set being held off rather than a
+  // page that has stopped looking: a revision this page has *not* refused has to land.
+  await put('probe', retunedProbe());
+  const unblocked = await page.evaluate(() => globalThis.__kinect.effects.pollNow())
+    .then(() => page.waitForFunction(
+      "globalThis.__kinect.params.names().includes('probe.hue')", null, { timeout: 20000 },
+    ))
+    .then(() => true).catch(() => false);
+  ok('and a revision it has not refused is adopted, so the block is keyed to the set rather than latched on the page',
+    unblocked === true, unblocked ? 'the page adopted the next revision' : 'the page never adopted it');
+
+  // ---- the uniform cells a half-migrated adoption leaves behind
+  //
+  // **Section 6 is about a rollback that works; this is about the table it rolls back
+  // through.** A uniform cell is a number for a plain binding and a two-component vector for
+  // an `axisDeg` one, and which shape it has to be is a fact about the manifest - so a fork
+  // that exchanges two bindings' shapes writes a number over one cell and then throws on
+  // `.set()` at the other, mid-walk, with the registry already swapped. That throw is exactly
+  // what the transaction is for. What it used to meet was an adoption that minted only
+  // missing cells: the rollback found both present, skipped them, and died on the number the
+  // forward attempt had left - so the page came out of a rollback holding a registry no
+  // document loads into, with nothing left to print but a request to reload.
+  //
+  // Its own package and its own uniform names, so nothing here touches what `probe` is doing
+  // or what section 7 primes on top of it.
+  const cellShapes = () => page.evaluate(() => {
+    const shape = (cell) => {
+      if (!cell) return 'missing';
+      if (typeof cell.value === 'number') return 'number';
+      return cell.value && typeof cell.value.set === 'function' ? 'vector' : 'other';
+    };
+    const k = globalThis.__kinect;
+    return {
+      axis: shape(k.uniforms.probeShapeAxis),
+      tone: shape(k.uniforms.probeShapeTone),
+      names: k.params.names().filter((n) => n.startsWith('probeshape.')),
+    };
+  });
+
+  await put('probeshape', shapedProbe());
+  const shaped = await page.evaluate(async () => {
+    try { await globalThis.__kinect.effects.reload(); } catch (err) { return { threw: String(err.message) }; }
+    const k = globalThis.__kinect;
+    k.params.set('probeshape.amount', 0.4);
+    k.params.set('probeshape.angle', 90);
+    k.params.set('probeshape.tone', 0.25);
+    return { threw: null, held: k.library.serialiseProjectBody().look.params['probeshape.angle'] ?? null };
+  });
+  const shapesBefore = await cellShapes();
+  ok('a package binding one cell of each shape installs and is adopted, with the document holding its values',
+    !shaped.threw && shaped.held === 90 && shapesBefore.names.length === 3,
+    shaped.threw ?? `${shapesBefore.names.length} parameters, the document holds angle at ${shaped.held}`);
+  ok('and the two cells are the two shapes this arm is about, which is what makes the swap below a swap',
+    shapesBefore.axis === 'vector' && shapesBefore.tone === 'number',
+    `probeShapeAxis is a ${shapesBefore.axis}, probeShapeTone is a ${shapesBefore.tone}`);
+
+  await put('probeshape', reshapedProbe());
+  const reshaped = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const before = k.params.names();
+    let threw = null;
+    try { await k.effects.reload(); } catch (err) { threw = String(err.message); }
+    return { threw, same: JSON.stringify(k.params.names()) === JSON.stringify(before) };
+  });
+  const shapesAfter = await cellShapes();
+  ok('the fork that swaps both shapes is refused by the document rather than by the table, so the rollback is what ran',
+    /probeshape\.glow/.test(reshaped.threw ?? '') && /still running the effects it had/.test(reshaped.threw ?? ''),
+    reshaped.threw ? `"${reshaped.threw.slice(0, 130)}"` : 'the rebuild reported success');
+  ok('and the rollback finished rather than dying in the table it was rolling back through',
+    !/reload the page/.test(reshaped.threw ?? '') && reshaped.same === true,
+    reshaped.same ? 'the registry is the one this page had' : 'the registry moved');
+  ok('the cells are the shapes the registry this page is holding demands, which is what a rollback through them has to leave',
+    shapesAfter.axis === 'vector' && shapesAfter.tone === 'number',
+    `probeShapeAxis is a ${shapesAfter.axis}, probeShapeTone is a ${shapesAfter.tone}`);
+
+  // Off again, values first so nothing of it parks: the badge and the pool belong to `probe`
+  // for the rest of this run, and a second parked effect would be this arm reaching into
+  // rows that are not about it.
+  await page.evaluate(() => {
+    const k = globalThis.__kinect;
+    for (const name of k.params.names().filter((n) => n.startsWith('probeshape.'))) {
+      k.params.set(name, k.params.spec(name).default);
+    }
+  }).catch(() => {});
+  await del('probeshape');
+  const unshaped = await page.evaluate(async () => {
+    let threw = null;
+    try { await globalThis.__kinect.effects.reload(); } catch (err) { threw = String(err.message); }
+    const k = globalThis.__kinect;
+    return {
+      threw,
+      knows: k.params.names().some((n) => n.startsWith('probeshape.')),
+      parked: Object.keys(k.library.parkedLook()?.params ?? {}).filter((n) => n.startsWith('probeshape.')).length,
+    };
+  });
+  ok('and taking it back off leaves the page rebuilding cleanly with nothing of it parked',
+    unshaped.threw === null && unshaped.knows === false && unshaped.parked === 0,
+    unshaped.threw ?? `${unshaped.parked} probeshape values parked`);
 
   // =========================================== 10. what a crashed install leaves behind
   //
