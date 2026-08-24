@@ -207,8 +207,16 @@ export function buildPostChain(gradeProgram) {
  * `tools/module-check.mjs` refuses. Its uniform table is exempt there and is written from
  * `web/main.js` on every look parameter; the material is not, and swapping a program is
  * this file's own business.
+ *
+ * **The old program is released on the way past, and it is a `dispose` that does it rather
+ * than `needsUpdate`** - the full argument is on `setCloudProgram`, which is the other half
+ * of the same swap and had the same leak. Guarded on the text having moved so that boot's
+ * own adoption, which hands back the program this pass was constructed on, costs nothing.
  */
 export function setGradeProgram(gradeProgram) {
+  if (grade.material.vertexShader === gradeProgram.vertexShader
+    && grade.material.fragmentShader === gradeProgram.fragmentShader) return;
+  grade.material.dispose();
   grade.material.vertexShader = gradeProgram.vertexShader;
   grade.material.fragmentShader = gradeProgram.fragmentShader;
   grade.material.needsUpdate = true;

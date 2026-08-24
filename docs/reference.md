@@ -374,15 +374,33 @@ master and its default has to be the value the effect is absent at, the kind and
 to be ones the registry implements, every uniform a parameter binds has to be declared by some
 program and every uniform the package declares has to be bound by one of its own parameters or
 listed under `hostDriven`, every joint a chunk names has to exist in a spine, and every identifier
-a chunk reaches for has to be something this build has. A refused package leaves nothing behind.
+a chunk reaches for has to be something this build has. Four more rules are about the package as a
+whole rather than about one entry in it, because every rule above is satisfied as many times as a
+package repeats a correct entry: a package holds at most 64 files and 256 KiB of chunk text (the
+widest that ships holds eight files and under 17 kilobytes, and every read of the store hashes
+every file of every package), a binding has to be the *shape* of the uniform it writes — `axisDeg`
+needs a `vec2` and everything else a `float` — a step may not be finer than `1e-6`, which is a
+grid neither the rounding nor a 32-bit float can resolve, and a parameter may only name a panel
+group this build holds or one its own package declares, with a package group key that collides
+with either refused by name. A refused package leaves nothing behind.
 
 **A page that is open when an install happens rebuilds itself.** Both shader programs are
 reassembled and swapped, the registry and the panel are rebuilt from the new set, and every value
 is written back through the same door a slider uses — so the controls show what the registry
 holds, the values in flight are where they were, and a newly installed effect's parked values
-come back and apply. Other browsers converge on their own within a few seconds; the poll stands
-down while an export, a preset gesture or a keyframe evaluation is running, because a rebuild
-between two frames of a render is a file that changes look halfway through.
+come back and apply. A package that changed no GLSL is adopted without recompiling anything,
+which is what keeps a retune from clearing the trails on a page mid-playback. Other browsers
+converge on their own within a few seconds; the poll stands down while an export, a preset
+gesture or a keyframe evaluation is running, because a rebuild between two frames of a render is
+a file that changes look halfway through — and it asks again after its last read, so a gesture
+that starts while it is reading defers it rather than being run over by it.
+
+**A package this build stores and cannot compile is a rollback and a sentence.** The door checks
+vocabulary and is not a compiler, so GLSL that is syntactically broken while naming only things
+this build has gets through it — and a shader that will not link is a log line in WebGL rather
+than an exception. The page detects it while it warms the swapped programs and refuses the
+install: it goes back to the effects it was drawing with, keeps the document it had, and says
+which shader did not compile.
 
 A fork may add parameters and retune the ones it inherits. It may not **drop** one: the panel's
 declaration order places every shipped parameter by hand, so a fork short of one is a build whose

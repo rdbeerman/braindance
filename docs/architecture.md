@@ -100,7 +100,24 @@ is a different byte stream with the same meaning, and provenance is about bytes.
 `<id>.<seq>.tmp`, any existing copy is renamed to `<id>.<seq>.old`, the new one is renamed in and
 the old one deleted. Those suffixes carry a dot and an effect id may not, so a crashed install is
 invisible to every read by the same rule that decides what an id is — and the next install of
-that id sweeps what it left. What may be written at all is decided before any of it: the door in
+that id sweeps what it left.
+
+**Between those two renames the id resolves to nothing, and that window is the one place this
+store can lose work.** A machine losing power there comes back with the only copy of the package
+in its aside and nothing at the live id, which reads as an uninstall rather than as damage — so
+the store puts it back when it is constructed, before anything can read it, and the sweep removes
+an aside only while there is a live directory beside it to measure against. An uninstall renames
+aside too, and its aside is named `<id>.<seq>.gone` for exactly this reason: one suffix per
+intent, so "should this come back" is answered by the name rather than guessed at, and a recovery
+that could not tell the two apart would undo somebody's uninstall on every restart.
+
+**A package file is an ordinary file.** `effects/` is the one directory in this program a client
+can write into, so the file route asks what a name *is* rather than what it points at — a symlink
+planted there is refused whether or not it aims somewhere legitimate, which is a narrower rule
+than the realpath-and-containment pair the static tree uses and needs no notion of where the roots
+are.
+
+What may be written at all is decided before any of it: the door in
 `server/effect-door.js` runs the real assembler against the set that would exist after the
 install, and a package that would not assemble, would bind a uniform no program declares or would
 name an identifier this build has not got is refused with the reason and never reaches disk. The

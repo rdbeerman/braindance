@@ -325,3 +325,43 @@ export const DEPTH_H = 424;
  * and that is a third spelling this could absorb rather than a claim that it has.
  */
 export const POINTS = DEPTH_W * DEPTH_H;
+
+/**
+ * How many decimal places a number is written to, which is how far the registry rounds a
+ * value after snapping it onto its slider's grid.
+ *
+ * **It is here rather than beside its one caller because it is the only piece of that
+ * arithmetic a bare-node test can reach.** `normalise` in `web/main.js` snaps a value onto
+ * `step` and then rounds to the decimals `min` and `step` imply, which is what keeps a
+ * value set headlessly and the same value set through a slider from landing a hair apart -
+ * and `web/main.js` is a browser module with a top-level fetch in it, so the rule could
+ * only ever be exercised through a GPU browser. Pulled out, it is a pure function of a
+ * number and `test/param-grid.test.mjs` holds it to the cases below.
+ *
+ * **A dot in the decimal spelling was the whole of the rule and JavaScript stops writing
+ * one.** `String(x)` switches to exponent notation below 1e-6, so `String(1e-7)` is
+ * `"1e-7"` with no dot anywhere in it - which read as zero decimals, and a parameter
+ * declaring that step had every value it ever held rounded to a whole number. The range
+ * collapsed to its integer positions with every control still moving and every slider
+ * still showing a number, which is the shape that gets found by somebody wondering why an
+ * effect only has two settings. The exponent is read now, so the count is what the value
+ * actually needs: `1e-7` is seven places, `1.5e-7` is eight, and `1e+21` is none because
+ * there is nothing after the point.
+ *
+ * Capped at the 100 places `toFixed` will accept, because a step below 1e-100 would
+ * otherwise turn a rounding into a `RangeError` on the first write. The install door
+ * refuses a step finer than 1e-6 long before that, so the cap is for the values that do
+ * not come through a door - a core parameter declared here in this repo.
+ */
+export const decimalsOf = (x) => {
+  const s = String(x);
+  const e = s.search(/[eE]/);
+  if (e < 0) {
+    const dot = s.indexOf('.');
+    return dot < 0 ? 0 : s.length - dot - 1;
+  }
+  const mantissa = s.slice(0, e);
+  const dot = mantissa.indexOf('.');
+  const fraction = dot < 0 ? 0 : mantissa.length - dot - 1;
+  return Math.min(100, Math.max(0, fraction - Number(s.slice(e + 1))));
+};

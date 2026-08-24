@@ -52,6 +52,32 @@ export const EFFECT_BIND_TABLES = Object.freeze(['points', 'grade']);
 export const EFFECT_BIND_TRANSFORMS = Object.freeze(['axisDeg', 'degToRad']);
 
 /**
+ * The panel groups the client's own spine holds, as a set, sorted so it reads as one.
+ *
+ * **The install door needs this and cannot reach the thing that declares it.**
+ * `CORE_PANEL_GROUPS` in `web/main.js` is ten entries carrying prose, tab tags and
+ * `before()`/`after()` closures that build DOM, so it lives in a browser module with a
+ * top-level await in it and the server can never import it. What the door has to ask is
+ * much smaller: a parameter naming a group that is neither its own package's nor one of
+ * these is a row `buildPanel` would throw over *after* the registry had already swapped,
+ * and a package group key colliding with one of these is the same failure from the other
+ * end.
+ *
+ * **Two statements, held equal at boot rather than trusted**, which is the shape
+ * `tableFromPackages` already uses for the declaration order: `withEffectGroups` compares
+ * the keys it is handed against this list and refuses a disagreement by name, so a core
+ * group added or renamed in `web/main.js` without this line following is a page that does
+ * not boot with both sets printed - not a door quietly refusing a correct package, and not
+ * a door quietly accepting a group key that collides. Membership only and never order: the
+ * panel's order is a layout fact and belongs to the one list that carries the prose
+ * arguing about it.
+ */
+export const CORE_PANEL_GROUP_KEYS = Object.freeze([
+  'colour', 'displacement', 'framing', 'motion', 'points',
+  'post', 'region', 'signal', 'style', 'viewer',
+]);
+
+/**
  * Every declared parameter name, in the order the registry declares them: the ones
  * the client's order places, in that order, and then everything else.
  *
@@ -150,6 +176,17 @@ export const tableFromPackages = (packages, order) => {
  * author's placement decision quietly overridden.
  */
 export const withEffectGroups = (coreGroups, packages) => {
+  // The one place the door's copy of the core group keys is held to the list that
+  // declares them. Compared as sets - see `CORE_PANEL_GROUP_KEYS` for why the order is
+  // deliberately not part of it - and refused by name, because a door checking a group
+  // vocabulary the page no longer has is a door that refuses correct packages and accepts
+  // colliding ones, and neither of those says anything about itself.
+  const held = [...coreGroups.map((g) => g.key)].sort();
+  if (held.join(',') !== [...CORE_PANEL_GROUP_KEYS].sort().join(',')) {
+    throw new Error(`the panel spine holds the groups ${held.join(', ')} and CORE_PANEL_GROUP_KEYS names `
+      + `${[...CORE_PANEL_GROUP_KEYS].sort().join(', ')} - the install door reads the second one, so the two `
+      + 'disagreeing is a door checking a vocabulary this page has not got');
+  }
   const inserts = new Map();
   for (const p of packages) {
     for (const g of p.manifest.panelGroups ?? []) {

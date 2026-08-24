@@ -457,17 +457,19 @@ node tools/effect-check.mjs                               # installing an effect
 node tools/effect-check.mjs --mutate temporaries-are-visible # ... the id filter the store lists directories through, widened, so
                                                           #     a crashed install's `<id>.<seq>.tmp` becomes a package `/effects`
                                                           #     lists and `rootFor` resolves. Reddens exactly the two rows of
-                                                          #     section 7 that are about a half-written package, which is why
+                                                          #     section 10 that are about a half-written package, which is why
                                                           #     that section is last - staged earlier it would redden every
                                                           #     section after it with a fault five sections away
 node tools/effect-check.mjs --mutate rebuild-skips-the-panel # ... the panel built on the first run and never again, which is the
                                                           #     rebuild somebody writes who thinks of the panel as boot
                                                           #     furniture. `boot-check` stays green, because boot is the run
-                                                          #     that builds it; one row of section 3 reddens
+                                                          #     that builds it; six rows redden, one in section 3 and the rest
+                                                          #     across 7, 8 and 9 - everything downstream of a panel that is
+                                                          #     not the registry
 node tools/effect-check.mjs --mutate install-skips-the-uniform-cells # ... the JavaScript cell a new binding needs, never minted.
                                                           #     No shipped package notices - every one of the sixteen binds a
                                                           #     uniform some hand-written table already holds - and a
-                                                          #     seventeenth throws inside the value walk. Reddens seven rows of
+                                                          #     seventeenth throws inside the value walk. Reddens six rows of
                                                           #     section 3 and ends the run early; the count is a floor
 node tools/effect-check.mjs --mutate reinstall-leaves-it-parked # ... the parking predicate widened to every dotted name, so a
                                                           #     value belonging to an installed effect parks anyway. The badge
@@ -480,11 +482,73 @@ node tools/effect-check.mjs --mutate reinstall-leaves-it-parked # ... the parkin
 node tools/effect-check.mjs --mutate rollback-keeps-the-new-registry # ... the rollback runs the loader again and runs it against
                                                           #     the packages that just arrived rather than the ones this page
                                                           #     had - the half-rollback somebody writes who reads the failure as
-                                                          #     being about the document. Reddens exactly four rows of section 6:
+                                                          #     being about the document. Reddens six rows: four in section 6 -
                                                           #     the sentence, the registry's contents, the signature, and what a
-                                                          #     save writes. The picture cannot see it, because the parameter the
-                                                          #     fork adds is inert at its default and the image is identical
-                                                          #     either way - which is why a pixel row is not enough to hold this
+                                                          #     save writes - and the two rollbacks of section 9. The picture
+                                                          #     cannot see it, because the parameter the fork adds is inert at
+                                                          #     its default and the image is identical either way, which is why
+                                                          #     a pixel row is not enough to hold this
+node tools/effect-check.mjs --mutate rebuild-remakes-the-buttons # ... the memo taken off the two closures that emit the framing
+                                                          #     group's hand-written rows, so every rebuild makes fresh buttons
+                                                          #     carrying the right ids and none of the wiring. Reddens two rows
+                                                          #     of section 7 - the control pressed, and the node the status was
+                                                          #     written into - and nothing else: the panel looks exactly right
+node tools/effect-check.mjs --mutate rebuild-forgets-the-tab # ... the showing tab not re-applied to the groups the generator has
+                                                          #     just made, so one install puts every tab's groups on screen at
+                                                          #     once. Reddens one row of section 7
+node tools/effect-check.mjs --mutate rebuild-keeps-the-paint # ... `groupPainted` left holding state strings written against
+                                                          #     elements the rebuild threw away, so a group whose values did not
+                                                          #     move is skipped by the first refresh and comes back open with no
+                                                          #     `aria-expanded`. Reddens one row of section 7
+node tools/effect-check.mjs --mutate rebuild-keeps-the-picker # ... the preset subset dialog built once and never again. An
+                                                          #     installed effect gets no checkbox and an uninstalled one leaves
+                                                          #     a box whose handler reads `PARAMS` for a name that is gone.
+                                                          #     Reddens two rows of section 7, one per direction
+node tools/effect-check.mjs --mutate gates-are-frozen-at-boot # ... the grade gate list computed once, off the packages installed
+                                                          #     while the module evaluated. All sixteen shipped effects are in
+                                                          #     it, so nothing about them notices; a grade effect installed
+                                                          #     afterwards writes into a pass that stays shut. Reddens one row
+                                                          #     of section 8
+node tools/effect-check.mjs --mutate every-reload-warms    # ... the warm run whether or not the programs moved, so a package
+                                                          #     that changed only its manifest clears the accumulators a page
+                                                          #     mid-playback is holding. Reddens one row of section 8, and the
+                                                          #     control beside it stays green because that one must warm
+node tools/effect-check.mjs --mutate swap-keeps-the-old-program # ... the program swap put back to `needsUpdate` alone. Three
+                                                          #     releases a program only from a material's `dispose` event, so
+                                                          #     every GLSL-changing install leaves one linked and cached.
+                                                          #     Reddens one row of section 8
+node tools/effect-check.mjs --mutate poll-checks-once      # ... the stand-down asked on the way into the tick and never again,
+                                                          #     so a rebuild lands inside a gesture that opened while it was
+                                                          #     reading. Reddens one row of section 8
+node tools/effect-check.mjs --mutate poll-takes-any-body   # ... `GET /effects` no longer held to the shape its readers assume,
+                                                          #     so a 200 carrying anything else reaches the signature
+                                                          #     comparison and throws out of the interval callback. Reddens one
+                                                          #     row of section 8. Two edits, because defusing the array check
+                                                          #     alone leaves the entry loop throwing inside the poll's own
+                                                          #     catch - which is handled, so the mutation reproduced nothing
+                                                          #     and the run came back NOT CAUGHT
+node tools/effect-check.mjs --mutate poll-guards-late      # ... the reentrancy guard raised after the list comes back rather
+                                                          #     than on the way in, so two ticks overlap and the older read can
+                                                          #     win. Reddens one row of section 8
+node tools/effect-check.mjs --mutate reads-need-not-agree  # ... the verification read taken off the end of the package fetch,
+                                                          #     so a set read across an install is one package from before it
+                                                          #     beside another from after. Reddens one row of section 8
+node tools/effect-check.mjs --mutate adopt-outside-the-transaction # ... the adoption put back outside the `try` the rollback
+                                                          #     hangs off, so a throw out of the adoption itself - a package
+                                                          #     written into the store past the door, naming a panel group
+                                                          #     nothing holds - walks past it and leaves a registry with no
+                                                          #     panel drawn from it. Reddens one row of section 9
+node tools/effect-check.mjs --mutate a-broken-shader-is-warm # ... the throw dropped from the end of the warm, leaving a link
+                                                          #     failure where three.js puts it: a console line. The install
+                                                          #     succeeds, the poll announces success, and the cloud draws
+                                                          #     nothing. Reddens two rows of section 9
+node tools/effect-check.mjs --mutate the-sweep-eats-the-last-copy # ... the sweep removing every aside it finds and the recovery
+                                                          #     pass removed with it, so a crash between an install's two
+                                                          #     renames loses the package to the next install of that id.
+                                                          #     Reddens two rows of section 11
+node tools/effect-check.mjs --mutate package-files-follow-links # ... `statSync` back where `lstatSync` is, so the file route
+                                                          #     asks what a name points at rather than what it is. Reddens one
+                                                          #     row of section 10, and the ordinary file beside it stays green
 node tools/effect-conformance-check.mjs --url http://localhost:8080 # the plugin contract: every installed effect draws nothing at all when it is off
 node tools/effect-conformance-check.mjs --mutate leaks-at-zero # ... a floor under the rain's master, so the package contributes at
                                                           #     the term it is meant to be absent at. Served over an
@@ -1837,12 +1901,49 @@ it, so seven rows fire and then the run stops — a verdict that put the crash f
 DID NOT RUN over a caught mutation, which is the census of exit codes `docs/instruments.md`
 already carries a case for.
 
-Baseline **56 assertions, 0 failed**, over seven sections: the store's revisions against hashes
+Baseline **91 assertions, 0 failed**, over eleven sections: the store's revisions against hashes
 the tool computes off the staged tree, seventeen hostile packages each refused with the sentence
 for its own rule, the hotload's registry-and-panel coherence including `boot-check`'s own
 control-vs-registry diff on a rebuilt page, the uninstall/reinstall pixel identity, the
-must-not-badge control, an install this page cannot carry the open document onto, and — last,
-deliberately — what a crashed install leaves behind.
+must-not-badge control, an install this page cannot carry the open document onto, everything on
+the panel that is not a parameter row, what a rebuild costs and what it stands down for, a
+package whose GLSL every rule here accepts and no driver will compile, what a crashed install
+leaves behind, and — last, after the browser is closed — what somebody plants in the user root
+and an install interrupted between its two renames.
+
+**Section 7 is the one whose subject is invisible.** Sections 3 and 4 ask whether the parameters
+arrived and whether their values are right, and a build can get both of those completely right
+while the buttons beside them are dead, the tab that was showing has stopped being applied, the
+collapse headers are painted for elements that no longer exist and the preset subset dialog is a
+statement of the registry from before the install. None of that throws, none of it moves a
+pixel, and each of the four has its own mutation because each is a separate way of rebuilding
+the panel and forgetting something.
+
+**Section 11 restarts the server and closes the browser first**, which is the only place in this
+tool that does either. The recovery it asks about is a fact about constructing the store, so it
+has to be driven by starting one; the page is closed rather than left running because its own
+poll would report a store that stopped answering, which is correct behaviour and has nothing to
+do with the rows, and because the section stages a package directly in the user root that no
+page has any business adopting.
+
+**Every fixture in that section is written rather than inherited**, and the reason is a mutation
+rather than tidiness: `temporaries-are-visible` leaves the store unable to install anything at
+all, so a row whose fixture was the previous row's output turned that mutation into an `ENOENT`
+crash three sections later instead of into the two red rows it is about. Both blocks now write
+their own package into the user root - the one with a symlink in it and the one staged as a
+crashed install's aside - so what the mutation reddens is what the mutation is about. Its control is the direction the recovery must not run in: `remove` also
+renames a directory aside before deleting it, so a crash there leaves the same shape on disk,
+and a recovery that could not tell the two apart would undo somebody's uninstall on every
+restart. The suffixes are what tell them apart — `.old` for a copy that should come back and
+`.gone` for one on its way out — and the last row of the section is what says so.
+
+**The 6-second poll on the page competes with the driver, and two rows are written around it.**
+`pollNow` is the interval's own body, so a tick that started six seconds ago can be mid-read
+when the driver calls it, and the reentrancy guard correctly sends that call straight back
+having done nothing. Section 6 therefore waits for the note rather than reading it the moment
+`pollNow` resolves — a build that never reports still fails, one interval later. It is worth
+knowing before reading a red row here: an assertion that reads page state immediately after
+`pollNow` is asserting against whichever of the two polls got there first.
 
 **Section 6 is the one that asserts a failure.** It installs a fork of the probe package
 carrying one parameter more while the open document holds that effect parked, which makes the

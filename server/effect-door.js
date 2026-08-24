@@ -29,8 +29,47 @@
 // which is what lets `server/effect-store.js` call it before it has made a directory and
 // lets `test/effect-door.test.mjs` run the whole shipped set through it under bare node.
 
-import { MANIFEST_FORMAT, EFFECT_PARAM_KINDS, EFFECT_BIND_TABLES, EFFECT_BIND_TRANSFORMS } from '../web/effect-manifests.js';
+import {
+  MANIFEST_FORMAT, EFFECT_PARAM_KINDS, EFFECT_BIND_TABLES, EFFECT_BIND_TRANSFORMS,
+  CORE_PANEL_GROUP_KEYS,
+} from '../web/effect-manifests.js';
 import { assembleShaders } from '../web/shader-assembly.js';
+
+/**
+ * How much of one package this build will take, as two numbers.
+ *
+ * **Every rule above these is about one entry and none of them is about how many there
+ * are**, which is the hole they leave between them: twenty thousand empty chunk files
+ * satisfy the file-name rule twenty thousand times, and the install that follows is one
+ * `writeFileSync` each into a directory the store then hashes on every `GET /effects` -
+ * so the cost is paid again by every poll on every open page, forever, for a package
+ * nobody can see is wrong.
+ *
+ * Both bounds are set against the shipped set rather than against a guess, because a
+ * limit that a real package could reach is a limit that refuses correct work. The widest
+ * package on disk is the glyph field at 8 files and 16,658 bytes of chunk text; 64 files
+ * is eight times the widest and 256 KiB is fifteen times the largest, which leaves room
+ * for a package several times more elaborate than anything this build ships and still
+ * refuses the shapes that are about volume rather than about content.
+ *
+ * Measured over the summed text rather than per file, because ten files of 200 KiB and
+ * one of 2 MiB are the same amount of work for the store and the same amount of GLSL for
+ * the driver.
+ */
+const MAX_PACKAGE_FILES = 64;
+const MAX_PACKAGE_BYTES = 256 * 1024;
+
+/**
+ * The finest grid a slider may snap to.
+ *
+ * `normalise` rounds a snapped value to the decimals `min` and `step` imply and a uniform
+ * is a 32-bit float, which carries about seven decimal digits - so a step below this is a
+ * grid neither the arithmetic that snaps onto it nor the number it lands in can resolve,
+ * and a range input cannot offer that many positions either. Refused rather than clamped,
+ * because a package asking for a resolution this build cannot deliver should be told so
+ * rather than have its manifest silently reinterpreted.
+ */
+const MIN_PARAM_STEP = 1e-6;
 
 // The same two shapes `server/effect-store.js` enforces on what it reads, restated here
 // rather than imported, because the door runs *before* the store has anything to read and
@@ -191,19 +230,35 @@ const declaredIn = (text) => {
   return names;
 };
 
-/** Every `uniform` one piece of GLSL declares, which is one direction of the binding check. */
-const uniformsIn = (text) => {
+/**
+ * Every `uniform` one piece of GLSL declares, with the type it was declared as - which is
+ * both directions of the binding check, because a binding promises a place to put the
+ * value *and* that the place is the shape of the value.
+ *
+ * A map rather than a set, and the values are sets of type names rather than one name,
+ * because the same declaration is credited to both programs a few hundred lines below and
+ * a name genuinely declared twice would otherwise be one arbitrary reading of two. Nothing
+ * in the shipped set declares one name at two types, which is asserted rather than assumed:
+ * `test/effect-door.test.mjs` runs the whole set through this door, and a build that grew
+ * such a pair would fail here by refusing a binding it can no longer answer for.
+ */
+const uniformTypesIn = (text) => {
   const src = withoutComments(text);
-  const names = new Set();
-  const decl = /\buniform\s+(?:(?:highp|mediump|lowp)\s+)?[A-Za-z_][A-Za-z0-9_]*\s+([^;]*);/g;
+  const types = new Map();
+  const decl = /\buniform\s+(?:(?:highp|mediump|lowp)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+([^;]*);/g;
   for (const m of src.matchAll(decl)) {
-    for (const part of m[1].split(',')) {
+    for (const part of m[2].split(',')) {
       const name = part.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)/);
-      if (name) names.add(name[1]);
+      if (!name) continue;
+      if (!types.has(name[1])) types.set(name[1], new Set());
+      types.get(name[1]).add(m[1]);
     }
   }
-  return names;
+  return types;
 };
+
+/** The same reading with the types dropped, for the rules that only ask whether a name is there. */
+const uniformsIn = (text) => new Set(uniformTypesIn(text).keys());
 
 /** Every verbatim segment of every spine, as one string per program name. */
 const spineTextByProgram = (spines) => Object.fromEntries(
@@ -331,6 +386,26 @@ export function doorRefusal(candidate, { beside = [], spines }) {
     }
   }
 
+  // ---- how much of it there is, which no rule above asks
+  //
+  // The rules above are each about one entry, so a package repeating a correct entry ten
+  // thousand times passes all of them. What it costs is not the install: it is every
+  // `GET /effects` afterwards, which reads and hashes every file of every package, on
+  // every poll of every page that is open.
+  const fileCount = new Set([...declaredFiles, ...Object.keys(chunks)]).size;
+  if (fileCount > MAX_PACKAGE_FILES) {
+    return `effect ${id} carries ${fileCount} files and this build takes ${MAX_PACKAGE_FILES} - `
+      + 'the widest package that ships holds eight, and every read of the store hashes every file of '
+      + 'every package, so a package is bounded by what a reader can afford rather than by what a writer can send';
+  }
+  const totalBytes = Object.values(chunks)
+    .reduce((sum, text) => sum + Buffer.byteLength(text, 'utf8'), 0);
+  if (totalBytes > MAX_PACKAGE_BYTES) {
+    return `effect ${id} carries ${totalBytes} bytes of chunk text and this build takes ${MAX_PACKAGE_BYTES} - `
+      + 'the largest package that ships is under 17 kilobytes, and this text is spliced into two programs '
+      + 'a driver has to compile on every page that adopts the install';
+  }
+
   // ---- the parameters
   if (!manifest.params || typeof manifest.params !== 'object' || Array.isArray(manifest.params)
       || Object.keys(manifest.params).length === 0) {
@@ -376,6 +451,11 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       if (!(spec.step > 0)) {
         return `${name} declares step ${spec.step} - the registry snaps every value onto this grid, and a step of zero divides by it`;
       }
+      if (spec.step < MIN_PARAM_STEP) {
+        return `${name} declares step ${spec.step} and the finest grid this build snaps to is ${MIN_PARAM_STEP} - `
+          + 'the value is rounded to the decimals this step implies and then written into a 32-bit float, '
+          + 'so a finer grid is one neither the arithmetic nor the uniform can tell the positions of apart';
+      }
       if (spec.def < spec.min || spec.def > spec.max) {
         return `${name} defaults to ${spec.def}, outside its own ${spec.min}..${spec.max} - a default the bounds `
           + 'clamp is a parameter that never sits where its own manifest says it starts';
@@ -415,6 +495,49 @@ export function doorRefusal(candidate, { beside = [], spines }) {
   if (masters > 1) {
     return `effect ${id} declares ${masters} parameters with the role master - one package is absent at one term, `
       + 'and two of them is two answers to whether this effect is contributing';
+  }
+
+  // ---- where the rows would land, which nothing before the swap asks
+  //
+  // **Both of these blow up inside `buildPanel`, which runs after the registry has already
+  // been replaced.** A parameter naming a group that is nowhere reaches the stray check at
+  // the end of the generator and throws `name no panel group`; a package group key
+  // colliding with a core one - or with another installed package's - makes
+  // `withEffectGroups` splice two entries under one key, and the generator then emits one
+  // group's rows twice and throws on the count. Neither is a bad install on the server: the
+  // package is stored, every page adopting it fails the same way, and the rollback that
+  // catches it is a page saying it could not carry its document across when what actually
+  // happened is that a group key was misspelled.
+  //
+  // Asked here because the vocabulary is knowable here. A group a parameter may name is a
+  // core group of this build's own spine or one this package declares beside it - not one
+  // *another* package declares, which would be a package placing its rows inside somebody
+  // else's heading and would break the moment that package were uninstalled.
+  const ownGroupKeys = new Set((manifest.panelGroups ?? []).map((g) => g?.key));
+  const besideGroupKeys = new Set(
+    beside.flatMap((p) => (p.manifest?.panelGroups ?? []).map((g) => g?.key)),
+  );
+  for (const [short, spec] of Object.entries(manifest.params)) {
+    const group = spec.panel.group;
+    if (CORE_PANEL_GROUP_KEYS.includes(group) || ownGroupKeys.has(group)) continue;
+    return `${id}.${short} asks for the panel group ${JSON.stringify(group)}, which is neither one of this `
+      + `build's own (${CORE_PANEL_GROUP_KEYS.join(', ')}) nor one ${id} declares - the generator builds a `
+      + 'row for every parameter and then refuses a row whose group nothing holds, which it does after the '
+      + 'registry has already swapped';
+  }
+  for (const g of manifest.panelGroups ?? []) {
+    if (!g || typeof g.key !== 'string') continue;
+    if (CORE_PANEL_GROUP_KEYS.includes(g.key)) {
+      return `effect ${id} declares the panel group ${JSON.stringify(g.key)} and this build's own spine already `
+        + 'holds one under that key - two groups under one key are spliced as two entries, so every row of that '
+        + 'group would be emitted twice and the generator refuses the count';
+    }
+    if (besideGroupKeys.has(g.key)) {
+      const owner = beside.find((p) => (p.manifest?.panelGroups ?? []).some((o) => o?.key === g.key))?.id;
+      return `effect ${id} declares the panel group ${JSON.stringify(g.key)} and effect ${owner} already declares `
+        + 'one under that key - a group key is how the panel finds its rows, so two packages claiming one is two '
+        + 'headings the page cannot tell apart';
+    }
   }
 
   // ---- the varyings and the panel groups, which the assembler does not read for shape
@@ -482,8 +605,15 @@ export function doorRefusal(candidate, { beside = [], spines }) {
   for (const text of Object.values(chunks)) for (const u of uniformsIn(text)) declaredHere.add(u);
   const spineText = spineTextByProgram(spines);
   const programUniforms = {};
+  const absorb = (program, text) => {
+    for (const [name, types] of uniformTypesIn(text)) {
+      if (!programUniforms[program].has(name)) programUniforms[program].set(name, new Set());
+      for (const t of types) programUniforms[program].get(name).add(t);
+    }
+  };
   for (const [program, text] of Object.entries(spineText)) {
-    programUniforms[program] = uniformsIn(text);
+    programUniforms[program] = new Map();
+    absorb(program, text);
   }
   for (const pkg of packages) {
     for (const text of Object.values(pkg.chunks ?? {})) {
@@ -493,17 +623,33 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       // instead, which is looser in the direction that produces no false refusal: a
       // binding is being asked whether the value has anywhere to go, and a uniform
       // declared in the cloud and bound on the grade would pass here and fail the driver.
-      for (const program of Object.keys(spineText)) {
-        for (const u of uniformsIn(text)) programUniforms[program].add(u);
-      }
+      for (const program of Object.keys(spineText)) absorb(program, text);
     }
   }
   const boundHere = new Set();
   for (const [short, spec] of Object.entries(manifest.params)) {
     const program = PROGRAM_OF_TABLE[spec.bind.on];
-    if (!programUniforms[program]?.has(spec.bind.uniform)) {
+    const declaredAs = programUniforms[program]?.get(spec.bind.uniform);
+    if (!declaredAs) {
       return `${id}.${short} binds the uniform ${JSON.stringify(spec.bind.uniform)} and the assembled `
         + `${program} program declares no such uniform - the control would move, the value would be written, and nothing would read it`;
+    }
+    // **The other half of what a binding promises, and it fails one layer further in.** The
+    // rule above asks whether the value has anywhere to go; this asks whether the place is
+    // the shape of the value, which nothing else here or downstream ever checks. `axisDeg`
+    // writes `.value.set(sin, cos)` and every other binding writes a bare number, so the
+    // two declared types that can receive them are `vec2` and `float` - and getting it
+    // backwards is silent all the way to the GPU: three.js picks its uploader from the
+    // *declared* uniform, so a scalar bound to a `vec2` uploads whatever `.value.x` reads
+    // as, and an `axisDeg` bound to a `float` throws inside `effectApply` on the first
+    // write with a message about `set` rather than about a manifest.
+    const wants = spec.bind.transform === 'axisDeg' ? 'vec2' : 'float';
+    if (!declaredAs.has(wants)) {
+      return `${id}.${short} binds the uniform ${JSON.stringify(spec.bind.uniform)}, which the assembled `
+        + `${program} program declares as ${[...declaredAs].join(' and ')}, and `
+        + `${spec.bind.transform === 'axisDeg' ? 'the axisDeg transform writes a two-component value' : 'a plain binding writes one number'} - `
+        + `so this binding needs a ${wants}. The mismatch is not caught anywhere downstream: it is a value `
+        + 'uploaded through the wrong setter, on a control that moves and a picture that does not';
     }
     boundHere.add(spec.bind.uniform);
   }

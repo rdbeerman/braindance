@@ -3933,3 +3933,75 @@ with a blast radius across every tool in the tree.
 to remember.** "It reads every JavaScript file in the checkout" is true of `module-check` and is
 a sentence about its consumers, not about its subjects - and a plan built on the sentence rather
 than on the split gets a safety net that is not there.
+
+## A driver that presses a control the page is already pressing on a timer
+
+`effect-check` calls `__kinect.effects.pollNow()` because waiting out a six-second interval
+would make every row six seconds longer and turn a rebuild that threw into a timeout with
+nothing to read. What that call *is*, though, is the interval's own body - and the interval is
+still running. So a tick that started six seconds ago can be mid-read when the driver arrives,
+the reentrancy guard sends the driver's call straight back having done nothing, and the row
+after it reads page state that the tick will not have written for another second.
+
+It cost two rows, and they failed in the two shapes this is worth remembering by. Section 6 read
+`#tNote` the moment `pollNow` resolved and found it empty - **while every other row of that
+section passed**, because they read state a rollback restores and a poll that did nothing leaves
+in exactly the same place. One red row in a green section is the signature: the rows that can
+see "nothing happened" and the rows that can see "the wrong thing happened" are different rows,
+and only the first kind is a clock problem. Section 8 read `presetGestureRunning()` one
+`setTimeout(0)` after clicking cancel and got `true` about half the time, because the dialog's
+`close` event and the `finally` that lowers the flag are several hops apart.
+
+**Both are the same rule: a driver that shares a control with the product waits for the state
+rather than for its own call to return.** `waitForFunction` on the condition the row is about -
+the note being non-empty, the flag being down, the signature having converged - keeps the claim
+intact, because a build that never gets there still fails, one interval later. Counting turns of
+the event loop does not: it encodes a guess about how many hops a DOM event takes, and the guess
+is wrong on a machine under load.
+
+The tempting alternative is to expose a handle that stops the interval for the length of a run.
+It would make the rows deterministic and it would make them rows about a build nobody ships,
+which is the trade `docs/measurement.md` records under screening measurements that remove the
+effect they are measuring.
+
+## `params.spec` answers with the bounds and not the words
+
+A row asserting that a retuned package's new label reached the registry read
+`k.params.spec('probe.hue').label` and got `undefined` - on a build where the label had arrived
+perfectly well and the panel was drawing it. `spec` returns a projection: `default`, `min`,
+`max`, `step`, `kind`, `tag`, and nothing else. The row was not measuring a wrong label, it was
+measuring a field that has never existed on that object, and `undefined !== 'probe hue, retuned'`
+is a red row on every build there has ever been.
+
+**A reading that is `undefined` on a correct build is not a finding, it is a probe pointed at
+nothing** - and the direction it fails in is the dangerous one only when the assertion is
+negative. Here it was positive and failed loudly; had the row asserted the label had *not*
+changed, it would have passed forever.
+
+The fix is the one this repo keeps arriving at from other directions: read the thing on screen.
+The label the row is about is the `<span>` in the panel row, which is what a person sees, what
+`registry-check` builds its view of the panel out of, and a reading that cannot come back
+`undefined` without something being genuinely wrong.
+
+## A mutation neutralised by a guard downstream of the line it edits
+
+`poll-takes-any-body` was written to put back a shipped defect: `GET /effects` answering a body
+with no `effects` array in it, reaching the signature comparison, and throwing out of an interval
+callback once every six seconds for the life of the page. The edit defused the array check that
+now stands in front of it, the run came back **NOT CAUGHT**, and the first reading was that the
+row was too weak.
+
+It was not. The rule the edit removed is one of two: the array check and, right after it, a loop
+over the entries checking that each is an id and a rev. With the first gone the second iterates
+`undefined`, which is a `TypeError` thrown from inside `listEffects` — where the poll's own
+`catch` is, and where it is handled exactly as a restarting server is. **The mutated build
+behaved identically to the fixed one**, so the row had nothing to see and was right to stay
+green.
+
+Two edits reproduce it, and only two: the array check defused *and* the entry loop made
+tolerant, at which point `listEffects` answers `undefined` and the comparison a line later is
+outside every catch there is. `CLAUDE.md` says to confirm a mutation did something before
+believing it was missed; the specific shape worth naming is **a rule that is really two rules,
+where the second one catches what the first was edited to let through**. A guard downstream of
+the line you edited makes a mutation a no-op, and a no-op mutation is indistinguishable in the
+output from an instrument that cannot see.

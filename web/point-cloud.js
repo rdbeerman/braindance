@@ -442,8 +442,26 @@ export function buildPointCloud(sourceCells, program) {
  * program actually holds - so a key with no uniform behind it costs nothing and a uniform
  * with no key reads zero, which is the same standing obligation the header above states
  * and which `web/main.js` meets by minting the cells a new package's bindings need.
+ *
+ * **The old program is released, and `needsUpdate` alone does not release it.** Read
+ * `deallocateMaterial` in three.js 0.185.1: a program's reference count is dropped only by
+ * `releaseMaterialProgramReferences`, and the only thing that calls it is the `dispose`
+ * event on a material. `needsUpdate` compiles a new program and adds it to the same
+ * material's `programs` set beside the old one, which stays linked, stays in the renderer's
+ * cache and keeps its GPU memory - so every install that changed a byte of GLSL left a
+ * whole compiled program behind, in a page designed to be installed into over and over
+ * without being reloaded. Disposing the material fires exactly that event; the material
+ * itself goes on working, because the next render finds no cached properties for it and
+ * initialises them again, which is the same path `needsUpdate` was asking for anyway.
+ *
+ * Only where the text actually moved, which is what keeps boot free: `web/main.js` adopts
+ * at boot with the programs the material was constructed on, and disposing there would
+ * throw away the one program this page has just compiled.
  */
 export function setCloudProgram(program) {
+  if (material.vertexShader === program.vertexShader
+    && material.fragmentShader === program.fragmentShader) return;
+  material.dispose();
   material.vertexShader = program.vertexShader;
   material.fragmentShader = program.fragmentShader;
   material.needsUpdate = true;

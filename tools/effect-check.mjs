@@ -49,6 +49,22 @@
 //     byte. `rollback-keeps-the-new-registry` is the control, and it is worth reading which
 //     rows it reddens: not the picture, because the added parameter is inert at its
 //     default, and not the note, because the refusal is reported either way.
+//  7. **Everything on the page that is not a parameter survives the rebuild too.** The
+//     panel is regenerated whole, so every hand-written control inside a generated group,
+//     the tab that was showing, the paint the collapse headers carry and the dialog that
+//     picks a preset's subset are all things a rebuild can quietly replace with a working
+//     copy of themselves that nothing is wired to. Each has its own mutation, because each
+//     of them is invisible in a screenshot and none of them fails anything else.
+//  8. **A rebuild costs what it has to cost and interrupts nothing it need not.** The
+//     grade pass is gated on a list derived from the packages, so it has to be derived
+//     again; a package that changed no GLSL must not warm and must not clear the
+//     accumulators mid-playback; a package that did change GLSL must release the program it
+//     replaced; and a rebuild must stand down when a gesture starts while it is reading
+//     rather than when it started reading.
+//  9. **A package this build cannot compile is a rollback and a sentence, not a black
+//     frame.** The door checks vocabulary and cannot compile GLSL, so identifier-valid text
+//     that is syntactically broken reaches the driver - where a link failure is a log line
+//     and not an exception. `a-broken-shader-is-warm` is the control.
 //
 // **What is deliberately not here.** The export door on a clip whose look this build
 // cannot draw, and the per-effect suppress beside it, belong to `export-check` - one
@@ -60,6 +76,21 @@
 //   node tools/effect-check.mjs --mutate install-skips-the-uniform-cells # must FAIL
 //   node tools/effect-check.mjs --mutate reinstall-leaves-it-parked      # must FAIL
 //   node tools/effect-check.mjs --mutate rollback-keeps-the-new-registry # must FAIL
+//   node tools/effect-check.mjs --mutate rebuild-remakes-the-buttons     # must FAIL
+//   node tools/effect-check.mjs --mutate rebuild-forgets-the-tab         # must FAIL
+//   node tools/effect-check.mjs --mutate rebuild-keeps-the-paint         # must FAIL
+//   node tools/effect-check.mjs --mutate rebuild-keeps-the-picker        # must FAIL
+//   node tools/effect-check.mjs --mutate gates-are-frozen-at-boot        # must FAIL
+//   node tools/effect-check.mjs --mutate every-reload-warms              # must FAIL
+//   node tools/effect-check.mjs --mutate swap-keeps-the-old-program      # must FAIL
+//   node tools/effect-check.mjs --mutate poll-checks-once                # must FAIL
+//   node tools/effect-check.mjs --mutate a-broken-shader-is-warm         # must FAIL
+//   node tools/effect-check.mjs --mutate the-sweep-eats-the-last-copy    # must FAIL
+//   node tools/effect-check.mjs --mutate package-files-follow-links      # must FAIL
+//   node tools/effect-check.mjs --mutate poll-takes-any-body             # must FAIL
+//   node tools/effect-check.mjs --mutate poll-guards-late                # must FAIL
+//   node tools/effect-check.mjs --mutate reads-need-not-agree            # must FAIL
+//   node tools/effect-check.mjs --mutate adopt-outside-the-transaction    # must FAIL
 //
 // It spawns its own server on a port nothing else in the suite uses and needs none
 // running. A GPU browser, a free port 8281, no capture, no sensor and no ffmpeg.
@@ -152,6 +183,223 @@ const MUTATIONS = {
       '      adoptEffectPackages(heldPackages, heldPrograms, held);',
       '      adoptEffectPackages(fetched, programs, held);',
     ]],
+  },
+
+  /**
+   * `rebuild-remakes-the-buttons` takes the memo off the two closures that emit the
+   * framing group's hand-written rows, which is what the panel generator did until an
+   * install existed to notice. Every rebuild then makes fresh buttons carrying the right
+   * ids and none of the wiring, and the visible `show crop box` stops toggling anything
+   * while `ui` writes its status into a node that is no longer in the document. Nothing
+   * throws, the panel looks exactly right, and the controls are dead.
+   */
+  'rebuild-remakes-the-buttons': {
+    file: 'web/main.js',
+    edits: [
+      ["    before: panelOnce(() => [\n      panelButtonRow(['camSensor', 'sensor view']),",
+        "    before: () => [\n      panelButtonRow(['camSensor', 'sensor view']),"],
+      ["      panelButtonRow(['camLevelReset', 'reset rotation']),\n    ]),\n    after: panelOnce(() => [",
+        "      panelButtonRow(['camLevelReset', 'reset rotation']),\n    ],\n    after: () => ["],
+      ["      panelNote('recRange', 'preview only'),\n    ]),", "      panelNote('recRange', 'preview only'),\n    ],"],
+    ],
+  },
+
+  /**
+   * `rebuild-forgets-the-tab` drops the re-application of the showing tab from the end of
+   * the generator. A generated group is a new element with `hidden` unset, so one install
+   * puts every tab's groups on screen at once - which is a panel four times as long as it
+   * should be and no error anywhere.
+   */
+  'rebuild-forgets-the-tab': {
+    file: 'web/main.js',
+    edits: [['\n  hideOffTab();\n\n  // And the dialog', '\n\n  // And the dialog']],
+  },
+
+  /**
+   * `rebuild-keeps-the-paint` leaves `groupPainted` holding the state strings it wrote
+   * against the elements the rebuild has just thrown away. A group whose values did not
+   * move across the install is then skipped by the first refresh after it, so it comes back
+   * without its `shut` class and without `aria-expanded` - open on screen while the page's
+   * own model says it is collapsed, and stable there, because the next refresh agrees with
+   * the map.
+   */
+  'rebuild-keeps-the-paint': {
+    file: 'web/main.js',
+    edits: [['\n  groupPainted.clear();\n  panelRowsEmitted = 0;', '\n  panelRowsEmitted = 0;']],
+  },
+
+  /**
+   * `rebuild-keeps-the-picker` builds the preset subset dialog once and never again, which
+   * is what it did when it was a top-level loop. An installed effect then gets no checkbox
+   * - so its values are in every preset with no way to leave them out - and an uninstalled
+   * one leaves a checkbox whose `change` handler reads `PARAMS` for a name the registry no
+   * longer has.
+   */
+  'rebuild-keeps-the-picker': {
+    file: 'web/main.js',
+    edits: [['\n  buildPresetPicker();\n}', '\n  if (!presetPickBoxes.size) buildPresetPicker();\n}']],
+  },
+
+  /**
+   * `gates-are-frozen-at-boot` computes the list of grade terms that hold the pass open
+   * once, off the packages that happened to be installed while the module evaluated. Every
+   * shipped grade effect is in that list, so nothing about the sixteen notices; a grade
+   * effect installed afterwards writes its uniform into a pass that stays shut, and the
+   * effect is silently absent with its slider moving and its value landing.
+   */
+  'gates-are-frozen-at-boot': {
+    file: 'web/main.js',
+    edits: [['  GRADE_GATES = gradeGatesOf(packages);\n', '  GRADE_GATES ??= gradeGatesOf(packages);\n']],
+  },
+
+  /**
+   * `every-reload-warms` warms unconditionally, which is what the rebuild did before it
+   * knew whether the programs had moved. A package that changed only its parameters
+   * assembles into the identical two programs and there is nothing to compile - but the
+   * warm ends in `resetAccumulators`, so the trails and the surface memory a page is
+   * mid-playback on are cleared for an install that changed no pixel of the shader.
+   */
+  'every-reload-warms': {
+    file: 'web/main.js',
+    edits: [['    if (!sameProgram) warmPrograms();', '    warmPrograms();']],
+  },
+
+  /**
+   * `swap-keeps-the-old-program` puts the program swap back to `needsUpdate` alone. Three
+   * releases a program's reference only from a material's `dispose` event, so every
+   * GLSL-changing install leaves a whole compiled program linked and cached - on a page
+   * whose entire point is being installed into again without a reload.
+   */
+  'swap-keeps-the-old-program': {
+    file: 'web/point-cloud.js',
+    edits: [[
+      '  if (material.vertexShader === program.vertexShader\n'
+      + '    && material.fragmentShader === program.fragmentShader) return;\n'
+      + '  material.dispose();\n',
+      '',
+    ]],
+  },
+
+  /**
+   * `poll-checks-once` asks whether a rebuild may happen on the way into the tick and never
+   * again. Several dozen requests happen after that, which is long enough for an export to
+   * start or a preset gesture to open - and the rebuild then lands inside it, replacing two
+   * shader programs and every value between one frame of a file nobody can watch being made
+   * and the next.
+   */
+  'poll-checks-once': {
+    file: 'web/main.js',
+    edits: [[
+      '  const blocked = effectRebuildBlocked();\n  if (blocked) return null;',
+      '  const blocked = null;\n  if (blocked) return null;',
+    ]],
+  },
+
+  /**
+   * `a-broken-shader-is-warm` drops the throw at the end of the warm, leaving the link
+   * failure where three.js puts it: a line in a console nobody has open. The install
+   * succeeds, the document is carried across, the poll announces that the page has been
+   * rebuilt from the new effects, and the cloud renders nothing at all.
+   */
+  'a-broken-shader-is-warm': {
+    file: 'web/main.js',
+    edits: [[
+      "    throw new Error(`this build's shaders did not compile after the effects changed - ${linkFailures[0]}`);",
+      "    console.warn(`shaders did not compile: ${linkFailures[0]}`);",
+    ]],
+  },
+
+  /**
+   * `adopt-outside-the-transaction` puts the adoption back where it was: before the `try`
+   * the rollback hangs off, so a throw out of the adoption itself walks straight past it.
+   * Everything the adoption replaces is already replaced by the time `buildPanel` refuses a
+   * parameter naming no panel group, so what it leaves behind is the half-migrated page the
+   * whole transaction exists to make unreachable - a registry with no panel drawn from it.
+   */
+  'adopt-outside-the-transaction': {
+    file: 'web/main.js',
+    edits: [
+      ['  let failure = null;\n  try {',
+        '  adoptEffectPackages(fetched, programs, held);\n  let failure = null;\n  try {'],
+      ['    adoptEffectPackages(fetched, programs, held);\n', ''],
+    ],
+  },
+
+  /**
+   * `the-sweep-eats-the-last-copy` puts the sweep back to removing every aside it finds,
+   * which is what destroys a package rather than tidying after one. A crash between the two
+   * renames of an install leaves the old copy in `<id>.<seq>.old` and nothing at `<id>` -
+   * and the sweep runs first thing in the next install of that id, so the operation that
+   * would have restored it deletes it.
+   */
+  'the-sweep-eats-the-last-copy': {
+    file: 'server/effect-store.js',
+    edits: [
+      ["      if (entry.name.endsWith('.old') && !liveHere) continue;\n", ''],
+      ['    this.recoverInterruptedInstalls();\n', ''],
+    ],
+  },
+
+  /**
+   * `package-files-follow-links` puts `statSync` back where `lstatSync` is, so the file
+   * route asks about what a name points at rather than about the name. The user root is the
+   * one directory in this program a client can write into, and a link planted there is then
+   * read and served from wherever it aims.
+   */
+  'package-files-follow-links': {
+    file: 'server/effect-store.js',
+    edits: [['    if (!existsSync(path) || !lstatSync(path).isFile()) return null;',
+      '    if (!existsSync(path) || !statSync(path).isFile()) return null;']],
+  },
+
+  /**
+   * `poll-takes-any-body` stops holding `GET /effects` to the shape every reader of it
+   * assumes. A 200 carrying anything else - a proxy's error page, a half-written response -
+   * then reaches the signature comparison, which throws out of the interval callback and
+   * rejects a promise nothing is awaiting, once every six seconds for the life of the page.
+   */
+  'poll-takes-any-body': {
+    file: 'web/main.js',
+    // **Two edits, because one of them is not the defect.** Defusing the array check alone
+    // leaves the entry loop iterating `undefined`, which throws a TypeError inside
+    // `listEffects` - inside the poll's own catch, where it is handled - so the mutated
+    // build behaved exactly like the fixed one and the run came back NOT CAUGHT on a
+    // mutation that had not reproduced anything. Both have to go for the shipped shape to
+    // come back: `listEffects` answers `undefined`, and the signature comparison a line
+    // later is outside every catch there is.
+    edits: [
+      ['  if (!body || !Array.isArray(body.effects)) {', '  if (body === undefined) {'],
+      ['  for (const entry of body.effects) {', '  for (const entry of body.effects ?? []) {'],
+    ],
+  },
+
+  /**
+   * `poll-guards-late` raises the reentrancy guard after the list has come back rather than
+   * on the way in, which is where it was. Two ticks then overlap - the interval does not
+   * wait for the last one - and whichever finishes second wins, so with an install landing
+   * between them the page settles on the packages it read first while its signature claims
+   * the ones it read second, and the comparison agrees with itself from then on.
+   */
+  'poll-guards-late': {
+    file: 'web/main.js',
+    edits: [
+      ['  if (effectReloading || effectRebuildBlocked()) return;\n  effectReloading = true;\n  try {',
+        '  if (effectReloading || effectRebuildBlocked()) return;\n  try {'],
+      ['    if (revSignature(listed) === effectSignature) return;\n    await pollRebuild();',
+        '    if (revSignature(listed) === effectSignature) return;\n    effectReloading = true;\n    await pollRebuild();'],
+    ],
+  },
+
+  /**
+   * `reads-need-not-agree` takes the second list read off the end of the package fetch, so
+   * a set is whatever the several dozen requests happened to return. An install landing
+   * anywhere in that sequence is then served partly from before it and partly from after,
+   * and the halves assemble into a program that compiles and draws something nobody wrote.
+   */
+  'reads-need-not-agree': {
+    file: 'web/main.js',
+    edits: [['    if (revSignature(await listEffects()) === revSignature(opened)) return packages;',
+      '    if (opened) return packages;']],
   },
 };
 
@@ -370,6 +618,95 @@ const bent = (edit) => {
 };
 
 /**
+ * The same package with a different version and byte-identical chunks - a rev that moves
+ * and two programs that do not.
+ *
+ * A retuned bound, a corrected label, a version bump: most of what a package author
+ * actually changes is the manifest, and none of it reaches the GLSL. The store's rev is a
+ * hash over every file, so the poll sees a change and rebuilds - and the rebuild has
+ * nothing to compile. What it must therefore not do is warm, because the warm ends in
+ * `resetAccumulators`.
+ */
+const retunedProbe = () => {
+  const pkg = probePackage();
+  pkg.manifest.version = '1.0.1';
+  pkg.manifest.params.hue.label = 'probe hue, retuned';
+  return pkg;
+};
+
+/**
+ * The same package with one more line of GLSL, so the assembled programs genuinely move.
+ *
+ * `n` makes each call a different program, which is what the row about released programs
+ * needs: three installs that compile three distinct programs, against a renderer whose
+ * cache would otherwise hold all three.
+ */
+const recompiledProbe = (n) => {
+  const pkg = probePackage();
+  pkg.manifest.version = `1.1.${n}`;
+  pkg.chunks['tone.frag.glsl'] =
+    '  if (probeAmount > 0.0) {\n'
+    + `    col = mix(col, vec3(probeHue, 1.0 - probeHue, probeHue * ${(0.5 + n * 0.01).toFixed(2)}), probeAmount);\n`
+    + '  }\n';
+  return pkg;
+};
+
+/**
+ * A package whose every identifier this build has and whose GLSL does not compile.
+ *
+ * **This is the shape the door cannot see and must not be asked to.** The door checks that
+ * a chunk names nothing the build has not got; it is not a compiler and reimplementing one
+ * here would be the second implementation this repo keeps refusing. So `col` is the spine's
+ * own colour and `probeAmount` is this package's own uniform - both perfectly well known -
+ * and assigning a `float` to a `vec3` is a type error the driver refuses at compile time.
+ * The install succeeds, the page fetches it, the programs assemble, and the link fails.
+ */
+const brokenProbe = () => {
+  const pkg = probePackage();
+  pkg.manifest.version = '9.0.0';
+  pkg.chunks['tone.frag.glsl'] = '  col = probeAmount;\n';
+  return pkg;
+};
+
+/**
+ * A grade effect, because the pass the grade runs in is gated and the gate is a list.
+ *
+ * Five shipped effects declare `gates` and every one of them was installed while the page
+ * booted, so a list computed once is right about all of them and wrong about the first
+ * package to arrive afterwards. This is that package: it binds a uniform of its own on the
+ * grade table with `gates` set, so raising it has to switch the pass on and nothing else
+ * on the page can do it.
+ *
+ * Its group is `post`, which is one of this build's own - a package inventing a group would
+ * be testing the panel where this is about the pass.
+ */
+const gradeProbeManifest = () => ({
+  format: 1,
+  id: 'probegrade',
+  version: '1.0.0',
+  title: 'Probe Grade',
+  params: {
+    amount: {
+      def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', label: 'probe grade',
+      panel: { group: 'post', tab: 'look' },
+      bind: { on: 'grade', uniform: 'probeGradeAmount', gates: true },
+      role: 'master',
+    },
+  },
+  chunks: [
+    { stage: 'g.decl', order: 900, file: 'decl.grade.glsl' },
+    { stage: 'g.body', order: 900, file: 'body.grade.glsl' },
+  ],
+});
+const gradeProbePackage = () => ({
+  manifest: gradeProbeManifest(),
+  chunks: {
+    'decl.grade.glsl': 'uniform float probeGradeAmount;\n',
+    'body.grade.glsl': '      col *= mix(1.0, 0.5, probeGradeAmount);\n',
+  },
+});
+
+/**
  * A pinned run with no capture and no sensor: a handful of depth frames written here.
  *
  * The wire's own frame payload - depth byte count, colour byte count, a stamp, then the
@@ -579,7 +916,21 @@ try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 760 } });
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(String(e)));
-  page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(m.text()); });
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    const where = m.location()?.url ?? '';
+    // **A package read that 404s while this tool is removing packages is the store
+    // changing under a reader, which is a thing this build handles rather than a fault.**
+    // `fetchEffectPackages` lists the store and then reads each id, and a `DELETE` landing
+    // between those two answers 404 for an id the list had just named - which the read
+    // refuses, the coherence check catches, and the next tick asks about again. The browser
+    // logs every failed request as a console error whatever the page then does with it, and
+    // this tool installs and removes packages several dozen times in a run where a person
+    // would do it a handful of times a year. So exactly that shape is not collected, by
+    // address rather than by message, and everything else still is.
+    if (/\/effects\//.test(where) && /status of 404/.test(m.text())) return;
+    pageErrors.push(where ? `${m.text()} (${where})` : m.text());
+  });
   await page.goto(`${BASE}/record`, { waitUntil: 'load' });
   await page.waitForFunction('Boolean(globalThis.__kinect)', null, { timeout: 20000 });
 
@@ -906,7 +1257,17 @@ try {
     fork.status === 200 && forkServed.status === 200 && forkServed.body.manifest?.version === '2.0.0',
     `${fork.status}: ${fork.body.error ?? 'installed'}, the store now serves version ${forkServed.body.manifest?.version}`);
 
+  // **Driven by the poll and then waited for, because the poll on the page competes with
+  // the poll this line calls.** `pollNow` is the interval's own body and the interval is
+  // still running, so a tick that started six seconds ago can be mid-read when this line
+  // arrives - and the reentrancy guard, correctly, sends this call straight back. What has
+  // to be true either way is that the page ends up reporting the refusal, so that is what
+  // is waited for rather than assumed to have happened by the time `pollNow` resolves.
+  // A build that never reports still fails, one interval later.
   await page.evaluate(() => globalThis.__kinect.effects.pollNow());
+  await page.waitForFunction(
+    "document.getElementById('tNote')?.textContent?.length > 0", null, { timeout: 20000 },
+  ).catch(() => {});
   const afterFork = await page.evaluate(readPage, POSITIONS);
 
   ok('the page reports the refusal by name, and says which set it is still running',
@@ -964,7 +1325,544 @@ try {
   ok('and with the fork taken back off, the page and the store are holding one set again',
     converged.signature === storeSignature, converged.signature === storeSignature ? 'agreed' : 'still apart');
 
-  // =========================================== 7. what a crashed install leaves behind
+  // ================================= 7. what a rebuild does to the rest of the panel
+  //
+  // **Everything on the panel that is not a parameter row, which is where a rebuild goes
+  // wrong invisibly.** Sections 3 and 4 ask whether the parameters arrived and whether
+  // their values are right, and a build can get both of those completely right while the
+  // buttons beside them are dead, the tab that was showing has stopped being applied, the
+  // collapse headers are painted for elements that no longer exist and the dialog that
+  // picks a preset's subset is a statement of the registry from before the install. None
+  // of those throws, none of them changes a pixel of the cloud, and each has its own
+  // mutation below because each is a separate way of rebuilding the panel and forgetting
+  // something.
+  console.log('\n[effect] 7. the panel a rebuild leaves behind, beside the rows it rebuilt');
+
+  // The state to be preserved is set up *before* the install, so what the rows below read
+  // is a page that had been used rather than a page that had just booted - which is the
+  // only state in which any of this is observable at all.
+  const primed = await page.evaluate(() => {
+    const k = globalThis.__kinect;
+    k.params.reset();
+    // A stamp on the note the framing group emits, which is the sharpest reading of the
+    // claim: the question is whether the element in the document after the rebuild is the
+    // element `ui` is holding, and an attribute nothing else writes answers it directly.
+    // The text beside it is the status line boot wrote through `ui.recRange` - a rebuilt
+    // node carries the bare default the generator gives it and not this.
+    const note = document.getElementById('recRange');
+    note.dataset.effectCheckWitness = 'before-the-install';
+    // A group the panel has painted shut, so `groupPainted` holds a state string for it
+    // and the rebuild has something to get wrong. `post` because it is a core group that
+    // survives every install below. The reset above puts every value at its default, which
+    // is what derives a group closed, so the toggle is pressed only where the panel is
+    // already showing it open - a click either way would otherwise be the gesture that
+    // decides the state rather than the state itself.
+    const post = document.querySelector('[data-group="post"]');
+    if (!post.classList.contains('shut')) document.querySelector('[data-group-toggle="post"]').click();
+    return {
+      shown: k.cropBoxShown(),
+      note: note.textContent,
+      postShut: post.classList.contains('shut'),
+      postExpanded: post.querySelector('.grouptoggle').getAttribute('aria-expanded'),
+      lookNames: k.params.names('look').length,
+      boxes: document.querySelectorAll('#ppGroups input[id^="pp-"]').length,
+    };
+  });
+  ok('the page is in a state a rebuild can damage: a group shut by hand, a note carrying a status write, a stamp on it',
+    primed.postShut === true && primed.postExpanded === 'false' && /capture keeps/.test(primed.note),
+    `post shut=${primed.postShut} aria-expanded=${primed.postExpanded}, note ${JSON.stringify(primed.note.slice(0, 40))}`);
+
+  await put('probe', probePackage());
+  const rebuilt = await page.evaluate(async () => {
+    await globalThis.__kinect.effects.reload();
+    const k = globalThis.__kinect;
+    // The control pressed rather than inspected. `show crop box` is one of the six the
+    // framing group emits, and what it has to do is flip the flag the chrome draws from -
+    // a listener on a detached node leaves the flag exactly where it was.
+    const before = k.cropBoxShown();
+    document.getElementById('cropBox').click();
+    const after = k.cropBoxShown();
+    const note = document.getElementById('recRange');
+    const post = document.querySelector('[data-group="post"]');
+    // The tab read off the button that says it is selected rather than off a reading the
+    // page publishes for the purpose, which is `editor-check`'s own reading of the same
+    // question: what a person can see is the panel, and the panel is what this asks.
+    const active = document.querySelector('.paneltab[aria-selected="true"]')?.dataset.panelTab ?? null;
+    const visible = [...document.querySelectorAll('#panelBody > [data-panel-tab]')]
+      .filter((g) => !g.hidden);
+    return {
+      pressed: before !== after,
+      pressedShows: after,
+      aria: document.getElementById('cropBox').getAttribute('aria-pressed'),
+      witness: note?.dataset.effectCheckWitness ?? null,
+      noteText: note?.textContent ?? '',
+      active,
+      visibleTabs: [...new Set(visible.map((g) => g.dataset.panelTab))],
+      offTab: visible.filter((g) => g.dataset.panelTab !== active)
+        .map((g) => g.dataset.group || g.id),
+      probeGroupHidden: document.querySelector('[data-group="probe"]')?.hidden ?? null,
+      postShut: post.classList.contains('shut'),
+      postExpanded: post.querySelector('.grouptoggle').getAttribute('aria-expanded'),
+      boxes: [...document.querySelectorAll('#ppGroups input[type="checkbox"]')].map((b) => b.id),
+      lookNames: k.params.names('look'),
+    };
+  });
+
+  ok('a hand-written control inside a rebuilt group still works: pressing show crop box moves what the chrome draws from',
+    rebuilt.pressed === true && rebuilt.aria === String(rebuilt.pressedShows),
+    `the flag ${rebuilt.pressed ? 'moved' : 'did not move'}, the button reads aria-pressed=${rebuilt.aria}`);
+  ok('and the node the page writes its status into is the node in the document, carrying what was written before the install',
+    rebuilt.witness === 'before-the-install' && rebuilt.noteText === primed.note,
+    `witness ${JSON.stringify(rebuilt.witness)}, note ${JSON.stringify(rebuilt.noteText.slice(0, 40))}`);
+
+  ok('the tab that was showing is still the only one showing, over groups the rebuild has just made',
+    rebuilt.offTab.length === 0 && rebuilt.probeGroupHidden === true,
+    rebuilt.offTab.length
+      ? `${rebuilt.offTab.length} groups from another tab are on screen: ${rebuilt.offTab.slice(0, 6).join(', ')}`
+      : `${rebuilt.visibleTabs.join(', ')} showing under the ${rebuilt.active} tab, the probe's look group hidden`);
+
+  ok('a group shut before the install is still shut after it, in the class the panel draws from and the attribute a reader hears',
+    rebuilt.postShut === true && rebuilt.postExpanded === 'false',
+    `shut=${rebuilt.postShut}, aria-expanded=${rebuilt.postExpanded}`);
+
+  const pickedNames = rebuilt.boxes.filter((id) => id.startsWith('pp-')).map((id) => id.slice(3));
+  ok('the preset subset dialog is a statement of the registry that exists now: the installed effect has its boxes',
+    pickedNames.includes('probe.amount') && pickedNames.includes('probe.hue')
+      && JSON.stringify([...pickedNames].sort()) === JSON.stringify([...rebuilt.lookNames].sort()),
+    `${pickedNames.length} boxes against ${rebuilt.lookNames.length} look values, `
+    + `probe ${pickedNames.filter((n) => n.startsWith('probe.')).join(' and ') || 'absent'}`);
+
+  await del('probe');
+  const unpicked = await page.evaluate(async () => {
+    await globalThis.__kinect.effects.reload();
+    const k = globalThis.__kinect;
+    const boxes = [...document.querySelectorAll('#ppGroups input[type="checkbox"]')];
+    // Every remaining box actually pressed, because the failure this closes is a handler
+    // reading `PARAMS` for a name the registry no longer has - which is a throw out of a
+    // tick rather than a box that looks wrong.
+    let threw = null;
+    for (const box of boxes) {
+      try {
+        box.checked = !box.checked;
+        box.dispatchEvent(new Event('change'));
+      } catch (err) { threw ??= `${box.id}: ${err.message}`; }
+    }
+    return {
+      names: boxes.filter((b) => b.id.startsWith('pp-')).map((b) => b.id.slice(3)),
+      threw,
+      count: document.getElementById('ppCount')?.textContent ?? '',
+      lookNames: k.params.names('look'),
+    };
+  });
+  ok('and the uninstalled effect has none, with every box left in the dialog still pressable',
+    unpicked.names.includes('probe.amount') === false && unpicked.threw === null
+      && JSON.stringify([...unpicked.names].sort()) === JSON.stringify([...unpicked.lookNames].sort()),
+    unpicked.threw ?? `${unpicked.names.length} boxes against ${unpicked.lookNames.length} look values, readout "${unpicked.count}"`);
+
+  // ============================ 8. what a rebuild costs, and what it must not interrupt
+  //
+  // **Four claims that are each about the rebuild rather than about its result.** The
+  // grade pass is switched on by a list derived from the packages, so a set that arrives
+  // later has to move it; a package that changed no GLSL must not pay for a warm, because
+  // the warm ends by clearing the accumulators a page mid-playback is holding; a package
+  // that did change GLSL must let go of the program it replaced, because three.js will not;
+  // and a rebuild must ask whether it may land at the moment it would land rather than at
+  // the moment it started reading.
+  console.log('\n[effect] 8. the grade gate, the warm that must not happen, the program that must be let go, and the gesture that stands a rebuild down');
+
+  const gradeInstall = await put('probegrade', gradeProbePackage());
+  ok('a grade effect installs - one this build did not boot with, binding its own gating uniform',
+    gradeInstall.status === 200, `${gradeInstall.status}: ${gradeInstall.body.error ?? 'installed'}`);
+
+  const gated = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    await k.effects.reload();
+    const atDefault = k.grade.enabled;
+    k.params.set('probegrade.amount', 0.6);
+    const raised = k.grade.enabled;
+    return { atDefault, raised, value: k.grade.uniforms.probeGradeAmount?.value ?? null };
+  });
+  ok('the pass is shut with the new effect at its default, which is what a master being inert at zero means',
+    gated.atDefault === false, `grade.enabled=${gated.atDefault}`);
+  ok('and raising the installed effect opens it, so a package that arrived after boot is counted by existing',
+    gated.raised === true && gated.value === 0.6,
+    `grade.enabled=${gated.raised} with the uniform at ${gated.value}`);
+
+  await del('probegrade');
+  const ungated = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    await k.effects.reload();
+    return { enabled: k.grade.enabled, value: k.grade.uniforms.probeGradeAmount?.value ?? null };
+  });
+  // The other direction, and it is a correctness row rather than a discriminating one:
+  // five gated effects ship, a builtin cannot be uninstalled, and every one of them is
+  // written by the value walk - so the walk's own re-ask already answers this on this
+  // build. What it is here for is the state that has no gated parameter left at all,
+  // which no mutation of this tree can reach and which the line in `adoptEffectPackages`
+  // is what covers.
+  ok('and taking it off shuts the pass again, on a uniform cell that is still carrying the value it was raised to',
+    ungated.enabled === false && ungated.value === 0.6,
+    `grade.enabled=${ungated.enabled}, probeGradeAmount still ${ungated.value}`);
+
+  // ---- the warm, and the accumulators it clears
+  //
+  // **Read off `counters.resets`, which is the page's own count of how many times the
+  // accumulators have been thrown away.** The obvious reading - how many frames the
+  // rebuild rendered - is not deterministic here: `reloadEffects` awaits several dozen
+  // requests, and the animation loop repaints during them, so a correct build shows a
+  // handful of frames for reasons that have nothing to do with the warm. The reset counter
+  // moves only where `resetAccumulators` runs, and on this path the only thing that runs
+  // it is `warmPrograms`.
+  await put('probe', probePackage());
+  await page.evaluate(async () => { await globalThis.__kinect.effects.reload(); });
+
+  await put('probe', retunedProbe());
+  const quietReload = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const before = k.timeline.counters.resets;
+    await k.effects.reload();
+    return {
+      resets: k.timeline.counters.resets - before,
+      // Read off the row the panel drew rather than off the registry, because
+      // `params.spec` answers with a projection that carries the bounds and not the words.
+      // The label on screen is the thing the retune is about anyway.
+      label: document.getElementById('probe.hue')?.closest('.row')?.querySelector('span')?.textContent ?? null,
+      knows: k.params.names().includes('probe.hue'),
+    };
+  });
+  ok('a package that changed only its manifest is adopted - the label the rebuild is about did move',
+    quietReload.label === 'probe hue, retuned' && quietReload.knows,
+    `the registry reads ${JSON.stringify(quietReload.label)}`);
+  ok('and it threw no accumulator away doing it, because the assembled programs are the ones already compiled',
+    quietReload.resets === 0,
+    `${quietReload.resets} accumulator resets across a rebuild that changed no GLSL`);
+
+  // The control, and it is the same reading taken across the case that *must* warm. A row
+  // saying nothing happened, on its own, is satisfied by a build that had stopped
+  // rebuilding at all.
+  await put('probe', recompiledProbe(1));
+  const loudReload = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const before = k.timeline.counters.resets;
+    await k.effects.reload();
+    return {
+      resets: k.timeline.counters.resets - before,
+      inShader: k.effects.programs().cloud.fragmentShader.includes('probeHue * 0.51'),
+    };
+  });
+  ok('and a package that did change its GLSL does warm, which is what makes the row above a distinction rather than a build that stopped rebuilding',
+    loudReload.resets === 1 && loudReload.inShader === true,
+    `${loudReload.resets} resets, the new chunk text ${loudReload.inShader ? 'reached' : 'did not reach'} the assembled program`);
+
+  // ---- the programs the swap replaces
+  //
+  // Counted off `renderer.info.programs`, which is the renderer's own cache and the only
+  // reading here that is not this tool agreeing with itself. Three installs of three
+  // distinct programs: three.js releases a program only from a material's `dispose` event,
+  // so a build that swaps with `needsUpdate` alone holds one more program after every one
+  // of them and a build that lets go holds what it started with.
+  const beforeGrowth = await page.evaluate(() => {
+    // Rendered first, so the count is taken after the driver has actually compiled what
+    // the page is holding rather than before it has been asked for anything.
+    globalThis.__kinect.drive.stepTo(0.4);
+    return globalThis.__kinect.renderer.info.programs.length;
+  });
+  const growthCounts = [];
+  for (let n = 2; n <= 4; n++) {
+    await put('probe', recompiledProbe(n));
+    growthCounts.push(await page.evaluate(async () => {
+      const k = globalThis.__kinect;
+      await k.effects.reload();
+      k.drive.stepTo(0.4);
+      return k.renderer.info.programs.length;
+    }));
+  }
+  ok('three GLSL-changing installs do not grow the renderer\'s program cache, because the swap releases what it replaced',
+    growthCounts.every((n) => n <= beforeGrowth),
+    `${beforeGrowth} programs before, ${growthCounts.join(' then ')} after each of three installs`);
+
+  // ---- a rebuild that must stand down where it stands
+  //
+  // **The gesture goes up while the rebuild is reading, which is the whole of what this
+  // row is about.** A rebuild that only asked on its way in would pass a check that raised
+  // the flag first; what has to be shown is that the answer is asked again after the last
+  // fetch and before the first write. The package read is held open by the driver, the
+  // preset dialog is opened in the page while it hangs, and then it is let go.
+  //
+  // The gesture is a preset subset rather than an export because this surface has no take
+  // to export - and the three conditions are one predicate, `effectRebuildBlocked`, so the
+  // arm that reaches it reaches all three. That is the reason a predicate exists rather
+  // than three tests written out at two call sites.
+  await put('probe', recompiledProbe(9));
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route('**/effects/probe', async (route) => {
+    await held;
+    await route.continue();
+  });
+  const deferred = page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const was = k.effects.signature();
+    const answer = await k.effects.reload();
+    return { answer, was, now: k.effects.signature(), names: k.params.names().length };
+  });
+  // Long enough for the reload to have reached the held request and not so long that a
+  // slow machine reads as a finding: the assertion is on what the reload answers, and a
+  // gesture that went up before the fetch started would be the poll's entry check firing
+  // instead - which is why the flag is read back below.
+  await wait(400);
+  const gestureUp = await page.evaluate(() => {
+    document.getElementById('tPresetSave').click();
+    return globalThis.__kinect.library.presetGestureRunning();
+  });
+  release();
+  const stoodDown = await deferred;
+  await page.unroute('**/effects/probe');
+  ok('a gesture opening while the rebuild was reading is a gesture the rebuild stands down for',
+    gestureUp === true && stoodDown.answer === null && stoodDown.now === stoodDown.was,
+    `the gesture was ${gestureUp ? 'up' : 'down'}, the rebuild answered ${JSON.stringify(stoodDown.answer)}, `
+    + `the signature ${stoodDown.now === stoodDown.was ? 'did not move' : 'moved'}`);
+
+  // **Waited for rather than counted in turns of the loop**, and the first spelling of this
+  // was the latter: the cancel closes the dialog, the dialog's `close` event resolves the
+  // picker's promise, and the flag comes down in a `finally` several hops after that - so a
+  // `setTimeout(0)` read it on its way down about half the time. What is being asserted is
+  // what happens once the gesture is genuinely over, so the gesture being over is a
+  // precondition to wait for rather than a step to assume.
+  await page.evaluate(() => { document.getElementById('ppCancel').click(); });
+  const gestureDown = await page.waitForFunction(
+    'globalThis.__kinect.library.presetGestureRunning() === false', null, { timeout: 10000 },
+  ).then(() => true).catch(() => false);
+  const storeAfterGesture = await getJson('/effects');
+  const wantSignature = storeAfterGesture.body.effects.map((e) => `${e.id} ${e.rev}`).join('\n');
+  // The same reason section 6 waits for its note: the interval on the page is still
+  // running, so `pollNow` can be answered by its own reentrancy guard while the tick that
+  // holds it does the work a moment later. What has to be true is that the page converges,
+  // and a build that never does still fails an interval later.
+  const resumedConverged = await page.evaluate(async () => { await globalThis.__kinect.effects.pollNow(); })
+    .then(() => page.waitForFunction(
+      (want) => globalThis.__kinect.effects.signature() === want, wantSignature, { timeout: 20000 },
+    ))
+    .then(() => true).catch(() => false);
+  ok('and the same rebuild lands as soon as the gesture is over, so standing down deferred it rather than dropping it',
+    gestureDown === true && resumedConverged === true,
+    gestureDown ? (resumedConverged ? 'the page converged on the store' : 'the page never converged on the store')
+      : 'the gesture never came down');
+
+  // ---- what the poll does with an answer it cannot use
+  //
+  // **Three ways the converging read goes wrong that have nothing to do with the packages
+  // being wrong**, and all three are silent. A body that is not a list of ids and revs used
+  // to throw past every guard the poll had, once every six seconds for the life of the
+  // page; two ticks overlapping let the older of two reads win and then agree with itself
+  // forever; and a package set read across an install is one package from before it beside
+  // another from after, spliced into a program that compiles and draws something nobody
+  // wrote.
+  console.log('    (and what the poll does with an answer it cannot use)');
+
+  await page.route('**/effects', (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ nope: 'this is not a store' }),
+  }));
+  const nonsense = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const was = { signature: k.effects.signature(), names: k.params.names().length };
+    let threw = null;
+    try { await k.effects.pollNow(); } catch (err) { threw = String(err.message); }
+    return { threw, was, signature: k.effects.signature(), names: k.params.names().length };
+  });
+  await page.unroute('**/effects');
+  ok('a 200 carrying a body this build cannot read is a tick that does nothing rather than a rejection every six seconds',
+    nonsense.threw === null && nonsense.signature === nonsense.was.signature
+      && nonsense.names === nonsense.was.names,
+    nonsense.threw ? `the poll threw: ${nonsense.threw.slice(0, 90)}` : `the page kept its ${nonsense.names} parameters and its signature`);
+
+  // Two ticks at once, with the list held open so the second arrives while the first is
+  // still reading. The count is taken in the driver rather than in the page, because what
+  // is being asked is how many times the store was read.
+  //
+  // **The read that is in flight is waited for rather than started**, and that is the
+  // difference between this row and the one that failed on a third run in three. The
+  // interval on the page is still going, so a call to `pollNow` can be answered by the very
+  // guard this row is about - correctly - and then nothing is in flight at all, and a fixed
+  // pause counts zero reads on a build that is working. Whoever starts the read is
+  // immaterial to the claim: while one is in flight, a second must not start.
+  let listCalls = 0;
+  let releaseList;
+  const listHeld = new Promise((resolve) => { releaseList = resolve; });
+  await page.route('**/effects', async (route) => {
+    listCalls += 1;
+    if (listCalls === 1) await listHeld;
+    await route.continue();
+  });
+  const firstTick = page.evaluate(() => globalThis.__kinect.effects.pollNow()).catch(() => {});
+  // Up to one whole interval plus the read itself, because if the driver's own call is the
+  // one the guard turns away then the tick that holds it is the one being waited for.
+  let inFlight = false;
+  for (let waited = 0; waited < 9000 && !inFlight; waited += 100) {
+    inFlight = listCalls >= 1;
+    if (!inFlight) await wait(100);
+  }
+  const secondTick = page.evaluate(() => globalThis.__kinect.effects.pollNow()).catch(() => {});
+  await wait(400);
+  const duringOverlap = listCalls;
+  releaseList();
+  await Promise.all([firstTick, secondTick]);
+  await page.unroute('**/effects');
+  ok('a second tick arriving while the first is still reading does not read too: the guard is up before the fetch rather than after it',
+    inFlight === true && duringOverlap === 1,
+    inFlight
+      ? `${duringOverlap} reads of the store were in flight at once${listCalls > duringOverlap ? `, ${listCalls} in all` : ''}`
+      : 'no read of the store ever went out, so nothing was held and this row measured nothing');
+
+  // A set read across an install, staged by answering the *verification* read with a
+  // signature that has moved. What the page must not do is assemble the two halves.
+  await put('probe', recompiledProbe(5));
+  let listReads = 0;
+  await page.route('**/effects', async (route) => {
+    listReads += 1;
+    const res = await route.fetch();
+    const body = await res.json();
+    // Every second read is the one taken after the packages have been fetched, and moving
+    // a rev in it is exactly what an install landing mid-read looks like from here.
+    if (listReads % 2 === 0) body.effects[0].rev = `${body.effects[0].rev}-moved`;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  const incoherent = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const was = k.effects.signature();
+    let threw = null;
+    try { await k.effects.reload(); } catch (err) { threw = String(err.message); }
+    return { threw, held: k.effects.signature() === was, knows: k.params.names().includes('probe.hue') };
+  });
+  await page.unroute('**/effects');
+  ok('a store that moves while the page is reading it is refused rather than assembled from both halves',
+    incoherent.threw !== null && /moved while this page was reading them/.test(incoherent.threw ?? '')
+      && incoherent.held === true,
+    incoherent.threw ? `"${incoherent.threw.slice(0, 110)}", the signature ${incoherent.held ? 'held' : 'moved'}`
+      : 'the rebuild reported success on a set read across two revisions');
+  const coherent = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    await k.effects.reload();
+    return k.effects.programs().cloud.fragmentShader.includes('probeHue * 0.55');
+  });
+  ok('and the same set read with nothing moving is adopted, so the rule above is a distinction rather than a refusal to read at all',
+    coherent === true, coherent ? 'the fifth recompiled chunk reached the assembled program' : 'the page did not adopt it');
+
+  // ================================ 9. a package this build can store and cannot compile
+  //
+  // **The door is not a compiler and this is the gap that leaves.** Every identifier in the
+  // chunk below is one this build has - `col` is the spine's own colour, `probeAmount` is
+  // the package's own uniform - so the door has nothing to refuse it for, and it is a type
+  // error the driver rejects at link time. WebGL reports that through a log rather than an
+  // exception and three.js passes it on the same way, so the install succeeded, the
+  // document was carried across, the poll said the page had been rebuilt, and the cloud
+  // drew nothing at all with no sentence anywhere.
+  console.log('\n[effect] 9. a package this build can store and cannot use');
+
+  const broken = await put('probe', brokenProbe());
+  ok('the server takes it: every name in it is one this build has, which is all the door can ask',
+    broken.status === 200, `${broken.status}: ${broken.body.error ?? 'installed'}`);
+
+  const refused = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const before = { names: k.params.names(), signature: k.effects.signature() };
+    let threw = null;
+    try {
+      await k.effects.reload();
+    } catch (err) { threw = String(err.message); }
+    return {
+      threw,
+      names: k.params.names(),
+      same: JSON.stringify(k.params.names()) === JSON.stringify(before.names),
+      signature: k.effects.signature(),
+      signatureHeld: k.effects.signature() === before.signature,
+      note: document.getElementById('tNote')?.textContent ?? '',
+      shader: k.effects.programs().cloud.fragmentShader.includes('col = probeAmount;'),
+    };
+  });
+  ok('the page refuses it rather than adopting it, and says the shaders did not compile',
+    refused.threw !== null && /did not compile/.test(refused.threw ?? ''),
+    refused.threw ? `"${refused.threw.slice(0, 130)}"` : 'the rebuild reported success');
+  ok('and it is back on the programs it was drawing with: the registry it had, the signature it had, and none of the broken text',
+    refused.same === true && refused.signatureHeld === true && refused.shader === false,
+    `${refused.names.length} parameters, the signature ${refused.signatureHeld ? 'held' : 'moved'}, `
+    + `the broken line ${refused.shader ? 'reached the assembled program' : 'did not'}`);
+
+  const mended = await del('probe');
+  const mendedPage = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    let threw = null;
+    try { await k.effects.reload(); } catch (err) { threw = String(err.message); }
+    return { threw, knows: k.params.names().includes('probe.amount') };
+  });
+  ok('and taking the package back off restores the page, so a build that cannot compile is a state to leave rather than one to be stuck in',
+    mended.status === 200 && mendedPage.threw === null && mendedPage.knows === false,
+    mendedPage.threw ?? 'the page rebuilt without it');
+
+  // ---- and a package that never went through the door at all
+  //
+  // **The rollback has to cover the adoption itself and not only what runs after it.** The
+  // door refuses a parameter naming a panel group nothing holds, and the store is still a
+  // directory: a package written into the user root by hand - a copy from another machine,
+  // an editor, a script - reaches the page having been checked by nothing. It assembles
+  // fine, because it declares no GLSL; what it does is make `buildPanel` throw on the stray
+  // parameter, **after** the registry, the panel maps and the shader programs have already
+  // been replaced. With the adoption outside the transaction that throw walked past the
+  // rollback and left the page holding a registry with no panel drawn from it.
+  //
+  // Written straight into the root rather than sent through `PUT`, which is the only way to
+  // reach this: the door's whole job is that this package cannot arrive that way.
+  const outside = join(USER_ROOT, 'probebad');
+  mkdirSync(outside, { recursive: true });
+  writeFileSync(join(outside, 'manifest.json'), `${JSON.stringify({
+    format: 1,
+    id: 'probebad',
+    version: '1.0.0',
+    title: 'Probe Bad',
+    params: {
+      amount: {
+        def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', label: 'probe bad',
+        panel: { group: 'nosuchgroup', tab: 'look' },
+        bind: { on: 'points', uniform: 'probeBadAmount' },
+        role: 'master',
+      },
+    },
+  }, null, 2)}\n`);
+  const unusable = await page.evaluate(async () => {
+    const k = globalThis.__kinect;
+    const before = { names: k.params.names(), signature: k.effects.signature() };
+    let threw = null;
+    try { await k.effects.reload(); } catch (err) { threw = String(err.message); }
+    // The panel asked for from the document rather than from a map, because the state this
+    // is about is a registry with no rows drawn from it - and a rebuilt panel that matched
+    // the rolled-back registry is the whole claim.
+    const rows = [...document.querySelectorAll('#panelBody [data-group] input')].map((i) => i.id);
+    return {
+      threw,
+      same: JSON.stringify(k.params.names()) === JSON.stringify(before.names),
+      signatureHeld: k.effects.signature() === before.signature,
+      knows: k.params.names().includes('probebad.amount'),
+      rowsMatchRegistry: k.params.names().filter((n) => rows.includes(n)).length === rows.length && rows.length > 0,
+    };
+  });
+  ok('a package written past the door is refused by the page, and the refusal comes out of the adoption rather than out of the document',
+    unusable.threw !== null && /nosuchgroup|name no panel group/.test(unusable.threw ?? ''),
+    unusable.threw ? `"${unusable.threw.slice(0, 120)}"` : 'the rebuild reported success');
+  ok('and the page is whole afterwards: the registry it had, the signature it had, and a panel whose rows are that registry',
+    unusable.same === true && unusable.signatureHeld === true && unusable.knows === false
+      && unusable.rowsMatchRegistry === true,
+    `the registry ${unusable.same ? 'held' : 'moved'}, the signature ${unusable.signatureHeld ? 'held' : 'moved'}, `
+    + `the panel's rows ${unusable.rowsMatchRegistry ? 'are all registry names' : 'do not match the registry'}`);
+  rmSync(outside, { recursive: true, force: true });
+  const afterOutside = await page.evaluate(async () => {
+    let threw = null;
+    try { await globalThis.__kinect.effects.reload(); } catch (err) { threw = String(err.message); }
+    return { threw, names: globalThis.__kinect.params.names().length };
+  });
+  ok('and removing it lets the page rebuild again, so the refusal is a state to leave rather than one to be stuck in',
+    afterOutside.threw === null, afterOutside.threw ?? `${afterOutside.names} parameters`);
+
+  // =========================================== 10. what a crashed install leaves behind
   //
   // **Last, and the position is the finding rather than housekeeping.** Everything in
   // this block leaves a directory in the user root that is not a package, and under
@@ -973,7 +1871,7 @@ try {
   // whose cause is five sections away. Put here, the mutation reddens the two rows it is
   // about and nothing else, which is the difference between a control that names a
   // property and one that fails everything.
-  console.log('\n[effect] 7. and what a crashed install leaves behind is invisible until it is swept');
+  console.log('\n[effect] 10. and what a crashed install leaves behind is invisible until it is swept');
 
   // Taken here rather than reused from section 1, because the probe is installed by now
   // and the count moved with it - a comparison against the boot listing would fail on a
@@ -1000,6 +1898,115 @@ try {
 
   ok('the page reported no error through any of it', pageErrors.length === 0,
     pageErrors.slice(0, 2).join(' | '));
+
+  // ============ 11. what somebody plants in the user root, and the window a crash lands in
+  //
+  // **The one place this store can lose work, and it is three lines wide.** `install`
+  // swaps the old copy aside and then swaps the new one in, and between those two renames
+  // the id resolves to nothing: a machine losing power there comes back with the only copy
+  // of the package in `<id>.<seq>.old`, every read answering from the builtin as though it
+  // had been uninstalled, and - before this - the next install of that id sweeping the
+  // aside away as rubbish. The recovery that would have saved it was the thing that
+  // destroyed it.
+  //
+  // **Driven by restarting the server, because the recovery is a fact about starting up.**
+  // The browser is closed first: the page's own poll would report a store that stopped
+  // answering, which is correct behaviour and has nothing to do with what is being asked
+  // here. Everything below is HTTP against a store that has just been constructed over a
+  // directory somebody crashed in.
+  console.log('\n[effect] 11. an install interrupted between its two renames, and what the next start does about it');
+
+  await browser.close();
+  browser = null;
+
+  // A file that is not a file, planted where only a client can write.
+  //
+  // **The name rule stops a path in the request and says nothing about a path already on
+  // disk.** `VALID_FILE_NAME` refuses `../secret`, and it accepts `leak.txt` - so a link
+  // called `leak.txt` sitting in a package directory was a name the route would build a
+  // path out of, `statSync` would follow, `isFile()` would agree with, and `readFileSync`
+  // would serve from wherever it aimed. The install door writes ordinary files and nothing
+  // else, so what is asked here is that the read agrees: a package file is a regular file,
+  // and a link is refused whether or not it points somewhere legitimate.
+  //
+  // **The package is written straight into the user root rather than installed**, and for
+  // both of the reasons this block sits after the browser has been closed. Written, it
+  // depends on no row above it - one mutation of this tool leaves the store unable to
+  // install anything at all, and a row whose fixture is the previous row's output turns
+  // that into a crash rather than into the two red rows it is about. And a package the page
+  // would have to adopt has no business appearing in the store while a page is polling it.
+  //
+  // The ordinary file beside it is what stops these rows passing on a route that refused
+  // everything, which is the same shape section 2's must-accept package has.
+  const secret = join(WORK, 'not-a-package-file.txt');
+  writeFileSync(secret, 'this text is outside both effect roots\n');
+  const linkRoot = join(USER_ROOT, 'probelink');
+  mkdirSync(linkRoot, { recursive: true });
+  writeFileSync(join(linkRoot, 'manifest.json'), `${JSON.stringify({
+    format: 1, id: 'probelink', version: '1.0.0', title: 'Probe Link', params: {},
+  }, null, 2)}\n`);
+  writeFileSync(join(linkRoot, 'notes.txt'), 'an ordinary file in a package directory\n');
+  symlinkSync(secret, join(linkRoot, 'leak.txt'));
+  const leaked = await fetch(`${BASE}/effects/probelink/file/leak.txt`);
+  const leakedText = await leaked.text();
+  ok('a symlink planted in a package directory is not a package file, whatever it points at',
+    leaked.status === 404 && !leakedText.includes('outside both effect roots'),
+    `answered ${leaked.status}${leakedText.includes('outside both effect roots') ? ' with the bytes it pointed at' : ''}`);
+  const served = await fetch(`${BASE}/effects/probelink/file/notes.txt`);
+  const servedText = await served.text();
+  ok('and an ordinary file in the same directory still serves, so the rule above is about the kind rather than about the route',
+    served.status === 200 && servedText.includes('an ordinary file in a package directory'),
+    `answered ${served.status} with ${servedText.length} bytes`);
+  const listedWithLink = await getJson('/effects/probelink');
+  ok('and it is in no file index either, so nothing anywhere offers it',
+    listedWithLink.status === 200
+      && listedWithLink.body.files.some((f) => f.name === 'notes.txt')
+      && !listedWithLink.body.files.some((f) => f.name === 'leak.txt'),
+    listedWithLink.body.files?.map((f) => f.name).join(', ') ?? 'no index');
+  rmSync(linkRoot, { recursive: true, force: true });
+
+  await stopAll();
+
+  // The crash, staged exactly as `install` would have left it: the package's own files in
+  // an aside carrying the `.old` suffix, and nothing at the live id.
+  //
+  // Written rather than renamed out of whatever section 10 left behind, on the same
+  // reasoning as the block above it: a fixture that is the previous row's output turns a
+  // mutation that broke installing into a crash here instead of into the red rows it is
+  // about.
+  const crashedAside = join(USER_ROOT, 'probe.4711.tmpseq.old');
+  rmSync(join(USER_ROOT, 'probe'), { recursive: true, force: true });
+  rmSync(crashedAside, { recursive: true, force: true });
+  mkdirSync(crashedAside, { recursive: true });
+  writeFileSync(join(crashedAside, 'manifest.json'), `${JSON.stringify(probeManifest(), null, 2)}\n`);
+  for (const [name, text] of Object.entries(probeChunks())) writeFileSync(join(crashedAside, name), text);
+  writeFileSync(join(crashedAside, 'witness.marker'), 'the copy that was live when the machine went down\n');
+  ok('a crashed install is staged: the package is in its aside and the id resolves to nothing',
+    existsSync(crashedAside) && !existsSync(join(USER_ROOT, 'probe')),
+    `user root holds ${userRootHolds().join(', ')}`);
+
+  await start();
+  const recovered = await getJson('/effects/probe');
+  ok('the next start puts it back, so the copy a crash orphaned is the copy the store comes up on',
+    recovered.status === 200 && recovered.body.builtin === false
+      && existsSync(join(USER_ROOT, 'probe', 'witness.marker')),
+    `answered ${recovered.status}, builtin=${recovered.body.builtin}, user root ${userRootHolds().join(', ')}`);
+  ok('and the aside is gone rather than left beside the copy it became, so nothing accumulates',
+    !existsSync(crashedAside), `user root ${userRootHolds().join(', ')}`);
+
+  // **The control, and it is the direction the recovery must not run in.** A `remove` also
+  // renames a directory aside before deleting it, so a crash there leaves the same shape -
+  // and a recovery that could not tell the two apart would undo somebody's uninstall on
+  // every restart. The suffix is what tells them apart, and this is the row that says so.
+  const removedForGood = await del('probe');
+  const goneAsides = userRootHolds();
+  await stopAll();
+  await start();
+  const stillGone = await getJson('/effects/probe');
+  ok('an uninstall is not a crashed install: the package stays removed across a restart',
+    removedForGood.status === 200 && stillGone.status === 404,
+    `after the restart the store answers ${stillGone.status} for probe, `
+    + `user root ${userRootHolds().join(', ') || 'empty'} (was ${goneAsides.join(', ') || 'empty'})`);
 } catch (err) {
   crashed = err;
   console.log(`\n  FAIL  the run did not finish: ${err.stack ?? err.message}`);

@@ -21,7 +21,8 @@
 
 import { createHash } from 'node:crypto';
 import {
-  existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync,
+  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 
@@ -53,6 +54,54 @@ export class EffectStore {
     }
     this.dir = dir;
     this.builtinDir = builtinDir;
+    this.recoverInterruptedInstalls();
+  }
+
+  /**
+   * The one window in `install` where a crash loses a package, closed at the next start.
+   *
+   * **`install` swaps the old copy aside and then swaps the new one in, and between those
+   * two renames the id resolves to nothing.** The window is microseconds and it is real: a
+   * machine losing power there comes back with `rain.4711.old` holding the only copy of the
+   * user's package and nothing at `rain`. Every read then answered from the builtin - which
+   * looks like an uninstall rather than like damage - and the next install of that id swept
+   * the `.old` away, so the last good copy was destroyed by the recovery path of the very
+   * operation that had orphaned it.
+   *
+   * So the aside is put back, here, before anything can read the store: a `.old` whose live
+   * id is missing is by construction a crashed install and never anything else, because the
+   * only other writer that renames a directory aside is `remove` and that one names its
+   * aside `.gone` for exactly this reason. Two intents, two suffixes, and the question
+   * "should this come back" is answered by the name rather than by a guess.
+   *
+   * Announced rather than silent. A package reappearing on its own is the correct outcome
+   * and it is still a machine saying it crashed mid-install, which is worth a line in a log
+   * somebody reads after the power comes back.
+   */
+  recoverInterruptedInstalls() {
+    if (!existsSync(this.dir)) return;
+    const asides = new Map();
+    for (const entry of readdirSync(this.dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.endsWith('.old')) continue;
+      const id = entry.name.slice(0, entry.name.indexOf('.'));
+      if (!VALID_EFFECT_ID.test(id) || existsSync(join(this.dir, id))) continue;
+      if (!asides.has(id)) asides.set(id, []);
+      asides.get(id).push(entry.name);
+    }
+    for (const [id, names] of asides) {
+      // The newest, because a machine that crashed twice mid-install left two and the
+      // second one is the copy that was live when it went down. Ordered by name after the
+      // timestamp so the choice is one arrangement rather than whatever the directory
+      // happened to yield; the ones not chosen are swept by the next install of the id,
+      // which can now see a live directory beside them.
+      const newest = names
+        .map((name) => ({ name, at: statSync(join(this.dir, name)).mtimeMs }))
+        .sort((a, b) => (b.at - a.at) || (a.name < b.name ? 1 : -1))[0].name;
+      renameSync(join(this.dir, newest), join(this.dir, id));
+      console.warn(`effect ${id} was left with no installed copy and ${newest} beside it - `
+        + 'an install was interrupted between swapping the old package aside and swapping the new one in, '
+        + 'and the old package has been put back');
+    }
   }
 
   /** The ids one root holds: every directory whose name is a valid effect id. */
@@ -71,8 +120,14 @@ export class EffectStore {
    */
   rootFor(id) {
     if (!VALID_EFFECT_ID.test(id)) return null;
-    if (existsSync(join(this.dir, id))) return { root: this.dir, builtin: false };
-    if (existsSync(join(this.builtinDir, id))) return { root: this.builtinDir, builtin: true };
+    // A real directory and not a link to one, on `file`'s reasoning one level up: `idsIn`
+    // already drops a link, because a symlink's `Dirent` answers `isSymbolicLink()` rather
+    // than `isDirectory()`, and a `rootFor` asking only whether something is there would
+    // resolve by name what the listing had refused by kind - a package in no list that
+    // every per-id route still answers for.
+    const real = (path) => existsSync(path) && lstatSync(path).isDirectory();
+    if (real(join(this.dir, id))) return { root: this.dir, builtin: false };
+    if (real(join(this.builtinDir, id))) return { root: this.builtinDir, builtin: true };
     return null;
   }
 
@@ -128,13 +183,34 @@ export class EffectStore {
     });
   }
 
-  /** One file's bytes, or null - the name is validated before the path is built. */
+  /**
+   * One file's bytes, or null - the name is validated before the path is built, and what
+   * is at the end of it has to be an ordinary file rather than a link to one.
+   *
+   * **`lstat` and not `stat`, which is the difference between asking about the name and
+   * asking about what the name points at.** `statSync` follows a symlink, so a link
+   * planted in the user root - the one directory in this program a client can write into -
+   * answered `isFile()` for whatever it aimed at and this route then read it and served
+   * it: `/etc/passwd` through a package file called `notes.txt`. The name rule above stops
+   * a path *in the request* and does nothing about a path already sitting on disk.
+   *
+   * A narrower rule than the realpath-and-containment pair `server/index.js` uses for the
+   * static tree, and deliberately so. A file under `web/` may legitimately be a link, so
+   * the question there is where it lands; a package file may not be one at all, because a
+   * package is what the install door wrote and the door writes ordinary files. Refusing
+   * the link itself needs no notion of where the roots are and cannot be walked around by
+   * a link that happens to point back inside one.
+   *
+   * `read` is covered by the same rule from the other end: its listing keeps only entries
+   * whose `Dirent` says `isFile()`, and a symlink's `Dirent` says `isSymbolicLink()`. So a
+   * planted link is in no file index and is served by no route.
+   */
   file(id, name) {
     if (!VALID_FILE_NAME.test(name)) return null;
     const where = this.rootFor(id);
     if (!where) return null;
     const path = join(where.root, id, name);
-    if (!existsSync(path) || !statSync(path).isFile()) return null;
+    if (!existsSync(path) || !lstatSync(path).isFile()) return null;
     return readFileSync(path);
   }
 
@@ -169,7 +245,20 @@ export class EffectStore {
       .map((e) => {
         const { manifest } = this.read(e.id);
         const chunks = {};
-        for (const c of manifest.chunks ?? []) chunks[c.file] = this.file(e.id, c.file).toString('utf8');
+        for (const c of manifest.chunks ?? []) {
+          const bytes = this.file(e.id, c.file);
+          // `file` answers null for a name that is not an ordinary file, and a manifest
+          // naming one is the one shape that reaches here: the store's own listing already
+          // drops it, so without this the next line would be a `null.toString` with a stack
+          // and no id in it. Named instead, because the set this assembles is what the
+          // install door is asked about and a door that crashed would refuse nothing.
+          if (!bytes) {
+            throw new Error(`effect ${e.id} names the chunk ${JSON.stringify(c.file)} and there is no ordinary `
+              + 'file of that name in its directory - a package file is what the install door wrote, and a link '
+              + 'or a directory standing in for one is not something this store will read');
+          }
+          chunks[c.file] = bytes.toString('utf8');
+        }
         return { id: e.id, manifest, chunks };
       });
   }
@@ -262,7 +351,13 @@ export class EffectStore {
     }
     this.sweepTemporaries(id);
     const seq = `${process.pid}.${Date.now().toString(36)}`;
-    const aside = join(this.dir, `${id}.${seq}.old`);
+    // **`.gone` and not `.old`, and the suffix is the whole of what tells the two apart.**
+    // `recoverInterruptedInstalls` puts a `.old` back when its live id is missing, which is
+    // exactly the state a crash here would leave - so an aside named `.old` would be a
+    // deletion the next start quietly undoes, and the operator's uninstall would come back
+    // by itself. One suffix per intent: `.old` is a copy that should return if nothing
+    // replaced it, `.gone` is a copy on its way out, and neither has to be guessed at.
+    const aside = join(this.dir, `${id}.${seq}.gone`);
     // Renamed out of the way and then deleted, so the id stops resolving in one operation
     // rather than over however long it takes to unlink a directory of files.
     renameSync(mine, aside);
@@ -276,14 +371,27 @@ export class EffectStore {
    * They are invisible to every read, so nothing is broken by their being there - what
    * they are is disk, and a machine that crashed mid-install ten times would carry ten
    * copies of a package with nothing ever looking at them.
+   *
+   * **`.old` is swept only while the live directory is there, and that condition is the
+   * difference between housekeeping and data loss.** A `.old` with nothing at its live id
+   * is the last copy of that package - the crash window `recoverInterruptedInstalls`
+   * describes - and this sweep used to run first thing in `install`, so the operation that
+   * would have restored it deleted it instead. With a live directory beside it a `.old` is
+   * genuinely spare: the swap completed and this is the copy that was replaced.
+   *
+   * `.tmp` and `.gone` carry no such condition. A `.tmp` is a package that was still being
+   * written when the machine went down, so it is incomplete by definition; a `.gone` is a
+   * copy somebody asked to be rid of.
    */
   sweepTemporaries(id) {
     if (!existsSync(this.dir)) return;
+    const liveHere = existsSync(join(this.dir, id));
     for (const entry of readdirSync(this.dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      if (entry.name.startsWith(`${id}.`) && /\.(tmp|old)$/.test(entry.name)) {
-        rmSync(join(this.dir, entry.name), { recursive: true, force: true });
-      }
+      if (!entry.name.startsWith(`${id}.`)) continue;
+      if (!/\.(tmp|old|gone)$/.test(entry.name)) continue;
+      if (entry.name.endsWith('.old') && !liveHere) continue;
+      rmSync(join(this.dir, entry.name), { recursive: true, force: true });
     }
   }
 }

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, versionRefusal, captureFormatRefusal } from './format.js';
+import {
+  DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, decimalsOf, versionRefusal, captureFormatRefusal,
+} from './format.js';
 import { pollRecordState } from './record-poll.js';
 // The renderer and everything built directly on it. Imported before any other module of
 // this page because its body appends the canvas and constructs the cameras, and the
@@ -135,16 +137,62 @@ import { assembleShaders } from './shader-assembly.js';
 // `assembleShaders` refuses a package whose text is missing: fetching the two apart would
 // open a window in which a package exists and cannot be assembled, and the boot this await
 // exists to close is the one place that window could be entered.
+/**
+ * What the store looked like at one moment, as one comparable string.
+ *
+ * The package rev is a hash over the sorted `name hash` lines of the package's own files,
+ * so an id and its rev together say everything a client needs to know about whether it is
+ * holding the current package - and a change of any byte of any file moves it. Joined into
+ * one string because the question is "has anything moved", and comparing one string is the
+ * cheapest honest way to ask it.
+ *
+ * **Declared at the top of the module rather than beside the poll that reads it**, which is
+ * the third time this file has had to write that sentence and the second time it was found
+ * by a boot rather than by a reading. Both the poll and the coherent read below want it,
+ * and the coherent read runs inside the top-level await two dozen lines down - so a `const`
+ * five hundred lines further on is in its temporal dead zone at that moment: `Cannot access
+ * 'revSignature' before initialization`, no `__kinect` published at all, and every tool in
+ * the suite reporting DID NOT RUN. Measured exactly once, immediately, which is the only
+ * reason it is a paragraph rather than a commit.
+ */
+const revSignature = (effects) => effects.map((e) => `${e.id} ${e.rev}`).join('\n');
+
+/**
+ * `GET /effects`, with the shape of the answer held to what every reader of it assumes.
+ *
+ * **A 200 carrying a body this build cannot read used to escape every guard there was.**
+ * The poll wrapped its fetch in a `try` and then computed the signature outside it, so a
+ * body with no `effects` array - a proxy's error page, a half-written response, a server
+ * from another program on the port - threw out of the interval callback, rejected its
+ * promise with nothing awaiting it, and did so again every six seconds for the life of the
+ * page. What the reader wants is a list of ids and revs, so that is what is checked, once,
+ * in the one place both callers go through: a body that is not that is a named refusal the
+ * caller decides about, and the set the page already holds is what it goes on drawing.
+ */
+async function listEffects() {
+  const res = await fetch('/effects');
+  if (!res.ok) throw new Error(`GET /effects answered ${res.status} - the registry cannot assemble without its packages`);
+  const body = await res.json();
+  if (!body || !Array.isArray(body.effects)) {
+    throw new Error('GET /effects answered a body with no effects array in it - this page reads a list of '
+      + 'installed packages there, and something else at that address is not a store this build can converge on');
+  }
+  for (const entry of body.effects) {
+    if (!entry || typeof entry.id !== 'string' || typeof entry.rev !== 'string') {
+      throw new Error(`GET /effects listed the entry ${JSON.stringify(entry)} - every entry is an id and the `
+        + 'revision of the package behind it, and the comparison that decides whether this page is up to date is over exactly those two');
+    }
+  }
+  return body.effects;
+}
+
 // A function rather than the expression it was, because there are two callers now and
 // they must be one: boot reads the store here, and a rebuild after an install reads it
 // again. A second fetch written at the install site would be the copy that stops
 // following a chunk into a second file, or stops de-duplicating, or stops refusing a
 // package that half-arrived - and the failure it produced would be a program with a
 // block missing, on a page that had been fine a second earlier.
-async function fetchEffectPackages() {
-  const listed = await fetch('/effects');
-  if (!listed.ok) throw new Error(`GET /effects answered ${listed.status} - the registry cannot assemble without its packages`);
-  const { effects } = await listed.json();
+async function readEffectPackages(effects) {
   return Promise.all(effects.map(async ({ id }) => {
     const res = await fetch(`/effects/${encodeURIComponent(id)}`);
     if (!res.ok) throw new Error(`GET /effects/${id} answered ${res.status} - the registry cannot assemble without its packages`);
@@ -160,6 +208,34 @@ async function fetchEffectPackages() {
     pkg.chunks = Object.fromEntries(names.map((name, i) => [name, texts[i]]));
     return pkg;
   }));
+}
+
+/**
+ * Every installed package, read as one moment rather than as a few dozen requests.
+ *
+ * **A package set is one answer and this is several dozen questions**, which is a
+ * distinction with nothing between it and a wrong program. The list is fetched, then each
+ * manifest, then each chunk - and an install landing anywhere in that sequence is served
+ * partly from before it and partly from after: the glyph field's declaration chunk from
+ * the old package and its body from the new one, spliced into one program that compiles
+ * and draws something nobody wrote. Nothing downstream can see it, because every byte
+ * arrived with a 200 and the assembled text is perfectly well-formed.
+ *
+ * So the list is asked again at the end and the signature has to be the one the read
+ * started from. One retry, because the shape this closes is a single install racing a
+ * single read and a second attempt clears it; two failures in a row is a store being
+ * written to faster than it can be read, and the honest answer there is to say so and
+ * leave the page holding the set it has rather than to spin.
+ */
+async function fetchEffectPackages() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const opened = await listEffects();
+    const packages = await readEffectPackages(opened);
+    if (revSignature(await listEffects()) === revSignature(opened)) return packages;
+  }
+  throw new Error('the installed effects moved while this page was reading them, twice - a set read across '
+    + 'an install is one package from before it beside another from after, which assembles into a program '
+    + 'nobody wrote, so this page keeps the set it has and asks again');
 }
 
 // **`let` and not `const`, which is the whole of what an install changes about this
@@ -959,8 +1035,18 @@ function updateDrawRange() {
  * that ask for no grade at all. It is a core parameter with no package, so it is outside
  * this list by construction rather than by being left out of it, and `registry-check`'s gate
  * matrix asserts that negative rather than leaving it as an omission.
+ *
+ * **Derived on every adoption and not once at boot**, which is the second half of the same
+ * argument. Computed at module scope it was a function of the packages that happened to be
+ * installed while this file evaluated, so a grade effect installed afterwards wrote its term
+ * into a pass that stayed shut - its slider moved, its uniform took the value, and the
+ * effect was silently absent, which is the exact failure deriving the list was meant to
+ * end. The mirror case is worse in the other direction: uninstall the last gating effect
+ * and the pass stayed open forever on a term nothing could reach any more. It is the same
+ * walk over the same packages, one line inside `adoptEffectPackages`.
  */
-const GRADE_GATES = effectPackages.flatMap((pkg) => Object.values(pkg.manifest.params ?? {})
+let GRADE_GATES;
+const gradeGatesOf = (packages) => packages.flatMap((pkg) => Object.values(pkg.manifest.params ?? {})
   .filter((p) => p.bind?.on === 'grade' && p.bind.gates)
   .map((p) => p.bind.uniform));
 
@@ -1154,7 +1240,7 @@ const CORE_PANEL_GROUPS = [
     // sits under - the angle a bracket ended up at belongs to the take, so it rotates
     // the room and not the camera, and the top-down, auto-orbit and the exported frame
     // come level with the picture.
-    before: () => [
+    before: panelOnce(() => [
       panelButtonRow(['camSensor', 'sensor view']),
       // Beside `sensor view` because it is the same kind of thing: a control that
       // changes what the person at the screen can see and writes nothing into the
@@ -1174,11 +1260,11 @@ const CORE_PANEL_GROUPS = [
       // exists to keep out of the dock.
       ...(EDITING ? [panelButtonRow(['cropFit', 'fit box to take'])] : []),
       panelButtonRow(['camLevelReset', 'reset rotation']),
-    ],
-    after: () => [
+    ]),
+    after: panelOnce(() => [
       panelButtonRow(['cropReset', 'revert all to default']),
       panelNote('recRange', 'preview only'),
-    ],
+    ]),
   },
   // Below here is the grade, and every group is one stage of the pipeline rather than
   // one subject heading. The order is the order the image is built in: what the depth
@@ -1218,8 +1304,8 @@ const CORE_PANEL_GROUPS = [
     tab: 'camera',
     lookgroup: true,
     collapses: true,
-    after: () => [panelNote('viewNote', 'Not saved with the clip and not exported: these '
-      + 'change what you are looking at, not what the frame is.')],
+    after: panelOnce(() => [panelNote('viewNote', 'Not saved with the clip and not exported: these '
+      + 'change what you are looking at, not what the frame is.')]),
   },
 ];
 
@@ -1819,11 +1905,9 @@ function refuseRegistryDisagreement() {
 // has to do the same arithmetic rather than lean on the DOM for it - otherwise a
 // value set headlessly lands on the uniform unsnapped while the same value set
 // through a slider lands snapped, and two runs of the same project disagree by a
-// hair for reasons nothing records.
-const decimalsOf = (x) => {
-  const dot = String(x).indexOf('.');
-  return dot < 0 ? 0 : String(x).length - dot - 1;
-};
+// hair for reasons nothing records. `decimalsOf` is the half of it a bare-node test
+// can reach and lives in `web/format.js` for that reason; the snapping stays here,
+// beside the registry that is the only thing that performs it.
 
 // Every value is checked for what it is rather than coerced into something. The
 // callers that matter are not the sliders - those hand over exactly what the
@@ -1904,6 +1988,33 @@ const panelControls = new Map();
 // `const` read before its own declaration is a TDZ error rather than an empty map, so
 // the map that gets read during boot has to be declared where boot can already see it.
 const resetButtons = new Map();
+
+// Which inspector tab is showing, declared here for the reason above it rather than
+// beside the four buttons that set it. `buildPanel` re-applies the tab to the groups it
+// has just made, and boot's first call to it runs a long way above the tab machinery -
+// so a `let` declared down there would be read in its own dead zone on the way through
+// the first panel this page ever draws.
+//
+// The record surface has no Look tab open by default and the editor has nothing else, so
+// the two surfaces start on different ones.
+let activePanelTab = EDITING ? 'look' : 'record';
+
+// The two maps the preset subset dialog is found again by, up here for the same reason:
+// `buildPresetPicker` runs from the end of `buildPanel`, which boot reaches while this
+// module is still being evaluated.
+const presetPickBoxes = new Map();
+const presetPickGroups = [];
+
+/**
+ * What the panel last painted per group, so a refresh writes only where the answer moved.
+ *
+ * The full argument for it is on `refreshGroups`, which is its only reader. It is declared
+ * here rather than there for the boot-order reason its neighbours are: `buildPanel` clears
+ * it with the seven maps that find the panel's elements again, because a rebuilt group is
+ * a new element that has never been painted whatever this map remembers - and boot's first
+ * `buildPanel` runs well above the line `refreshGroups` sits on.
+ */
+const groupPainted = new Map();
 
 // What each parameter is worth in a project nobody has touched, computed once per
 // registry.
@@ -2287,6 +2398,37 @@ const panelButtonRow = (...buttons) => {
   return row;
 };
 
+/**
+ * A group's hand-written furniture, built once and re-parented on every rebuild.
+ *
+ * **The panel is regenerated whole on every install, and everything that is not a
+ * parameter row was being regenerated with it.** `buildPanel` removes each generated group
+ * and calls the group's `before()` and `after()` again, so `sensor view`, `show crop box`,
+ * `fit box to take`, `reset rotation`, `revert all to default` and the recorder's range
+ * note were fresh elements carrying the right ids and none of the wiring: `ui` still held
+ * the boot-time nodes and every `addEventListener` was on those, so after one install the
+ * six visible buttons did nothing at all and `ui.recRange.textContent` wrote into an
+ * element no longer in the document. Nothing threw and nothing looked wrong.
+ *
+ * **One mechanism, and it is that these nodes are never replaced.** `append` moves an
+ * element rather than copying it, so handing back the same node puts the live one - with
+ * its listeners, its `aria-pressed`, its disabled state and its text - into the rebuilt
+ * group. Re-resolving `ui` after each rebuild would have fixed the references and left the
+ * listeners on the corpses; delegating every listener would have been a second dispatch
+ * path beside the direct ones the rest of the panel uses. Not building them twice is the
+ * one that leaves a single statement of what each control is and does.
+ *
+ * A `function` declaration rather than the `const` arrow its two neighbours are, and the
+ * reason is the same one written on `resetButtons` and on `revSignature`: `CORE_PANEL_GROUPS`
+ * calls this while it is being evaluated, a thousand lines above here, and a `const` would
+ * be in its temporal dead zone at that moment - no `__kinect` published at all, and every
+ * tool in the suite reporting DID NOT RUN. A declaration is hoisted and initialised.
+ */
+function panelOnce(build) {
+  let made = null;
+  return () => (made ??= build());
+}
+
 const panelNote = (id, text) => {
   const note = panelNode('div', null, text);
   note.id = id;
@@ -2468,6 +2610,17 @@ function buildPanel() {
   panelGroupParams.clear();
   panelTail.clear();
   groupDefaults.clear();
+  // **The map that says a group has already been painted, cleared with the nodes it is
+  // about.** `refreshGroups` skips a group whose state string has not moved since it last
+  // wrote to it, which is what keeps a `textContent` and two attribute writes per group
+  // out of the render path - and after a rebuild that skip was reading a state string
+  // about elements that had been thrown away. A group whose values happened not to change
+  // across the install came back with no `shut` class, no `aria-expanded` and an empty
+  // mark, showing as open with the panel's own header saying nothing about it, and the
+  // next refresh agreed with itself and left it there. It belongs with the seven maps
+  // above rather than beside its own reader, because the thing that invalidates it is
+  // exactly what invalidates them: the elements are new.
+  groupPainted.clear();
   panelRowsEmitted = 0;
   for (const group of PANEL_GROUPS) {
   const groupNode = panelNode('div', group.lookgroup ? 'group lookgroup' : 'group');
@@ -2593,6 +2746,15 @@ function buildPanel() {
   for (const names of panelGroupParams.values()) {
     for (const name of names) groupDefaults.set(name, params.normalise(name, PARAMS[name].def));
   }
+
+  // The tab that was up, put back over the groups that have just been made. A generated
+  // group carries `data-panel-tab` and no `hidden`, so without this a rebuild shows every
+  // tab's groups at once - see `hideOffTab`, which is the same rule the tab buttons press.
+  hideOffTab();
+
+  // And the dialog that lets a look leave as a subset of itself, which is a second view of
+  // this same panel and goes stale in the same way - see `buildPresetPicker`.
+  buildPresetPicker();
 }
 
 // ------------------------------------------------- adopting a set of packages
@@ -2600,25 +2762,9 @@ function buildPanel() {
 // Everything downstream of "which effects are installed", in one function, called once at
 // boot and again after every install and every uninstall.
 
-/**
- * What the store looked like when this page last read it, as one comparable string.
- *
- * The package rev is a hash over the sorted `name hash` lines of the package's own files,
- * so an id and its rev together say everything a client needs to know about whether it is
- * holding the current package - and a change of any byte of any file moves it. Joined into
- * one string because the question is "has anything moved", and comparing one string is the
- * cheapest honest way to ask it.
- *
- * **Declared here rather than beside the poll that reads it**, which is the third time this
- * file has had to write that sentence and the second time it was found by a boot rather
- * than by a reading. `adoptEffectPackages` below writes the signature, boot calls it while
- * the module is still evaluating, and a `const` five hundred lines further down is in its
- * temporal dead zone at that moment: `Cannot access 'revSignature' before initialization`,
- * no `__kinect` published at all, and every tool in the suite reporting DID NOT RUN.
- * Measured exactly once, immediately, which is the only reason it is a paragraph rather
- * than a commit.
- */
-const revSignature = (effects) => effects.map((e) => `${e.id} ${e.rev}`).join('\n');
+// `revSignature` is declared at the top of the module beside the reads that compose it -
+// the note there carries why. This is the signature of the set this page is assembled
+// from, written by `adoptEffectPackages` and read by the poll.
 let effectSignature;
 
 /**
@@ -2697,6 +2843,11 @@ function adoptEffectPackages(packages, programs, held = {}) {
 
   EFFECT_PARAMS = tableFromPackages(packages, EFFECT_PARAM_ORDER);
   PANEL_GROUPS = withEffectGroups(CORE_PANEL_GROUPS, packages);
+  // Which grade terms hold the pass open, re-derived from the set that just arrived. It is
+  // read by `effectApply`'s gate a few lines later in the value walk below, so it has to
+  // move before the registry does - see `GRADE_GATES` for what each direction of a stale
+  // list costs.
+  GRADE_GATES = gradeGatesOf(packages);
   PARAMS = buildParams();
   READINGS = Object.keys(PARAMS).filter((n) => PARAMS[n].reading);
   refuseRegistryDisagreement();
@@ -2723,6 +2874,14 @@ function adoptEffectPackages(packages, programs, held = {}) {
   for (const name of Object.keys(PARAMS)) {
     params.set(name, Object.hasOwn(held, name) ? held[name] : PARAMS[name].def);
   }
+
+  // And the grade pass asked once more, because the walk above cannot answer for the case
+  // that matters. A gated parameter's own write re-asks `gradeNeeded` as it lands, so any
+  // set with one installed settles itself - but uninstall the last of them and there is no
+  // gated write left to make, and the pass would stay open on a term the registry no
+  // longer has, running a full-screen read and write per frame for nothing. Asked here it
+  // is one call against a list that has just been re-derived.
+  grade.enabled = gradeNeeded();
 }
 
 // Boot's own call, and the first run of the path above. Everything from here down reads a
@@ -2785,6 +2944,10 @@ adoptEffectPackages(effectPackages, shaderPrograms);
  * adaptation every other door here refuses; the honest answer is that the page cannot
  * carry *this* document onto that package, said out loud, with the page still drawing what
  * it drew.
+ *
+ * **It answers null when it stands down**, which is the one outcome that is neither a
+ * rebuild nor a failure - see `effectRebuildBlocked` for the conditions and for why they
+ * have to be asked twice.
  */
 async function reloadEffects() {
   // Captured before anything moves, and read from the live bindings rather than re-derived:
@@ -2809,13 +2972,47 @@ async function reloadEffects() {
     throw new Error(`the installed effects changed and this page could not read them: ${err.message}`);
   }
 
-  adoptEffectPackages(fetched, programs, held);
+  // **Asked again here, after the last await and before the first write.** The poll asks
+  // the same question on its way in, and between the two there are several dozen requests -
+  // which is long enough for an export to start, and an export is precisely what must not
+  // have the look replaced underneath it. A rebuild landing there changes two shader
+  // programs and every value between one frame of the file and the next, and the file is
+  // the one artefact of this program nobody can watch being made. The other two are the
+  // same shape one gesture down. Nothing has been written yet, so standing down is a
+  // return: the signature is untouched, and the next tick asks again in six seconds.
+  const blocked = effectRebuildBlocked();
+  if (blocked) return null;
+
+  // **Whether the programs actually moved, decided before anything is swapped.** A package
+  // that changed only its parameters - a retuned bound, a new label, a fork that adds a key
+  // with no GLSL - assembles into the identical two programs, and warming them costs an
+  // additive toggle, two composed frames and `resetAccumulators`, which clears the surface
+  // memory pair and both afterimage buffers and puts `lastProgramTime` back to zero. On a
+  // page mid-playback that is the trails and the afterimage disappearing for a reason
+  // nobody can connect to anything, on an install that changed no pixel of the shader.
+  // Compared as text because text is what a program is here and what the driver would be
+  // handed: identical text is a program already compiled and already warm.
+  const sameProgram = programs.cloud.vertexShader === heldPrograms.cloud.vertexShader
+    && programs.cloud.fragmentShader === heldPrograms.cloud.fragmentShader
+    && programs.grade.vertexShader === heldPrograms.grade.vertexShader
+    && programs.grade.fragmentShader === heldPrograms.grade.fragmentShader;
+
   let failure = null;
   try {
+    // **Inside the try with everything else, and it was outside it.** The adoption is not
+    // only the thing the rollback protects against a later failure - it can throw itself,
+    // and by then it has already replaced the registry: `buildPanel` refuses a parameter
+    // naming no panel group and refuses a row count that does not match the registry, both
+    // of which are reachable from a package the door has now been taught to refuse but
+    // which nothing stops arriving from a store written to some other way. Left outside,
+    // that throw walked past the rollback into the poll's catch, and the page was the
+    // half-migrated state this whole transaction exists to make unreachable.
+    adoptEffectPackages(fetched, programs, held);
     // The swapped programs and the additive variant, compiled here rather than on the frame
     // that first reaches them - which is the same 83ms stall `warmPrograms` was written for,
-    // arriving at a moment nobody would connect to an install.
-    warmPrograms();
+    // arriving at a moment nobody would connect to an install. Skipped where the text did
+    // not move, because there is nothing to compile and the reset it ends with is not free.
+    if (!sameProgram) warmPrograms();
     restoreProject(open);
   } catch (err) {
     failure = err;
@@ -2868,22 +3065,70 @@ async function reloadEffects() {
  */
 const EFFECT_POLL_MS = 6000;
 let effectReloading = false;
+
+/**
+ * Why a rebuild may not happen right now, by name, or null.
+ *
+ * A declaration and not a `const`, so `reloadEffects` above can ask it: the poll asks on
+ * its way in and the rebuild asks again after its last fetch, and the two have to be one
+ * question or the second is a looser copy of the first that stops covering a case the
+ * first still names.
+ */
+function effectRebuildBlocked() {
+  if (exporting) return 'an export is running';
+  if (presetGesture) return 'a preset gesture is open';
+  if (evaluating) return 'a track is being evaluated';
+  return null;
+}
+
+// The last thing this poll complained about, so a store answering the same nonsense every
+// six seconds says it once rather than a hundred times an hour. It is the message and not
+// a flag, because a *different* fault is worth hearing about even while the first is still
+// there.
+let lastPollComplaint = null;
+
 async function pollEffects() {
-  if (effectReloading || exporting || presetGesture || evaluating) return;
-  let listed;
-  try {
-    const res = await fetch('/effects');
-    if (!res.ok) return;
-    listed = (await res.json()).effects;
-  } catch {
-    // A server that is restarting is not a reason to say anything: the next tick asks
-    // again, and the page goes on drawing what it has.
-    return;
-  }
-  if (revSignature(listed) === effectSignature) return;
+  // **The guard goes up at the top of the tick and it used to go up after the list came
+  // back.** Two ticks overlapped in that window - the interval does not wait for the last
+  // one - and each read the store, each rebuilt, and whichever finished second won. With
+  // an install landing between them the loser was the newer set, so the page settled on
+  // the packages it had read *first* while its signature claimed the ones it had read
+  // second, and the comparison that would have noticed agreed with itself forever after.
+  if (effectReloading || effectRebuildBlocked()) return;
   effectReloading = true;
   try {
-    await reloadEffects();
+    let listed;
+    try {
+      listed = await listEffects();
+    } catch (err) {
+      // A server that is restarting is not a reason to say anything, and a body this build
+      // cannot read is a reason to say it once. Either way the page goes on drawing the set
+      // it has: the signature is untouched, so a store that comes back is picked up by the
+      // same comparison with no special case. What must not happen is the throw escaping
+      // into the interval, which is what a signature computed outside this catch used to
+      // do - once every six seconds, for the life of the page, with nothing awaiting the
+      // rejected promise.
+      if (err.message !== lastPollComplaint) {
+        lastPollComplaint = err.message;
+        console.warn('could not read the installed effects:', err.message);
+      }
+      return;
+    }
+    lastPollComplaint = null;
+    if (revSignature(listed) === effectSignature) return;
+    await pollRebuild();
+  } finally {
+    effectReloading = false;
+  }
+}
+
+async function pollRebuild() {
+  try {
+    // Null is the rebuild standing down rather than failing - an export started while it
+    // was reading, most likely - and it has written nothing and moved no signature, so the
+    // next tick asks the same question again. Silent on purpose: a chip announcing that
+    // nothing happened is a chip that has to be read to find that out.
+    if (await reloadEffects() === null) return;
     say('the installed effects changed - this page has been rebuilt from them');
   } catch (err) {
     // Reported and not retried on a timer. The set on the server is the one this page
@@ -2899,8 +3144,6 @@ async function pollEffects() {
     // prefix takes is the width the refusal loses.
     console.warn('could not rebuild from the installed effects:', err.message);
     say(err.message);
-  } finally {
-    effectReloading = false;
   }
 }
 setInterval(pollEffects, EFFECT_POLL_MS);
@@ -2911,8 +3154,27 @@ setInterval(pollEffects, EFFECT_POLL_MS);
 // document: the registry and proof sweeps still see the complete surface.
 const panelTabsEl = document.getElementById('panelTabs');
 const panelTabButtons = [...panelTabsEl.querySelectorAll('.paneltab')];
-// Default to 'record' on the record surface, 'look' on the editor.
-let activePanelTab = EDITING ? 'look' : 'record';
+// `activePanelTab` is declared beside the panel's other boot-order casualties, up with
+// `panelControls` - see the note there.
+
+/**
+ * Every group on screen shown or hidden by whether it belongs to the tab that is up.
+ *
+ * **A function rather than a loop inside `setPanelTab`, because the panel generator needs
+ * the same rule and there may only be one of it.** A generated group is a brand new
+ * element with `hidden` unset, so a rebuild put every group on screen at once: one install
+ * and the inspector showed Look, Camera, Framing and Region stacked on top of each other
+ * until somebody pressed a tab. Written twice, the copy in the generator is the one that
+ * would stop agreeing about which groups a tab holds.
+ *
+ * A declaration, so `buildPanel` a few hundred lines above can call it.
+ */
+function hideOffTab() {
+  const tab = activePanelTab;
+  for (const group of document.querySelectorAll('#panelBody > [data-panel-tab]')) {
+    group.hidden = group.dataset.panelTab !== tab;
+  }
+}
 
 function setPanelTab(tab) {
   if (!['record', 'camera', 'framing', 'look', 'region'].includes(tab)) return false;
@@ -2920,9 +3182,7 @@ function setPanelTab(tab) {
   for (const button of panelTabButtons) {
     button.setAttribute('aria-selected', String(button.dataset.panelTab === tab));
   }
-  for (const group of document.querySelectorAll('#panelBody > [data-panel-tab]')) {
-    group.hidden = group.dataset.panelTab !== tab;
-  }
+  hideOffTab();
   document.getElementById('panelBody').scrollTop = 0;
   return true;
 }
@@ -3454,7 +3714,8 @@ function groupTouchedCount(key) {
  * write would put a `textContent` assignment and an attribute write per group into the
  * render path to say what the panel already said.
  */
-const groupPainted = new Map();
+// `groupPainted` is declared beside `panelControls`, with the other maps `buildPanel`
+// clears - see the note there for why boot order decides where it sits.
 // How often the panel has been re-derived, for the one question a tool cannot answer
 // from outside: whether a bulk write costs one pass or one per value in it. A count the
 // page keeps rather than a duration a driver times, because a rate taken around a
@@ -10300,32 +10561,6 @@ const requiresFor = (names) => effectIdsIn(names).map((id) => ({ id, version: ve
 // ------------------------------------------- which look values a preset carries
 
 /**
- * The subset picker, built once at boot and shown by both doors a look leaves by.
- *
- * `presetFromCurrentLook` has taken a subset of names since it was written and both
- * of its callers passed nothing, so every preset this program could author was the
- * whole look tag - the capability sat one layer down with no way to reach it. What
- * that cost was not expressiveness: "just my grain and bloom" had to be a hand-edited
- * file, and a hand-edited file is the one door into this program that nothing
- * upstream validates.
- *
- * **The groups come from `PANEL_GROUPS` and `PARAMS[n].group`, never from a list
- * here.** A second statement of which parameter belongs under which heading is a
- * statement that drifts, and it would drift silently, because a parameter missing
- * from this dialog is not an error anywhere - it is a value you can no longer choose
- * to leave out. Derived, a parameter added next year appears by existing, under the
- * heading the panel already gives it.
- *
- * **Built at boot rather than on the first press**, which is the same call
- * `library.js` makes for the gallery's menus and for the same reason: `editor-check`
- * enumerates what the document contains and demands a driver for every control in it,
- * so a dialog that populated itself on open would show the sweep an empty box and the
- * user fifty-odd checkboxes. A control no sweep can see is a control nothing proves.
- */
-const presetPickBoxes = new Map();
-const presetPickGroups = [];
-
-/**
  * One box written, and the four that may have to move with it.
  *
  * The five reading weights tick and untick as a unit because a document naming two of
@@ -10368,60 +10603,106 @@ function presetPickSync() {
 
 const presetPickNames = () => [...presetPickBoxes.keys()].filter((n) => presetPickBoxes.get(n).checked);
 
-for (const group of PANEL_GROUPS) {
-  const members = params.names('look').filter((n) => PARAMS[n].group === group.key);
-  // Skipped where the panel generator refuses, and the opposite call is right for the
-  // opposite reason: an empty panel group is a group key misspelled on one side, where
-  // an empty group here is the Viewer heading, which holds render scale and auto-orbit
-  // and both of them are `view`. View state is not in any preset, so a heading with
-  // nothing under it would be the panel's shape leaking into a question about the
-  // document.
-  if (!members.length) continue;
-  const groupNode = document.createElement('div');
-  groupNode.className = 'ppgroup';
-  const head = document.createElement('label');
-  head.className = 'check pphead';
-  const all = document.createElement('input');
-  all.type = 'checkbox';
-  all.id = `ppg-${group.key}`;
-  head.append(all, ` ${group.label}`);
-  groupNode.append(head);
-  all.addEventListener('change', () => {
-    for (const name of members) presetPickSet(name, all.checked);
-    presetPickSync();
-  });
+/**
+ * The subset picker, rebuilt whenever the panel is, and shown by both doors a look
+ * leaves by.
+ *
+ * `presetFromCurrentLook` has taken a subset of names since it was written and both
+ * of its callers passed nothing, so every preset this program could author was the
+ * whole look tag - the capability sat one layer down with no way to reach it. What
+ * that cost was not expressiveness: "just my grain and bloom" had to be a hand-edited
+ * file, and a hand-edited file is the one door into this program that nothing
+ * upstream validates.
+ *
+ * **The groups come from `PANEL_GROUPS` and `PARAMS[n].group`, never from a list
+ * here.** A second statement of which parameter belongs under which heading is a
+ * statement that drifts, and it would drift silently, because a parameter missing
+ * from this dialog is not an error anywhere - it is a value you can no longer choose
+ * to leave out. Derived, a parameter added next year appears by existing, under the
+ * heading the panel already gives it.
+ *
+ * **Built with the panel rather than once at boot, which is what an install made of
+ * it.** This was a top-level loop over the registry as it stood while the module
+ * evaluated, and both directions of a hotload went wrong afterwards: an installed
+ * effect got no checkbox, so its values were in every preset with no way to leave them
+ * out, and an uninstalled one left checkboxes behind whose `change` handler
+ * dereferences `PARAMS[name]` for a name the registry no longer has - a throw out of a
+ * tick - while a confirm assembled a preset naming values nothing on this build can
+ * apply. Rebuilding it is `buildPanel`'s last act, so there is one moment at which the
+ * panel and this dialog are both a statement of the same registry.
+ *
+ * **Rebuilt rather than on the first press**, which is the same call `library.js` makes
+ * for the gallery's menus and for the same reason: `editor-check` enumerates what the
+ * document contains and demands a driver for every control in it, so a dialog that
+ * populated itself on open would show the sweep an empty box and the user fifty-odd
+ * checkboxes. A control no sweep can see is a control nothing proves.
+ *
+ * The host is asked for by id rather than read off `ui`, and that is boot order rather
+ * than taste: `ui` is a `const` five thousand lines below here and boot's first
+ * `buildPanel` runs above it, so reading it would be a dead-zone throw on the first
+ * panel this page ever draws.
+ */
+function buildPresetPicker() {
+  const host = document.getElementById('ppGroups');
+  host.replaceChildren();
+  presetPickBoxes.clear();
+  presetPickGroups.length = 0;
+  for (const group of PANEL_GROUPS) {
+    const members = params.names('look').filter((n) => PARAMS[n].group === group.key);
+    // Skipped where the panel generator refuses, and the opposite call is right for the
+    // opposite reason: an empty panel group is a group key misspelled on one side, where
+    // an empty group here is the Viewer heading, which holds render scale and auto-orbit
+    // and both of them are `view`. View state is not in any preset, so a heading with
+    // nothing under it would be the panel's shape leaking into a question about the
+    // document.
+    if (!members.length) continue;
+    const groupNode = document.createElement('div');
+    groupNode.className = 'ppgroup';
+    const head = document.createElement('label');
+    head.className = 'check pphead';
+    const all = document.createElement('input');
+    all.type = 'checkbox';
+    all.id = `ppg-${group.key}`;
+    head.append(all, ` ${group.label}`);
+    groupNode.append(head);
+    all.addEventListener('change', () => {
+      for (const name of members) presetPickSet(name, all.checked);
+      presetPickSync();
+    });
 
-  for (const name of members) {
-    const row = document.createElement('label');
-    row.className = 'check';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    // Prefixed, because the panel's own control for this parameter is already `id`
-    // = the parameter's name. Two nodes under one id is a document where
-    // `getElementById` answers whichever came first, and `editor-check` builds the
-    // set it diffs against the registry out of exactly these ids - so a bare name
-    // here would let a panel that had dropped a row pass the row that exists to
-    // catch it, on the strength of a checkbox in a dialog.
-    input.id = `pp-${name}`;
-    input.checked = true;
-    row.append(input, ` ${PARAMS[name].label}`);
-    groupNode.append(row);
-    presetPickBoxes.set(name, input);
-    input.addEventListener('change', () => { presetPickSet(name, input.checked); presetPickSync(); });
+    for (const name of members) {
+      const row = document.createElement('label');
+      row.className = 'check';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      // Prefixed, because the panel's own control for this parameter is already `id`
+      // = the parameter's name. Two nodes under one id is a document where
+      // `getElementById` answers whichever came first, and `editor-check` builds the
+      // set it diffs against the registry out of exactly these ids - so a bare name
+      // here would let a panel that had dropped a row pass the row that exists to
+      // catch it, on the strength of a checkbox in a dialog.
+      input.id = `pp-${name}`;
+      input.checked = true;
+      row.append(input, ` ${PARAMS[name].label}`);
+      groupNode.append(row);
+      presetPickBoxes.set(name, input);
+      input.addEventListener('change', () => { presetPickSet(name, input.checked); presetPickSync(); });
+    }
+    host.append(groupNode);
+    presetPickGroups.push({ box: all, members });
   }
-  ui.pickGroups.append(groupNode);
-  presetPickGroups.push({ box: all, members });
-}
 
-// Every reading needs a box, on the same reasoning as the uniform assertion beside
-// `READINGS` itself: `presetPickSet` reaches for all five whenever one of them is
-// ticked, so a reading the loop above did not build - one tagged something other than
-// `look`, which is the only way it could be skipped - would not be a missing checkbox.
-// It would be a dialog that throws on the first tick of any reading, which is a control
-// that appears to work until somebody uses it.
-for (const name of READINGS) {
-  if (!presetPickBoxes.has(name)) {
-    throw new Error(`the reading ${name} has no box in the preset subset dialog: ticking any of the five would throw`);
+  // Every reading needs a box, on the same reasoning as the uniform assertion beside
+  // `READINGS` itself: `presetPickSet` reaches for all five whenever one of them is
+  // ticked, so a reading the loop above did not build - one tagged something other than
+  // `look`, which is the only way it could be skipped - would not be a missing checkbox.
+  // It would be a dialog that throws on the first tick of any reading, which is a control
+  // that appears to work until somebody uses it. Asked on every rebuild rather than once,
+  // because the registry it is about is rebuilt too.
+  for (const name of READINGS) {
+    if (!presetPickBoxes.has(name)) {
+      throw new Error(`the reading ${name} has no box in the preset subset dialog: ticking any of the five would throw`);
+    }
   }
 }
 
@@ -14825,6 +15106,30 @@ let pinnedPairs = null;
 function warmPrograms() {
   const was = { after: afterimage.enabled, bloom: bloom.enabled, grade: grade.enabled };
   const wasAdditive = uniforms.softEdge.value === 1;
+  // **A shader that will not compile is not an exception anywhere, and that is the whole
+  // of why this hook is here.** WebGL reports a link failure through `getProgramInfoLog`
+  // and three.js reports it onward through `renderer.debug.onShaderError` or, with no hook
+  // set, a `console.error` - and then carries on. So a package whose GLSL is malformed
+  // rather than merely unfamiliar drew nothing at all while every step of the install
+  // reported success: the door cannot compile, so identifier-valid text that is
+  // syntactically broken reaches the driver; the swap succeeds, `restoreProject` succeeds,
+  // and the poll announces that the page has been rebuilt from the new effects while the
+  // cloud renders an empty frame. There is nothing on screen and nothing in the chip.
+  //
+  // Collected here rather than reported, and thrown below rather than warned, because a
+  // throw out of this function is what `reloadEffects` rolls back on - so the page goes
+  // back to the programs it was drawing with and says which shader failed and why. At boot
+  // it takes the module down instead, which is the honest answer to a build whose own
+  // shipped shaders do not compile: there is no earlier set to fall back to.
+  const linkFailures = [];
+  const priorHook = renderer.debug.onShaderError;
+  renderer.debug.onShaderError = (gl, program, vertexShader, fragmentShader) => {
+    const log = gl.getProgramInfoLog(program)?.trim() ?? '';
+    const stage = gl.getShaderInfoLog(vertexShader)?.trim()
+      ? `vertex: ${gl.getShaderInfoLog(vertexShader).trim()}`
+      : `fragment: ${gl.getShaderInfoLog(fragmentShader)?.trim() ?? ''}`;
+    linkFailures.push(`${log || 'the program did not link'} (${stage})`);
+  };
   try {
     afterimage.enabled = true;
     bloom.enabled = true;
@@ -14840,13 +15145,20 @@ function warmPrograms() {
   } catch (err) {
     // A page that cannot warm is a page that still works, one hitch at a time. It is
     // reported rather than swallowed because a warm that silently stopped happening
-    // would read exactly like the stalls coming back for some other reason.
+    // would read exactly like the stalls coming back for some other reason. A shader that
+    // did not link does not arrive here - see the hook above for where it does.
     console.warn('could not warm the shader programs:', err.message);
   } finally {
+    renderer.debug.onShaderError = priorHook;
     afterimage.enabled = was.after;
     bloom.enabled = was.bloom;
     grade.enabled = was.grade;
     resetAccumulators();
+  }
+  // After the restore rather than inside the try, so the enabled flags and the
+  // accumulators are back where they belong before the caller starts unwinding.
+  if (linkFailures.length) {
+    throw new Error(`this build's shaders did not compile after the effects changed - ${linkFailures[0]}`);
   }
 }
 warmPrograms();
