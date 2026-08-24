@@ -16,6 +16,7 @@ import {
   downloadsInFlight, hashFile, markWriteCount, readMarkLog, readMarks, reconcile, remaining,
   removeTake, renameTake, resolveMarks, revealSupport, revealTake, scanTakes,
 } from './library.js';
+import { EffectStore } from './effect-store.js';
 import { Recorder } from './recorder.js';
 import { JobStore } from './jobs.js';
 import { Webcam } from './webcam.js';
@@ -215,6 +216,15 @@ const PRESETS = new DocumentStore(
   'preset',
   PROJECT_VERSION,
   resolve(flag('--builtin-presets', join(ROOT, 'presets-builtin'))),
+);
+// The effect packages, on the preset store's two-root rule: shipped beside user,
+// the user's copy shadowing by id. A package is a directory of files rather than one
+// JSON body - a manifest beside the shader chunks the client assembles from - which
+// is why this is its own store class. The flags exist for the reason the preset
+// flags do: a check points the search path somewhere it controls.
+const EFFECTS = new EffectStore(
+  resolve(flag('--effects', join(ROOT, 'effects'))),
+  resolve(flag('--builtin-effects', join(ROOT, 'effects-builtin'))),
 );
 // Version 2 dropped `outputFps`. The output rate is a property of the edit rather than of
 // one output of it - `programTime = k / outputFps` makes it the edit's own coordinate, and
@@ -1645,6 +1655,33 @@ const ROUTES = [
   // ---- documents
   { path: '/projects', pattern: /^\/projects\/?$/, read: (req, res) => listDocuments(res, PROJECTS) },
   { path: '/presets', pattern: /^\/presets\/?$/, read: (req, res) => listDocuments(res, PRESETS) },
+  // The effect packages, reads only: the list a client assembles from, one package's
+  // manifest and file index, and one file's raw bytes. Install and delete join when
+  // the surface that can drive them end to end exists; a write route nothing can
+  // exercise before commit is the class of code this table refuses to carry. The
+  // chunk route serves text/plain because what the tools anchor and the client
+  // compiles is the file's own bytes - a content type that invited transformation
+  // would be the wrong promise.
+  { path: '/effects', pattern: /^\/effects\/?$/, read: (req, res) => sendJson(res, { effects: EFFECTS.list() }) },
+  {
+    path: '/effects/:id',
+    pattern: /^\/effects\/([^/]+)$/,
+    read: (req, res, args) => {
+      const pkg = EFFECTS.read(args[0]);
+      if (!pkg) return sendJson(res, { error: `no effect ${args[0]} here - GET /effects lists what is installed` }, 404);
+      return sendJson(res, pkg);
+    },
+  },
+  {
+    path: '/effects/:id/file/:name',
+    pattern: /^\/effects\/([^/]+)\/file\/([^/]+)$/,
+    read: (req, res, args) => {
+      const bytes = EFFECTS.file(args[0], args[1]);
+      if (!bytes) return sendJson(res, { error: `effect ${args[0]} has no file ${args[1]} - GET /effects/${args[0]} lists its files` }, 404);
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': bytes.length });
+      return res.end(bytes);
+    },
+  },
   {
     path: '/projects/:name',
     pattern: /^\/projects\/([^/]+)$/,

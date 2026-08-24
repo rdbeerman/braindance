@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "id": "edges",
+  "version": "1.0.0",
+  "title": "Edges",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "edges",
+      "panel": {
+        "group": "style",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "edges"
+      },
+      "role": "master"
+    }
+  }
+}

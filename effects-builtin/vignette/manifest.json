@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "id": "vignette",
+  "version": "1.0.0",
+  "title": "Vignette",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "vignette",
+      "panel": {
+        "group": "post",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "grade",
+        "uniform": "vignette",
+        "gates": true
+      },
+      "role": "master"
+    }
+  }
+}

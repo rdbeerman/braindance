@@ -534,6 +534,7 @@ node tools/syntax-check.mjs --mutate shell-key-undeclared # ... and the other di
 node tools/syntax-check.mjs --mutate web-citation-outlives-its-module # ... and a module this repo's own prose names, renamed to something the tree does not hold
 node tools/syntax-check.mjs --mutate line-citation-past-the-end # ... and the line half of that, which rots without the path rotting
 node tools/syntax-check.mjs --mutate citation-outside-the-prose # ... and one written in the C++, which is the half of the tree the walk used to skip
+node tools/syntax-check.mjs --mutate manifest-does-not-parse # ... and a shipped effect package the store would throw on must be named, not counted
 node tools/release-gate-check.mjs                    # the .npmrc supply-chain gate is actually armed
 node tools/release-gate-check.mjs --mutate wrong-unit # ... and must FAIL (also: no-gate, absent)
 node tools/cpp-check.mjs                             # both C++ files parse and typecheck, in all four

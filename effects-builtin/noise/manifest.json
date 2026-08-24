@@ -1,0 +1,75 @@
+{
+  "format": 1,
+  "id": "noise",
+  "version": "1.0.0",
+  "title": "Turbulence",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.005,
+      "kind": "scalar",
+      "label": "turbulence",
+      "panel": {
+        "group": "displacement",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "noise"
+      },
+      "role": "master"
+    },
+    "scale": {
+      "def": 3,
+      "min": 0.2,
+      "max": 12,
+      "step": 0.1,
+      "kind": "scalar",
+      "label": "grain m",
+      "panel": {
+        "group": "displacement",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "noiseScale"
+      },
+      "under": "amount"
+    },
+    "speed": {
+      "def": 0.7,
+      "min": 0,
+      "max": 3,
+      "step": 0.05,
+      "kind": "scalar",
+      "label": "speed",
+      "panel": {
+        "group": "displacement",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "noiseSpeed"
+      },
+      "under": "amount"
+    },
+    "region": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.005,
+      "kind": "scalar",
+      "label": "scramble",
+      "panel": {
+        "group": "region",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "regionNoise"
+      }
+    }
+  }
+}

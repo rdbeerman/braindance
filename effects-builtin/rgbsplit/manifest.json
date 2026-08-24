@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "id": "rgbsplit",
+  "version": "1.0.0",
+  "title": "RGB split",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 6,
+      "step": 0.05,
+      "kind": "scalar",
+      "label": "rgb split",
+      "panel": {
+        "group": "post",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "grade",
+        "uniform": "rgbSplit",
+        "gates": true
+      },
+      "role": "master"
+    }
+  }
+}

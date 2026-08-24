@@ -108,6 +108,14 @@ const MUTATIONS = {
     edits: [['`gpuTimer.poll` in `web/main.js` is and what made', '`gpuTimer.poll` in `web/main.js:98600` is and what made']],
   },
 
+  // The package-parse gate's control: one manifest with one brace doubled is a package
+  // the store throws on, and the gate has to name it rather than print a clean count.
+  // The rain package because it is the one whose shape docs/reference.md walks through.
+  'manifest-does-not-parse': {
+    file: 'effects-builtin/rain/manifest.json',
+    edits: [['{\n  "format": 1,', '{{\n  "format": 1,']],
+  },
+
   // The third half of the same row, and the one that says the walk reaches outside the
   // prose. Both mutations above plant their failure in a file the old citing set already
   // read - a root markdown page and a `docs/` page - so both stayed caught while the walk
@@ -493,6 +501,14 @@ const withoutStringBodies = (src) => {
     // which is the one that fails where somebody sees it.
     const text = /\.(js|mjs)$/.test(rel) ? withoutStringBodies(raw) : raw;
     for (const m of text.matchAll(/\bdocs\/[A-Za-z0-9._-]+\.md\b/g)) cited.add(m[0]);
+    // The effect packages are a citable class the moment prose can name a chunk or a
+    // manifest: `effects-builtin/rain/manifest.json` has to resolve the way a docs
+    // page does, or the prose rots from the first day of the surface existing. No
+    // separate floor - nothing may cite a package yet, and over-reporting is for
+    // matches, not absences; the existence check below covers whatever appears. The
+    // first thing this matcher ever caught was this comment's own example naming a
+    // chunk file that does not exist yet, which is the class working as written.
+    for (const m of text.matchAll(/\beffects-builtin\/[a-z][a-z0-9]*\/[A-Za-z0-9._-]+\.[a-z]+\b/g)) cited.add(m[0]);
     // A range takes its last line, because that is the bound the file has to reach: a
     // `:844-847` whose 844 still exists and whose 847 does not is a citation half of which
     // is off the end, and reading the start would call that resolved.
@@ -539,6 +555,37 @@ const withoutStringBodies = (src) => {
     if (!gone.length && !past.length) {
       console.log(`  web/    all ${modules.size} cited modules exist, ${byLine.length} of them named by line`);
     }
+  }
+}
+
+// **Every shipped effect package parses.** The manifests are data the client assembles
+// the registry from, and a manifest that does not parse is a package the store throws
+// on at read - a server that boots and then 500s on `/effects`. The gate is the same
+// shape as the per-directory parse floors above: every manifest must parse, an id must
+// match its directory (the namespace parameters carry), and zero packages is its own
+// failure, because an empty directory here is a build with no effects that would
+// otherwise print a clean line about nothing.
+{
+  const root = join(ROOT, 'effects-builtin');
+  const ids = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()
+    : [];
+  if (ids.length === 0) {
+    fail('effects-builtin/ holds no packages, so this build ships no effects - the directory is gone or this scan is looking in the wrong place');
+  } else {
+    const bad = [];
+    for (const id of ids) {
+      const path = join(root, id, 'manifest.json');
+      if (!existsSync(path)) { bad.push(`${id} has no manifest.json`); continue; }
+      try {
+        const manifest = JSON.parse(sourceWithMutation(`effects-builtin/${id}/manifest.json`) ?? readFileSync(path, 'utf8'));
+        if (manifest.id !== id) bad.push(`${id}/manifest.json declares id ${JSON.stringify(manifest.id)}`);
+      } catch (err) {
+        bad.push(`${id}/manifest.json does not parse: ${err.message}`);
+      }
+    }
+    if (bad.length) fail(`${bad.join('; ')} - a package the store cannot read is a server that boots and then refuses /effects`);
+    else console.log(`  effects/ all ${ids.length} shipped packages parse and name themselves`);
   }
 }
 

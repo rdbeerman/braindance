@@ -1,0 +1,44 @@
+{
+  "format": 1,
+  "id": "streak",
+  "version": "1.0.0",
+  "title": "Streak",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "streak",
+      "panel": {
+        "group": "post",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "grade",
+        "uniform": "streak",
+        "gates": true
+      },
+      "role": "master"
+    },
+    "angle": {
+      "def": 0,
+      "min": -180,
+      "max": 180,
+      "step": 1,
+      "kind": "scalar",
+      "label": "streak angle",
+      "panel": {
+        "group": "post",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "grade",
+        "uniform": "streakAxis",
+        "transform": "axisDeg"
+      },
+      "under": "amount"
+    }
+  }
+}

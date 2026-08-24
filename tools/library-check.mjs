@@ -2213,6 +2213,11 @@ function stageServer() {
   // page error. A staged tree is supposed to be an install, and an install has the looks
   // that ship in it.
   cpSync(join(REPO, 'presets-builtin'), join(root, 'presets-builtin'), { recursive: true });
+  // The effects that ship, for the same reason one paragraph up - and a harder edge:
+  // the effect store refuses to BOOT on a missing builtin root rather than answering
+  // an empty list, precisely so a broken install cannot read as nothing-installed.
+  // A staged tree without this line is a server this tool cannot even start.
+  cpSync(join(REPO, 'effects-builtin'), join(root, 'effects-builtin'), { recursive: true });
   for (const name of ['node_modules', 'vendor']) {
     const from = join(REPO, name);
     if (existsSync(from) && !existsSync(join(root, name))) symlinkSync(from, join(root, name));
