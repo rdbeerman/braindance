@@ -83,5 +83,41 @@
       "after": "style",
       "order": 100
     }
+  ],
+  "varyings": [
+    {
+      "name": "vRain",
+      "type": "float",
+      "init": "0.0",
+      "order": 200
+    }
+  ],
+  "consumes": [
+    {
+      "service": "cell",
+      "when": "rain > 0.0",
+      "gateOrder": 200
+    }
+  ],
+  "chunks": [
+    {
+      "stage": "v.decl",
+      "order": 200,
+      "file": "decl.vert.glsl"
+    },
+    {
+      "stage": "cell",
+      "file": "cell.vert.glsl"
+    },
+    {
+      "stage": "f.decl",
+      "order": 200,
+      "file": "decl.frag.glsl"
+    },
+    {
+      "stage": "f.tone",
+      "order": 500,
+      "file": "lift.frag.glsl"
+    }
   ]
 }

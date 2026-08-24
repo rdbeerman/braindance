@@ -50,9 +50,10 @@ import { tableFromPackages, withEffectGroups } from './effect-manifests.js';
 // One number out of the halo, and nothing else. `bloom-pass.js` holds the pass and
 // `post-chain.js` is what constructs it; what this file still needs is the reference the
 // chain is frozen at, because `resize` sizes that chain and `resize` lives here. The two
-// GLSL programs went the same way - `point-cloud.js` imports them from `cloud-shader.js`
-// directly, and both modules stay reachable through the ones that use them rather than
-// through a name carried here.
+// GLSL programs went the same way - `point-cloud.js` reaches the spine in
+// `cloud-shader.js` and the assembler in `shader-assembly.js` directly, and all three
+// modules stay reachable through the ones that use them rather than through a name
+// carried here.
 //
 // **A name imported and not used is worse than no import**, which is why this line is one
 // binding rather than the three it was. It reads as a dependency to anyone tracing the
@@ -100,6 +101,54 @@ import {
   geometry, uniforms, material, cloud, buildPointCloud, setAdditive,
   CLIP_NEAR_DEFAULT, CLIP_FAR_DEFAULT, CROP_LIMIT, cropReach, croppedOut,
 } from './point-cloud.js';
+
+// ------------------------------------------------ the installed effects, fetched
+//
+// The registry assembles from the effect packages the server holds, and so do the cloud's
+// two shader programs, so the packages come first and the module waits for them: a
+// top-level await, because everything below - the material the point cloud is compiled
+// into, the panel spine, the parameter table, the boot-time reset - is built from what
+// arrives here, and a page that raced its own registry would be the panel and the
+// parameters disagreeing about what exists. A fetch rather than an import, deliberately:
+// `module-check` walks the static graph and data crossing it as modules would join that
+// graph as code, when what crosses here is JSON a server answered. A package that cannot
+// be fetched fails the boot loudly - `__kinect` never publishes and every tool reports
+// DID NOT RUN - which is the honest shape until the missing-effect surface exists to say
+// something better.
+//
+// **It sits at the top of the module rather than beside the registry it feeds, and what
+// moved it up here is the shaders.** `buildPointCloud` compiles the material at its banner
+// below, which is seven hundred lines above where this block used to be - so the fetch had
+// to come up rather than the cloud go down: the cloud is built after the textures and the
+// surface memory because it composes cells those two own, and that order is a property of
+// the GPU rather than of the packages. Everything after this line stays synchronous, which
+// is the half worth keeping - one await site, at the top of the module, and no second one
+// anybody has to reason about.
+//
+// The chunk files arrive with their manifest rather than in a second pass, because
+// `assembleShaders` refuses a package whose text is missing: fetching the two apart would
+// open a window in which a package exists and cannot be assembled, and the boot this await
+// exists to close is the one place that window could be entered.
+const effectPackages = await (async () => {
+  const listed = await fetch('/effects');
+  if (!listed.ok) throw new Error(`GET /effects answered ${listed.status} - the registry cannot assemble without its packages`);
+  const { effects } = await listed.json();
+  return Promise.all(effects.map(async ({ id }) => {
+    const res = await fetch(`/effects/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`GET /effects/${id} answered ${res.status} - the registry cannot assemble without its packages`);
+    const pkg = await res.json();
+    // Named once and fetched once. A manifest may point two joints at one file, and a
+    // second request for the same bytes would be a second answer to a question with one.
+    const names = [...new Set((pkg.manifest.chunks ?? []).map((c) => c.file))];
+    const texts = await Promise.all(names.map(async (name) => {
+      const chunk = await fetch(`/effects/${encodeURIComponent(id)}/file/${encodeURIComponent(name)}`);
+      if (!chunk.ok) throw new Error(`GET /effects/${id}/file/${name} answered ${chunk.status} - the cloud's shaders cannot be assembled without it`);
+      return chunk.text();
+    }));
+    pkg.chunks = Object.fromEntries(names.map((name, i) => [name, texts[i]]));
+    return pkg;
+  }));
+})();
 
 // Which of the two surfaces this page is, decided by the path. One document still
 // serves both, because there is one renderer and one image pipeline and splitting
@@ -199,7 +248,12 @@ buildSurfaceMemory();
 // program's boot rather than about the cloud - and the cells from the textures above,
 // handed over rather than reached for, so the one place the two are wired together is this
 // line.
-buildPointCloud(sourceCells);
+//
+// The packages go the same way and for the same reason. The material is assembled out of
+// the spine and whatever effects are installed, so the cloud needs them - and handing them
+// over here rather than having `point-cloud.js` fetch them keeps the module free of the
+// network, which is what lets the same assembler run under bare node in the gate.
+buildPointCloud(sourceCells, effectPackages);
 
 // And the one cell in that table the hardware fills rather than the registry or the
 // transport. `ALIASED_POINT_SIZE_RANGE` is what this GPU will actually rasterise a point
@@ -939,29 +993,6 @@ async function fitCropToTake(id, near, far) {
 // clicks, and Playwright's click waits for visibility - so a collapsible `framing` would
 // turn that row into a thirty-second timeout, which is a crash carrying no failed
 // assertion rather than a finding.
-//
-// ------------------------------------------------ the installed effects, fetched
-//
-// The registry assembles from the effect packages the server holds, so the packages
-// come first and the module waits for them: a top-level await, because everything
-// below - the panel spine, the parameter table, the boot-time reset - is built from
-// what arrives here, and a page that raced its own registry would be the panel and
-// the parameters disagreeing about what exists. A fetch rather than an import,
-// deliberately: `module-check` walks the static graph and data crossing it as
-// modules would join that graph as code, when what crosses here is JSON a server
-// answered. A package that cannot be fetched fails the boot loudly - `__kinect`
-// never publishes and every tool reports DID NOT RUN - which is the honest shape
-// until the missing-effect surface exists to say something better.
-const effectPackages = await (async () => {
-  const listed = await fetch('/effects');
-  if (!listed.ok) throw new Error(`GET /effects answered ${listed.status} - the registry cannot assemble without its packages`);
-  const { effects } = await listed.json();
-  return Promise.all(effects.map(async ({ id }) => {
-    const res = await fetch(`/effects/${encodeURIComponent(id)}`);
-    if (!res.ok) throw new Error(`GET /effects/${id} answered ${res.status} - the registry cannot assemble without its packages`);
-    return res.json();
-  }));
-})();
 
 // Where each effect parameter lands in the registry's declaration order. This is
 // the client's layout fact, not the packages': the order is load-bearing (the

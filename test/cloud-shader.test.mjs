@@ -1,8 +1,9 @@
 // Every uniform the cloud's two programs declare, against the object that feeds them.
 //
 // **This is the obligation the split created, so it arrives with the split rather than
-// after it.** The GLSL lives in `web/cloud-shader.js` and the `uniforms` table lives in
-// `web/point-cloud.js`, and nothing pairs them at runtime: three.js writes the keys it is
+// after it.** The GLSL lives in `web/cloud-shader.js` and, since the effects began
+// carrying their own, in the chunk files under `effects-builtin/`; the `uniforms` table
+// lives in `web/point-cloud.js`, and nothing pairs them at runtime: three.js writes the keys it is
 // given and ignores the rest, so a uniform declared in the shader with no key is read as
 // zero with nothing on the console, and a key with no declaration is a write per frame
 // that reaches no pixel. Both are silent, and both are exactly what a move of nine hundred
@@ -24,23 +25,45 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const WEB = join(dirname(fileURLToPath(import.meta.url)), '..', 'web');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const WEB = join(ROOT, 'web');
+const BUILTIN = join(ROOT, 'effects-builtin');
 
 /**
- * Every name declared by a `uniform` line in the two programs.
+ * Every name declared by a `uniform` line in the shipped GLSL, wherever it lives.
  *
  * One declaration carries several names - `uniform vec2 focal, center, resolution;` is
  * three - which is why this splits on the comma rather than taking one name per line.
+ *
+ * **The spine and the chunk files together, because a uniform in a package is a uniform.**
+ * Nine of the eighty-six moved out of `web/cloud-shader.js` and into the glyph and rain
+ * packages when their GLSL did, and a scan left pointing at the spine alone would have
+ * reported those nine keys as writes reaching nothing - a red row about a build with
+ * nothing wrong with it, and worse, a row that would go green again by deleting nine
+ * working parameters. The walk is over the directory rather than over a list of packages,
+ * so a chunk added next year is asked by existing.
+ *
+ * What this cannot say is that a declaration is ever *spliced* - a chunk no joint claims
+ * would be scanned here and reach no program. That is the claim
+ * `test/shader-assembly.test.mjs` holds, by flipping a byte in each chunk in turn and
+ * requiring the assembled program to move.
  */
 const declaredInGlsl = () => {
-  const source = readFileSync(join(WEB, 'cloud-shader.js'), 'utf8');
+  const sources = [readFileSync(join(WEB, 'cloud-shader.js'), 'utf8')];
+  for (const pkg of readdirSync(BUILTIN, { withFileTypes: true }).filter((e) => e.isDirectory())) {
+    for (const file of readdirSync(join(BUILTIN, pkg.name)).filter((f) => f.endsWith('.glsl'))) {
+      sources.push(readFileSync(join(BUILTIN, pkg.name, file), 'utf8'));
+    }
+  }
   const names = new Set();
-  for (const line of source.matchAll(/^\s*uniform\s+\w+\s+([^;]+);/gm)) {
-    for (const name of line[1].split(',')) names.add(name.trim());
+  for (const source of sources) {
+    for (const line of source.matchAll(/^\s*uniform\s+\w+\s+([^;]+);/gm)) {
+      for (const name of line[1].split(',')) names.add(name.trim());
+    }
   }
   return names;
 };
@@ -73,8 +96,11 @@ const keysInTable = () => {
 test('the scan finds both lists, so an equality below cannot pass on two empty sets', () => {
   // The falsification control for this file. Both sides are read by pattern, and a pattern
   // that stopped matching would leave two empty sets that are trivially equal - a green row
-  // saying nothing at all. Sixty is well under the seventy-six there are and well over
-  // anything a broken scan would return.
+  // saying nothing at all. Sixty is well under the eighty-six there are and well over
+  // anything a broken scan would return. It is deliberately not raised to catch a scan
+  // that lost the chunk files and kept the spine: seventy-seven would still clear any
+  // floor worth having, and the row that names that failure is the third one below, which
+  // lists the nine keys as writes reaching nothing rather than printing a count.
   assert.ok(declaredInGlsl().size > 60, `only ${declaredInGlsl().size} uniforms found in the GLSL`);
   assert.ok(keysInTable().size > 60, `only ${keysInTable().size} keys found in the uniforms literal`);
 });

@@ -629,10 +629,10 @@ const MUTATIONS = {
   // only observable through the block this closes, so which character a cell would have
   // drawn cannot reach a pixel once no character is drawn at all.
   'glyph-ignored': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/glyph/size.vert.glsl',
     edits: [
       ['  if (glyph > 0.0) {', '  if (false) {'],
-      ['  if (glyphMix > 0.0) {', '  if (false) {'],
+      ['  if (glyphMix > 0.0) {', '  if (false) {', 'effects-builtin/glyph/index.frag.glsl'],
     ],
     fails: 'twenty-two rows on top of the six section 1b carries on the clean tree, counted out '
       + 'because a list that undercounts sends the next reader hunting a defect that is not '
@@ -680,7 +680,7 @@ const MUTATIONS = {
   // asymmetry to prove a value is per point, this one plants a redundancy to prove one is
   // per cell.
   'glyph-hash-per-point': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/glyph/cell.vert.glsl',
     edits: [[
       '    vCellSeed = hash(dot(wc, vec3(127.1, 311.7, 74.7)));',
       '    vCellSeed = hash(dot(vec3(position.xy, 0.0), vec3(127.1, 311.7, 74.7)));',
@@ -757,7 +757,7 @@ const MUTATIONS = {
   // ratio has no scale, so a mix renders the identical image when every weight is doubled
   // where a sum does not. This is the one property the two compositions cannot share.
   'glyph-index-averages': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/glyph/index.frag.glsl',
     edits: [[
       '    float f = fract(glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
       '    float f = (glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep) '
@@ -774,7 +774,7 @@ const MUTATIONS = {
   // about - a build drawing characters from a shuffled table is a build whose tone key
   // draws noise, which is what the hash key is already for.
   'glyph-tone-ignored': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/glyph/index.frag.glsl',
     edits: [[
       '    float f = fract(glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
       '    float f = fract(0.0 * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
@@ -795,11 +795,12 @@ const MUTATIONS = {
   // `glyph.rain` goes into the no-effect bucket with the four, on the `duotone-ignored`
   // terms: a key that reads the rain cannot be observed with the rain gone.
   'rain-ignored': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/rain/lift.frag.glsl',
     edits: [
       ['  float rainLift = 1.0 - smoothstep(0.0, rainTrail / rainSpan, fract(vRain));',
         '  float rainLift = 0.0;'],
-      ['    float rainStep = floor(vRain) * 0.6180339887498949;', '    float rainStep = 0.0;'],
+      ['    float rainStep = floor(vRain) * 0.6180339887498949;', '    float rainStep = 0.0;',
+        'effects-builtin/glyph/index.frag.glsl'],
     ],
     fails: 'nine rows. The claim: glyph.rain, rain.amount, rain.speed, rain.span and rain.trail '
       + 'unexplained in the drop-one sweep, with the count at 81 of 89. The rest is the '
@@ -821,7 +822,7 @@ const MUTATIONS = {
   // No row that asks whether the rain changed the picture can see it, because every sign
   // changes the picture. It takes a fixture that can say which way.
   'rain-trail-below-the-head': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/rain/lift.frag.glsl',
     edits: [[
       '  float rainLift = 1.0 - smoothstep(0.0, rainTrail / rainSpan, fract(vRain));',
       '  float rainLift = 1.0 - smoothstep(0.0, rainTrail / rainSpan, 1.0 - fract(vRain));',
@@ -838,7 +839,7 @@ const MUTATIONS = {
   // over a degraded link. The fixture this repo ships was shot at about 9.3fps, which is
   // the condition nobody grades in and the one this row stands in.
   'rain-span-in-frames': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/rain/cell.vert.glsl',
     edits: [[
       '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
       '    vRain = (rainPhase * rainSpeed + room.y) / (rainSpan * spanSec * 30.0) '
@@ -861,7 +862,7 @@ const MUTATIONS = {
   // reference ones, so the far cloud draws one arbitrary bit of a character each instead of
   // a dot.
   'crossfade-reads-the-reference': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/glyph/mark.frag.glsl',
     edits: [[
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);',
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vSize);',
@@ -929,7 +930,7 @@ const MUTATIONS = {
   // is the one term in this expression whose absence is invisible at every weight except
   // the one the slider tops out at.
   'rain-key-counts-whole-drops': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/glyph/index.frag.glsl',
     edits: [[
       '    float rainStep = floor(vRain) * 0.6180339887498949;',
       '    float rainStep = floor(vRain);',
@@ -950,7 +951,7 @@ const MUTATIONS = {
   // pixel, and no row that reads one frame however carefully, can see it: a still of rain
   // rising and a still of rain falling are the same kind of picture. It takes two phases.
   'rain-climbs': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/rain/cell.vert.glsl',
     edits: [[
       '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
       '    vRain = (-rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
@@ -1068,7 +1069,7 @@ const MUTATIONS = {
   // renders at defaults and would move on both arms, and every other comparison here either
   // has the master raised on both sides or is not looking at a character.
   'glyph-leaks-at-zero': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/glyph/mark.frag.glsl',
     edits: [[
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);',
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx) + 0.02;',
@@ -1088,7 +1089,7 @@ const MUTATIONS = {
   // multiplier being exactly one. A term that leaked here would move all nine shipped
   // documents at once.
   'rain-leaks-at-zero': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/rain/lift.frag.glsl',
     edits: [[
       '  col *= 1.0 + rain * rainLift;',
       '  col *= 1.0 + (rain + 0.02) * rainLift;',
@@ -1179,40 +1180,59 @@ const mutatedSource = (() => {
   const spec = MUTATIONS[MUTATE];
   if (!spec) throw new Error(`unknown mutation ${MUTATE} - have ${Object.keys(MUTATIONS).join(', ')}`);
   const staged = new Map();
+  const touched = [];
   const read = (rel) => {
     if (!staged.has(rel)) staged.set(rel, readFileSync(join(REPO, rel), 'utf8'));
     return staged.get(rel);
   };
-  for (const [from, to] of spec.edits) {
-    const body = read(spec.file);
+  // **An edit may name its own file, and two edits of one mutation may name two.** The
+  // third element of an edit pair is that file, defaulting to the spec's, which is the
+  // shape `syntax-check`'s anchor row has always read and the shape `export-check` has
+  // always staged - this file ignored it, which was true by coincidence right up until the
+  // effects began carrying their own GLSL. `glyph-ignored` now switches the master off in
+  // the glyph package's vertex chunk and again in its fragment chunk, and `rain-ignored`
+  // spans two packages: the rain's own lift and the glyph field's index block, which is
+  // where the rain key is read. A staging loop that read one file would have applied the
+  // second edit to the first file, matched nothing, and refused - which is the loud
+  // direction, but it would have refused a control that is perfectly well defined.
+  for (const [from, to, where] of spec.edits) {
+    const file = where ?? spec.file;
+    const body = read(file);
     const hits = body.split(from).length - 1;
     if (hits !== 1) {
-      throw new Error(`mutation ${MUTATE} matched its anchor ${hits} times in ${spec.file}, not once: `
+      throw new Error(`mutation ${MUTATE} matched its anchor ${hits} times in ${file}, not once: `
         + `${JSON.stringify(from)}`);
     }
-    staged.set(spec.file, body.replace(from, to));
+    staged.set(file, body.replace(from, to));
+    if (!touched.includes(file)) touched.push(file);
   }
   // The panel and the module, which this tool has always served as a pair because a
   // build's `PARAMS` throws at boot on a parameter with no control in the markup - and
-  // beside them whatever file the spec actually edited. For a spec naming `main.js` that
-  // third member is the same string as `js`; for one naming a module `main.js` imports it
-  // is that module's own bytes, requested by the browser under its own path.
+  // beside them every file the spec actually edited, each at the URL a browser reaches it
+  // by. For a spec naming `main.js` that third member is the same string as `js`; for one
+  // naming a module `main.js` imports it is that module's own bytes; for one naming an
+  // effect's chunk it is the text the page fetches out of `/effects/:id/file/:name` and
+  // assembles its shader from.
   //
   // **This used to be the pair alone, and a spec naming a third file was refused outright**
   // with a note saying the pairing would be fixed when something needed it. Eighteen of the
   // entries below need it: the cloud's two GLSL programs are `web/cloud-shader.js` now, and
   // a refusal there is eighteen falsification controls that cannot run. What the refusal
   // was protecting against is real and is closed differently here - the staged edit used to
-  // be discarded at this line while `mutantPath` still resolved to the module's own path,
+  // be discarded at this line while the mutant's path still resolved to the module's own,
   // so the interception fired on a request for that module and answered it with `main.js`'s
   // unmutated bytes, which reads as a delivered mutation and asserts about code nobody
   // wrote. Serving each file at its own path is what makes that impossible rather than
   // refused.
-  return { js: read('web/main.js'), html: read('web/index.html'), mutated: read(spec.file) };
+  return {
+    js: read('web/main.js'),
+    html: read('web/index.html'),
+    mutants: touched.map((file) => ({ file, path: servedAt(file), body: read(file), type: contentTypeFor(file) })),
+  };
 })();
 
 /**
- * Where a file under `web/` is reached from a browser.
+ * Where a file this repo ships is reached from a browser.
  *
  * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
  * on the basename is a claim about a filename where the server's rule is about a path -
@@ -1220,12 +1240,42 @@ const mutatedSource = (() => {
  * anything failing. `timeline-check` carries the same function for the same reason;
  * this file keeps its own copy rather than importing one, the way every tool here
  * resolves its own `REPO` rather than sharing it.
+ *
+ * **The second branch is the effects' own GLSL, which the page fetches rather than
+ * imports.** A chunk under `effects-builtin/<id>/<name>` has no URL of its own under
+ * `web/`; it is answered by `/effects/:id/file/:name`, which is the route the boot in
+ * `web/main.js` reads it out of before `assembleShaders` splices it into the material. So
+ * a mutation that edits a chunk is delivered at the fetch rather than at the module - and
+ * from Playwright's side those are the same interception, because `page.route` sees a
+ * `fetch` exactly as it sees a script tag. Everything else is a refusal: a spec naming a
+ * file no browser asks for would install a route that never fires, which is the shape the
+ * guard at the foot of this file is about.
  */
 function servedAt(file) {
+  if (file.startsWith('effects-builtin/')) {
+    const parts = file.split('/');
+    if (parts.length !== 3) {
+      throw new Error(`${file} is not an effect package file - a chunk is <id>/<name> under effects-builtin/`);
+    }
+    return `/effects/${parts[1]}/file/${parts[2]}`;
+  }
   if (!file.startsWith('web/')) {
     throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
   }
   return `/${file.slice('web/'.length)}`;
+}
+
+/**
+ * What the server answers a file with, restated here because the interception has to
+ * answer the same way.
+ *
+ * A chunk is served `text/plain` by `server/index.js` on the argument that what the tools
+ * anchor and the client compiles is the file's own bytes; answering it as JavaScript here
+ * would be this tool inventing a second promise about the same route, which is exactly
+ * the kind of difference between a mutated arm and a clean one that gets read as a finding.
+ */
+function contentTypeFor(file) {
+  return file.endsWith('.glsl') ? 'text/plain; charset=utf-8' : 'text/javascript; charset=utf-8';
 }
 
 // The route below used to be a bare `'**/main.js'` glob, true of every mutation this
@@ -1240,15 +1290,20 @@ function servedAt(file) {
 // call site wants the same answer under `--mutate`: which file, if any, is the
 // mutated one.
 const MAIN_PATH = servedAt('web/main.js');
-const mutantPath = MUTATE ? servedAt(MUTATIONS[MUTATE].file) : MAIN_PATH;
-// Counted rather than assumed. A route that matches nothing fulfils nothing and
-// throws no error - the page simply loads the tree's own source - so the only way to
-// tell a mutation that was delivered from one that was never asked for is to watch
-// the interception fire, and it has to be watched across every page this file opens
-// under `--mutate`, not just the first: the after-arm, the pin arm and the panel arm
-// all default to the current tree's source, and any one of them failing to ask for
-// the mutated module would leave the others carrying a run that never happened.
-let mutantServed = 0;
+// Counted rather than assumed, and counted per file. A route that matches nothing
+// fulfils nothing and throws no error - the page simply loads the tree's own source -
+// so the only way to tell a mutation that was delivered from one that was never asked
+// for is to watch the interception fire, and it has to be watched across every page
+// this file opens under `--mutate`, not just the first: the after-arm, the pin arm and
+// the panel arm all default to the current tree's source, and any one of them failing
+// to ask for the mutated module would leave the others carrying a run that never
+// happened.
+//
+// **Per file rather than in total, because a mutation now edits more than one.** A sum
+// is satisfied by one of two chunks arriving, which is a half-delivered mutation
+// reported as delivered - and the half that goes missing is the one whose route was
+// wrong, so the total would be loudest exactly where it is least true.
+const mutantServed = new Map((mutatedSource?.mutants ?? []).map((m) => [m.path, 0]));
 
 const HEADED = argv.includes('--headed');
 const SOURCE_FRAMES = Number(flag('--frames', '6'));
@@ -2115,10 +2170,12 @@ async function openPage({
   // answer `/main.js` with a property of null. The mutation has to exist for there to be
   // one to serve.
   if (mutatedSource && source === mutatedSource) {
-    await page.route((url) => url.pathname === mutantPath, (route) => {
-      mutantServed++;
-      return route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: source.mutated });
-    });
+    for (const mutant of mutatedSource.mutants) {
+      await page.route((url) => url.pathname === mutant.path, (route) => {
+        mutantServed.set(mutant.path, mutantServed.get(mutant.path) + 1);
+        return route.fulfill({ contentType: mutant.type, body: mutant.body });
+      });
+    }
   }
   if (pin) {
     await page.route('**/__pinned.bin', (route) => route.fulfill({
@@ -2292,10 +2349,13 @@ const afterArm = await bootState({});
 // ordinary catch is inverted (0 caught, 1 not caught): a run that tested nothing is
 // neither of those, and reusing either code would make it unrecoverably ambiguous
 // with a real verdict.
-if (MUTATE && mutantServed === 0) {
-  console.log(`\n[registry] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
-    + 'requested it, so this run would have measured the unmutated build');
-  process.exit(2);
+if (MUTATE) {
+  const unserved = [...mutantServed].filter(([, n]) => n === 0).map(([path]) => path);
+  if (unserved.length) {
+    console.log(`\n[registry] DID NOT RUN - ${MUTATE} was staged for ${unserved.join(', ')} and the page never `
+      + 'requested it, so this run would have measured a build the mutation did not fully reach');
+    process.exit(2);
+  }
 }
 const measuredBar = await afterArm.page.evaluate(
   "Math.round(document.getElementById('appBar').getBoundingClientRect().height)");

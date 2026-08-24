@@ -313,7 +313,7 @@ const MUTATIONS = {
     "    ext: 'pngseq',\n    frameExt: null,",
   ]] },
   // The dominant screen-space term goes back to framebuffer pixels.
-  'pointsize-absolute': { file: 'web/cloud-shader.js', edits: [[
+  'pointsize-absolute': { file: 'effects-builtin/glyph/size.vert.glsl', edits: [[
     'gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);',
     'gl_PointSize = clamp(pointSize * (1.0 / max(0.15, -mv.z)), 1.0, 64.0);',
   ]] },
@@ -616,10 +616,30 @@ function mutatedSource(name) {
  * against a page.
  */
 function servedAt(file) {
+  if (file.startsWith('effects-builtin/')) {
+    // The effects' own GLSL, which the page fetches out of `/effects/:id/file/:name` and
+    // `assembleShaders` splices into the cloud's material - so a mutation that edits a
+    // chunk is delivered at the fetch rather than at a module, which from Playwright's
+    // side is the same interception.
+    const parts = file.split('/');
+    if (parts.length !== 3) {
+      throw new Error(`${file} is not an effect package file - a chunk is <id>/<name> under effects-builtin/`);
+    }
+    return `/effects/${parts[1]}/file/${parts[2]}`;
+  }
   if (!file.startsWith('web/')) {
     throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
   }
   return `/${file.slice('web/'.length)}`;
+}
+
+/**
+ * What the server answers a file with, restated here because the interception has to
+ * answer the same way: a chunk is `text/plain` in `server/index.js`, on the argument that
+ * what the tools anchor and the client compiles is the file's own bytes.
+ */
+function contentTypeFor(file) {
+  return file.endsWith('.glsl') ? 'text/plain; charset=utf-8' : 'text/javascript; charset=utf-8';
 }
 
 // ------------------------------------------------------------------- playwright
@@ -1048,7 +1068,13 @@ const mutation = MUTATE ? mutatedSource(MUTATE) : null;
 // parameter for: a cross-build arm passes its own older `main.js` and must not be handed
 // this run's mutated one, while every other staged module is a file that arm's build never
 // imports, so it can be routed on every page unconditionally.
-const pageMutants = (mutation ?? []).filter((m) => m.file.startsWith('web/'));
+// **Reachable in a browser is no longer `web/` alone.** An effect package's chunk is
+// fetched out of `/effects/:id/file/:name` and assembled into the cloud's material, so a
+// mutation editing one is a page mutation in every sense that matters here - and a filter
+// that still read `web/` would drop it silently into the server-mutation bucket, where
+// nothing serves it and nothing counts it.
+const inBrowser = (file) => file.startsWith('web/') || file.startsWith('effects-builtin/');
+const pageMutants = (mutation ?? []).filter((m) => inBrowser(m.file));
 const mutatedBody = pageMutants.find((m) => m.file === 'web/main.js')?.body ?? null;
 const otherMutants = pageMutants.filter((m) => m.file !== 'web/main.js');
 // The path this mutation would arrive at if a browser asked for it, read off the
@@ -1141,7 +1167,7 @@ async function openPage(viewport, source = mutatedBody, html = null) {
     await page.route((url) => url.pathname === path, (route) => {
       mutantServed++;
       mutantServedBy.set(mutant.file, mutantServedBy.get(mutant.file) + 1);
-      route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: mutant.body });
+      route.fulfill({ contentType: contentTypeFor(mutant.file), body: mutant.body });
     });
   }
   if (source) {

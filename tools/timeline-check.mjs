@@ -270,7 +270,7 @@ const MUTATIONS = {
   // the accumulators hold over `cascade` is the wave moving through them, so a wave that
   // does not move leaves a pre-roll with nothing to warm. That is the same reading the note
   // above `CASCADE_LOOK` arrives at from the other side.
-  'rain-phase-unread': { file: 'web/cloud-shader.js', edits: [[
+  'rain-phase-unread': { file: 'effects-builtin/rain/cell.vert.glsl', edits: [[
     '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
     '    vRain = (0.0 * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
   ]] },
@@ -311,10 +311,30 @@ function mutatedSource() {
  * anything failing.
  */
 function servedAt(file) {
+  if (file.startsWith('effects-builtin/')) {
+    // The effects' own GLSL, which the page fetches out of `/effects/:id/file/:name` and
+    // `assembleShaders` splices into the cloud's material - so a mutation that edits a
+    // chunk is delivered at the fetch rather than at a module, which from Playwright's
+    // side is the same interception.
+    const parts = file.split('/');
+    if (parts.length !== 3) {
+      throw new Error(`${file} is not an effect package file - a chunk is <id>/<name> under effects-builtin/`);
+    }
+    return `/effects/${parts[1]}/file/${parts[2]}`;
+  }
   if (!file.startsWith('web/')) {
     throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
   }
   return `/${file.slice('web/'.length)}`;
+}
+
+/**
+ * What the server answers a file with, restated here because the interception has to
+ * answer the same way: a chunk is `text/plain` in `server/index.js`, on the argument that
+ * what the tools anchor and the client compiles is the file's own bytes.
+ */
+function contentTypeFor(file) {
+  return file.endsWith('.glsl') ? 'text/plain; charset=utf-8' : 'text/javascript; charset=utf-8';
 }
 
 // ------------------------------------------------------------------- playwright
@@ -547,7 +567,7 @@ if (MUTATE) {
   mutantPath = servedAt(file);
   await page.route((url) => url.pathname === mutantPath, (route) => {
     mutantServed++;
-    route.fulfill({ contentType: 'text/javascript; charset=utf-8', body });
+    route.fulfill({ contentType: contentTypeFor(file), body });
   });
   console.log(`[timeline] MUTATED BUILD: ${MUTATE} in ${file} at ${mutantPath} - this run is expected to FAIL`);
 }

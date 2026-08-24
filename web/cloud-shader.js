@@ -1,25 +1,53 @@
-// The two programs a depth sample is drawn by, as source text and nothing else.
+// The core of the two programs a depth sample is drawn by, and the joints the installed
+// effects are spliced into.
 //
-// There is no arithmetic here, nothing is constructed and nothing is imported: this file
-// is what the point cloud's material is compiled from, lifted whole out of `main.js` so
-// that nine hundred lines of GLSL stop sitting between the uniforms that feed them and
-// the hundred places that write those uniforms. Neither program interpolates anything -
-// there is no `${}` in either literal - so the text below is exactly what the driver is
-// handed, and it stays that way: a shader that needs a value from JavaScript takes it as
-// a uniform, which is the boundary the uniform block is for and the reason this could
-// move at all.
+// There is no arithmetic here, nothing is constructed and nothing is imported: what this
+// file exports is source text, in ordered segments, and `web/shader-assembly.js` joins
+// those segments to whatever the effect packages bring to produce the two strings three.js
+// is handed. Neither program interpolates anything - there is no `${}` in any segment -
+// so the text below is exactly what the driver is handed, and it stays that way: a shader
+// that needs a value from JavaScript takes it as a uniform, which is the boundary the
+// uniform block is for and the reason any of this could move at all.
 //
-// **What the move costs is the pairing, and it is worth naming here rather than being
-// discovered.** Every `uniform` declared below has to have a key in the `uniforms` object
-// in `main.js`, and nothing enforces that in either direction. A uniform with no key is
-// silent: three.js simply never writes it, the shader reads zero, and the look is subtly
-// wrong with nothing on the console. A key with no uniform is dead weight that costs a
-// slider's write on every frame it is animated. Measured across the split: 86 declared
-// here, 86 keys there, and the two sets are equal both ways. That equality is a fact
-// about today rather than something this file can hold, so a term added to one side
-// belongs in the same commit as the other.
+// **The text did not change when the joints arrived, and that is measured rather than
+// intended.** `test/shader-assembly.test.mjs` assembles this spine against the shipped
+// packages read off disk and asserts the two strings equal the two literals this file used
+// to hold, taken out of the last revision carrying them - so an edit here that moves a byte
+// is a red row naming which program moved, and a chunk file edited by one byte is the
+// control beside it. Until an effect actually differs from what the monolith drew, "the
+// look is unchanged" is a thing a check says rather than a thing a commit message claims.
+//
+// **A joint is one of four kinds, and `web/shader-assembly.js` carries what each is for.**
+// A `stage` takes any number of chunks in declared order, a `slot` takes one and carries
+// the text to use when nothing claims it, a `service` is a gate this file opens and the
+// consumers fill, and a `varyings` entry is generated from the packages' own declarations.
+// The comments below say why each joint is where it is, because a cut through a shader is
+// a claim about what belongs to an effect and what belongs to every point in the frame -
+// and the second class is the one that goes wrong quietly.
+//
+// **What the split costs is the pairing, and it is worth naming here rather than being
+// discovered.** Every `uniform` in the assembled programs has to have a key in the
+// `uniforms` object in `web/point-cloud.js`, and nothing enforces that in either
+// direction. A uniform with no key is silent: three.js simply never writes it, the shader
+// reads zero, and the look is subtly wrong with nothing on the console. A key with no
+// uniform is dead weight that costs a slider's write on every frame it is animated.
+// Measured across the split: 86 distinct uniforms in the assembled pair, 86 keys there,
+// and the two sets are equal both ways - 77 of them declared in the segments below and 9
+// in the glyph and rain packages' own declaration chunks. That equality is a fact about
+// today rather than something this file can hold, so a term added to one side belongs in
+// the same commit as the other, and `test/cloud-shader.test.mjs` asks it of the assembled
+// text rather than of this file, which is what keeps a uniform arriving in a package
+// inside the question.
 
-export const vertexShader = /* glsl */ `
+// Each entry frozen as well as the list, because the spine is read by two callers that
+// share one object - the page's material and the gate - and a segment somebody trimmed in
+// place would move the look of one and the verdict of the other in the same breath.
+const frozen = (entries) => Object.freeze(entries.map((e) => Object.freeze(e)));
+
+export const cloudSpine = Object.freeze({
+  vertex: frozen([
+    { text: /* glsl */ `\
+
 precision highp float;
 precision highp usampler2D;
 
@@ -41,23 +69,13 @@ uniform float pointSize, nearClip, farClip, time, edgeTol;
 uniform float cropL, cropR, cropB, cropT, cropOn, cropOutside;
 uniform float noise, noiseScale, noiseSpeed;
 uniform float lattice, latticeCell;
-// The glyph field's master, which this stage needs for one thing only - growing the
-// sprite into the cell the lattice already cut. Which character gets drawn is decided in
-// the fragment stage, because it keys on a luminance that does not exist until the colour
-// is built, so the other three weights are declared there and not here.
-uniform float glyph;
-// The rain, which is a colour term rather than a property of the alphabet and so has its
-// own four parameters. Three of them are read here because the scalar the whole thing
-// rests on is a function of world height, which only this stage knows; rainTrail shapes
-// the brightness and is read in the fragment stage beside the colour it lifts.
-uniform float rain, rainSpeed, rainSpan;
-// Program time again, and it is a second cell holding the same number rather than a reuse
-// of time on purpose. The rain has to be a pure function of program time or a seek lands
-// where playback never would, and the control that holds that claim -
-// timeline-check --mutate rain-accumulates - has to be able to integrate exactly one
-// line. Mutating time itself would redden the ripple, the glitch and the raster along
-// with it, and a control that fails everything cannot say which claim is load-bearing.
-uniform float rainPhase;
+` },
+    // The uniforms an effect declares for this stage, above the region's block because
+    // that is where the two that use it were written. A package adds its own `uniform`
+    // lines here and nothing else: a term that needs a value from the registry needs a
+    // cell to read it out of, and this is where the cell is named.
+    { stage: 'v.decl' },
+    { text: /* glsl */ `\
 uniform vec3 regionCentre, regionHalf;
 uniform float regionRound, regionSoft, regionPush, regionNoise, regionMask;
 uniform float ripple, rippleFreq, rippleSpeed;
@@ -78,8 +96,14 @@ out float vGhost;
 out float vFade;
 out float vMask;
 out float vSpeed;
-out float vCellSeed;
-out float vRain;
+` },
+    // The channels an effect carries to the fragment stage, declared from the packages'
+    // `varyings` rather than written out, so this `out` and the `in` far below cannot
+    // come apart. `vCellNorm` is deliberately not one of them: it is the energy
+    // compensation the lattice needs, it is written unconditionally below, and it belongs
+    // to every point in the frame rather than to any effect.
+    { varyings: 'out' },
+    { text: /* glsl */ `\
 out float vCellNorm;
 
 float depthAt(usampler2D tex, ivec2 p) {
@@ -210,8 +234,15 @@ void main() {
   // normalisation at one is a multiply that changes no alpha. That third one is written
   // unconditionally further down rather than under a gate, so what its initialisation
   // covers is the early returns alone.
-  vCellSeed = 0.0;
-  vRain = 0.0;
+` },
+    // The same declarations again as the value that makes each consumer inert, and this
+    // is the half that has to sit here rather than where the varyings are computed. There
+    // are three early returns above this line and a whole branch - the ghost - that never
+    // reaches the block below, so a varying only written on the live path is undefined
+    // everywhere else, and undefined in a shader is whatever the last invocation left in
+    // the register.
+    { varyings: 'init' },
+    { text: /* glsl */ `\
   vCellNorm = 1.0;
 
   if (aSlot > 0.5) {
@@ -397,25 +428,23 @@ void main() {
   // is exactly the sensor-to-levelled rotation and cannot come apart from the one the snap
   // uses. Gated on the two masters together because neither consumer exists below them and
   // the block is a mat3 multiply and two hashes on every point in the frame.
-  if (glyph > 0.0 || rain > 0.0) {
+` },
+    // Which cell of the room this point fell in, computed once for everything that keys
+    // on the lattice's own grid. The gate is generated from the `when` of every consumer
+    // rather than written out, which is the property that makes it right by construction:
+    // a build with neither consumer installed does not pay a mat3 multiply and two hashes
+    // on every point in the frame, and a build with one pays for one. The body is the
+    // room-space position and the cell index, because those are what "which cell" means
+    // and every consumer needs both.
+    {
+      service: 'cell',
+      indent: '  ',
+      body: /* glsl */ `\
     vec3 room = mat3(modelMatrix) * p0;
     vec3 wc = floor(room / latticeCell + 0.5);
-    vCellSeed = hash(dot(wc, vec3(127.1, 311.7, 74.7)));
-    // Counted in whole drops rather than wrapped into one, so that the fragment stage can
-    // read both halves of the same number off one varying: the fraction is how far above
-    // the last head this point sits, which is the brightness, and the integer is how many
-    // heads have already gone past it, which is the scramble. Wrapping here would throw
-    // the counter away and cost a second varying to get it back.
-    //
-    // Heads descend, so world height enters with the same sign program time does and a
-    // point standing still watches the coordinate climb. One head every rainSpan metres
-    // down each column rather than a single head wrapping over the whole room: a column
-    // always has two or three running, where one head spends half its cycle below the
-    // floor with the room dark behind it. The per-column offset is a hash of the cell's
-    // own x and z, so neighbouring columns are out of step and the room does not pulse as
-    // a single plane.
-    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));
-  }
+`,
+    },
+    { text: /* glsl */ `\
 
   // Gated because it is the most expensive thing in this shader: eight hashes of three
   // sines each, against the six the old sine field cost. A look with no turbulence pays
@@ -583,35 +612,20 @@ void main() {
   // control off rather than move it.
   float dist = max(0.15, -mv.z);
   float cellPx = latticeCell * projectionMatrix[1][1] * 540.0 / dist;
-  // **The sprite grows into its cell as the master rises**, so one character stands for one
-  // cube of room, which is the whole reading the cube variant of this was chosen for. A
-  // 5.5cm cell a metre away is about 64 reference pixels where pointSize 9 is 9, so the
-  // two are nowhere near each other and something had to give; blending rather than
-  // switching is what keeps pointSize meaning something at every value in between.
-  //
-  // **The ceiling on the glyph branch is the hardware's and not the literal 64**, because a
-  // cell-sized sprite reaches 64 pixels at a metre and that is where a person stands. Past
-  // that the sprite would stop growing while the cell kept growing, so characters would
-  // stop filling their cells, the tiling would open up, and spriteWorld / cell would stop
-  // being 1 at full glyph - which is the property the energy compensation in the fragment
-  // stage rests on. The clamp is in framebuffer pixels, so that failure moves with output
-  // size: the same look that opens gaps at a metre on screen opens them at two metres in a
-  // 4K export, which is exactly the drift the 1080p reference unit exists to stop.
-  //
-  // **The old statement survives verbatim on the else branch, and that departs from the
-  // design document on purpose.** The document replaces the literal 64 outright. It is kept
-  // here because no shipped look reaches it - pointSize tops out at 9 across all nine, so
-  // 64 needs a subject 14cm from the sensor, nearer than a Kinect v2 will range - and
-  // because leaving the statement textually alone is what keeps the old path byte-identical
-  // across output sizes and keeps export-check's anchor alive. What the document is right
-  // about is the case it was written for, which is the grown sprite, and that case is the
-  // branch above.
-  if (glyph > 0.0) {
-    float base = clamp(pointSize * k / dist, 1.0, 64.0);
-    gl_PointSize = clamp(mix(base, cellPx * k, glyph), 1.0, pointCeiling);
-  } else {
-    gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);
-  }
+` },
+    // How big the sprite is drawn, and the one joint here that is a replacement rather
+    // than an addition: an effect that grows the sprite into something other than a point
+    // has to stand where the clamp stood, not beside it. The fallback is that clamp,
+    // exactly as it was written before anything claimed this - pixels at 1080p over the
+    // view distance, floored at one framebuffer pixel and ceilinged at the literal 64 -
+    // and the long argument for both bounds is in the comment above `dist`.
+    {
+      slot: 'v.pointSize',
+      fallback: /* glsl */ `\
+  gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);
+`,
+    },
+    { text: /* glsl */ `\
   // Carried in reference pixels rather than framebuffer ones, because the fragment
   // shader normalises a splat's additive energy against its area. For the same
   // image at twice the size each point covers four times the pixels, so it has to
@@ -699,9 +713,11 @@ void main() {
   // because brightness has to be invariant to output size where legibility cannot be.
   vLegiblePx = gl_PointSize / max(k, 1.0);
 }
-`;
+` },
+  ]),
+  fragment: frozen([
+    { text: /* glsl */ `\
 
-export const fragmentShader = /* glsl */ `
 precision highp float;
 
 uniform sampler2D colorPrev, colorCurr;
@@ -711,15 +727,13 @@ uniform float duotoneDepth, duotoneHue, duotoneSplit, duotoneSpan, duotoneMotion
 uniform float readRgb, readDepth, readGhost, readContour, readBlackwall;
 uniform float rgbSaturation, depthGamma, ghostRim, ghostFill;
 uniform float contourBands, contourLo, contourHi, blackwallSweep;
-// The glyph field's master and its three keys. The master is declared in both stages
-// because it does two things that belong at two stages - it grows the sprite up there and
-// it crossfades the mark here - and the three keys are here alone, because the character
-// index is decided beside the colour it reads.
-uniform float glyph, glyphTone, glyphHash, glyphRain;
-// The rain's brightness and the two lengths that shape it. The speed is not here: how fast
-// a head falls only enters through the scalar the vertex stage already computed, where the
-// world height it is a rate against lives.
-uniform float rain, rainSpan, rainTrail;
+` },
+    // The uniforms an effect declares for this stage. A term is declared in the stage
+    // that reads it and in both when both read it, which is why the glyph field's master
+    // appears here as well as in the vertex stage: it grows the sprite up there and
+    // crossfades the mark down here.
+    { stage: 'f.decl' },
+    { text: /* glsl */ `\
 uniform int hasColor, softEdge;
 
 in vec2 vUv;
@@ -732,116 +746,21 @@ in float vGhost;
 in float vFade;
 in float vMask;
 in float vSpeed;
-in float vCellSeed;
-in float vRain;
+` },
+    // The far end of the channels the vertex stage declared, from the same `varyings`
+    // entries, in the same order.
+    { varyings: 'in' },
+    { text: /* glsl */ `\
 in float vCellNorm;
 
 out vec4 fragColor;
 
-// The alphabet, as sixty-four 8x8 bitmasks held in the shader source.
-//
-// **There is no atlas, no texture and no fetch, and that is a decision about boot rather
-// than about memory.** This renderer loads no static image: every texture it binds is built
-// out of frame bytes in web/gpu-textures.js, so an atlas would be the first file the render
-// path ever went and got - a route on the server to serve it, a load order to get right, a
-// question about what the shader draws in the frames before it arrives, and the same
-// question again inside the headless browser tools/render-worker.mjs drives, where a missing
-// asset is a deliverable with no characters in it rather than a visible error. A table in
-// the source has none of those states, because it is there the moment the shader compiles.
-// The other thing it buys is that the alphabet is reviewable: a bitmask is a diff a person
-// can read, where an atlas is a binary nobody looks inside.
-//
-// 8x8 rather than the 5x6 the probe drew, and the size is the whole reason for it. 5x6
-// draws latin, digits and symbols and cannot draw kana, which would put the reference
-// look's own alphabet permanently out of reach. 8x8 is what the home computers of the
-// eighties drew kana at, so it is the smallest grid that keeps the option, and two
-// unsigned ints carry one character exactly.
-//
-// **Sorted by ink, sparsest first, which is what lets three keys share one table.** A
-// luminance ramp is ASCII art and only works if the index means ink, so that a bright cell
-// draws a dense character and a dark one draws a sparse one; a hash and a rain counter want
-// the index to mean nothing, because looking like noise is their whole job. Sorting by ink
-// dissolves that rather than resolving it - the tone key reads the table as tone and the
-// hash key reads the same table as noise, and both readings are true of it at once - so no
-// parameter has to choose between them, which matters because a chooser would be an enum
-// and this registry has refused those since the region's shape control, on the grounds that
-// an enum cannot keyframe and a slider can. What it costs is a latin tone ramp: a luminance
-// sweep now runs through kana, so the picture is ASCII art drawn in an alphabet that is not
-// ASCII.
-//
-// Packed with x holding rows 0 to 3 and y holding rows 4 to 7, row 0 at the top, and within
-// a word the bit at row * 8 + col with column 0 on the left. **Column 7 and row 7 are clear
-// in every one of the sixty-four**, and that is where the margin between neighbouring cells
-// comes from rather than from a parameter: an 8x8 character does not fill its own 8x8 box,
-// so cells tile while the marks inside them do not touch, which is how the reference frames
-// actually look - characters with dark between them rather than a solid wall of ink.
-const uvec2 GLYPHS[64] = uvec2[64](
-  uvec2(0x00080800u, 0x00000000u), // '  apostrophe  ink 2
-  uvec2(0x00000000u, 0x000c0c00u), // .  period  ink 4
-  uvec2(0x00141400u, 0x00000000u), // "  quote  ink 4
-  uvec2(0x04081000u, 0x00001008u), // <  less-than  ink 5
-  uvec2(0x10080400u, 0x00000408u), // >  greater-than  ink 5
-  uvec2(0x3e000000u, 0x00000000u), // -  hyphen  ink 5
-  uvec2(0x00000000u, 0x00060c0cu), // ,  comma  ink 6
-  uvec2(0x00000000u, 0x007f0000u), // _  underscore  ink 7
-  uvec2(0x08040201u, 0x00402010u), // \  backslash  ink 7
-  uvec2(0x08080808u, 0x00080808u), // |  vertical bar  ink 7
-  uvec2(0x08102040u, 0x00010204u), // /  slash  ink 7
-  uvec2(0x10204300u, 0x00000408u), // ン  katakana N  ink 7
-  uvec2(0x000c0c00u, 0x00000c0cu), // :  colon  ink 8
-  uvec2(0x0c081020u, 0x0008080au), // イ  katakana I  ink 9
-  uvec2(0x10204442u, 0x00020408u), // ソ  katakana SO  ink 9
-  uvec2(0x3e080800u, 0x00000808u), // +  plus  ink 9
-  uvec2(0x000c0c00u, 0x00060c0cu), // ;  semicolon  ink 10
-  uvec2(0x003e0000u, 0x0000003eu), // =  equals  ink 10
-  uvec2(0x08080c08u, 0x001c0808u), // 1  digit one  ink 10
-  uvec2(0x10204a0au, 0x00020408u), // ツ  katakana TSU  ink 10
-  uvec2(0x14240404u, 0x0004040cu), // ト  katakana TO  ink 10
-  uvec2(0x23400300u, 0x00060810u), // シ  katakana SHI  ink 10
-  uvec2(0x003c0000u, 0x00007f00u), // ニ  katakana NI  ink 11
-  uvec2(0x02020202u, 0x003e0202u), // L  latin L  ink 11
-  uvec2(0x0808081cu, 0x001c0808u), // I  latin I  ink 11
-  uvec2(0x0808083eu, 0x00080808u), // T  latin T  ink 11
-  uvec2(0x0810203eu, 0x00040404u), // 7  digit seven  ink 11
-  uvec2(0x1c2a0800u, 0x0000082au), // *  asterisk  ink 11
-  uvec2(0x10107f00u, 0x00081010u), // ナ  katakana NA  ink 12
-  uvec2(0x1020223eu, 0x00020408u), // ク  katakana KU  ink 12
-  uvec2(0x2020407eu, 0x00040810u), // フ  katakana FU  ink 12
-  uvec2(0x22222222u, 0x000c1020u), // リ  katakana RI  ink 12
-  uvec2(0x22420202u, 0x00060a12u), // レ  katakana RE  ink 12
-  uvec2(0x44242800u, 0x00414242u), // ハ  katakana HA  ink 12
-  uvec2(0x0202221cu, 0x001c2202u), // C  latin C  ink 13
-  uvec2(0x2040427eu, 0x00040810u), // ワ  katakana WA  ink 13
-  uvec2(0x20427e08u, 0x00040810u), // ウ  katakana U  ink 13
-  uvec2(0x040c1424u, 0x007c0404u), // ヒ  katakana HI  ink 14
-  uvec2(0x0c08103eu, 0x00402112u), // ス  katakana SU  ink 14
-  uvec2(0x1020221cu, 0x003e0408u), // 2  digit two  ink 14
-  uvec2(0x1810201eu, 0x001c2220u), // 3  digit three  ink 14
-  uvec2(0x1e02023eu, 0x00020202u), // F  latin F  ink 14
-  uvec2(0x20203e00u, 0x003e2020u), // コ  katakana KO  ink 14
-  uvec2(0x24247e00u, 0x00020c10u), // ア  katakana A  ink 14
-  uvec2(0x2c20223eu, 0x00040810u), // タ  katakana TA  ink 14
-  uvec2(0x0810203eu, 0x003e0204u), // Z  latin Z  ink 15
-  uvec2(0x087f003cu, 0x00040808u), // テ  katakana TE  ink 15
-  uvec2(0x0e10207fu, 0x00101008u), // マ  katakana MA  ink 15
-  uvec2(0x107f1212u, 0x00081010u), // サ  katakana SA  ink 15
-  uvec2(0x22242424u, 0x00612122u), // ル  katakana RU  ink 15
-  uvec2(0x22242830u, 0x0020203eu), // 4  digit four  ink 15
-  uvec2(0x08083e00u, 0x007f0808u), // エ  katakana E  ink 16
-  uvec2(0x207f003cu, 0x00060810u), // ラ  katakana RA  ink 16
-  uvec2(0x2222221cu, 0x001c2222u), // 0  digit zero  ink 16
-  uvec2(0x201e023eu, 0x001c2220u), // 5  digit five  ink 17
-  uvec2(0x3c22221cu, 0x001c2220u), // 9  digit nine  ink 17
-  uvec2(0x4244447cu, 0x00011922u), // カ  katakana KA  ink 17
-  uvec2(0x18107f10u, 0x00191214u), // オ  katakana O  ink 18
-  uvec2(0x1e02023eu, 0x003e0202u), // E  latin E  ink 18
-  uvec2(0x2a2a3622u, 0x00222222u), // M  latin M  ink 18
-  uvec2(0x3c20203eu, 0x003e2020u), // ヨ  katakana YO  ink 18
-  uvec2(0x7f107f10u, 0x00040808u), // キ  katakana KI  ink 19
-  uvec2(0x1c087f08u, 0x00084936u), // ホ  katakana HO  ink 20
-  uvec2(0x2222223eu, 0x003e2222u)  // ロ  katakana RO  ink 20
-);
-
+` },
+    // Whatever an effect needs at file scope: a table, a helper, a constant array. Above
+    // the ramps rather than below them because a helper has to be declared before the
+    // function that calls it in GLSL, and `main` is at the bottom.
+    { stage: 'f.helpers' },
+    { text: /* glsl */ `\
 // Black through red and orange to white, the palette a thermal camera writes rather
 // than the cool-to-warm one depthRamp uses - the two are deliberately different, so
 // that thermal on top of Depth mode is a second reading and not the same one twice.
@@ -893,52 +812,29 @@ void main() {
   vec2 d = gl_PointCoord - 0.5;
   float r2 = dot(d, d);
 
-  // How much of the mark is a character rather than a round splat, worked out here
-  // because the discard below has to know about it and finished a long way down, where the
-  // luminance the character index keys on finally exists.
-  //
-  // **The distance term multiplies into the master rather than clamping the sprite**, and
-  // that is what protects the recession. A cell four metres from the sensor projects to
-  // about six pixels, and an 8x8 bitmask sampled across six pixels is not a small
-  // character - it is a different random set of bits every time the camera moves, which
-  // bloom then amplifies. Clamping the sprite to a legible minimum would keep every cell
-  // readable at any range, but far cells would stop being cell-sized and start
-  // overlapping, which collapses the perspective recession at depth into exactly the flat
-  // screen grid this design was chosen over. So the mark stops trying to be legible and
-  // the geometry never stops being true, and it does it by reusing the blend the master
-  // already is rather than adding a mechanism that could go out of step with it.
-  //
-  // The two ends are the font's own sampling limits: at 8 the 8x8 grid gets one pixel per
-  // font cell, which is where the bits start aliasing into speckle, and at 16 it gets two
-  // and the character resolves. The design document says the fallback is somewhere below
-  // about ten pixels, which is inside this band rather than at either end of it.
-  //
-  // **What the two numbers are pixels *of* is the whole of what the vertex stage works out
-  // above**, and it is neither of this renderer's two existing references on its own. Below
-  // 1080 they are framebuffer pixels, because aliasing is a fact about the samples that
-  // exist and a mark cannot resolve on texels it does not have. At and above 1080 they are
-  // reference pixels, because the boundary between text and texture is a property of the
-  // look and a 4K export has to draw the same picture the grade was made on. The band is
-  // therefore stated once and read against whichever limit is nearer.
-  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);
-
+` },
+    // What shape the mark is, which is a replacement for the same reason the point size
+    // is: an effect drawing something other than a round splat needs the disc test to
+    // stop cutting its corners, and a second test beside the first would be two answers
+    // to one question. The fallback is the pair that stood here before anything claimed
+    // it - the discard on the hard-edged branch, then the falloff - and it is the text
+    // that shipped rather than a reconstruction of it.
+    {
+      slot: 'f.mark',
+      fallback: /* glsl */ `\
   // Additive mode shapes the sprite purely with alpha falloff. Skipping the
   // discard keeps Apple's tile-based hidden-surface removal working.
-  //
-  // **The disc the hard-edged branch cuts would take the corners off a character**, so it
-  // is asked about the glyph first. At a glyphMix of exactly zero - which is every value of
-  // every look that does not draw characters, because the master multiplies - the condition
-  // collapses to the test that has always been here and the executed path is literally the
-  // old one, discard and then smoothstep. Above zero the sprite keeps its corners, and what
-  // shapes it is the bitmask rather than the disc.
   float falloff;
   if (softEdge == 1) {
     falloff = exp(-r2 * 9.0);
   } else {
-    if (glyphMix <= 0.0 && r2 > 0.25) discard;
+    if (r2 > 0.25) discard;
     falloff = smoothstep(0.25, 0.02, r2);
   }
 
+`,
+    },
+    { text: /* glsl */ `\
   float t = clamp((vDepth - nearClip) / max(0.001, farClip - nearClip), 0.0, 1.0);
   vec3 rgb = hasColor == 1
     ? mix(texture(colorPrev, vUv).rgb, texture(colorCurr, vUv).rgb, mixT)
@@ -1274,92 +1170,19 @@ void main() {
   // than reasoning about what a branch did to the contractions around it.
   col += vec3(0.2, 0.9, 1.0) * vGlitch;
 
-  // **The rain, which is a colour term rather than a property of the alphabet.** It sits
-  // here for the reason thermal, the edges and the duotone above it do - a term written
-  // into one reading is inert in every other one - and it is a term of its own rather than
-  // a setting inside the glyph field because the brightness *is* the effect. What the
-  // reference clips show carrying the picture is a drop head descending a column with a
-  // trail of afterglow above it; scrambling on its own is invisible, since which character
-  // a cell draws is noise either way. Filed inside the glyph field, a wave descending
-  // through the room would have been unreachable for any look that was not drawing text -
-  // including voxel, which now gets it for nothing.
-  //
-  // It is below the flare rather than above it so that the line the flare's own comment
-  // measured keeps the neighbours it was measured beside, and because a torn band is
-  // emitted light: the rain lifts what the cell actually draws, flare included, and the
-  // tone key one block down reads the same colour the frame gets.
-  //
-  // vRain counts whole drops, so its fraction is how far above the last head this point
-  // stands as a share of the span, and the trail arrives in metres and is converted into
-  // that same share. **The trail sits above the head and not below it**, which is what
-  // makes the wave read as falling rather than as a band sliding through: the lift is 1 at
-  // the head and decays upward over rainTrail metres, and a point just under a head is a
-  // whole span below the next one and so is dark.
-  //
-  // Unconditional and written straight through, on the flare's own measurement above: at a
-  // rain of 0 the multiplier is exactly 1.0 whether or not the compiler contracts it, where
-  // a branch dropped into this path costs contractions across the lines either side of it.
-  float rainLift = 1.0 - smoothstep(0.0, rainTrail / rainSpan, fract(vRain));
-  col *= 1.0 + rain * rainLift;
-
-  // **Which character this cell draws.** Decided here rather than in the vertex stage
-  // because one of the three keys does not exist up there: the tone key is the luminance of
-  // the colour the cell is about to draw, which is the line above this one. Nothing is lost
-  // by the move - the cell seed and the rain coordinate are both constant across a sprite,
-  // so the character is too.
-  //
-  // **The three keys add and wrap rather than mixing the way the five readings do**, and
-  // the difference is forced rather than stylistic: character indices do not average.
-  // Character 3 blended half and half with character 9 is character 6, which is an
-  // unrelated symbol rather than anything between the two. A sum wrapped into the table is
-  // the only composition that leaves each weight meaning how far it moves the character,
-  // and it keeps the property the readings have, that a weight at zero contributes exactly
-  // nothing.
-  //
-  // **The tone key is scaled by 63/64 where the other two keep the pure wrap**, and that
-  // departs from the design document, which writes all three the same. Luminance is the one
-  // key with a direction: the table is sorted by ink, so a tone ramp is only a ramp if full
-  // luminance lands on the densest character. Unscaled it lands on fract(1.0), which is 0
-  // and therefore the sparsest, so the brightest point in the picture would draw an
-  // apostrophe and the top of the ramp would read as a hole in it. The hash and the rain
-  // are not scaled, because wrapping is exactly what makes them look like noise.
-  //
-  // The luminance is clamped for the same reason the scaling exists. col can leave the unit
-  // interval - the readings sum, the flare adds, and a duotone pole is hot - and an
-  // unclamped tone term would carry the top of the ramp round to the sparse end again.
-  //
-  // The rain key reads whole heads gone past rather than the continuous coordinate, because
-  // a character index that blends is a character nobody wrote. It is multiplied by the
-  // golden ratio rather than used raw, and that is not decoration: at a weight of 1 an
-  // integer counter contributes exactly nothing, since the fract of a whole number is zero,
-  // so the one setting where the key should be strongest is the one where it would be
-  // inert. An irrational step walks the table without repeating, which is what a scramble
-  // has to do.
-  if (glyphMix > 0.0) {
-    float lum = clamp(dot(col, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
-    float rainStep = floor(vRain) * 0.6180339887498949;
-    float f = fract(glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);
-    // Guarded rather than trusted. fract is below 1 by definition, but a value arriving at
-    // exactly 1.0 through a rounding would index one past the end of the table, and reading
-    // a constant array out of range in GLSL is undefined rather than an error - so the one
-    // way this could go wrong is also the way nothing would report it.
-    int idx = min(int(f * 64.0), 63);
-    uvec2 g = GLYPHS[idx];
-    // gl_PointCoord runs from the sprite's upper left, which is where row 0 and column 0 of
-    // the bitmask are, so the two grids line up without a flip anywhere. Sampled across the
-    // whole 8x8 box rather than across the ink: the clear eighth row and column are the
-    // margin, and cropping to the ink would be a parameter for something the font already
-    // says.
-    uint gc = uint(clamp(gl_PointCoord.x * 8.0, 0.0, 7.0));
-    uint gr = uint(clamp(gl_PointCoord.y * 8.0, 0.0, 7.0));
-    uint bits = gr < 4u ? g.x >> (gr * 8u + gc) : g.y >> ((gr - 4u) * 8u + gc);
-    // A hard cut rather than an antialiased one, and the crossfade above is why it can be.
-    // The mark is already blending back toward the round falloff wherever it is too small
-    // to resolve, so softening the bits as well would be a second legibility mechanism
-    // doing the first one's job - and the two would then have to be kept in step.
-    falloff = mix(falloff, (bits & 1u) == 1u ? 1.0 : 0.0, glyphMix);
-  }
-
+` },
+    // A term over the colour the readings produced, after the blend and after the flare.
+    // It is a stage rather than a slot because these compose: a term written into one
+    // reading is inert in every other one, which is the argument the thermal, the edges
+    // and the duotone above it are all arranged by, and two effects lifting the same
+    // colour is two multiplies rather than a conflict.
+    { stage: 'f.tone' },
+    // What the mark actually draws, if it draws something other than the falloff. It
+    // reads the colour above it, which is why it is here and not at either end: the one
+    // key that cannot be decided in the vertex stage is the luminance of the colour this
+    // cell is about to draw, and that does not exist until the line above.
+    { slot: 'f.glyph', fallback: '' },
+    { text: /* glsl */ `\
   // Cross-fade. A dying point thins out where it stood instead of blinking off,
   // and its replacement comes up over the same window.
   alpha *= vFade;
@@ -1452,4 +1275,6 @@ void main() {
   if (softEdge == 0 && alpha * falloff <= 0.0) discard;
   fragColor = vec4(col * exposure, alpha * falloff);
 }
-`;
+` },
+  ]),
+});

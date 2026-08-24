@@ -1365,6 +1365,35 @@ another module's text exports none of the names its importer asks for. With the 
 and `crush-ignored`, which still names `web/main.js`, fires 3 and reddens the drop-one sweep on
 `crush` — so neither path was traded for the other.
 
+**And the third file stopped being a module.** When the glyph field's and the rain's GLSL moved
+into their packages, sixteen anchors moved with it onto files no browser requests as a script:
+`effects-builtin/glyph/index.frag.glsl` and its neighbours are fetched out of
+`/effects/:id/file/:name` and spliced into the material by `assembleShaders`. Three tools grew the
+same branch — `servedAt` maps a package path to that route, and the fulfilment answers
+`text/plain` because that is what `server/index.js` answers, rather than inventing a second
+promise about one route. Two properties of the fix are worth having written down rather than
+rediscovered. **A mutation now edits more than one file, and two of them span two packages**:
+`rain-ignored` patches the rain's own colour lift and the glyph field's index block, because the
+rain key is read where the character is chosen — so `registry-check` stages per edit, honouring
+the third element of an edit pair the way `export-check` already did and `syntax-check` always
+read, and its delivery guard counts per file. A total would be satisfied by one of two chunks
+arriving, which is half a mutation measured under the whole one's name. And **`export-check`'s
+"is this a page mutation" filter was `file.startsWith('web/')`**, which silently sorted a chunk
+into the server-mutation bucket where nothing serves it and nothing counts it — the filter is a
+predicate now, and it is the same class as the `**/main.js` glob one level up.
+
+**The one that syntax-check cannot see, and the reason it is written here.** `v.pointSize` and
+`f.mark` are slots: the spine carries the text to use when nothing claims them, and the glyph
+package's chunk carries an `else` branch that is the same statement again. So
+`export-check`'s `pointsize-absolute`, whose anchor is `gl_PointSize = clamp(pointSize * k /
+max(0.15, -mv.z), 1.0, 64.0);` with no leading whitespace, went on matching **exactly once** in
+`web/cloud-shader.js` after the split — against the fallback, which is text nothing compiles while
+the glyph package is installed. The anchor row is green either way, because "matches once in the
+file it names" is true of a line nobody reaches. It was repointed at the chunk by reading the
+anchor map rather than by running the tool, and what would find the next one is the same reading:
+a slot's fallback is a second copy of the shipped text, and an anchor is only in the right one of
+the two if somebody decided which.
+
 ### A mutation can erase its own evidence
 
 `plant-open-take` originally appended its foreign bytes through a second file descriptor.

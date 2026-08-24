@@ -83,5 +83,53 @@
       "after": "points",
       "order": 100
     }
+  ],
+  "varyings": [
+    {
+      "name": "vCellSeed",
+      "type": "float",
+      "init": "0.0",
+      "order": 100
+    }
+  ],
+  "consumes": [
+    {
+      "service": "cell",
+      "when": "glyph > 0.0",
+      "gateOrder": 100
+    }
+  ],
+  "chunks": [
+    {
+      "stage": "v.decl",
+      "order": 100,
+      "file": "decl.vert.glsl"
+    },
+    {
+      "stage": "cell",
+      "file": "cell.vert.glsl"
+    },
+    {
+      "slot": "v.pointSize",
+      "file": "size.vert.glsl"
+    },
+    {
+      "stage": "f.decl",
+      "order": 100,
+      "file": "decl.frag.glsl"
+    },
+    {
+      "stage": "f.helpers",
+      "order": 100,
+      "file": "helpers.frag.glsl"
+    },
+    {
+      "slot": "f.mark",
+      "file": "mark.frag.glsl"
+    },
+    {
+      "slot": "f.glyph",
+      "file": "index.frag.glsl"
+    }
   ]
 }
