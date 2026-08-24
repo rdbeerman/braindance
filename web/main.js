@@ -46,7 +46,7 @@ import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.
 // nothing at all, which is what lets a check pull an older revision of it out of `git show`
 // and evaluate that text under bare node with no page standing around it. What turns a row
 // of it into the closure the registry stores is `effectApply`, beside `PARAMS`.
-import { tableFromPackages, withEffectGroups } from './effect-manifests.js';
+import { EFFECT_BIND_TRANSFORMS, tableFromPackages, withEffectGroups } from './effect-manifests.js';
 // One number out of the halo, and nothing else. `bloom-pass.js` holds the pass and
 // `post-chain.js` is what constructs it; what this file still needs is the reference the
 // chain is frozen at, because `resize` sizes that chain and `resize` lives here. The two
@@ -83,7 +83,7 @@ import {
 // banner below, so the moment a composer takes a pair of full-size render targets off the
 // GPU is a line in this file rather than a position in this list.
 import {
-  composer, renderPass, afterimage, bloom, grade, buildPostChain,
+  composer, renderPass, afterimage, bloom, grade, buildPostChain, setGradeProgram,
 } from './post-chain.js';
 // What a point is made of and how it is addressed: the geometry, the uniform table both
 // shaders are driven through, the material and the cloud itself. Last of the render core
@@ -98,7 +98,7 @@ import {
 // is not state leaking across a boundary - it is the only way three.js can be told
 // anything, and a setter per term would be the registry below spelled a second time.
 import {
-  geometry, uniforms, material, cloud, buildPointCloud, setAdditive,
+  geometry, uniforms, material, cloud, buildPointCloud, setAdditive, setCloudProgram,
   CLIP_NEAR_DEFAULT, CLIP_FAR_DEFAULT, CROP_LIMIT, cropReach, croppedOut,
 } from './point-cloud.js';
 // The text those two builders compile, and the concatenator that makes it. Source text and
@@ -135,7 +135,13 @@ import { assembleShaders } from './shader-assembly.js';
 // `assembleShaders` refuses a package whose text is missing: fetching the two apart would
 // open a window in which a package exists and cannot be assembled, and the boot this await
 // exists to close is the one place that window could be entered.
-const effectPackages = await (async () => {
+// A function rather than the expression it was, because there are two callers now and
+// they must be one: boot reads the store here, and a rebuild after an install reads it
+// again. A second fetch written at the install site would be the copy that stops
+// following a chunk into a second file, or stops de-duplicating, or stops refusing a
+// package that half-arrived - and the failure it produced would be a program with a
+// block missing, on a page that had been fine a second earlier.
+async function fetchEffectPackages() {
   const listed = await fetch('/effects');
   if (!listed.ok) throw new Error(`GET /effects answered ${listed.status} - the registry cannot assemble without its packages`);
   const { effects } = await listed.json();
@@ -154,7 +160,16 @@ const effectPackages = await (async () => {
     pkg.chunks = Object.fromEntries(names.map((name, i) => [name, texts[i]]));
     return pkg;
   }));
-})();
+}
+
+// **`let` and not `const`, which is the whole of what an install changes about this
+// module.** What is installed is no longer decided once at boot: `PUT /effects/:id` and
+// `DELETE /effects/:id` change the answer while the page is up, and everything assembled
+// out of these two bindings - both shader programs, the parameter table, the panel - is
+// rebuilt from them by `adoptEffectPackages` below. Nothing outside that function
+// reassigns either, which is what keeps "the packages" one answer rather than a set of
+// consumers each holding whatever it was handed.
+let effectPackages = await fetchEffectPackages();
 
 // Every program this page compiles, in one call, before either builder runs.
 //
@@ -169,7 +184,12 @@ const effectPackages = await (async () => {
 //
 // It sits beside the fetch that feeds it rather than inside either builder, because the two
 // builders run seven hundred lines apart and the packages are one answer to one question.
-const shaderPrograms = assembleShaders({ cloud: cloudSpine, grade: gradeSpine }, effectPackages);
+//
+// The spine map is named rather than written out at the call, because a rebuild assembles
+// against exactly the same map and two literals would be the way a build ends up
+// assembling two different sets of spines depending on when it was asked.
+const SPINES = { cloud: cloudSpine, grade: gradeSpine };
+let shaderPrograms = assembleShaders(SPINES, effectPackages);
 
 // Which of the two surfaces this page is, decided by the path. One document still
 // serves both, because there is one renderer and one image pipeline and splitting
@@ -1062,7 +1082,25 @@ const EFFECT_PARAM_ORDER = [
   'vignette.amount',
 ];
 
-const EFFECT_PARAMS = tableFromPackages(effectPackages, EFFECT_PARAM_ORDER);
+// **The list is the placement of the shipped set and never a census of what is
+// installed.** A package the list has never heard of is placed by `placeParams` rather
+// than refused - its parameters land contiguously after everything here, in manifest
+// order - so installing a seventeenth effect changes nothing about where any of the
+// forty-one above sit. That was a refusal until installs existed, and it had to stop
+// being one: `tableFromPackages` treated a declared name this list did not place as a
+// control the registry would silently skip, which is the right answer for somebody
+// editing a shipped manifest and the only possible answer to an install.
+//
+// Assigned by `adoptEffectPackages` rather than here, with everything else that is a
+// function of which packages are installed.
+let EFFECT_PARAMS;
+
+// The names the list above does not place, which is where a newly installed package's
+// parameters are: `placeParams` puts them after every placed name, so this is the tail
+// of the assembled table and `PARAMS` spreads it in one run at the end of the effects.
+// Empty with the shipped sixteen installed, which is what keeps the registry's
+// declaration order the bytes it was.
+const effectAppendix = () => Object.keys(EFFECT_PARAMS).slice(EFFECT_PARAM_ORDER.length);
 
 // `reveals` is the escape hatch beside it, and exactly one group needs one. A group's
 // default rule is that it is in use when its own parameters are, and `Reading · detail`
@@ -1188,7 +1226,7 @@ const CORE_PANEL_GROUPS = [
 // The spine plus every group the installed packages declare, spliced at their
 // anchors - the list every consumer below iterates, under the name they have
 // always iterated it by.
-const PANEL_GROUPS = withEffectGroups(CORE_PANEL_GROUPS, effectPackages);
+let PANEL_GROUPS;
 
 /**
  * The effect a dotted name belongs to, or null for a core parameter. The dot is the
@@ -1236,6 +1274,14 @@ const effectOf = (name) => {
  * and lands in a uniform that wanted radians, with every picture still changing and every
  * slider still moving.
  *
+ * **The two names are `EFFECT_BIND_TRANSFORMS` and the install door refuses anything
+ * else**, which is what makes the throw below unreachable from a package rather than a
+ * fence somebody could climb. The set is one binding read at both ends: a transform the
+ * door allowed and this function did not know would install cleanly and throw on its
+ * first write, which is a page that boots and then dies under a slider - the worst of the
+ * three places this could fail. The throw stays anyway, because the door is not the only
+ * way a binding reaches here.
+ *
  * The gate is composed on top rather than spelled into each of the five writes. Each post
  * pass costs a full-screen read and write whether or not it changes anything, so a term of
  * the grade at zero has to shut its pass rather than run it as a no-op - and `gradeNeeded`
@@ -1255,7 +1301,8 @@ function effectApply(bind) {
   } else if (bind.transform) {
     throw new Error(
       `the binding for ${bind.uniform} names the transform ${JSON.stringify(bind.transform)}, `
-      + 'which this applier does not know: its value would land unconverted',
+      + `which this applier does not know - it implements ${EFFECT_BIND_TRANSFORMS.join(' and ')}, `
+      + 'and an unknown one would land its value unconverted',
     );
   } else {
     write = (v) => { table()[bind.uniform].value = v; };
@@ -1294,7 +1341,26 @@ const effectSlice = (first, last) => {
   }));
 };
 
-const PARAMS = {
+/**
+ * The registry, rebuilt. `PARAMS` is a function of which packages are installed, and
+ * installing one is something that happens while the page is up - so this is a function
+ * rather than the object literal it was, and `adoptEffectPackages` is the only caller.
+ *
+ * **Every closure in it captures nothing that a rebuild replaces**, which is what makes
+ * rebuilding safe rather than a second registry sitting beside the first. An `apply`
+ * resolves its uniform table when the write happens, reads module bindings by name and
+ * holds no reference to the table it was declared in - so a control built against the old
+ * `PARAMS` and never rebuilt would still write the right cell, and one built against the
+ * new one writes the same cell. The one thing that would break that is a closure capturing
+ * `PARAMS` itself, and none does.
+ *
+ * An arrow returning the literal rather than a function with a `return` inside it, so the
+ * three hundred lines below keep the indentation they were written at. Every proof tool in
+ * the suite anchors mutations into this file by exact text, and re-indenting a table to
+ * gain a level would go stale on dozens of them at once - which `syntax-check`'s anchor row
+ * would catch, and which would still be a diff nobody could read.
+ */
+const buildParams = () => ({
   // Pixels at 1080p, not pixels. The unit changed exactly once, when the screen-
   // space terms went resolution-relative, and every value here changed with it:
   // this default and both presets are their old values times 1080/600, the 600
@@ -1607,6 +1673,23 @@ const PARAMS = {
     group: 'viewer', label: 'render %',
     apply: (v) => { renderScale = v / 100; resize(); } },
 
+  // Every parameter of every package the declaration order above has never heard of,
+  // which is where an installed effect's controls are.
+  //
+  // **Last, and that is the placement rather than an absence of one.** The seven runs
+  // above interleave the shipped effects with the core parameters because the panel
+  // builds a group's rows in registry order and the shipped groups are stages of the
+  // pipeline - and nothing here can know which stage a package that arrived this morning
+  // belongs to. What it does know is that a package's own parameters are one unit, so they
+  // arrive contiguous and in the order the manifest declares them, and the group they draw
+  // into is spliced at the anchor the package itself names. A new effect's rows are
+  // therefore in the right group and at the end of it, which is a defined place; guessing
+  // at a better one would be this file making a layout decision on a package's behalf.
+  //
+  // Empty for the shipped sixteen, so this line contributes nothing at all to the
+  // registry the presets and the scramble table are written against.
+  ...(effectAppendix().length ? effectSlice(effectAppendix()[0], effectAppendix().at(-1)) : {}),
+
   // The one composition parameter, and the only pose. The camera track reads its
   // kind off this entry rather than off a second table beside the path editor, and
   // the render path writes the evaluated pose through the same door every other
@@ -1624,13 +1707,21 @@ const PARAMS = {
         programCamera.updateProjectionMatrix();
       }
     } },
-};
+});
 
-// The readings, read off the registry rather than written down a second time. Every
-// use of the set - the shader's uniforms, the panel group, the sweep arms a proof
-// tool builds - goes through this, so adding a sixth reading means adding one
-// registry entry and nothing else discovers it late.
-const READINGS = Object.keys(PARAMS).filter((n) => PARAMS[n].reading);
+/**
+ * The registry itself, and the readings read off it rather than written down a second
+ * time. Every use of the reading set - the shader's uniforms, the panel group, the sweep
+ * arms a proof tool builds - goes through it, so adding a sixth reading means adding one
+ * registry entry and nothing else discovers it late.
+ *
+ * Both assigned by `adoptEffectPackages`. `READINGS` is a `let` beside `PARAMS` although
+ * no package can change it - a reading is core and there is no manifest that could declare
+ * one - because it is derived from a table that is rebuilt, and a set derived once from a
+ * table that is replaced is the copy that goes on describing the build before last.
+ */
+let PARAMS;
+let READINGS;
 
 /**
  * Which of the five readings a document does not name, asked at both doors a document
@@ -1663,53 +1754,66 @@ function missingReadings(values) {
   return READINGS.filter((n) => !Object.hasOwn(values, n));
 }
 
-// Each reading needs a uniform of its own name, and the two are now written in different
-// files - the registry here, the shader source in `web/cloud-shader.js` - so nothing about
-// reading one puts the other in front of you. A reading declared in the registry with no
-// uniform behind it would fail as a slider that moves nothing rather than as an
-// error. That is the shape this file keeps rejecting - a control that appears to
-// work - so it is an assertion, on the same reasoning as the age ceiling below.
-for (const name of READINGS) {
-  if (!Object.hasOwn(uniforms, name)) {
-    throw new Error(`the reading ${name} has no uniform: its slider would move nothing`);
+/**
+ * Everything the registry has to be true of, asked of the table that has just been built
+ * rather than of the one this file was written against.
+ *
+ * **They ran at module scope until installs existed, and moving them is the whole reason
+ * to bother saying so.** Each of the four is a claim about the registry and the packages
+ * agreeing, and the moment a package can arrive at runtime, a check that only ever ran
+ * while the module evaluated is a check about the sixteen this build shipped with. The
+ * install that goes wrong is by definition the one that was not there at boot.
+ *
+ * Cheap enough to run per rebuild that the count is not worth thinking about: four walks
+ * of a table of eighty, against an install that has just recompiled two shader programs.
+ */
+function refuseRegistryDisagreement() {
+  // Each reading needs a uniform of its own name, and the two are now written in different
+  // files - the registry here, the shader source in `web/cloud-shader.js` - so nothing about
+  // reading one puts the other in front of you. A reading declared in the registry with no
+  // uniform behind it would fail as a slider that moves nothing rather than as an
+  // error. That is the shape this file keeps rejecting - a control that appears to
+  // work - so it is an assertion, on the same reasoning as the age ceiling below.
+  for (const name of READINGS) {
+    if (!Object.hasOwn(uniforms, name)) {
+      throw new Error(`the reading ${name} has no uniform: its slider would move nothing`);
+    }
   }
-}
 
-// The table and the registry hold the same forty-one names, asked in both directions,
-// because the two failures are different and neither is loud on its own.
-//
-// A run left out of the seven spreads above is nine parameters that silently do not exist:
-// no slider, no track, and a project naming one refused by `specOf` as an unknown parameter
-// a long way from the line that dropped it. And a dotted name written out inline again is
-// the second implementation this file keeps refusing - it would work, which is exactly the
-// problem, because the copy is what drifts off the table the presets and the applier agree
-// on. `effectOf` draws the line between the two halves and this asks against that same
-// line, so an effect parameter added on either side is checked by existing rather than by
-// somebody remembering to come back here.
-for (const name of Object.keys(EFFECT_PARAMS)) {
-  if (!Object.hasOwn(PARAMS, name)) {
-    throw new Error(
-      `${name} is declared by an installed effect and reaches no registry entry: it would `
-      + 'be a look term with no slider and no track, and a document naming it would be refused',
-    );
+  // The table and the registry hold the same names, asked in both directions,
+  // because the two failures are different and neither is loud on its own.
+  //
+  // A run left out of the seven spreads above is nine parameters that silently do not exist:
+  // no slider, no track, and a project naming one refused by `specOf` as an unknown parameter
+  // a long way from the line that dropped it. And a dotted name written out inline again is
+  // the second implementation this file keeps refusing - it would work, which is exactly the
+  // problem, because the copy is what drifts off the table the presets and the applier agree
+  // on. `effectOf` draws the line between the two halves and this asks against that same
+  // line, so an effect parameter added on either side is checked by existing rather than by
+  // somebody remembering to come back here.
+  for (const name of Object.keys(EFFECT_PARAMS)) {
+    if (!Object.hasOwn(PARAMS, name)) {
+      throw new Error(
+        `${name} is declared by an installed effect and reaches no registry entry: it would `
+        + 'be a look term with no slider and no track, and a document naming it would be refused',
+      );
+    }
   }
-}
-for (const name of Object.keys(PARAMS)) {
-  if (effectOf(name) !== null && !Object.hasOwn(EFFECT_PARAMS, name)) {
-    throw new Error(
-      `${name} is an effect parameter written out in the registry rather than declared in `
-      + 'a manifest: it is a second copy of a binding, and the copy is what drifts',
-    );
+  for (const name of Object.keys(PARAMS)) {
+    if (effectOf(name) !== null && !Object.hasOwn(EFFECT_PARAMS, name)) {
+      throw new Error(
+        `${name} is an effect parameter written out in the registry rather than declared in `
+        + 'a manifest: it is a second copy of a binding, and the copy is what drifts',
+      );
+    }
   }
-}
 
-// The surface memory's age ceiling has to cover the longest persistence the two
-// sliders can ask for, or a ray that stops swapping pins its age below its own
-// life and sheds forever. The ceiling and the refusal about it are the memory's, so
-// what happens here is the registry handing over the one number only it can compute -
-// and it happens here rather than at the memory's own banner because `PARAMS` is
-// declared above this line and not above that one.
-refuseAgeCeiling((PARAMS.fade.max + PARAMS.wake.max) / 1000);
+  // The surface memory's age ceiling has to cover the longest persistence the two
+  // sliders can ask for, or a ray that stops swapping pins its age below its own
+  // life and sheds forever. The ceiling and the refusal about it are the memory's, so
+  // what happens here is the registry handing over the one number only it can compute.
+  refuseAgeCeiling((PARAMS.fade.max + PARAMS.wake.max) / 1000);
+}
 
 // Range inputs snap to their step grid and clamp to their bounds, and the registry
 // has to do the same arithmetic rather than lean on the DOM for it - otherwise a
@@ -1800,6 +1904,26 @@ const panelControls = new Map();
 // `const` read before its own declaration is a TDZ error rather than an empty map, so
 // the map that gets read during boot has to be declared where boot can already see it.
 const resetButtons = new Map();
+
+// What each parameter is worth in a project nobody has touched, computed once per
+// registry.
+//
+// **Through `normalise`, not against `PARAMS[n].def` raw**, and the difference is a
+// class rather than a case. `normalise` clamps, snaps to a grid anchored at `min` and
+// rounds to the decimals `min` and `step` imply, and every scalar default this build
+// declares happens to land on its own grid - so raw equality is correct today and
+// would go on being correct right up until somebody adds a parameter whose default is
+// not on its step. That group would then read as touched from boot, on a fresh page,
+// with nothing anywhere saying why. Doing it once per rebuild is what keeps the
+// arithmetic off the evaluator's path, where this is asked several times a frame - and
+// an installed effect is exactly the way a default that is not on its own step arrives,
+// since nothing about a package author's numbers went through review here.
+//
+// Declared beside the two maps above rather than beside the predicate that reads it,
+// for the reason the note on `resetButtons` gives: `buildPanel` fills it while the
+// module is still evaluating, and a `const` read before its own declaration is a TDZ
+// error rather than an empty map.
+const groupDefaults = new Map();
 
 /**
  * What a reset puts back, asked of the same function that decides what `set` stores.
@@ -2315,7 +2439,37 @@ function panelHead(group) {
 }
 
 let panelRowsEmitted = 0;
-for (const group of PANEL_GROUPS) {
+
+/**
+ * The panel, generated out of the registry - all of it, every time.
+ *
+ * **Rebuilt whole rather than patched, and that is the same argument `paintMissingEffects`
+ * makes one scale up.** An install adds a group and its rows, an uninstall takes one away,
+ * and a generator that edited in place would be a second statement of which parameters
+ * exist - the one that has to be taught about every shape of change, where this one is
+ * taught about none. The cost is a few dozen elements built twice a session, against a
+ * page that has just recompiled two shader programs.
+ *
+ * **Everything the last pass left behind is dropped first, and each of the seven maps is
+ * a name the panel is found again by.** A generated group carries `data-group` and a
+ * hand-written one carries an id, which is what makes the selector below able to remove
+ * exactly what this function made - the distinction was drawn for a different reason
+ * (id collisions) and is what makes a rebuild possible at all. A map left with its old
+ * entries is worse than a stale element: `panelControls` would hand `writeControl` an
+ * input that is no longer in the document, so every write would repaint a row nobody can
+ * see and the row that is there would show the value it had before.
+ */
+function buildPanel() {
+  for (const node of document.querySelectorAll('#panelBody > [data-group]')) node.remove();
+  panelControls.clear();
+  keyButtons.clear();
+  resetButtons.clear();
+  panelGroupNodes.clear();
+  panelGroupParams.clear();
+  panelTail.clear();
+  groupDefaults.clear();
+  panelRowsEmitted = 0;
+  for (const group of PANEL_GROUPS) {
   const groupNode = panelNode('div', group.lookgroup ? 'group lookgroup' : 'group');
   // A data attribute and not an id, because the hand-written groups in the markup
   // are already `#cameraGroup`, `#sensorGroup`, `#monitorGroup`, `#programOutGroup`,
@@ -2404,20 +2558,19 @@ for (const group of PANEL_GROUPS) {
 
   if (group.after) groupNode.append(...group.after());
   panelPlace(group, groupNode);
-}
+  }
 
-// The count, asserted rather than inferred - and this is what the old boot loop's
-// throw turned into rather than a tidier spelling of it. That loop looked a control
-// up by id and threw when it found none, which stops being able to fail the moment
-// the same pass creates the control it then looks for: a generator that filtered one
-// parameter out would produce a smaller panel that worked perfectly and said nothing.
-//
-// Counted against the registry from the other side, so a row lost anywhere in the
-// loop above - a group key nobody declared, a filter that dropped one, a `continue`
-// that ran once too often - is a refusal to boot with both numbers in it. The stray
-// check above names the parameter where it can; this one catches the cases that have
-// no name to give.
-{
+  // The count, asserted rather than inferred - and this is what the old boot loop's
+  // throw turned into rather than a tidier spelling of it. That loop looked a control
+  // up by id and threw when it found none, which stops being able to fail the moment
+  // the same pass creates the control it then looks for: a generator that filtered one
+  // parameter out would produce a smaller panel that worked perfectly and said nothing.
+  //
+  // Counted against the registry from the other side, so a row lost anywhere in the
+  // loop above - a group key nobody declared, a filter that dropped one, a `continue`
+  // that ran once too often - is a refusal to boot with both numbers in it. The stray
+  // check above names the parameter where it can; this one catches the cases that have
+  // no name to give.
   const owned = params.names().filter((n) => PARAMS[n].tag !== 'composition');
   const stray = owned.filter((n) => !PANEL_GROUPS.some((g) => g.key === PARAMS[n].group));
   if (stray.length) {
@@ -2433,7 +2586,244 @@ for (const group of PANEL_GROUPS) {
     throw new Error(`the panel generator emitted ${panelRowsEmitted} rows for ${owned.length} `
       + 'parameters: a panel that is not the registry is a look nothing can reach');
   }
+
+  // What a fresh project is worth per parameter, taken here because here is where the
+  // rows the question is about were emitted - the same argument the evidence set beside
+  // each group is recorded on.
+  for (const names of panelGroupParams.values()) {
+    for (const name of names) groupDefaults.set(name, params.normalise(name, PARAMS[name].def));
+  }
 }
+
+// ------------------------------------------------- adopting a set of packages
+//
+// Everything downstream of "which effects are installed", in one function, called once at
+// boot and again after every install and every uninstall.
+
+/**
+ * What the store looked like when this page last read it, as one comparable string.
+ *
+ * The package rev is a hash over the sorted `name hash` lines of the package's own files,
+ * so an id and its rev together say everything a client needs to know about whether it is
+ * holding the current package - and a change of any byte of any file moves it. Joined into
+ * one string because the question is "has anything moved", and comparing one string is the
+ * cheapest honest way to ask it.
+ *
+ * **Declared here rather than beside the poll that reads it**, which is the third time this
+ * file has had to write that sentence and the second time it was found by a boot rather
+ * than by a reading. `adoptEffectPackages` below writes the signature, boot calls it while
+ * the module is still evaluating, and a `const` five hundred lines further down is in its
+ * temporal dead zone at that moment: `Cannot access 'revSignature' before initialization`,
+ * no `__kinect` published at all, and every tool in the suite reporting DID NOT RUN.
+ * Measured exactly once, immediately, which is the only reason it is a paragraph rather
+ * than a commit.
+ */
+const revSignature = (effects) => effects.map((e) => `${e.id} ${e.rev}`).join('\n');
+let effectSignature;
+
+/**
+ * A uniform cell for every binding the registry holds, minted where the tables have none.
+ *
+ * **The one thing a package cannot bring with it.** A manifest declares the GLSL that
+ * reads a uniform and the parameter that writes it, and both of those travel; what does
+ * not is the JavaScript cell three.js copies from - `uniforms` in `web/point-cloud.js` and
+ * the grade pass's table are written out by hand, so a seventeenth effect's first slider
+ * move would be `undefined.value = v` and the page would throw inside the registry's
+ * single write path. That is the failure this function exists for, and it is not
+ * hypothetical: it is what every install did before this line was here.
+ *
+ * Minted rather than refused, because the alternative is that no effect can ever be
+ * installed without editing this build. Seeded at zero rather than at the parameter's
+ * default, since the value walk at the end of the adoption writes every parameter through
+ * `params.set` a moment later and the write is what the cell is for - a seed that tried to
+ * be the default would be a second application of `effectApply`'s conversions, which is
+ * where a unit gets applied twice.
+ *
+ * The `axisDeg` transform is the one shape that cannot be a bare number: it writes
+ * `.value.set(sin, cos)` into a two-component cell, so a cell holding `0` would throw on
+ * the first write with a message about `set` rather than about a uniform.
+ */
+function seedUniformCells() {
+  for (const name of Object.keys(EFFECT_PARAMS)) {
+    const bind = EFFECT_PARAMS[name];
+    const table = bind.on === 'grade' ? grade.uniforms : uniforms;
+    if (Object.hasOwn(table, bind.uniform)) continue;
+    table[bind.uniform] = { value: bind.transform === 'axisDeg' ? new THREE.Vector2() : 0 };
+  }
+}
+
+/**
+ * The programs, the registry, the panel and every value - rebuilt from one set of
+ * packages.
+ *
+ * **This is the boot path, and it is the install path, and there is one of them.** Boot
+ * calls it below with what it fetched; `reloadEffects` calls it with what it fetched
+ * after a `PUT` or a `DELETE`. That matters for one property in particular, which
+ * `boot-check` is the instrument for: the last thing this does is walk every parameter
+ * through `params.set`, so every control on the panel shows the value the registry holds
+ * *by construction* rather than because two code paths were kept in step. A separate boot
+ * assembly would be the second implementation, and the one that drifts is always the one
+ * that runs on somebody else's machine.
+ *
+ * **`held` is what survives, and defaults are what does not.** An install must not move a
+ * slider the operator has set, so the values in flight are handed back in; a parameter the
+ * new set introduces has no held value and takes its default. A parameter the new set
+ * *removed* is simply not walked - it is gone from `PARAMS`, so `specOf` refuses it and
+ * `values` is pruned below, which is what stops the registry answering for a control that
+ * is no longer on screen.
+ *
+ * The order is the order the dependencies run in and each step needs the one above it. The
+ * shaders are swapped before the registry is rebuilt, because `seedUniformCells` mints
+ * cells the swapped programs declare; the panel is built before the value walk, because
+ * `writeControl` paints the row the walk is about.
+ */
+function adoptEffectPackages(packages, programs, held = {}) {
+  effectPackages = packages;
+  shaderPrograms = programs;
+  // What the store looked like when these packages were read, so the poll below compares
+  // against the set the page is actually assembled from. Written here rather than beside
+  // the poll because this is the one line that changes which packages the page holds.
+  effectSignature = revSignature(packages);
+
+  // **The materials are mutated rather than replaced, and the identity is the point.**
+  // Everything downstream holds them: the cloud is a `THREE.Points` built on the point
+  // material, `composer` has the grade pass in its chain, `gradeNeeded` gates it, and
+  // `setAdditive` flips its blend. Building a new one would leave every one of those
+  // pointing at the program before last. Both writes are the owning module's own door
+  // rather than a reach into an imported object - see `setCloudProgram` and
+  // `setGradeProgram` for why that boundary is where it is.
+  setCloudProgram(programs.cloud);
+  setGradeProgram(programs.grade);
+
+  EFFECT_PARAMS = tableFromPackages(packages, EFFECT_PARAM_ORDER);
+  PANEL_GROUPS = withEffectGroups(CORE_PANEL_GROUPS, packages);
+  PARAMS = buildParams();
+  READINGS = Object.keys(PARAMS).filter((n) => PARAMS[n].reading);
+  refuseRegistryDisagreement();
+  seedUniformCells();
+
+  // Values the registry no longer declares, dropped. `params.get` refuses an unknown
+  // name, so a stale entry is unreachable through the door - but `values` is what
+  // `params.values()` serialises, and an entry that outlived its parameter would be
+  // written into the next project as a look term nothing on this build can apply.
+  // Whatever a document held for the departed effect is in the parked pool by then,
+  // which is where it belongs and where it round-trips.
+  for (const name of [...values.keys()]) {
+    if (!Object.hasOwn(PARAMS, name)) values.delete(name);
+  }
+
+  buildPanel();
+
+  // **The walk that makes the invariant hold by construction.** Every parameter, through
+  // the one write path, in registry order - so `apply` reaches its uniform, `writeControl`
+  // paints the row that was just built, and `refreshReset` decides whether the row offers
+  // a revert. A rebuild that painted the panel and left the values where they were would
+  // be a set of controls showing the build before last, which is exactly what `boot-check`
+  // exists to refuse.
+  for (const name of Object.keys(PARAMS)) {
+    params.set(name, Object.hasOwn(held, name) ? held[name] : PARAMS[name].def);
+  }
+}
+
+// Boot's own call, and the first run of the path above. Everything from here down reads a
+// registry and a panel that exist because this line ran.
+adoptEffectPackages(effectPackages, shaderPrograms);
+
+/**
+ * The store read again, and everything on this page rebuilt from what it says.
+ *
+ * **The document goes out through the serialiser and comes back through the loader, and
+ * that is the whole of the parking half.** An install has to unpark what the arriving
+ * effect owns and an uninstall has to park what the departing one owned, and both of
+ * those are the three-way split `restoreProject` already performs against whatever
+ * registry it happens to be looking at - a bare name is a typo and is refused, a dotted
+ * name whose effect is installed is validated and applied, a dotted name whose effect is
+ * absent is parked. So the pair of writes below is the pair of reads that already exists:
+ * `serialiseProjectBody` hands over the open document with the parked pool merged back
+ * verbatim, the registry is replaced underneath it, and the loader re-splits the same
+ * document against the new one. An effect that has just arrived finds its parked values
+ * in `look.params` and applies them; an effect that has just left finds its values
+ * unrecognised and parks them, with the `requires` entry the serialiser wrote on the way
+ * out - which is where the version the badge quotes comes from, at the moment the package
+ * was still here to be asked.
+ *
+ * Writing that as two loops over the pool would have been the second implementation of
+ * the split, and it would have had to re-derive the entry, re-validate the keys, re-prune
+ * the suppressions and repaint the badge - four things this loader does and the loop
+ * would have had to be taught.
+ *
+ * **Nothing is written until the new set assembles.** The fetch and the assembly happen
+ * before the first assignment, so a store that answers a package this build cannot
+ * assemble leaves the page exactly as it was and the caller gets the assembler's own
+ * sentence. That is the last line of defence behind the install door rather than a
+ * duplicate of it: the door refuses the package on the machine it was installed on, and
+ * this refuses a set that arrived some other way.
+ */
+async function reloadEffects() {
+  const fetched = await fetchEffectPackages();
+  const programs = assembleShaders(SPINES, fetched);
+  const open = serialiseProjectBody();
+  // Every value in flight, view state included, so an install does not move a slider.
+  const held = params.values(params.names());
+  adoptEffectPackages(fetched, programs, held);
+  // The swapped programs and the additive variant, compiled here rather than on the frame
+  // that first reaches them - which is the same 83ms stall `warmPrograms` was written for,
+  // arriving at a moment nobody would connect to an install.
+  warmPrograms();
+  restoreProject(open);
+  refreshGroups();
+  requestRepaint();
+  return fetched.map((p) => ({ id: p.id, version: p.manifest.version, rev: p.rev }));
+}
+
+/**
+ * Every client converges, because one of them installing does not tell the others.
+ *
+ * A slow poll rather than a socket message, and the interval is deliberately unhurried:
+ * an install is a thing a person does a handful of times, the cost of noticing it a few
+ * seconds late is that a second browser draws the old look for a few seconds, and the
+ * cost of a socket message would be a second channel carrying state that the store
+ * already answers for. `GET /effects` reads sixteen directories and hashes their files,
+ * which is the whole of what a tick costs when nothing has changed.
+ *
+ * **A tick stands down rather than queues while anything is mid-gesture.** A rebuild
+ * replaces both shader programs and rewrites every value, so one landing inside an export
+ * would change the look between two frames of one file, one landing inside a preset
+ * gesture would fight the bulk write that gesture is making, and one landing inside track
+ * evaluation would be refused by `params.apply`'s own guard with a throw nobody asked
+ * for. Standing down costs one interval, and the signature is still whatever it was, so
+ * the next tick asks again.
+ */
+const EFFECT_POLL_MS = 6000;
+let effectReloading = false;
+async function pollEffects() {
+  if (effectReloading || exporting || presetGesture || evaluating) return;
+  let listed;
+  try {
+    const res = await fetch('/effects');
+    if (!res.ok) return;
+    listed = (await res.json()).effects;
+  } catch {
+    // A server that is restarting is not a reason to say anything: the next tick asks
+    // again, and the page goes on drawing what it has.
+    return;
+  }
+  if (revSignature(listed) === effectSignature) return;
+  effectReloading = true;
+  try {
+    await reloadEffects();
+    say('the installed effects changed - this page has been rebuilt from them');
+  } catch (err) {
+    // Reported and not retried on a timer. The set on the server is the one this page
+    // could not adopt, so a retry is the same failure once every six seconds; the
+    // signature is left alone so a later fix is picked up by the same comparison.
+    console.warn('could not rebuild from the installed effects:', err.message);
+    say(`the installed effects changed and this page could not adopt them: ${err.message}`);
+  } finally {
+    effectReloading = false;
+  }
+}
+setInterval(pollEffects, EFFECT_POLL_MS);
 
 // The four Pencil inspectors are views over the one registry-built panel. Groups are
 // tagged where they are declared above, so adding a parameter to a group inherits its
@@ -2468,8 +2858,6 @@ function showInspector() {
 
 // On the record surface, initialize the tabs immediately since they're always visible.
 if (!EDITING) setPanelTab(activePanelTab);
-
-params.reset();
 
 // ------------------------------------------------------------------- presets
 
@@ -2900,20 +3288,6 @@ function storeGroupOverride() {
   }
 }
 
-// What each parameter is worth in a project nobody has touched, computed once.
-//
-// **Through `normalise`, not against `PARAMS[n].def` raw**, and the difference is a
-// class rather than a case. `normalise` clamps, snaps to a grid anchored at `min` and
-// rounds to the decimals `min` and `step` imply, and every scalar default this build
-// declares happens to land on its own grid - so raw equality is correct today and
-// would go on being correct right up until somebody adds a parameter whose default is
-// not on its step. That group would then read as touched from boot, on a fresh page,
-// with nothing anywhere saying why. Doing it once at module scope is what keeps the
-// arithmetic off the evaluator's path, where this is asked several times a frame.
-const groupDefaults = new Map();
-for (const names of panelGroupParams.values()) {
-  for (const name of names) groupDefaults.set(name, params.normalise(name, PARAMS[name].def));
-}
 
 /**
  * Whether one parameter carries evidence that somebody has been here: a keyframe track
@@ -9784,14 +10158,25 @@ function refuseRequires(what, requires, names) {
   }
 }
 
-// Until the effects are packages with manifests of their own, every effect this build
-// declares is at 1.0.0: the version a requires entry names belongs to the package, and
-// the packages do not exist yet - the registry is still one table. The constant moves
-// into the manifests when they arrive, and nothing else should learn this number.
-const EFFECT_VERSION = '1.0.0';
+/**
+ * What version of an effect this build has, off the package that answered for it.
+ *
+ * This was the constant `1.0.0` with a comment saying it would move into the manifests
+ * when the manifests arrived. They have arrived, and the constant had become a lie
+ * waiting for its first fork: `PUT /effects/rain` can install a package declaring 2.0.0,
+ * and every document saved afterwards would have gone on claiming to need 1.0.0 - which
+ * is the one field the badge on a machine without the package prints, so the person told
+ * to install it would be told the wrong thing. Every shipped package declares 1.0.0, so
+ * this changes no document any build has written.
+ *
+ * An id with no package is `unknown` rather than a throw, because the caller is a
+ * serialiser: refusing to save a document over a version it cannot look up would lose
+ * work over a field nothing renders.
+ */
+const versionOf = (id) => effectPackages.find((p) => p.id === id)?.manifest.version ?? 'unknown';
 
 /** The requires list a set of value names derives, one entry per effect touched. */
-const requiresFor = (names) => effectIdsIn(names).map((id) => ({ id, version: EFFECT_VERSION }));
+const requiresFor = (names) => effectIdsIn(names).map((id) => ({ id, version: versionOf(id) }));
 
 // ------------------------------------------- which look values a preset carries
 
@@ -14476,6 +14861,31 @@ globalThis.__kinect = {
   // is exactly what `level-check --mutate tilt-ignored` does.
   worldTilt: () => cloud.quaternion.toArray(),
   resetWorldRotation,
+
+  /**
+   * The installed effects, and the rebuild an install triggers.
+   *
+   * **`reload` is the product's own path and not a driver's shortcut**, which is the
+   * whole reason it is exposed rather than left to the poll. A check installing a package
+   * has two ways to see the page adopt it: wait out an interval that is deliberately slow,
+   * or call the thing the interval calls. The first makes every row in the tool six
+   * seconds longer and turns a rebuild that threw into a timeout with nothing to read; the
+   * second is the same function, so a row that passes here is a row about the shipped
+   * rebuild. `pollNow` is the interval's own body, for the one claim that is about the
+   * poll rather than about the rebuild: that a page nobody touched converges on its own.
+   *
+   * `packages` answers with the manifests as the page holds them, which is what lets a
+   * row ask whether the page is assembled from the package the server is serving rather
+   * than from the one it booted on.
+   */
+  effects: {
+    reload: reloadEffects,
+    pollNow: pollEffects,
+    packages: () => effectPackages.map((p) => ({ id: p.id, version: p.manifest.version, rev: p.rev })),
+    signature: () => effectSignature,
+    /** The assembled source both programs were compiled from, for a row about the text. */
+    programs: () => JSON.parse(JSON.stringify(shaderPrograms)),
+  },
 
   // The live cloud's draw-rate cap, in hertz, readable and settable so the rate can be
   // swept on the node it was chosen for. A getter and a setter over the one binding the

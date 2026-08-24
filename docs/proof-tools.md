@@ -453,6 +453,35 @@ node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the sh
                                                           #     are lying. Reddens exactly one row of nine and leaves the
                                                           #     write-sweep row beside it green, because that one is about the
                                                           #     live path and the fault is in the boot write - read the rows
+node tools/effect-check.mjs                               # installing an effect: revisions, the door, the hotload, park and restore
+node tools/effect-check.mjs --mutate temporaries-are-visible # ... the id filter the store lists directories through, widened, so
+                                                          #     a crashed install's `<id>.<seq>.tmp` becomes a package `/effects`
+                                                          #     lists and `rootFor` resolves. Reddens exactly the two rows of
+                                                          #     section 6 that are about a half-written package, which is why
+                                                          #     that section is last - staged earlier it would redden every
+                                                          #     section after it with a fault four sections away
+node tools/effect-check.mjs --mutate rebuild-skips-the-panel # ... the panel built on the first run and never again, which is the
+                                                          #     rebuild somebody writes who thinks of the panel as boot
+                                                          #     furniture. `boot-check` stays green, because boot is the run
+                                                          #     that builds it; one row of section 3 reddens
+node tools/effect-check.mjs --mutate install-skips-the-uniform-cells # ... the JavaScript cell a new binding needs, never minted.
+                                                          #     No shipped package notices - every one of the sixteen binds a
+                                                          #     uniform some hand-written table already holds - and a
+                                                          #     seventeenth throws inside the value walk. Reddens seven rows of
+                                                          #     section 3 and ends the run early; the count is a floor
+node tools/effect-check.mjs --mutate reinstall-leaves-it-parked # ... the parking predicate widened to every dotted name, so a
+                                                          #     value belonging to an installed effect parks anyway. The badge
+                                                          #     still appears on the uninstall, which is what makes it worth
+                                                          #     having: four rows across sections 4 and 5 redden and the
+                                                          #     badge-appeared row stays green
+node tools/effect-conformance-check.mjs --url http://localhost:8080 # the plugin contract: every installed effect draws nothing at all when it is off
+node tools/effect-conformance-check.mjs --mutate leaks-at-zero # ... a floor under the rain's master, so the package contributes at
+                                                          #     the term it is meant to be absent at. Served over an
+                                                          #     interception rather than written, because this tool runs against
+                                                          #     a server somebody else started and has no staged tree to edit.
+                                                          #     Reddens exactly one row - rain's drop equality - and no other
+                                                          #     effect's; the two arms that hold the master at zero cannot see
+                                                          #     it, because the sub-keys are behind the `rain > 0.0` gate
 node tools/monitor-check.mjs                              # step 9: the monitor's decimation, the take it must not touch, and the picture it shows
 node tools/monitor-check.mjs --mutate decimate-reaches-recorder  # ... and must FAIL mutated
 node tools/monitor-check.mjs --mutate bind-ignores-grid          # ... and must FAIL mutated
@@ -1775,6 +1804,49 @@ positions, so the move stays on the safe side; the mutated build boots both surf
 page errors. Its four exit-2 refusals were each probed by hand: an unknown name, an anchor
 matching zero times, an anchor matching 221 times, and a mutation staged for a module the
 recorder never requests.
+
+**`effect-check`** spawns its own server on **8281** and needs none running: a GPU browser, a
+free port, no capture, no sensor and no ffmpeg. It asks the kernel for the port before it
+stages anything and exits 2 naming the pid that holds it, because a run answered by a stranger
+asserts against whatever fixture that process staged. Its staged tree is `.effect-check/`,
+gitignored, and it copies `server/`, `tools/`, `web/`, `effects-builtin/` and `presets-builtin/`
+into it — the last of those because the page fetches the preset library while it boots and a
+staged tree without the shipped root answers 500, which lands in `pageErrors` and reddens the
+last row with a fault that has nothing to do with effects.
+
+**It is the only tool in the suite that writes packages, so it hands the server both store
+roots by name.** `--effects` and `--builtin-effects` are passed outright rather than left to
+resolve from the staged tree, because the failure that costs something is a run whose user root
+resolved to the checkout: seventeen fixtures, fifteen of them hostile, written into `effects/`.
+
+**Read the exit line rather than the code**, and this tool says more than most: a mutated run
+with failures is reported as caught however it ended, and it says whether it ended early.
+`install-skips-the-uniform-cells` leaves the page half-adopted and takes the driver down with
+it, so seven rows fire and then the run stops — a verdict that put the crash first would report
+DID NOT RUN over a caught mutation, which is the census of exit codes `docs/instruments.md`
+already carries a case for.
+
+Baseline **43 assertions, 0 failed**, over six sections: the store's revisions against hashes
+the tool computes off the staged tree, seventeen hostile packages each refused with the sentence
+for its own rule, the hotload's registry-and-panel coherence including `boot-check`'s own
+control-vs-registry diff on a rebuilt page, the uninstall/reinstall pixel identity, the
+must-not-badge control, and — last, deliberately — what a crashed install leaves behind.
+
+**`effect-conformance-check`** needs `--url` against a running server and a GPU browser, and no
+port of its own. Every hash is taken inside the run and none is written down: what it compares
+is three images the same process just rendered on the same GPU, so it means the same thing on
+every machine and there is nothing here to re-baseline. It enumerates from `GET /effects`, so a
+seventeenth package is asked its questions by existing.
+
+Baseline **99 assertions, 0 failed** with the shipped sixteen — six or seven rows per package
+depending on whether it carries GLSL of its own. Two of them are the controls: the raise has to
+reach the registry before its picture means anything, and the package's own longest line of GLSL
+has to leave the assembled program while it is hollow and come back after. That second row was
+added after the first version of this tool spent a run reporting eleven effects as unable to
+reach a pixel — `page.unroute` matches its matcher by reference, so a fresh arrow removed
+nothing, every package dropped stayed dropped, and the raise arm was asking hollowed packages to
+move a picture. One handler consulting a variable replaced sixteen routes, and the marker row is
+what would have said so.
 
 **`module-check`** needs nothing at all — no port, no server, no browser, no sensor and no
 install — and that is the point rather than a convenience. Every failure it is about is a

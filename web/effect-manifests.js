@@ -14,16 +14,106 @@
 // exactly what must not matter.
 
 /**
- * The flat table the registry assembles from, one entry per name in the order
- * given. The order is a full list of dotted names rather than of effect ids,
- * because the registry's declaration order interleaves below effect granularity -
- * `noise.region` sits in the region run beside the push and the mask it works
- * with, three entries away from its own master - and that placement is the
- * client's layout fact: the scramble coupling and the panel's row order both fall
- * out of it, and nothing in a package can know where the whole build wants each
- * parameter. Validated both ways: a name the order lists that no package
- * declares, and a package parameter the order never places, are refusals rather
- * than guesses, so the list and the shipped set are held equal at boot.
+ * The generation of the package format this build reads. A manifest declaring a
+ * higher number is refused at the install door rather than adapted, on the same
+ * argument `format.js` makes about a capture: a package written against a later
+ * build may mean something different by a field this one thinks it understands,
+ * and reading it anyway is how a look renders as something nobody authored. A
+ * manifest declaring nothing is refused too, because unlike a capture there is no
+ * archive of packages shot before the field existed - every package that has ever
+ * existed carries it.
+ */
+export const MANIFEST_FORMAT = 1;
+
+/**
+ * The closed vocabularies a manifest is written in, stated once because both ends
+ * consume them.
+ *
+ * The install door refuses a manifest outside these sets, and the client's applier
+ * implements exactly them - and those have to be one statement rather than two
+ * agreeing lists, because the failure a second list produces is precisely the one the
+ * door exists to prevent. A transform the door allowed and the applier did not know
+ * would install cleanly and throw on its first write; a kind the door allowed and
+ * `normalise` did not know would take the scalar branch and turn a boolean into NaN.
+ * So `effectApply` in `web/main.js` reads `EFFECT_BIND_TRANSFORMS` rather than
+ * spelling its two names again, and the door reads the same binding.
+ *
+ * `kind` is two entries and not three: `pose` is the camera's, it is core rather than
+ * an effect's, and there is no uniform a pose could be bound to. `on` names which of
+ * the two uniform tables a write lands on - the point cloud's or the grade pass's -
+ * which is the only choice a binding has about where it goes.
+ *
+ * Frozen, because they cross a module boundary and a closed set that anybody could push
+ * onto is not a closed set - the door would go on reporting the vocabulary it was given
+ * while accepting whatever had been added to it.
+ */
+export const EFFECT_PARAM_KINDS = Object.freeze(['scalar', 'step']);
+export const EFFECT_BIND_TABLES = Object.freeze(['points', 'grade']);
+export const EFFECT_BIND_TRANSFORMS = Object.freeze(['axisDeg', 'degToRad']);
+
+/**
+ * Every declared parameter name, in the order the registry declares them: the ones
+ * the client's order places, in that order, and then everything else.
+ *
+ * **The placed set is byte-stable and the appendix is where a package the order has
+ * never heard of goes.** The order is a hand-written layout fact about the sixteen
+ * shipped effects - the scramble coupling coupled to it, the panel builds a group's
+ * rows in it - so it may not be regenerated, reordered or grown by a package
+ * arriving at runtime. But a seventeenth effect has to land somewhere, and until
+ * this rule existed it landed in a refusal: `tableFromPackages` treated a declared
+ * name the order did not place as a parameter the registry would silently skip, which
+ * is the right answer for a manifest edit and the wrong one for an install.
+ *
+ * So the appendix, and the rule is written out here because "deterministic" has to
+ * mean one arrangement rather than whatever `Object.keys` happened to yield. Packages
+ * are taken by id in lexical order, each package's unplaced parameters keep their
+ * manifest declaration order, and the whole appendix follows the last placed name.
+ * Contiguous per package, because a package's own parameters are the one grouping a
+ * manifest can be sure of - its master and the keys under it read as a unit on the
+ * panel, and interleaving two packages the order does not know would be this file
+ * inventing a layout decision it has just finished saying it cannot make.
+ *
+ * **A fork that adds a parameter appends it rather than seating it beside its
+ * siblings**, and that is a consequence worth stating rather than discovering. Fork
+ * `rain` with a fifth key and the four the order places stay exactly where they are;
+ * the fifth goes to the appendix, so it is last in the rain group rather than next to
+ * `trail`. Seating it would mean guessing which of the placed names it belongs after,
+ * and a guess about layout is the thing the order exists to make somebody state.
+ *
+ * With the shipped sixteen installed the appendix is empty and this returns the
+ * order unchanged, which is what keeps every number downstream of it - the registry's
+ * declaration order, the panel's rows, the scramble table - the bytes they were.
+ */
+export const placeParams = (packages, order) => {
+  const placed = new Set(order);
+  const appendix = [];
+  for (const p of [...packages].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    for (const short of Object.keys(p.manifest.params)) {
+      const name = `${p.id}.${short}`;
+      if (!placed.has(name)) appendix.push(name);
+    }
+  }
+  return [...order, ...appendix];
+};
+
+/**
+ * The flat table the registry assembles from, one entry per declared parameter, in
+ * the order `placeParams` decides. The order handed in is a full list of dotted names
+ * rather than of effect ids, because the registry's declaration order interleaves
+ * below effect granularity - `noise.region` sits in the region run beside the push
+ * and the mask it works with, three entries away from its own master - and that
+ * placement is the client's layout fact: the scramble coupling and the panel's row
+ * order both fall out of it, and nothing in a package can know where the whole build
+ * wants each parameter.
+ *
+ * **One direction is still a refusal and the other became a placement**, and the two
+ * used to be symmetric. A name the order lists that no installed package declares is
+ * a registry that cannot assemble the entry, so it throws as it always did; the
+ * install door is what keeps that unreachable, by refusing a fork that drops a
+ * parameter the package it shadows declares. A declared name the order does not place
+ * used to throw on the same reasoning and cannot any more, because that is exactly
+ * what installing an effect nobody had written a layout for looks like - see
+ * `placeParams` for where it goes instead.
  */
 export const tableFromPackages = (packages, order) => {
   const declared = new Map();
@@ -37,13 +127,8 @@ export const tableFromPackages = (packages, order) => {
     throw new Error(`the effect order names ${missing.join(', ')} and no installed package declares `
       + `${missing.length === 1 ? 'it' : 'them'} - the registry cannot assemble entries it has no parameters for`);
   }
-  const unplaced = [...declared.keys()].filter((name) => !order.includes(name));
-  if (unplaced.length) {
-    throw new Error(`${unplaced.join(', ')} is installed and the effect order does not place `
-      + `${unplaced.length === 1 ? 'it' : 'them'} - a parameter the registry silently skipped would be a control that exists nowhere`);
-  }
   const table = {};
-  for (const name of order) {
+  for (const name of placeParams(packages, order)) {
     const p = declared.get(name);
     const entry = {
       def: p.def, min: p.min, max: p.max, step: p.step, kind: p.kind, label: p.label,

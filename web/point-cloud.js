@@ -419,6 +419,36 @@ export function buildPointCloud(sourceCells, program) {
  * its own pipeline object - which is why `warmPrograms` in `web/main.js` presses this both
  * ways at boot rather than trusting one variant to cover the other.
  */
+/**
+ * The two shader programs this material draws with, replaced.
+ *
+ * **The material is mutated rather than rebuilt, and the identity is what the caller is
+ * buying.** `cloud` is a `THREE.Points` built on this material and already in the scene,
+ * `setAdditive` flips its blend, and `web/main.js` holds neither by any route but the
+ * imported bindings - so constructing a new `ShaderMaterial` here would leave the drawn
+ * cloud on the program before last with nothing anywhere saying so. `needsUpdate` is what
+ * makes three.js recompile, which is the same flag and the same reason as the blend switch
+ * below.
+ *
+ * It lives here rather than at the call site because the call site imports this material
+ * and may not write into it: an imported object anybody can reach into is the channel
+ * `tools/module-check.mjs` refuses in general, on the grounds that the module holding the
+ * state cannot see the write. `uniforms` is the one exemption and it is a table of cells
+ * the GPU reads; a shader program is the module's own construction, so the write belongs
+ * to the module.
+ *
+ * The uniform table is deliberately untouched. A swapped program declares a different set
+ * of uniforms, and three.js resolves a material's uniforms against whatever the compiled
+ * program actually holds - so a key with no uniform behind it costs nothing and a uniform
+ * with no key reads zero, which is the same standing obligation the header above states
+ * and which `web/main.js` meets by minting the cells a new package's bindings need.
+ */
+export function setCloudProgram(program) {
+  material.vertexShader = program.vertexShader;
+  material.fragmentShader = program.fragmentShader;
+  material.needsUpdate = true;
+}
+
 export function setAdditive(on) {
   material.blending = on ? THREE.AdditiveBlending : THREE.NormalBlending;
   material.depthWrite = !on;

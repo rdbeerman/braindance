@@ -145,6 +145,8 @@ exit code (rule 3).
 | `vcam-check.mjs` | the output to OBS, and the take it must not touch | port 8361 free |
 | `guard-check.mjs` | the socket's origin rule, the bind, the rebinding rule | port 8321 free |
 | `jobs-check.mjs` | the queue, the pin, a real render, a job this build cannot read | port 8231, a GPU browser, ffprobe |
+| `effect-check.mjs` | installing an effect: revisions, the door, the hotload, park and restore | port 8281 free, a GPU browser |
+| `effect-conformance-check.mjs` | every installed effect draws nothing at all when it is off | `--url`, a GPU browser |
 | `module-check.mjs` | the boundaries in `web/`: the import graph, what crosses it | nothing |
 | `syntax-check.mjs` | every shipped file parses, the cross-language constants agree, the citations resolve, every tool is named here | nothing |
 | `cpp-check.mjs` | both C++ files parse and typecheck, in all four pipeline configurations | a C++ compiler and turbojpeg's headers |
@@ -152,15 +154,17 @@ exit code (rule 3).
 | `registration-check.mjs` | our registration equals upstream's, bit for bit | a corpus from `grabber --dump-corpus` |
 | `release-gate-check.mjs` | the `.npmrc` supply-chain gate is actually armed | the npm registry |
 
-**Seven spawn their own server, so what they need is a free port rather than a running one** —
-`guard-check` on 8321, `jobs-check` on 8231, `level-check` on 8377, `monitor-check` on 8341,
-`vcam-check` on 8361, `boot-check` on 8391, and `library-check` across `--node-port` and
-`--mac-port`..`+16`, which default to 8210 and 8211..8227. The distinction is not bookkeeping: a
+**Eight spawn their own server, so what they need is a free port rather than a running one** —
+`guard-check` on 8321, `jobs-check` on 8231, `effect-check` on 8281, `level-check` on 8377,
+`monitor-check` on 8341, `vcam-check` on 8361, `boot-check` on 8391, and `library-check` across
+`--node-port` and `--mac-port`..`+16`, which default to 8210 and 8211..8227. The distinction is not bookkeeping: a
 tool that finds a stranger already listening on its port is answered by the stranger and asserts
 against whatever fixture *that* process staged, which is a green run proving nothing.
-`library-check` and `boot-check` ask the kernel first and exit 2 naming what is held; everywhere
-else check `pgrep -f "tools/.*-check.mjs"` yourself, because another agent's run is the normal
-state on this machine. `sensor-view-check` does both — `--url` for most of its run, and a private
+`library-check`, `boot-check` and `effect-check` ask the kernel first and exit 2 naming what is
+held; everywhere else check `pgrep -f "tools/.*-check.mjs"` yourself, because another agent's run
+is the normal state on this machine. **`effect-check` is the only tool that writes packages**, so
+it hands its staged server both store roots by name rather than letting them resolve — a run whose
+user root resolved to the checkout would leave seventeen fixtures in `effects/`. `sensor-view-check` does both — `--url` for most of its run, and a private
 server on 8131 for the section needing its own capture.
 
 **`module-check` needs nothing at all** — no port, no browser, no install — because every failure

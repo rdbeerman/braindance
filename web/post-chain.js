@@ -189,3 +189,27 @@ export function buildPostChain(gradeProgram) {
 
   composer.addPass(new OutputPass());
 }
+
+/**
+ * The grade's program, replaced without replacing the pass.
+ *
+ * **The pass's identity is what the chain is built out of.** `composer` holds it at a
+ * position between the bloom and the output that this file's whole argument is about,
+ * `gradeNeeded` in `web/main.js` switches it on and off, and every one of the nine
+ * uniforms the look writes is a cell in `GRADE_UNIFORMS` that this pass's material
+ * composed by reference. Building a new `ShaderPass` would put the new program in a pass
+ * that is in no chain, leaving the drawn image on the old one - which is the shape of
+ * failure this program keeps writing case files about, because the picture still comes out
+ * and nothing says which program drew it.
+ *
+ * Here rather than at the call site for the same reason `setCloudProgram` is: `grade` is
+ * an exported binding, and a module reaching into an imported object is the channel
+ * `tools/module-check.mjs` refuses. Its uniform table is exempt there and is written from
+ * `web/main.js` on every look parameter; the material is not, and swapping a program is
+ * this file's own business.
+ */
+export function setGradeProgram(gradeProgram) {
+  grade.material.vertexShader = gradeProgram.vertexShader;
+  grade.material.fragmentShader = gradeProgram.fragmentShader;
+  grade.material.needsUpdate = true;
+}

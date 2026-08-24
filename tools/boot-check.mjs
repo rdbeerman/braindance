@@ -100,28 +100,37 @@ const RECORDER_PATH = '/record';
  * control that fails everything cannot say which question it was asking, and one that
  * reproduces a *different* defect wearing the same colour is worse than none.
  *
+ * **Both halves live inside `adoptEffectPackages` now, and the mutation moved with them
+ * rather than being replaced.** The page used to generate the panel while the module
+ * evaluated and write `params.reset()` a few lines below it; installing an effect made
+ * both of those things that happen again while the page is up, so they are two steps of
+ * one function and boot is that function's first call. The fault is the same fault - the
+ * values written before the controls they are meant to paint exist - and it is put back
+ * the same way, by lifting `buildPanel()` from above the walk to below it.
+ *
  * **It boots, which took some care and is the whole reason it is aimed here.** The obvious
- * spelling of this mutation is dangerous: `params.reset()` writes every parameter while the
+ * spelling of this mutation is dangerous: the value walk writes every parameter while the
  * module is still evaluating, and `groupRevealChanged` and `transportWriting` are declared
  * as no-ops above the registry precisely so that write cannot reach `tracks` or
  * `withoutRepaint` in their temporal dead zone. A page that throws during module evaluation
  * publishes no `globalThis.__kinect` at all, every tool in the suite reports DID NOT RUN,
  * and an exit code with no assertion behind it is the outcome this repo has three times
  * written down as a bug found - `docs/instruments.md` names it under "A mutation whose only
- * effect is that the page refuses to boot is not a usable mutation". Moving the call from
- * after the generator to just before it stays on the safe side of that: `tracks` is declared
- * at `web/main.js`'s `const tracks = new Map()`, which is below both positions, so the
- * no-ops are still the no-ops and nothing moves into a dead zone. Measured rather than
- * reasoned about - the mutated build boots both surfaces with zero page errors.
+ * effect is that the page refuses to boot is not a usable mutation". Swapping two adjacent
+ * steps of one function stays on the safe side of that, because neither step moves across
+ * a declaration: `writeControl` and `refreshReset` both return early when the panel has no
+ * control by that name, which is exactly the state the mutated order puts them in.
+ * Measured rather than reasoned about - the mutated build boots both surfaces with zero
+ * page errors.
  */
 const MUTATIONS = {
   'reset-before-the-panel-generator': {
     file: 'web/main.js',
     edits: [
-      ['\nparams.reset();\n', '\n'],
+      ['\n  buildPanel();\n', '\n'],
       [
-        '\nfor (const group of PANEL_GROUPS) {\n  const groupNode = panelNode(',
-        '\nparams.reset();\n\nfor (const group of PANEL_GROUPS) {\n  const groupNode = panelNode(',
+        '    params.set(name, Object.hasOwn(held, name) ? held[name] : PARAMS[name].def);\n  }\n',
+        '    params.set(name, Object.hasOwn(held, name) ? held[name] : PARAMS[name].def);\n  }\n  buildPanel();\n',
       ],
     ],
   },

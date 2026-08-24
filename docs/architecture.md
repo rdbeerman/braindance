@@ -67,6 +67,46 @@ proves.
 renderer class it will draw with. [Get a video out](../README.md#5-get-a-video-out) has the
 rest.
 
+## The effect store
+
+The look is not one program. Every effect is a package — a manifest and the GLSL chunks it
+splices into the shaders — and the page assembles both point-cloud programs, the grade pass, the
+parameter registry and the panel out of whatever the store holds. `server/effect-store.js` serves
+them and `web/shader-assembly.js` joins them.
+
+**Two roots, and the user's copy wins.** `effects-builtin/` is what the build ships with and
+nothing in this program writes into it; `effects/` is where an install lands. An id present in
+both resolves from the user's, which *is* the fork mechanism: install a package under a shipped
+id and it shadows the shipped one, delete that copy and the shipped one answers again. The
+shipped set is therefore always available to fall back to, which is why removing a builtin
+nothing forks is refused rather than performed. It is the same shape the preset store uses, and
+what makes it its own class rather than a fourth construction of that one is what is stored: a
+package is a directory of files, so a revision has to be computed over the set and a read has to
+say which files exist before a client can fetch them one at a time.
+
+```
+GET    /effects              every id either root holds, each with its files and revisions
+GET    /effects/:id          one package: the parsed manifest, the file index, the revision
+GET    /effects/:id/file/:n  one file's bytes, as text/plain
+PUT    /effects/:id          { manifest, chunks: { <file>: <text> } }  installs into effects/
+DELETE /effects/:id          removes the user's copy only
+```
+
+A revision is a hash of the bytes: `sha256` per file, and the package's own over the sorted
+`name hash` lines. Never a re-serialisation — a manifest that round-trips through `JSON.parse`
+is a different byte stream with the same meaning, and provenance is about bytes.
+
+**An install is atomic because a package is a directory.** The whole thing is written under
+`<id>.<seq>.tmp`, any existing copy is renamed to `<id>.<seq>.old`, the new one is renamed in and
+the old one deleted. Those suffixes carry a dot and an effect id may not, so a crashed install is
+invisible to every read by the same rule that decides what an id is — and the next install of
+that id sweeps what it left. What may be written at all is decided before any of it: the door in
+`server/effect-door.js` runs the real assembler against the set that would exist after the
+install, and a package that would not assemble, would bind a uniform no program declares or would
+name an identifier this build has not got is refused with the reason and never reaches disk. The
+alternative is a package that installs cleanly and breaks the *next* page load, where the only
+evidence is a console nobody has open.
+
 ## Program time is the edit coordinate
 
 Source time is a position inside the capture; program time a position inside the output.

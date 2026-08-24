@@ -84,6 +84,9 @@
       "order": 100
     }
   ],
+  "hostDriven": [
+    "rainPhase"
+  ],
   "varyings": [
     {
       "name": "vRain",

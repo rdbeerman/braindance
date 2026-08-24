@@ -347,6 +347,47 @@ A queued render is the same rule with nobody watching. The job carries the effec
 requires, and a worker that has not got one of them **fails the job with a reason naming it**
 rather than rendering, unless the job was queued with `suppressEffects` covering it.
 
+### Installing an effect, and taking one away
+
+`PUT /effects/<id>` installs a package and `DELETE /effects/<id>` removes one. The body is
+`{manifest, chunks}` — the manifest as JSON and a map of file name to GLSL text — and the id in
+the path is the namespace its parameters carry, so a manifest declaring a different one is
+refused rather than guessed at.
+
+**An install lands in `effects/` and never in `effects-builtin/`**, which is the whole of the
+fork mechanism: a package installed under a shipped id shadows it, and deleting that copy brings
+the shipped one back. Nothing reachable from the network can edit or remove what the build shipped
+with, so there is always a package to fall back to — and a `DELETE` aimed at a builtin nothing is
+forking is refused by name rather than silently doing nothing. Deleting a package that exists only
+in `effects/` uninstalls it, at which point every open document's values under it park exactly as
+they would on a machine that never had it.
+
+**A package that this build could not compile is refused at the door, and the refusal names the
+rule it broke.** That matters more than it sounds: a package is GLSL spliced into two shader
+programs and a table of parameters spliced into the registry, and both of those are assembled
+while the page is still loading — so a bad package that landed would not fail its install, it
+would fail the *next page load*, with nothing on screen and the only evidence in a console nobody
+has open. So the door runs before a byte is written: the id and the manifest have to agree, the
+package format has to be one this build reads (a later one is refused rather than adapted), a file
+name has to be a bare name in the package's own directory, at most one parameter may be the
+master and its default has to be the value the effect is absent at, the kind and the binding have
+to be ones the registry implements, every uniform a parameter binds has to be declared by some
+program and every uniform the package declares has to be bound by one of its own parameters or
+listed under `hostDriven`, every joint a chunk names has to exist in a spine, and every identifier
+a chunk reaches for has to be something this build has. A refused package leaves nothing behind.
+
+**A page that is open when an install happens rebuilds itself.** Both shader programs are
+reassembled and swapped, the registry and the panel are rebuilt from the new set, and every value
+is written back through the same door a slider uses — so the controls show what the registry
+holds, the values in flight are where they were, and a newly installed effect's parked values
+come back and apply. Other browsers converge on their own within a few seconds; the poll stands
+down while an export, a preset gesture or a keyframe evaluation is running, because a rebuild
+between two frames of a render is a file that changes look halfway through.
+
+A fork may add parameters and retune the ones it inherits. It may not **drop** one: the panel's
+declaration order places every shipped parameter by hand, so a fork short of one is a build whose
+registry cannot assemble at all, and that is refused at the door with the names it dropped.
+
 ## Levelling a canted mount
 
 A sensor bolted to a dashboard shoots a room that arrives on its side, and nothing measures
