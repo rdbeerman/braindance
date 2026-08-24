@@ -40,6 +40,13 @@ import {
 } from './plan-geometry.js';
 import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
+// The forty-one effect parameters as data: which uniform each one writes, on which of the
+// two tables, and what conversion it takes on the way. It belongs to the block above rather
+// than to the render core below because it is the purest thing in that block - it imports
+// nothing at all, which is what lets a check pull an older revision of it out of `git show`
+// and evaluate that text under bare node with no page standing around it. What turns a row
+// of it into the closure the registry stores is `effectApply`, beside `PARAMS`.
+import { EFFECT_PARAMS } from './effect-params.js';
 // One number out of the halo, and nothing else. `bloom-pass.js` holds the pass and
 // `post-chain.js` is what constructs it; what this file still needs is the reference the
 // chain is frozen at, because `resize` sizes that chain and `resize` lives here. The two
@@ -1066,6 +1073,110 @@ const PANEL_GROUPS = [
   },
 ];
 
+/**
+ * The effect a dotted name belongs to, or null for a core parameter. The dot is the
+ * namespace: `glyph.tone` is the glyph effect's tone key, `cell` is the core grid.
+ * The split is what lets a reader tell a typo from an effect this build does not
+ * have - a bare name the registry lacks is a typo, a dotted name whose prefix names
+ * no effect is a document from a machine with something installed that this one
+ * lacks. The two get different answers, and this is the line they divide on.
+ *
+ * It sits above the registry rather than beside the four functions built on it, because
+ * the same line decides which half of the registry a name is declared in: the dotted ones
+ * come out of `web/effect-params.js` and the bare ones are written out below. The
+ * assertion under `PARAMS` asks both halves against this function, and an assertion cannot
+ * call something declared seven thousand lines further down - that reach is a dead zone
+ * rather than a forward reference, and it is the fault this file has shipped twice.
+ */
+const effectOf = (name) => {
+  const dot = name.indexOf('.');
+  return dot > 0 ? name.slice(0, dot) : null;
+};
+
+/**
+ * The write one effect parameter's binding describes, as the closure the registry stores.
+ *
+ * Forty-one parameters do the same thing - one number into one uniform - and they used to
+ * do it as forty-one hand-written closures, where the ordinary case could be got subtly
+ * wrong in a way nothing reads back and where a reader had to check every one to find out
+ * which cases there were. `web/effect-params.js` declares them as data now, and this is the
+ * one place that data becomes behaviour.
+ *
+ * **The uniform table is resolved when the write happens and never when the closure is
+ * built.** Both tables are null while this module evaluates - `uniforms` is filled by
+ * `buildPointCloud` and `grade` by `buildPostChain`, each at its own banner far below this
+ * line - so a closure that captured either of them here would capture null and every look
+ * parameter in the program would throw on its first write. That is the intra-module dead
+ * zone `tools/module-check.mjs` says in its own output it cannot see, and it is the fault
+ * this file has already shipped twice, so it is worth the paragraph rather than the trust.
+ *
+ * **The transform vocabulary is two entries and each is written out exactly once.**
+ * `degToRad` belongs to `duotone.hue` alone; `axisDeg` is the raster's angle and the
+ * streak's together, which is why those two entries can say a check holds the axis against
+ * the arithmetic rather than against a second copy of it. An unknown transform throws here
+ * rather than falling through to the plain write, because falling through is precisely the
+ * defect the shipped mutations for both of them describe: a value that arrives in degrees
+ * and lands in a uniform that wanted radians, with every picture still changing and every
+ * slider still moving.
+ *
+ * The gate is composed on top rather than spelled into each of the five writes. Each post
+ * pass costs a full-screen read and write whether or not it changes anything, so a term of
+ * the grade at zero has to shut its pass rather than run it as a no-op - and `gradeNeeded`
+ * asks the five uniforms rather than the five parameters, so it goes on being right when a
+ * project writes them in any order.
+ */
+function effectApply(bind) {
+  const table = () => (bind.on === 'grade' ? grade.uniforms : uniforms);
+  let write;
+  if (bind.transform === 'axisDeg') {
+    write = (v) => {
+      const r = THREE.MathUtils.degToRad(v);
+      table()[bind.uniform].value.set(Math.sin(r), Math.cos(r));
+    };
+  } else if (bind.transform === 'degToRad') {
+    write = (v) => { table()[bind.uniform].value = THREE.MathUtils.degToRad(v); };
+  } else if (bind.transform) {
+    throw new Error(
+      `the binding for ${bind.uniform} names the transform ${JSON.stringify(bind.transform)}, `
+      + 'which this applier does not know: its value would land unconverted',
+    );
+  } else {
+    write = (v) => { table()[bind.uniform].value = v; };
+  }
+  if (!bind.gates) return write;
+  return (v) => { write(v); grade.enabled = gradeNeeded(); };
+}
+
+/**
+ * One contiguous run of `EFFECT_PARAMS`, as registry entries ready to spread into `PARAMS`.
+ *
+ * The forty-one are interleaved with the core parameters in seven runs, because the panel
+ * builds a group's rows in registry order and the groups are stages of the pipeline rather
+ * than subject headings. So the registry keeps the positions and the table keeps the
+ * declarations, and a run is named by its two ends rather than by listing its members - one
+ * effect parameter added to `web/effect-params.js` between two ends lands in `PARAMS` at
+ * the right place by existing, which is the whole reason not to restate the names here.
+ *
+ * `tag: 'look'` is constant across all forty-one and is added here rather than repeated
+ * forty-one times: an effect parameter that was not part of the clip would not be an effect
+ * parameter. Everything else is the binding's own, in the key order the inline entries held.
+ */
+const effectSlice = (first, last) => {
+  const names = Object.keys(EFFECT_PARAMS);
+  const from = names.indexOf(first);
+  const to = names.indexOf(last);
+  if (from === -1 || to === -1 || to < from) {
+    throw new Error(`${first}..${last} is not a run of web/effect-params.js in that order`);
+  }
+  return Object.fromEntries(names.slice(from, to + 1).map((name) => {
+    const bind = EFFECT_PARAMS[name];
+    return [name, {
+      def: bind.def, min: bind.min, max: bind.max, step: bind.step, kind: bind.kind,
+      tag: 'look', group: bind.group, label: bind.label, apply: effectApply(bind),
+    }];
+  }));
+};
+
 const PARAMS = {
   // Pixels at 1080p, not pixels. The unit changed exactly once, when the screen-
   // space terms went resolution-relative, and every value here changed with it:
@@ -1086,48 +1197,10 @@ const PARAMS = {
   additive: { def: false, kind: 'step', tag: 'look',
     group: 'points', label: 'additive glow', apply: setAdditive },
 
-  // The glyph field: every point drawn as a character rather than as a round splat, on the
-  // grid `lattice` and `latticeCell` already cut. There is no cell size here and no second
-  // snap, deliberately - the shader's own comment carries why - so this family costs the
-  // presets four values rather than six and nothing has to be kept in step with a grid.
-  //
-  // The master crossfades the mark and grows the sprite into the cell as it rises, rather
-  // than switching. Blending is what every other master in this registry does: `lattice`
-  // blends, the five readings blend, `glitch` fades, and a control with two states would be
-  // a checkbox wearing a slider and could not keyframe into anything. The composition falls
-  // out for free - at `lattice` 1.0 with this at 0 the picture is the `voxel` look that
-  // ships today, and raising it turns those dots into characters without moving one of
-  // them. Nothing gates it on the lattice, because a control that refuses to work until you
-  // find its partner is the failure `Glitch` sitting inside `Displacement` already was; at
-  // `lattice` 0 with this at 1 every one of 217,088 points draws a cell-sized character at
-  // its own unquantised position and the picture is mush, which is authoring rather than a
-  // defect.
-  'glyph.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glyph', label: 'glyph',
-    apply: (v) => { uniforms.glyph.value = v; } },
-  // The three keys, which add into one index and wrap. Each is how far that reading moves
-  // the character, and each contributes exactly nothing at zero.
-  //
-  // `tone` reads the luminance of the colour the cell is about to draw, so with `readDepth`
-  // up it is a depth band without a second control existing to do that - which is why there
-  // is no fourth key for depth. `hash` is the cell's own identity and holds still, so the
-  // characters belong to the room and a subject walks through them. `rain` is the falling
-  // counter passing through the cell, which is the one of the three that moves on its own.
-  //
-  // **`hash` defaults to 1 and the other two to 0**, on the convention the glitch ceilings
-  // set: a setting under a master defaults to the literal it replaces, and the probe this
-  // came from had exactly one key, the cell's. So raising `glyph` alone draws the field the
-  // probe drew rather than sixty-four copies of one character, which is what a default of 0
-  // across all three would give.
-  'glyph.tone': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glyph', label: 'tone key',
-    apply: (v) => { uniforms.glyphTone.value = v; } },
-  'glyph.hash': { def: 1, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glyph', label: 'hash key',
-    apply: (v) => { uniforms.glyphHash.value = v; } },
-  'glyph.rain': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glyph', label: 'rain key',
-    apply: (v) => { uniforms.glyphRain.value = v; } },
+  // The glyph field: its master and the three keys under it. Declared in
+  // `web/effect-params.js` with the rest of the effect parameters, and spread in here at
+  // the position they have always held - the panel builds its rows in this order.
+  ...effectSlice('glyph.amount', 'glyph.rain'),
 
   // The mount's cant, in degrees. Document state rather than view, because the angle
   // belongs to the take and every project on it wants the same answer - see the long
@@ -1206,27 +1279,11 @@ const PARAMS = {
     group: 'motion', label: 'wake',
     apply: (v) => { uniforms.wakeTime.value = v / 1000; updateDrawRange(); } },
 
-  // The turbulence field, in world units throughout: amplitude in metres, scale in
-  // cycles per metre, speed in metres of drift per program second. Nothing here is a
-  // screen-space length, so unlike `pointSize` and the grade terms none of it is
-  // referred to 1080p - the same values draw the same displacement at every output
-  // size because they describe the room rather than the frame.
-  'noise.amount': { def: 0, min: 0, max: 1, step: 0.005, kind: 'scalar', tag: 'look',
-    group: 'displacement', label: 'turbulence',
-    apply: (v) => { uniforms.noise.value = v; } },
-  'noise.scale': { def: 3, min: 0.2, max: 12, step: 0.1, kind: 'scalar', tag: 'look',
-    group: 'displacement', label: 'grain m',
-    apply: (v) => { uniforms.noiseScale.value = v; } },
-  'noise.speed': { def: 0.7, min: 0, max: 3, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'displacement', label: 'speed',
-    apply: (v) => { uniforms.noiseSpeed.value = v; } },
-  // How far the cloud is pulled onto its grid, so the two ends are the measured surface
-  // and a fully reconstructed one, and everything between is the surface arriving. It
-  // snaps in the levelled frame, which means a canted mount does not cut the grid on the
-  // diagonal - the shader block carries that reasoning and the rotation it uses.
-  'lattice.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'displacement', label: 'lattice',
-    apply: (v) => { uniforms.lattice.value = v; } },
+  // The turbulence field and the grid the cloud is pulled onto. The cell that grid is cut
+  // at is `cell` below, which stays written out here because it is a core parameter: the
+  // dot is the namespace, and `effectOf` reads a bare name as the core grid rather than as
+  // anything the glyph or lattice effects own.
+  ...effectSlice('noise.amount', 'lattice.amount'),
   // The cell, in metres of the room like every other displacement here and unlike the
   // screen-space terms. A cell is a distance the subject stands in rather than a size on
   // screen, so the same look gives the same grid at any output resolution, and the floor
@@ -1235,100 +1292,9 @@ const PARAMS = {
     group: 'displacement', label: 'cell m',
     apply: (v) => { uniforms.latticeCell.value = v; } },
 
-  // Datastream corruption: one master and five ceilings, where there used to be one
-  // scalar carrying all six meanings at fixed ratios. The comment beside the uniforms
-  // has the argument for the shape; what belongs here is why the ceilings are ceilings
-  // and not absolute values. An absolute set would need a clip to animate density,
-  // shove and tint on three tracks that all reach zero on the same frame just to fade
-  // corruption out, and one that missed by a frame leaves a tear standing in a clean
-  // plate. The master is the fade, and these say what a full one means.
-  //
-  // **Four of the five defaults are exactly the literals they replaced, and the fifth is
-  // not.** That is the rule the readings' seven constants are held to and it is
-  // load-bearing the same way here, so the exception matters: 0.45, 0.45, 12 and 7 are the
-  // numbers the shader already had, and `glitchTint` is 1.8 where the old line baked 3.0.
-  //
-  // This sentence used to claim all five without naming an exception, with the
-  // enumeration above listing precisely the four that hold - which is the shape of error
-  // `CLAUDE.md` rule 5 describes, an object every observation skips behind a justification
-  // that stops anybody looking twice. So `blackwall.json`, which names `glitch: 0.18` and
-  // no tint, does *not* draw the picture it drew: its tear flares dimmer. The flare's move
-  // out of the Blackwall branch - which is in `web/cloud-shader.js` now, and was a
-  // thousand-odd lines above this even before it left the file - is a deliberate change on
-  // top of that; this one was not deliberate.
-  'glitch.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'amount',
-    apply: (v) => { uniforms.glitch.value = v; } },
-  // How much of the frame tears at a full master, as a fraction of the bands. The
-  // shove's other half: this one is how *often* the feed fails and the next is how
-  // badly, and the two were the same number until now.
-  'glitch.density': { def: 0.45, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'density',
-    apply: (v) => { uniforms.glitchDensity.value = v; } },
-  // Metres a band travels at a full master, half of it either way. World units like
-  // the turbulence field and unlike every screen-space term here, because a tear is a
-  // distance in the room: the same look draws the same shear at any output size, and a
-  // shove referred to 1080p would change how far the feed failed when you exported.
-  'glitch.shove': { def: 0.45, min: 0, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'shove m',
-    apply: (v) => { uniforms.glitchShove.value = v; } },
-  // What a torn band flares, per metre it was shoved. Deliberately per metre rather
-  // than normalised against `glitchShove`, so a bigger tear burns harder on its own -
-  // the alternative decouples them and then wants a second slider to couple them back.
-  // The default is not the 3.0 the literal was, and the arithmetic says what it is
-  // instead. Inside the Blackwall branch the flare was added to `bw` and then scaled by
-  // that reading's `0.55 + 0.75 * lum` on the way out, so the tint reproducing the old
-  // picture is `3.0 * (0.55 + 0.75 * lum)` over the torn pixels: 1.65 where a tear falls
-  // on black, 2.10 at a luminance of 0.2, 3.0 only where it crosses something as bright
-  // as 0.6. Which end of that applies is a fact about the footage rather than about the
-  // shader, and this look is graded for rooms shot dark - `docs/reference.md` says the
-  // sample was shot unlit and that colour "reads a signal the sensor barely produced" -
-  // so the torn bands land near the bottom of the range and 1.8 is the match at a
-  // luminance of about 0.07.
-  //
-  // Stated as arithmetic and not as an A/B of rendered frames, deliberately, because at
-  // the value anything ships with the choice barely resolves: `blackwall.json` asks for
-  // a master of 0.18, where the largest shove is 8.1cm and the whole flare spans 0.13 to
-  // 0.19 across that entire luminance range. It is at a full master that the end of the
-  // range starts to matter, and a full master is a slider anybody setting it is watching.
-  'glitch.tint': { def: 1.8, min: 0, max: 8, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'flare',
-    apply: (v) => { uniforms.glitchTint.value = v; } },
-  // Depth-image rows per band, so the count of bands is 424 over this - 35 of them at
-  // the default. Rows and not a fraction of the frame, because a band is a run of the
-  // sensor's own scanlines and that is what makes the tear read as the feed failing
-  // rather than as a shape drawn over the picture.
-  'glitch.bands': { def: 12, min: 1, max: 64, step: 1, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'band rows',
-    apply: (v) => { uniforms.glitchBands.value = v; } },
-  // Which way the bands run, from the sensor's rows at 0 to its columns at 1, and the
-  // interesting looks are the fractions in between where the bands cross the frame on a
-  // diagonal. The axis was baked as `position.y` from the first version of this effect,
-  // which is why the default is 0 and why it has to be exactly 0: a document written
-  // before this control existed names no axis and has to keep tearing along rows.
-  //
-  // A blend of the two image axes rather than an angle in degrees, and that is the honest
-  // spelling rather than a lazy one. The bands are quantised in the *sensor's* frame,
-  // where the two axes are 512 columns against 424 rows and a band is a run of scanlines
-  // rather than a distance - so there is no square in which an angle would mean what an
-  // angle means, and a raster's `scanAngle` two hundred lines down is the term that has
-  // one because it runs in screen space where the pixels are square.
-  //
-  // No shear parameter to go with it. The tear's direction stays sensor-frame x, so
-  // turning the axis rotates which bands are chosen and not which way they slide, and the
-  // pair of controls that would let those disagree buys a look nothing in the references
-  // shows and two more ways to author something incoherent.
-  'glitch.axis': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'axis',
-    apply: (v) => { uniforms.glitchAxis.value = v; } },
-  // Hertz: how often the torn set is redrawn, 7 by default, so a state holds for 143ms
-  // or about 4.3 frames at 30fps. The phase is `floor(time * rate)` and stays a pure
-  // function of program time - integrating a rate for a smoother phase would make the
-  // frame depend on how the playhead got there, and seek-equals-playback dies the
-  // moment it does. Keyframing the rate therefore jumps the pattern, which is in genre.
-  'glitch.rate': { def: 7, min: 0, max: 30, step: 0.5, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'rate hz',
-    apply: (v) => { uniforms.glitchRate.value = v; } },
+  // Datastream corruption: the master and its five ceilings, plus the rate they are
+  // redrawn at.
+  ...effectSlice('glitch.amount', 'glitch.rate'),
 
   // One region, authored once and read three ways. Three scalars rather than a new
   // `point` kind, which is the awkward part and is deliberate: the design doc argues
@@ -1367,37 +1333,9 @@ const PARAMS = {
     group: 'region', label: 'falloff',
     apply: (v) => { uniforms.regionSoft.value = v; } },
 
-  // The three effects. Push and mask are signed because both questions have two
-  // answers - bulge or pinch, hide the inside or hide everything else - and a sign is
-  // one slider where a direction toggle would be a second parameter that cannot lerp.
-  'push.amount': { def: 0, min: -1, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'push',
-    apply: (v) => { uniforms.regionPush.value = v; } },
-  'noise.region': { def: 0, min: 0, max: 1, step: 0.005, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'scramble',
-    apply: (v) => { uniforms.regionNoise.value = v; } },
-  'mask.amount': { def: 0, min: -1, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'mask',
-    apply: (v) => { uniforms.regionMask.value = v; } },
-  // The region read a fourth way, after displacing, scrambling and masking: a wave
-  // travelling out along the radius, in metres at a full weight. Non-negative, unlike the
-  // push and the mask beside it, because the phase is what a sign would invert and the
-  // wave already visits both directions every cycle - a negative amplitude would be a
-  // second spelling of a shift the frequency can already reach.
-  'ripple.amount': { def: 0, min: 0, max: 0.5, step: 0.005, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'ripple m',
-    apply: (v) => { uniforms.ripple.value = v; } },
-  // Cycles per metre of radius, so the wave's spacing is a distance in the room.
-  'ripple.freq': { def: 4, min: 0.2, max: 20, step: 0.1, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'ripple per m',
-    apply: (v) => { uniforms.rippleFreq.value = v; } },
-  // Cycles per second, and it advances in eighths of one rather than smoothly - the block
-  // says why. Zero freezes the wave where it stands instead of switching it off, which is
-  // the state `glitchRate` reaches the same way and for the same reason: a held shape is
-  // a different picture from no shape, and both keyframe.
-  'ripple.speed': { def: 1, min: 0, max: 8, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'ripple hz',
-    apply: (v) => { uniforms.rippleSpeed.value = v; } },
+  // The four ways the region above is read: it displaces, it scrambles, it masks, and a
+  // wave travels out along its radius.
+  ...effectSlice('push.amount', 'ripple.speed'),
   // Still what it always was - orbit the view you are looking at - and still view
   // state rather than an edit: the controls advance it on the program delta the
   // render loop hands them, so the same orbit renders the same way at any output
@@ -1497,247 +1435,34 @@ const PARAMS = {
   rim: { def: 0.55, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'style', label: 'rim',
     apply: (v) => { uniforms.rimAmount.value = v; } },
-  // The same argument the readings above were rebuilt on, made here first.
-  'thermal.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'thermal',
-    apply: (v) => { uniforms.thermal.value = v; } },
-  'edges.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'edges',
-    apply: (v) => { uniforms.edges.value = v; } },
-  // The duotone: how far the image lands between the two poles, which way they are
-  // turned, and where they meet. Three amounts and no source selector, which is the same
-  // argument `thermal` and the readings above are built on - a shading idea expressed as
-  // a mode is refused during evaluation as a user action and can therefore never move
-  // under the playhead, where three scalars each key like anything else.
-  //
-  // `duotoneDepth` is an amount rather than a switch for the reason every other term here
-  // is one: a clip brings the tonal transform in and out on one track. It is the term the
-  // rest of this look sits on top of, because in the frames this is graded against the
-  // light is emitted by the data rather than reflected off surfaces - so the interiors
-  // have to fall toward black before a raster over the top reads as a reconstruction
-  // instead of as a filter laid over a video.
-  'duotone.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone depth',
-    apply: (v) => { uniforms.duotoneDepth.value = v; } },
-  // Degrees on the slider and radians at the uniform, the way `tilt` and `roll` are, so
-  // the panel reads in the unit a person turns a hue in and the shader gets the unit a
-  // trigonometric function takes. The full turn either way rather than a half, because
-  // the two poles are asymmetric - the near one is nearly black - so +90 and -90 are
-  // genuinely different pictures and a half-range would hide one of them.
-  'duotone.hue': { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone hue',
-    apply: (v) => { uniforms.duotoneHue.value = THREE.MathUtils.degToRad(v); } },
-  // Where the poles meet, as a fraction of the near/far clip range. A place in the room
-  // rather than a fraction of the frame, which is what lets a subject keep its silhouette
-  // when the camera moves - and it is the same reasoning `contourBands` is per metre for.
-  'duotone.split': { def: 0.5, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone split',
-    apply: (v) => { uniforms.duotoneSplit.value = v; } },
-  // And how many metres the crossing between the poles takes, which is the one term here
-  // stated in the room's units rather than as a share of the clip range. The uniform
-  // carries why; what belongs beside the entry is the range.
-  //
-  // The floor is 0.2m rather than zero because zero is a hard edge and the ramp already
-  // has one at 0.2 for anything a sensor this noisy can resolve - the jitter is about 4mm
-  // per sample, so a crossing inside a couple of centimetres is a threshold with speckle
-  // on it rather than a gradient. The ceiling is the full 9.5m the depth sliders reach,
-  // so a ramp can always be opened wider than anything the box can hold, which is what
-  // "the grade does not follow the framing" has to mean at the top end.
-  //
-  // **The default is the default clip range, and it is derived rather than typed.** At
-  // that value `duotoneSpan / (farClip - nearClip)` is 1.0 on an untouched document and
-  // the expression is the one this replaced, term for term - so nine shipped looks and
-  // every saved project render what they rendered. Deriving it means the three defaults
-  // cannot drift apart silently; it does not make the identity exact on its own, which is
-  // why the commit carries hashes rather than this comment carrying an argument.
-  'duotone.span': { def: CLIP_FAR_DEFAULT - CLIP_NEAR_DEFAULT, min: 0.2, max: 9.5, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone span m',
-    apply: (v) => { uniforms.duotoneSpan.value = v; } },
-  // The fourth of them, and the one that is not a fact about where a point is. It keys
-  // the same two poles on how fast a point is moving along the sensor's axis, so a room
-  // graded by distance gets whatever is moving through it in the hot pole - which is the
-  // one reading the depth key cannot produce, since a subject and the wall behind it are
-  // both exactly where they stand.
-  //
-  // **The speed is measured from the two depth frames the shader already holds and there
-  // is no flow pass.** Optical flow would buy lateral motion as well, and it would buy it
-  // for a full pass over the frame plus a second history to keep, on a renderer whose
-  // whole transport rests on a seek producing the same image playback would - so the pass
-  // would have to be walked forward through a pre-roll like the accumulators are, and a
-  // scrub would arrive carrying whatever the drag had built. What the depth pair gives is
-  // the axial component alone, for one texel fetch that was nearly already there, and
-  // axial is the component this look is about: the sensor measures depth, so a subject
-  // walking toward it is the movement it can actually see.
-  //
-  // An amount rather than an amount and a reference speed, on the precedent the poles
-  // themselves are baked on: what a look parameterises is how much of a ramp it wants.
-  // The shader carries the reference and the measurement behind it.
-  'duotone.motion': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone motion',
-    apply: (v) => { uniforms.duotoneMotion.value = v; } },
+  // The two shading ideas that answered the mode argument before the readings above did,
+  // and the duotone the rest of this look sits on top of.
+  ...effectSlice('thermal.amount', 'duotone.motion'),
 
-  // The rain: repeating drop heads descending each column of the room, brightening what
-  // they pass. It is a term of its own rather than a setting inside the glyph field because
-  // the brightness is the effect - the glyph field's `rain` key reads the same scalar to
-  // scramble a character, which is the arrangement `duotone` already has, one source and
-  // two consumers. Filed inside the glyph field, a wave descending through a room would
-  // have been unreachable for any look that was not drawing text, including `voxel`, which
-  // now gets it for nothing.
-  //
-  // **No accumulated state anywhere in it.** The value is a pure function of program time
-  // and world position, so a seek lands on exactly the frame playback would have drawn
-  // there; `timeline-check` is the instrument that holds that, and a rain integrated frame
-  // to frame would fail it.
-  //
-  // **A repeating drop rather than one that wraps**, which is the first of three things
-  // the probe had to settle by rendering them. A single head running down four metres
-  // spends half its cycle below the floor with the room dark behind it; a head every
-  // `span` metres means a column always has two or three running. And the trail sits
-  // *above* the head, which is what makes it read as falling rather than as a band sliding
-  // through.
-  'rain.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'rain', label: 'rain',
-    apply: (v) => { uniforms.rain.value = v; } },
-  // The three lengths under it, in metres and metres per second of the room, so unlike the
-  // screen-space terms none of them owes anything to the 1080p reference and the same look
-  // draws the same wave at any output size. Each defaults to the value the reference clips
-  // were shot at rather than to zero: they are settings under a master on the glitch
-  // ceilings' convention, and a span of zero in particular is a degenerate divisor with
-  // nothing but the master standing over it.
-  'rain.speed': { def: 0.55, min: 0.05, max: 3, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'rain', label: 'fall m/s',
-    apply: (v) => { uniforms.rainSpeed.value = v; } },
-  'rain.span': { def: 1.3, min: 0.2, max: 4, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'rain', label: 'head gap m',
-    apply: (v) => { uniforms.rainSpan.value = v; } },
-  'rain.trail': { def: 0.45, min: 0.05, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'rain', label: 'trail m',
-    apply: (v) => { uniforms.rainTrail.value = v; } },
+  // The rain, which the glyph field above reads a second time as a key.
+  ...effectSlice('rain.amount', 'rain.trail'),
   // Each post pass costs a full-screen read and write whether or not it changes
   // anything, so a zero value switches its pass off rather than running it as a
-  // no-op. The three grade terms share one pass, so they gate it together.
+  // no-op. The five terms that gate the grade share one pass, so they gate it together -
+  // three when this was written, and the count is checkable in one place now that it is a
+  // `gates` flag rather than a line repeated in each of their applies.
   bloom: { def: 0, min: 0, max: 6, step: 0.05, kind: 'scalar', tag: 'look',
     group: 'post', label: 'bloom',
     apply: (v) => { bloom.strength = v; bloom.enabled = v > 0; } },
   trails: { def: 0, min: 0, max: 0.97, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'motion', label: 'trails',
     apply: (v) => { afterimage.uniforms.damp.value = v; afterimage.enabled = v > 0; } },
-  'rgbsplit.amount': { def: 0, min: 0, max: 6, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'rgb split',
-    apply: (v) => { grade.uniforms.rgbSplit.value = v; grade.enabled = gradeNeeded(); } },
-  // The raster's master, and the only one of the four that gates the pass. It keeps the
-  // name `scanlines`, which now describes one of its settings rather than the whole term:
-  // a rename is the one change `registry-check` cannot make bit-exact against its pinned
-  // commit, and it would break every preset anybody has authored. Accepted rather than
-  // overlooked.
-  'raster.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'raster', label: 'scanlines',
-    apply: (v) => { grade.uniforms.scanlines.value = v; grade.enabled = gradeNeeded(); } },
-  // The three settings under it, and none of them gates the pass - for `crush`'s reason
-  // in the case of the pitch, whose default is 1.3 and so is true of every document there
-  // is, and for a plainer one in the case of the other two: raising an angle while the
-  // master sits at zero rotates a raster nobody asked for, and switching a full-screen
-  // pass on to draw nothing is exactly the no-op the gate exists to refuse.
-  //
-  // Degrees on the slider and radians at the uniform. The full half-turn either way is
-  // the whole of a raster's range, because a line grille at 180 degrees is the grille at
-  // 0 - what the sign buys is which way a *rotating* raster turns under the playhead.
-  // One parameter, one vec2 uniform, and the trigonometry happens here rather than in
-  // the shader. The comment beside the uniform carries the measurement that forced it;
-  // what belongs here is that the arithmetic is stated once, in this file, so a check can
-  // hold the axis against it rather than against a second copy of the same sum.
-  'raster.angle': { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
-    group: 'raster', label: 'angle',
-    apply: (v) => {
-      const r = THREE.MathUtils.degToRad(v);
-      grade.uniforms.scanAxis.value.set(Math.sin(r), Math.cos(r));
-    } },
-  // Cycles per reference pixel along the raster's own axis, and the default is exactly
-  // the literal it replaces.
-  //
-  // **The useful range runs below the default, not above it**, which is the opposite of
-  // what this said when it was written and is worth stating as a correction rather than
-  // quietly replacing. The claim was that 1.3 is a television artifact and 6 is the column
-  // raster a reference frame gets sliced into. The first half is right and the second is
-  // backwards: the wave is expressed against 1080p, so 1.3 is already about 220 cycles
-  // across the picture, 6 is nearer a thousand, and a line thinner than the pixel carrying
-  // it is not a grille but aliasing. The wide bands the references actually cut a picture
-  // into want a pitch under about 0.6. Measured on rendered frames at a fixed pose rather
-  // than reasoned about: at 0.1 the bands are wide enough to read across the room, and by
-  // 1.0 they have closed up into a scanline again.
-  //
-  // The old range of 0.1 to 12 in tenths therefore put every value worth having inside its
-  // bottom four percent, with six positions to choose between, and spent the rest of the
-  // travel past the point where anything is resolvable.
-  //
-  // **The default has to stay reachable to the exact bit**, because the guard in the grade
-  // shader tests this against the literal 1.3 and takes the old code path when it matches.
-  // A range input does its stepping in decimal on its own value string, so a minimum of
-  // 0.05 with a hundredth step still lands the same double `params.reset()` writes, and
-  // every one of the 396 reachable positions round-trips. Checked in a browser rather than
-  // reasoned about, because a default that missed by one bit would take the shipped raster
-  // off its bit-exact path with nothing anywhere turning red to say so.
-  'raster.pitch': { def: 1.3, min: 0.05, max: 4, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'raster', label: 'pitch',
-    apply: (v) => { grade.uniforms.scanPitch.value = v; } },
-  // How square the wave is, from the sine it has always been to a hard grille with dark
-  // gaps. This is the control that makes the other two reach the look at all - an angle
-  // over a sine is rotated softness, and softness is not what the references show.
-  'raster.hard': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'raster', label: 'hardness',
-    apply: (v) => { grade.uniforms.scanHard.value = v; } },
-  'grain.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'grain',
-    apply: (v) => { grade.uniforms.grain.value = v; grade.enabled = gradeNeeded(); } },
-  // The fifth term that gates the pass, and it gates for the plain reason the other four
-  // do rather than as an exception: its default is zero, so a look that never names it
-  // pays nothing and the pass stays shut. Contrast `crush` further down, whose default is
-  // the literal it replaced and which therefore cannot gate anything without holding the
-  // pass open for every look there has ever been.
-  'streak.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'streak',
-    apply: (v) => { grade.uniforms.streak.value = v; grade.enabled = gradeNeeded(); } },
-  // Which way the light runs, and this **reverses a decision the code used to state as
-  // settled**, which is worth saying plainly rather than leaving as a diff. The gather ran
-  // down the column and nothing else, the comment above it said it falls and only falls,
-  // and `docs/reference.md` said a control for the direction would be a control for
-  // getting it wrong. The argument was that gravity has one direction. It is not a bad
-  // argument and it is not the operator's: a smear is a thing a lens and a sensor do, and
-  // a light bleeding sideways off a hot edge is in as many reference frames as one running
-  // down a column. The old sentences are gone rather than left standing next to the slider
-  // that contradicts them.
-  //
-  // Zero has to be exactly straight down, because a look authored before this control
-  // existed names no angle and has to keep the streak it was graded with. The gather's own
-  // comment carries the measurement that says it does, to the bit.
-  //
-  // A full half-turn either way, like the raster's angle and unlike it in what the sign
-  // buys: a grille at 180 degrees is the grille at 0, so there the sign only decides which
-  // way a rotating raster turns, where here 0 and 180 are opposite directions and both are
-  // reachable by two routes. Positive turns the streak clockwise on the glass - 90 puts it
-  // across to the left, -90 across to the right - which is the same sense the raster's
-  // angle turns in, and it is written down here because it was read off rendered frames
-  // rather than derived. One parameter, one vec2 uniform, and the trigonometry happens in
-  // this file so a check can hold the axis against the arithmetic stated once rather than
-  // against a second copy of the same sum.
-  'streak.angle': { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'streak angle',
-    apply: (v) => {
-      const r = THREE.MathUtils.degToRad(v);
-      grade.uniforms.streakAxis.value.set(Math.sin(r), Math.cos(r));
-    } },
-  // The corner falloff, which was a literal inside the grade shader and so arrived with
-  // whichever of the three above you happened to raise. The uniform beside it carries
-  // why this is the one promoted literal that does not keep its old value; what belongs
-  // here is that it gates the pass like the other three, so the vignette can be had on
-  // its own and a look wanting none of the four still pays for no pass at all.
-  'vignette.amount': { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'vignette',
-    apply: (v) => { grade.uniforms.vignette.value = v; grade.enabled = gradeNeeded(); } },
+  // Every term of the one combined grade pass except its toe, which is `crush` below and is
+  // the one of the nine that must not gate the pass. Five of these do gate it, and which
+  // five is a `gates` flag in `web/effect-params.js` rather than a line of wiring repeated
+  // five times here.
+  ...effectSlice('rgbsplit.amount', 'vignette.amount'),
   // The toe under the grade's Reinhard curve, and **the one term sharing that pass which
-  // deliberately does not gate it** - note the missing `grade.enabled` beside the four
-  // above. That is the whole of its wiring and it is worth the paragraph, because the
-  // symmetry is the thing a reader will reach to restore.
+  // deliberately does not gate it** - the five that do carry `gates` in
+  // `web/effect-params.js`, and this one is written out here with no such flag anywhere,
+  // because it is a core parameter rather than an effect's. That is the whole of its wiring
+  // and it is worth the paragraph, because the symmetry is the thing a reader will reach to
+  // restore.
   //
   // Its default is the literal it replaces, so gating on it would be gating on
   // `0.018 > 0`: the pass held open for every look there has ever been, the four shipped
@@ -1830,6 +1555,34 @@ function missingReadings(values) {
 for (const name of READINGS) {
   if (!Object.hasOwn(uniforms, name)) {
     throw new Error(`the reading ${name} has no uniform: its slider would move nothing`);
+  }
+}
+
+// The table and the registry hold the same forty-one names, asked in both directions,
+// because the two failures are different and neither is loud on its own.
+//
+// A run left out of the seven spreads above is nine parameters that silently do not exist:
+// no slider, no track, and a project naming one refused by `specOf` as an unknown parameter
+// a long way from the line that dropped it. And a dotted name written out inline again is
+// the second implementation this file keeps refusing - it would work, which is exactly the
+// problem, because the copy is what drifts off the table the presets and the applier agree
+// on. `effectOf` draws the line between the two halves and this asks against that same
+// line, so an effect parameter added on either side is checked by existing rather than by
+// somebody remembering to come back here.
+for (const name of Object.keys(EFFECT_PARAMS)) {
+  if (!Object.hasOwn(PARAMS, name)) {
+    throw new Error(
+      `${name} is declared in web/effect-params.js and reaches no registry entry: it would `
+      + 'be a look term with no slider and no track, and a document naming it would be refused',
+    );
+  }
+}
+for (const name of Object.keys(PARAMS)) {
+  if (effectOf(name) !== null && !Object.hasOwn(EFFECT_PARAMS, name)) {
+    throw new Error(
+      `${name} is an effect parameter written out in the registry rather than declared in `
+      + 'web/effect-params.js: it is a second copy of a binding, and the copy is what drifts',
+    );
   }
 }
 
@@ -9369,19 +9122,6 @@ function presetFromCurrentLook(names) {
  * nine values measured in metres. A silent drift would be the reason not to; a loud one
  * is the reason this is derived rather than restated.
  */
-
-/**
- * The effect a dotted name belongs to, or null for a core parameter. The dot is the
- * namespace: `glyph.tone` is the glyph effect's tone key, `cell` is the core grid.
- * The split is what lets a reader tell a typo from an effect this build does not
- * have - a bare name the registry lacks is a typo, a dotted name whose prefix names
- * no effect is a document from a machine with something installed that this one
- * lacks. The two get different answers, and this is the line they divide on.
- */
-const effectOf = (name) => {
-  const dot = name.indexOf('.');
-  return dot > 0 ? name.slice(0, dot) : null;
-};
 
 /** Every look parameter of one effect, in declaration order. */
 const effectParamNames = (id) => params.names('look').filter((n) => effectOf(n) === id);

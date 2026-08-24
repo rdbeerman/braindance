@@ -325,11 +325,18 @@ const MUTATIONS = {
   // of: the poles still turn, the picture still changes, and every sweep row that asks
   // whether the slider reaches a pixel goes on passing. What separates the two builds is
   // the number at the uniform, so the landing row is the only thing that can fail here.
+  //
+  // **It anchors a branch of the shared applier now rather than this parameter's own
+  // closure, and that costs it nothing.** The forty-one effect parameters are declared as
+  // data in `web/effect-params.js` and `effectApply` in `web/main.js` is what turns a
+  // binding into a write, so there is no `duotoneHue` line left to anchor. `degToRad` is
+  // the transform of exactly one of the forty-one - this hue - so mutating the branch and
+  // mutating the parameter are still the same act, and the row set below is unchanged.
   'duotone-hue-in-degrees': {
     file: 'web/main.js',
     edits: [[
-      '    apply: (v) => { uniforms.duotoneHue.value = THREE.MathUtils.degToRad(v); } },',
-      '    apply: (v) => { uniforms.duotoneHue.value = v; } },',
+      '    write = (v) => { table()[bind.uniform].value = THREE.MathUtils.degToRad(v); };',
+      '    write = (v) => { table()[bind.uniform].value = v; };',
     ]],
     fails: 'the duotone.hue row of the one-at-a-time landing sweep, reporting "landed 47 want '
       + '0.8203047484373349", and the all-at-once row beside it - that second one is the same '
@@ -511,18 +518,39 @@ const MUTATIONS = {
   // 0.2 against a clean build sitting at 0.135, which is a gate adjusted to make a
   // prediction come true - the failure `docs/instruments.md` records twice, both times
   // arriving with a written justification that stopped anybody looking again.
+  //
+  // **This control got broader when the effect parameters became data, and the widening is
+  // a real loss of resolution rather than a stronger check.** There is no `streakAxis` line
+  // left to anchor: the forty-one are declared in `web/effect-params.js` and `effectApply`
+  // in `web/main.js` builds the write, with `axisDeg` stated once for the two angles that
+  // take it. So the anchor is that one branch, and mutating it feeds degrees to both
+  // `streak.angle` and `raster.angle`. The name is kept because it is what
+  // `docs/proof-tools.md` lists and what anybody reaching for this control types, but read
+  // the row set below as a claim about the pair.
+  //
+  // What that costs is the thing this table is built to give: a mutation that reddens
+  // *different* rows from its neighbours is how a run says which claim is load-bearing, and
+  // this one can no longer separate the streak's unit from the raster's. Sharing the
+  // arithmetic is still the right call - two copies of the same sum is the drift the whole
+  // refactor removes - but the honest reading of a red run here is "an axis lands in the
+  // wrong unit", not "the streak's axis does".
   'streak-angle-in-degrees': {
     file: 'web/main.js',
     edits: [[
-      '      grade.uniforms.streakAxis.value.set(Math.sin(r), Math.cos(r));',
-      '      grade.uniforms.streakAxis.value.set(Math.sin(v), Math.cos(v));',
+      '      table()[bind.uniform].value.set(Math.sin(r), Math.cos(r));',
+      '      table()[bind.uniform].value.set(Math.sin(v), Math.cos(v));',
     ]],
     fails: 'the streak.angle row of the one-at-a-time landing sweep, reporting "landed '
       + '[-0.097181906,0.995266636] want [0.920504853,-0.390731128]", and the all-at-once '
       + 'row beside it - that second one is the same comparison over the whole set rather '
       + 'than a separate finding. Nothing in the direction section moves: this is a unit '
       + 'error, and a streak running at the wrong angle is still a streak running at an '
-      + 'angle',
+      + 'angle. **And the raster.angle landing row with it**: the two angles share the one '
+      + '`axisDeg` branch this now anchors, so the same wrong arithmetic reaches both - '
+      + 'measured, raster.angle lands [0.1673557,0.985896582] against a want of '
+      + '[0.891006524,0.4539905]. The repointing was first shipped with that row as a '
+      + 'prediction, and the run confirmed it; the streak numbers above are unchanged '
+      + 'because neither the test value nor the arithmetic moved',
   },
   // The raster's axis nailed back to the frame's y, which is what it was before the angle
   // existed. Everything else about the raster goes on working - the pitch still sets the
