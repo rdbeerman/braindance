@@ -236,6 +236,13 @@ cpSync(join(REPO, 'tools'), join(WORK, 'tools'), { recursive: true });
 // one state a proof tool must never produce - and it would do it silently, since the
 // staged tree is deleted at the end of every run.
 cpSync(join(REPO, 'web'), join(WORK, 'web'), { recursive: true });
+// `effects-builtin` is staged for a different reason than the three above: the effect
+// store refuses to BOOT without its shipped root - deliberately, so a broken install
+// cannot read as nothing-installed - so a staged tree missing it is a server that never
+// comes up, and this tool then says `DID NOT RUN` rather than failing a row, which is a
+// silence nobody reads. Copied rather than linked on the same argument `web/` is, so a
+// mutation naming a chunk under it could never rewrite the repo's own source.
+cpSync(join(REPO, 'effects-builtin'), join(WORK, 'effects-builtin'), { recursive: true });
 for (const name of ['node_modules', 'vendor', 'captures']) {
   const from = join(REPO, name);
   if (existsSync(from)) symlinkSync(from, join(WORK, name));
@@ -1073,14 +1080,35 @@ try {
       // that ever sets it - so if it never arrives, everything below is measuring nothing
       // and has to say so. A fixed wait here would turn "no colour ever decoded" into a
       // silent pass on the row that matters most.
-      const hasColor = () => page.evaluate('globalThis.__kinect.uniforms.hasColor.value');
+      //
+      // **It reads through a published `__kinect` rather than off one, and that is the
+      // difference between a wait and a throw.** `load` stopped meaning the page is up
+      // when the effect packages moved onto the wire: boot now fetches them over HTTP, so
+      // `__kinect` publishes tens of milliseconds *after* the event `goto` waits for -
+      // measured at 366ms to `load` against 398ms to the handle. Reaching straight through
+      // the handle raises a TypeError inside the predicate, `waitFor` does not catch one,
+      // and the twenty seconds are never spent: the row reddened in the same second it was
+      // printed, saying no colour ever bound about a build whose colour binds in 451ms.
+      // The two sections above survive on a fixed `wait()` after their own `goto`, which is
+      // the silent-pass shape this comment already refuses, so the guard belongs here rather
+      // than a third sleep. `-1` for an unpublished handle keeps the timeout reachable, and
+      // the two states are reported apart below because "the page never booted" and "colour
+      // never arrived" are different findings.
+      const hasColor = () => page.evaluate('globalThis.__kinect ? globalThis.__kinect.uniforms.hasColor.value : -1');
       let bound = false;
       try {
         await waitFor(async () => (await hasColor()) === 1, 20000, 'a colour frame to decode and bind');
         bound = true;
       } catch { /* the row below is the report, and the rows after it are skipped */ }
+      // Short-circuited and caught, because this read runs on the path where the wait has
+      // already failed: a page that died during those twenty seconds would throw here and
+      // turn a red row into a crash with the count still short, which is the shape that
+      // reads as a catch to anything checking exit codes.
+      const booted = bound || (await hasColor().catch(() => -1)) !== -1;
       ok('a colour-on grabber paints the cloud with a real decoded JPEG, which is what the toggle is measured against',
-        bound, bound ? '' : 'hasColor never reached 1, so no colour ever bound and nothing below would have measured the toggle');
+        bound, bound ? '' : (booted
+          ? 'hasColor never reached 1, so no colour ever bound and nothing below would have measured the toggle'
+          : 'the page never published __kinect, so this is a viewer that did not boot rather than a colour that did not arrive'));
 
       // Counted before the press, because the restart can be under way by the time the
       // click resolves and a hello read after the fact could be the one already on file.

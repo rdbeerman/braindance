@@ -1155,6 +1155,16 @@ each with its own comment saying why; `level-check`, `vcam-check`, `monitor-chec
 refuse could not have known which trees it broke, which is the argument for the refusal being
 checked rather than for the lists being remembered.
 
+**All four lists name it now, and unblocking the last three cost one more finding.** `vcam-check`
+came back 41 assertions and `jobs-check` 56, both clean the first time either of them booted.
+`monitor-check` reached its rows and reddened one, and the row it reddened was a precondition
+that had not run since the packages arrived — the entry under "Things that bite in a browser"
+below carries it. That is the second half of the argument above stated as a measurement: a tool
+that cannot boot is not a tool that is passing, and what four commits of silence were holding was
+not nothing. The sweep behind the count is worth writing down too, because the number is smaller
+than it looks — six tools in `tools/` stage a tree and spawn a server out of it, and
+`sensor-view-check` and `boot-check` spawn from the checkout itself, so they were never exposed.
+
 ### And `fails=1` can be the same crash wearing the count
 
 Counting assertions is not enough on its own if the harness's own failure is one of the
@@ -2552,6 +2562,24 @@ avoided exactly this, and the ordering made it false. Measuring it needs the dri
 changed as well: a programmatic `element.click()` leaves the caret on the body, where a
 build that stranded it and a build that never had it read identically, so `openPicker`
 focuses before it clicks.
+
+**`waitUntil: 'load'` stopped meaning the page is up when the effect packages moved onto the
+wire.** Boot fetches them over HTTP now, so `globalThis.__kinect` publishes *after* the event
+`page.goto` waits for — measured at 366ms to `load` against 398ms to the handle, on loopback with
+a warm page cache. Every driver that reaches straight through that handle on the line after a
+`goto` is a race from that commit onward, and it does not arrive looking like one: a predicate
+raising `TypeError: Cannot read properties of undefined` inside `waitFor` is not caught by it, so
+the twenty seconds the wait was given are never spent. `monitor-check`'s colour precondition did
+exactly that — it reddened saying no colour ever bound, against a build whose colour binds 451ms
+after the same `goto`, and skipped the viewer row beneath it as unmeasurable. **A red that
+arrives instantly out of a wait that was given seconds is a throw rather than a timeout**, and
+the timestamp on the line is the cheapest thing that tells those apart; here the failed row and
+the section heading above it carry the same second. The repair is a guarded read that leaves the
+timeout reachable and reports "the page never published `__kinect`" apart from "colour never
+arrived", because those are different findings. What it is *not* is a fixed `wait()` after the
+`goto` — the two sections above it in the same tool survive on one, which is the silent-pass
+shape their own comments refuse, and a sleep tuned on this machine is a pass waiting for a
+slower one.
 
 **A contended machine fails a check in a way that reads as a finding.** Two worktrees running
 proof tools at once produced four failed runs, and the quiet one is the dangerous one: under

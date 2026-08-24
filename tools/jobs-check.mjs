@@ -200,6 +200,14 @@ const root = join(WORK, 'root');
 mkdirSync(root, { recursive: true });
 cpSync(join(REPO, 'server'), join(root, 'server'), { recursive: true });
 cpSync(join(REPO, 'web'), join(root, 'web'), { recursive: true });
+// **`effects-builtin` is staged because without it the server refuses to boot at all.**
+// The effect store declines the absence of its shipped root deliberately, so a broken
+// install cannot read as nothing-installed - which makes a staged tree missing it a
+// server this check can never start, and every run then reports `DID NOT RUN` with no
+// assertions rather than reddening a row. Copied rather than symlinked, like the two
+// trees above it, so a mutation naming a chunk under it could not rewrite the repo's own
+// source.
+cpSync(join(REPO, 'effects-builtin'), join(root, 'effects-builtin'), { recursive: true });
 // **The worker is staged too, and the render row spawns the staged copy.** It used to
 // be copied nowhere and spawned from the repo path, so a mutation naming
 // `tools/render-worker.mjs` would have edited a file nothing runs and reported a miss
