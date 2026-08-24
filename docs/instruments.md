@@ -390,6 +390,45 @@ red row. It is unresolved and out of this branch's scope, written down so the ne
 `362 of 361` starts from the measurement — and so that nobody closes it by widening the row, which
 would delete the only thing currently able to see it.
 
+**That last paragraph was wrong, and the correction is left beside it rather than written over it,
+because how the reading was wrong is the lesson.** `runTo` lands on its target every time. Two
+things the original reading never asked for say so. The sample capture has **no source stamp
+between 12.0000s and 12.0333s** — the take stalls there — so a step to output frame 361 crosses no
+source frame and could not have produced the +2 state advances that are half the signature. And a
+failing run ends with **the playhead at frame 0 and the rain clock reading 0.00000**, which a run
+that stepped one frame *past* 12.0s cannot do. The extra render is not inside `runTo` at all: it
+arrives afterwards.
+
+**What it is.** `openTake` ended with `await timeline.seek(0)` — the take's first accurate frame —
+and everything above that line is awaited: three library listings over the network, the
+deliverable, the undo baseline. The editor is on screen and drivable throughout, and
+`__kinect.timeline.transport()` has been answering since the transport was built several hundred
+lines earlier, which is exactly what every tool in this suite waits for before it starts driving.
+So the boot seek arrives *after* the tool's first arm has begun, queues behind the `runTo`, and
+lands last: one render at program 0, two source-frame advances, and `this.frame = 0` over the
+position the run had reached. The same window is reachable by hand — a person who scrubs while the
+listings are still in flight has their position taken away the same way.
+
+**Measured, interleaved, on the build with the fix and the build without it served through the same
+page route** so the two arms differ by nothing but the file the page fetched: six probe streams
+contending for the machine, six pairs each, **28 measured runs per arm — 10 overshoots before, 0
+after**. On an idle machine the same probe reads about 1 in 119, which is why the 3-of-19 above is
+consistent rather than contradictory: it was tallied on a shared working day, and contention is the
+whole amplifier. The op log names `openTake`'s seek every time — enqueued 57ms into the run, queued
+1761ms behind it, one render at target 0.
+
+**The fix, and the shape of it is the reusable part.** That line is a *repaint* rather than a move:
+the take is open and configured, so make the image true unless it already is. `seekHere` was the
+obvious repair and is the wrong one — it renders the true image at wherever the playhead got to,
+which is correct and costs a whole 21-frame pre-roll, so the row that caught this would still be
+red and the work would still be wasted. `repaintHere` stands down when an accurate render has
+happened since it was asked for, which is what a repaint means. `pumpRepaint` had the same defect
+in its own right and goes through the same door: it read the playhead when it pumped and handed
+that number to a `seek` that ran whenever the queue reached it. **A guard that stood down on every
+repaint would pass every render-count row in this file**, so the control that separates the two is
+`timeline-check`'s own `dragging a look slider rebuilds the image`: an over-dropping build reddens
+that row and four others, 5 failed assertions of 75.
+
 **One practical consequence, because it has already corrupted a record.** A run caught by this
 inflates the fired-row count of whatever else is running: `preroll-constant` was recorded as
 reddening 11 rows pre-rebase, and its honest count is **8**. Re-running settled it at 8, 8, then

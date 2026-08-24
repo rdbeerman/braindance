@@ -5529,6 +5529,9 @@ class TimelineTransport {
     // The tail of the operation chain, and whether one is running right now.
     this.queue = null;
     this.working = false;
+    // How many exclusive operations have thrown. Read only by `repaintHere`, which
+    // must not stand down across one - see the note in `exclusive`.
+    this.faults = 0;
   }
 
   get programSec() { return this.frame / this.outputFps; }
@@ -5580,6 +5583,15 @@ class TimelineTransport {
       this.working = true;
       try {
         return await work();
+      } catch (err) {
+        // Counted because `repaintHere` has to be able to tell a render that finished
+        // from one that did not. An operation that throws part-way through a pre-roll
+        // has moved the render counter and left a frame on screen that is nobody's
+        // image - and a repaint reading only the counter would take that for service
+        // and stand down, leaving the half-drawn frame standing where today it heals
+        // it. The throw is re-raised: this counts, it does not handle.
+        this.faults++;
+        throw err;
       } finally {
         this.working = false;
       }
@@ -5704,6 +5716,56 @@ class TimelineTransport {
    */
   seekHere(options = {}) {
     return this.exclusive(() => this.seekNow(this.programSec, options));
+  }
+
+  /**
+   * A repaint: `seekHere` plus the one question a repaint has to ask and a seek does
+   * not - whether anything still needs drawing by the time the queue gets here.
+   *
+   * A seek is a move somebody asked for, so it runs whatever else has happened in the
+   * meantime. A repaint is not a move at all: it means "something changed, the image
+   * is stale, rebuild it", and any accurate render that ran *after* the request has
+   * already rebuilt it - the registry is read at render time, so a frame drawn after
+   * the write carries the write. Running one anyway costs two things rather than one,
+   * and the wasted frame is the smaller of them. `pumpRepaint` reads the playhead when
+   * it pumps and hands that number to work that runs whenever the queue reaches it, so
+   * a repaint raised while the playhead is parked at zero - a slider written, a look
+   * applied, a resize landing late - queues behind a `runTo` that walks the whole edit,
+   * arrives at the far end, and seeks *back* to zero. The playhead is dragged off the
+   * position the run landed on with nothing on screen saying why, which is the shape
+   * `seekHere` above records, arriving through the one caller nobody converted.
+   *
+   * Measured on `captures/sample.knct`: a run to output frame 360 with a single slider
+   * written back to the value it already held, immediately after the run's opening
+   * seek, renders 362 output frames against 361 and advances the surface memory 124
+   * times against 122, ending with the playhead at frame 0 and the rain clock reading
+   * 0.000s rather than 12.000s. Three of three forced, and about one natural run in a
+   * hundred and nineteen on an idle machine - which is the signature
+   * `docs/instruments.md` carries for the intermittent that had been read as `runTo`
+   * overshooting its target by one frame. It never did: it lands on its target every
+   * time, and this is what arrives afterwards.
+   *
+   * **The draft and the fault are why a render count alone is not the question.** A
+   * draft renders, so it moves the counter, and it is deliberately not the true image -
+   * so a repaint a draft overtook still has all of its work to do. An operation that
+   * threw part-way through a pre-roll moved the counter too, and what it left on screen
+   * is nobody's image; `exclusive` counts those, and standing down across one would
+   * turn the repaint that heals a failed seek today into the thing that abandons it.
+   *
+   * **Not folded into `seekHere`, and the reason is a caller rather than a preference.**
+   * The only other caller is `pumpParkedDraft`'s release branch, which runs
+   * `finishOrbitDrift` and *then* seeks, precisely to close the gap between the last
+   * redraw and the last damping step - the camera moved after the render, so the image
+   * is stale in a way no render counter can see, and a `seekHere` that stood down when
+   * the counter had moved would drop the seek that measurement exists for. Two doors
+   * because there are two questions, not two ways of asking one.
+   */
+  repaintHere(askedAtRenders = counters.renders, askedAtFaults = this.faults) {
+    return this.exclusive(() => {
+      const overtaken = counters.renders !== askedAtRenders && this.faults === askedAtFaults;
+      if (overtaken && !this.drafted) return null;
+      return this.seekNow(this.programSec);
+    });
   }
 
   /**
@@ -6927,13 +6989,22 @@ async function pumpDraft() {
 let repaintWanted = false;
 let repaintBusy = false;
 let repaintScheduled = false;
+// What `counters.renders` read when the pending request was made, which is how
+// `repaintHere` finds out whether anything drew the image while the request sat in the
+// queue. Recorded at the ask rather than at the pump because "since it was asked for"
+// is the claim being made, and the two are the same number only when nothing is
+// running - which is exactly the case this is not about.
+let repaintAskedAt = 0;
+let repaintAskedAtFaults = 0;
 
 async function pumpRepaint() {
   if (repaintBusy || !repaintWanted || !timeline) return;
   repaintBusy = true;
   repaintWanted = false;
+  const askedAt = repaintAskedAt;
+  const askedAtFaults = repaintAskedAtFaults;
   try {
-    await timeline.seek(timeline.programSec);
+    await timeline.repaintHere(askedAt, askedAtFaults);
   } catch (err) {
     showTimelineError(err);
   } finally {
@@ -6951,6 +7022,13 @@ function requestRepaint() {
   // would reset them under it. It repaints once at the end for the editor's sake.
   if (!timeline || timeline.playing || scrubbing || orbiting || exporting) return;
   repaintWanted = true;
+  // Where the image stood when *this* write happened, and the newest ask overwrites the
+  // older one, which is what makes the coalescing below safe to keep. A write landing
+  // while a repaint is already in flight is judged by the re-pump against the frames
+  // drawn after itself rather than after the earlier request - so it is served when
+  // that repaint's own renders came after it, and repainted again when they did not.
+  repaintAskedAt = counters.renders;
+  repaintAskedAtFaults = timeline.faults;
   if (repaintScheduled) return;
   repaintScheduled = true;
   // Deferred to the end of the task so a bulk write asks for one image rather
@@ -13663,7 +13741,37 @@ async function openTake(id) {
   // directory. That document is deliberately absent from the project picker, so
   // withholding this button is withholding the only road back to the operator's work.
   if (listed.projects) offerWorkingDocument(listed.projects);
-  await timeline.seek(0);
+  // The take's first accurate frame, and it is a repaint rather than a move because by
+  // the time it runs the playhead may not be this function's to place any more.
+  //
+  // **This line is where the transport's oldest intermittent actually lived.** It used
+  // to read `await timeline.seek(0)`, and everything above it is awaited - three library
+  // listings over the network, the deliverable, the undo baseline - while the editor has
+  // been on screen and drivable since `ui.root.hidden = false` several hundred lines up,
+  // and `__kinect.timeline.transport()` has answered since the transport was built. So a
+  // person who scrubbed during that stretch, or a proof tool that waited for the
+  // transport and started driving it, had this seek arrive *afterwards*, queue behind
+  // whatever they had asked for, and land last - putting the playhead back on frame 0
+  // and drawing one frame of program time zero over the position they had chosen.
+  //
+  // Measured on `captures/sample.knct` with six probe streams contending for the
+  // machine: 13 of 29 runs of a `seek(0)` then `runTo(360)` rendered 362 output frames
+  // instead of 361 and advanced the surface memory 124 times instead of 122, ending with
+  // the playhead at frame 0 and the rain clock reading 0.000s. The op log names this
+  // call every time - enqueued 57ms into the run, queued for 1761ms behind it, one
+  // render at target 0. That is the signature `docs/instruments.md` carries as `runTo`
+  // overshooting its target by one frame; `runTo` lands on its target every time.
+  //
+  // `repaintHere` and not `seekHere`, and the difference is the whole repair rather than
+  // a nicety. `seekHere` would render the true image at wherever the playhead had got
+  // to, which is correct and costs a whole pre-roll - 22 renders here instead of one, so
+  // the row that caught this would still be red and the work would still be wasted.
+  // Nothing needs drawing at all when somebody else has already drawn it, which is
+  // exactly what a repaint means and exactly what this is: the take is open and
+  // configured, so make the image true unless it already is. A scrub is the case that
+  // keeps it honest - a draft is deliberately not the true image, so this still runs
+  // after one, and it runs at the position the person scrubbed to rather than at zero.
+  await timeline.repaintHere();
   // Two things per frame, and the second is not an afterthought: with the playhead
   // parked `tick` returns immediately, so this is the only clock a paused editor has.
   // A drag that continued itself off its own renders instead is what this loop was

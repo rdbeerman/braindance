@@ -1710,11 +1710,17 @@ console.log('\n== 6. the rain falls with the program clock, not with the frames 
   // **Section 1's exact render count, which this section did not have.** The loose ratio
   // above says the arms differ; it does not say the playback arm drew every output frame of
   // the edit, and that matters here for a reason peculiar to this machine rather than to
-  // this claim: `runTo` lands one output frame past its target about one run in five, and
-  // `docs/instruments.md` carries the measurement. Without this row that overshoot arrives
-  // as the rain equality failing, which reads exactly like a phase that accumulated - a
-  // finding about the feature, produced by the transport. With it, the run says which of
-  // the two happened in its own words.
+  // this claim: an intermittent used to land one extra render inside this arm about one run
+  // in five on a contended machine, and `docs/instruments.md` carries the measurement.
+  // Without this row that arrives as the rain equality failing, which reads exactly like a
+  // phase that accumulated - a finding about the feature, produced by the transport. With
+  // it, the run says which of the two happened in its own words.
+  //
+  // The row is kept now that the intermittent is fixed, and the reason is the correction
+  // rather than the fix. It was read as `runTo` overshooting its target, and it never was:
+  // `openTake`'s closing seek to the head of the take was arriving after this arm had
+  // started and landing behind it. This row is what made the difference visible at all, so
+  // it stays as the arm that would see the next one.
   check(played.delta.renders === seeked.seek.target + 1,
     'playback rendered every output frame from the start of the edit and no more',
     `${played.delta.renders} of ${seeked.seek.target + 1}`);

@@ -987,6 +987,16 @@ is not that — it reproduces at about one in five on an idle machine, and the e
 inside `runTo` makes it a candidate finding about the transport rather than about the check. Both
 are unresolved; `docs/instruments.md` carries the signatures and the measurements.
 
+**The second of those is fixed, and it was never `runTo`** — the sentence above stays because the
+way it was misread is the lesson, and `docs/instruments.md` carries the correction in full. `runTo`
+lands on its target every time; the extra render arrives afterwards, out of `openTake`'s closing
+seek to the head of the take, which is enqueued while three library listings are still in flight
+and lands behind whatever the tool has already started. It goes through `repaintHere` now and
+stands down when something has already drawn the image. Interleaved against the pre-fix build
+served through the same page route, six contending streams: **28 measured runs per arm, 10
+overshoots before, 0 after.** The first intermittent — the 533x300 crash — is untouched and still
+reads as a non-zero exit with zero failed assertions.
+
 **Read the assertion count and the fired-row names off every run of this tool, never the exit
 code or the total.** Both intermittents move a total without moving the names, and one of them
 has already corrupted a record: `preroll-constant` was carried at 11 reddened rows and its honest
