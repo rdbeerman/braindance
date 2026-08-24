@@ -71,5 +71,19 @@
         "uniform": "regionNoise"
       }
     }
-  }
+  },
+  "consumes": [
+    {
+      "service": "region",
+      "when": "regionNoise > 0.0",
+      "gateOrder": 200
+    }
+  ],
+  "chunks": [
+    {
+      "stage": "v.regionDisplace",
+      "order": 100,
+      "file": "turbulence.vert.glsl"
+    }
+  ]
 }

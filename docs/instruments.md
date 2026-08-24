@@ -1137,6 +1137,24 @@ exit code. Seen twice on step 5, on two different mutations in two different sui
 **Count failed assertions, not exit codes**, and treat `fails=0` as a crash to investigate
 rather than a success to record.
 
+### And a tool that says `DID NOT RUN` on every run says it to nobody
+
+`level-check` reported `0 assertions, 0 failed` and exit 2 on every invocation for three commits,
+and the reason was one line: its staged tree copies `server`, `tools` and `web`, and the effect
+store refuses to *boot* without `effects-builtin` — deliberately, so that a broken install cannot
+read as nothing-installed. So from the commit that made the effects packages onward, the server it
+spawns could not start. The verdict was loud, correct and unread, because the tool is run when
+somebody is about to touch levelling and nobody was.
+
+Two things worth keeping. **The exit-2 convention did its job and it is not enough on its own** —
+`DID NOT RUN` distinguishes "the harness did not run" from "the harness found something" for a
+reader who is there, and a check nobody ran this week has no reader. **And one staging list was
+updated while four were not.** `library-check` and `guard-check` name `effects-builtin` in theirs,
+each with its own comment saying why; `level-check`, `vcam-check`, `monitor-check` and
+`jobs-check` do not, and nothing joins the five lists together. The commit that made the store
+refuse could not have known which trees it broke, which is the argument for the refusal being
+checked rather than for the lists being remembered.
+
 ### And `fails=1` can be the same crash wearing the count
 
 Counting assertions is not enough on its own if the harness's own failure is one of the
@@ -1382,7 +1400,7 @@ arriving, which is half a mutation measured under the whole one's name. And **`e
 into the server-mutation bucket where nothing serves it and nothing counts it — the filter is a
 predicate now, and it is the same class as the `**/main.js` glob one level up.
 
-**The one that syntax-check cannot see, and the reason it is written here.** `v.pointSize` and
+**The one that syntax-check could not see, and now can.** `v.pointSize` and
 `f.mark` are slots: the spine carries the text to use when nothing claims them, and the glyph
 package's chunk carries an `else` branch that is the same statement again. So
 `export-check`'s `pointsize-absolute`, whose anchor is `gl_PointSize = clamp(pointSize * k /
@@ -1390,9 +1408,37 @@ max(0.15, -mv.z), 1.0, 64.0);` with no leading whitespace, went on matching **ex
 `web/cloud-shader.js` after the split — against the fallback, which is text nothing compiles while
 the glyph package is installed. The anchor row is green either way, because "matches once in the
 file it names" is true of a line nobody reaches. It was repointed at the chunk by reading the
-anchor map rather than by running the tool, and what would find the next one is the same reading:
-a slot's fallback is a second copy of the shipped text, and an anchor is only in the right one of
-the two if somebody decided which.
+anchor map rather than by running the tool, and what would find the next one was the same
+reading: a slot's fallback is a second copy of the shipped text, and an anchor is only in the
+right one of the two if somebody decided which.
+
+**Closing it took two rules and not one, and the second is the one that works.** The obvious
+rule — every anchor into the spine or a chunk appears exactly once in the *assembled* pair, which
+`web/shader-assembly.js` will build under bare node because it imports nothing — is green on
+exactly this defect. The glyph chunk's `else` branch carries the old clamp statement verbatim, on
+purpose and with its own comment saying so, so the anchor appears once in the assembled text
+whichever copy it names and the count cannot tell them apart. What separates them is applying the
+edit: staged against the fallback the two programs come back byte-identical, because nothing
+emits it. So `syntax-check` asks both, and they catch different things — the count finds an anchor
+over two live sites, where a mutation reaches one and is recorded under the whole one's name, and
+the move finds an anchor over none. `--mutate anchor-in-dead-fallback` repoints
+`pointsize-absolute` back at `web/cloud-shader.js` and is the control for the second;
+`--mutate anchor-duplicated-into-a-second-chunk` copies `lattice-ignored`'s anchored line into a
+neighbouring package's chunk — a *different* file, since a duplicate inside its own is already
+refused one rule up — and is the control for the first.
+
+**`web/shader-assembly.js` is inside the rule as well, and the count is not asked of it.** An
+anchor on a branch the emit never takes is the same dead control wearing JavaScript, so the move
+half covers it; its anchors are JavaScript and the two programs are GLSL, so the count half would
+be asking a question with no answer. `registry-check`'s `ripple-outside-the-gate` is the first
+spec to land there, because the region's gate is generated from its consumers' `when` clauses and
+there is no longer a line of GLSL anybody wrote to anchor on.
+
+**And the seam this rule needed cost a round of its own.** The row above reads its targets off
+disk while these read through the mutation substitution, which looks like an inconsistency and is
+the opposite: reading a staged file in the anchor-existence row makes every control report *its
+own* anchor as stale, since a control's whole job is to replace the line it anchors on. Written
+that way it added one red row to four of `syntax-check`'s seven controls, none of them findings.
 
 ### A mutation can erase its own evidence
 
@@ -2864,6 +2910,27 @@ Four instruments written for the crop box in one session were each aimed somewhe
 correct build and the broken one would have agreed. All four were caught by running the
 mutation rather than by reading the code, which is the argument for the rule that a proof
 tool is mutation-tested rather than reasoned about.
+
+**A sort whose subject is already sorted.** The shader assembler places each stage's chunks by
+the `order` their manifests declare, and `test/shader-assembly.test.mjs` holds the assembled
+programs byte for byte against the monolith — so taking `stages.sort(byOrder)` out of the
+assembler entirely ought to redden it. It does not. The packages are read in directory order and
+every shipped stage's declared order *is* that order: glitch before lattice on `v.displace`,
+glyph before rain on both declaration stages and on `f.tone`, noise before push before ripple on
+`v.regionDisplace`. Six stages, six coincidences, and each arrived honestly, because a package is
+named after its effect and the effects were written roughly in the order they run. A build that
+lost the sort would draw today's picture exactly and a different one the first time somebody adds
+a package whose name sorts the wrong way, which is a defect that ships and then waits.
+
+This was found by running the mutation and then obeying the rule about a mutation that seems to
+have been missed: the count of caught defects was 13 of 14, and the fourteenth turned out to have
+changed no byte of either program. What holds it now is a fixture rather than the shipped set,
+because the property under test is that the *numbers* decide and the shipped numbers agree with
+the alphabet: two synthetic packages named against their orders — the one that goes first called
+`zeta`, the one that goes second `alpha` — with the same inversion put through a service's
+`gateOrder`. The gate's half is live on the shipped set as well, since the region's push consumes
+at 100 where its noise consumes at 200; the stage's half exists only in the fixture, and saying so
+is the point.
 
 **A counter that is zero in both builds.** The face drag had to be shown to arm a redraw
 rather than render out of its own handler, and the first counter reached for was

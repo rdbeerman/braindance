@@ -27,12 +27,23 @@
 //     it. A slot is a *replacement* - the glyph field's point-size branch stands where
 //     the old clamp line stood - so two claimants is a refusal rather than a
 //     concatenation nobody could read.
-//   - a **service** is a gate the spine opens and the packages fill: the condition is
-//     generated from the `when` of every package consuming it, joined with `||` in
-//     `gateOrder`, and the body is the spine's own prologue followed by each consumer's
-//     chunk in the same order. With no consumers the whole block disappears, which is
-//     the point - a build with neither glyph nor rain installed must not pay a mat3
-//     multiply and two hashes per point for a cell nothing reads.
+//   - a **service** is a value the spine computes under a gate generated from whoever
+//     needs it: the condition is the `when` of every package consuming it, joined with
+//     `||` in `gateOrder`, and the spine's own `open`, `body` and `close` are the text
+//     around it. With no consumers the whole thing disappears, which is the point - a
+//     build with neither glyph nor rain installed must not pay a mat3 multiply and two
+//     hashes per point for a cell nothing reads.
+//
+//     **A service that closes something it opened is a scope, and that changes what its
+//     consumers owe it.** `cell` opens a block, so `room` and `wc` are locals of that
+//     block and a consumer's chunk has to go *inside* it - which is why a chunk naming a
+//     service as its stage takes its place from `gateOrder` rather than from an `order`
+//     of its own: the term in the gate and the block it opens are one placement. `region`
+//     closes nothing: it computes `rw` at the surrounding scope, its consumers read that
+//     value from wherever they happen to sit, and their chunks are placed by the stage or
+//     slot they name. So the two services ask their consumers for different things, and
+//     the refusals below are written per shape rather than as one rule that would have to
+//     be wrong about one of them.
 //   - a **varying declaration** is generated from the packages' `varyings` entries, in
 //     three places out of one declaration: the vertex `out`, the fragment `in`, and the
 //     line in the prologue that gives it its inert value above the early returns. One
@@ -59,19 +70,22 @@ const byOrder = (a, b) => (a.order - b.order) || (a.id < b.id ? -1 : a.id > b.id
 const jointsOf = (spine) => {
   const stages = new Set();
   const slots = new Map();
-  const services = new Set();
+  const services = new Map();
   const claim = (name, where) => {
     if (stages.has(name) || slots.has(name) || services.has(name)) {
       throw new Error(`the shader spine declares ${JSON.stringify(name)} twice, so a chunk naming it would be spliced in two places`);
     }
     if (where === 'stage') stages.add(name);
-    if (where === 'service') services.add(name);
   };
   for (const program of [spine.vertex, spine.fragment]) {
     for (const entry of program) {
       if (entry.stage !== undefined) claim(entry.stage, 'stage');
-      else if (entry.service !== undefined) claim(entry.service, 'service');
-      else if (entry.slot !== undefined) {
+      // The entry rather than the name alone, because whether a service opens a scope
+      // decides what its consumers owe it, and that is a property of the spine's text.
+      else if (entry.service !== undefined) {
+        claim(entry.service, 'service');
+        services.set(entry.service, entry);
+      } else if (entry.slot !== undefined) {
         claim(entry.slot, 'slot');
         slots.set(entry.slot, entry);
       }
@@ -101,14 +115,18 @@ const chunkText = (pkg, file) => {
  *
  * `packages` are the objects `/effects/:id` answers with, each carrying its `manifest`
  * and a `chunks` map of file name to text. A package with no `chunks` section in its
- * manifest contributes nothing and is not an error: most of the sixteen shipped effects
- * are parameters over code the spine already holds.
+ * manifest contributes nothing and is not an error: half of the sixteen shipped effects
+ * are parameters over code the spine already holds. That number was "most" while the glyph
+ * field, the rain, the glitch and the lattice were the only packages carrying GLSL, and it
+ * is eight against eight now that the region family has moved out - a sentence worth
+ * keeping current rather than approximately true, since it is the one a reader checks
+ * before wondering why their package assembled to nothing.
  */
 export function assembleShaders(spine, packages) {
   const joints = jointsOf(spine);
   const stages = new Map([...joints.stages].map((name) => [name, []]));
   const slots = new Map();
-  const services = new Map([...joints.services].map((name) => [name, []]));
+  const services = new Map([...joints.services.keys()].map((name) => [name, []]));
   const varyings = [];
   const declared = new Set();
 
@@ -139,7 +157,7 @@ export function assembleShaders(spine, packages) {
       varyings.push({ ...v, id: pkg.id });
     }
 
-    const filled = new Set();
+    const filled = new Map();
     for (const c of manifest.chunks ?? []) {
       const text = chunkText(pkg, c.file);
       if (c.slot !== undefined) {
@@ -170,8 +188,7 @@ export function assembleShaders(spine, packages) {
         if (filled.has(c.stage)) {
           throw new Error(`effect ${pkg.id} fills the ${c.stage} service twice, and one consumer gets one block`);
         }
-        filled.add(c.stage);
-        services.get(c.stage).push({ id: pkg.id, order: consumed.gateOrder, when: consumed.when, text });
+        filled.set(c.stage, text);
         continue;
       }
       if (!joints.stages.has(c.stage)) {
@@ -183,10 +200,33 @@ export function assembleShaders(spine, packages) {
       stages.get(c.stage).push({ id: pkg.id, order: c.order, text });
     }
 
-    for (const service of consumes.keys()) {
-      if (!filled.has(service)) {
-        throw new Error(`effect ${pkg.id} consumes ${service} and brings no chunk for it, so it would widen the gate and put nothing inside it`);
+    // **A consumer widens a gate, so a consumer that contributes nothing is a build paying
+    // for a value nobody reads** - and what counts as contributing depends on whether the
+    // service opens a scope. A consumer of `cell` has to fill it: its chunk reads locals
+    // that exist only inside that block, so a chunk anywhere else would not compile and a
+    // consumer with no chunk at all is a mat3 multiply and two hashes bought for nothing.
+    // A consumer of `region` reads `rw` at the surrounding scope and puts its own text in
+    // whatever stage or slot it names, so what it owes is a chunk somewhere - the failure
+    // being refused is the same one either way, a term in the condition with nothing behind
+    // it, and only the place the something has to be differs.
+    //
+    // **The gate term comes from `consumes` and never from the chunk**, which is the half
+    // this loop had backwards while `cell` was the only service: the consumer list used to
+    // be built where a chunk filled the service, so a package consuming one and putting its
+    // text somewhere else declared a `when` nothing ever read, and the gate came out one
+    // term short with no error anywhere. Every consumer joins the condition here; the text
+    // it puts inside is whatever it filled the service with, or nothing.
+    for (const [service, consumed] of consumes) {
+      if (joints.services.get(service).close.length > 0) {
+        if (!filled.has(service)) {
+          throw new Error(`effect ${pkg.id} consumes the ${service} scope and brings no chunk for it, so it would widen the gate and put nothing inside it`);
+        }
+      } else if ((manifest.chunks ?? []).length === 0) {
+        throw new Error(`effect ${pkg.id} consumes ${service} and brings no chunk at all, so it would widen the gate and nothing would read the value behind it`);
       }
+      services.get(service).push({
+        id: pkg.id, order: consumed.gateOrder, when: consumed.when, text: filled.get(service) ?? '',
+      });
     }
   }
 
@@ -206,10 +246,16 @@ export function assembleShaders(spine, packages) {
       else if (entry.service !== undefined) {
         const consumers = services.get(entry.service);
         if (consumers.length === 0) continue;
-        out += `${entry.indent}if (${consumers.map((c) => c.when).join(' || ')}) {\n`;
+        // Four pieces and none of them assumed: the spine carries the text either side of
+        // the condition and after the chunks, so an `if` block and a conditional expression
+        // are the same joint with different text rather than two kinds. The alternative was
+        // baking `if (` and `) {` in here, which is a fact about one shader living inside a
+        // concatenator that is supposed to know nothing about GLSL at all.
+        out += entry.open;
+        out += consumers.map((c) => c.when).join(' || ');
         out += entry.body;
         out += consumers.map((c) => c.text).join('');
-        out += `${entry.indent}}\n`;
+        out += entry.close;
       } else {
         throw new Error(`the shader spine holds an entry of no kind this assembler knows: ${JSON.stringify(Object.keys(entry))}`);
       }

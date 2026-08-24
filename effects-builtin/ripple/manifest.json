@@ -55,5 +55,19 @@
       },
       "under": "amount"
     }
-  }
+  },
+  "consumes": [
+    {
+      "service": "region",
+      "when": "ripple > 0.0",
+      "gateOrder": 400
+    }
+  ],
+  "chunks": [
+    {
+      "stage": "v.regionDisplace",
+      "order": 300,
+      "file": "wave.vert.glsl"
+    }
+  ]
 }

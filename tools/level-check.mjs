@@ -229,7 +229,14 @@ if (MUTATE && !MUTATIONS[MUTATE]) {
 // here would rewrite the repo's own source.
 rmSync(WORK, { recursive: true, force: true });
 mkdirSync(WORK, { recursive: true });
-for (const dir of ['server', 'tools', 'web']) cpSync(join(REPO, dir), join(WORK, dir), { recursive: true });
+// `effects-builtin` joined this list when the shaders did, and the three commits it took to
+// notice are the whole argument for the row below refusing loudly. The effect store declines
+// to BOOT without its shipped root - deliberately, so a broken install cannot read as
+// nothing-installed - so from the moment the packages arrived, the staged tree here was a
+// server that could not start, and this tool had reported `DID NOT RUN` on every run since.
+// `guard-check` carries the same note over the same list; nothing joins the two, which is why
+// both say it.
+for (const dir of ['server', 'tools', 'web', 'effects-builtin']) cpSync(join(REPO, dir), join(WORK, dir), { recursive: true });
 // **`native/` is deliberately not among these, and that is load-bearing rather than an
 // omission.** Every frame this tool grades is one it planted, and a live socket wipes a
 // plant in well under a second - measured on a page with the sensor attached, a sentinel

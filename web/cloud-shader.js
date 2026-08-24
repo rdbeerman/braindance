@@ -19,8 +19,9 @@
 //
 // **A joint is one of four kinds, and `web/shader-assembly.js` carries what each is for.**
 // A `stage` takes any number of chunks in declared order, a `slot` takes one and carries
-// the text to use when nothing claims it, a `service` is a gate this file opens and the
-// consumers fill, and a `varyings` entry is generated from the packages' own declarations.
+// the text to use when nothing claims it, a `service` is a value this file computes under a
+// gate its consumers generate - filling it is `cell`'s arrangement and not `region`'s - and a
+// `varyings` entry is generated from the packages' own declarations.
 // The comments below say why each joint is where it is, because a cut through a shader is
 // a claim about what belongs to an effect and what belongs to every point in the frame -
 // and the second class is the one that goes wrong quietly.
@@ -405,9 +406,32 @@ void main() {
   // The operators are not uniform on purpose: regionNoise and ripple cannot go negative
   // and are tested against zero, where regionPush and regionMask run from -1 and would be
   // switched off across half their travel by the same test.
-  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0 || ripple > 0.0)
+` },
+    // The region weight, computed once for everything that reads it, under a gate that is
+    // the four consumers' own `when` clauses rather than a list kept here. The comment
+    // above is the one the monolith carried and it is left exactly as it was, because the
+    // property it insists on - that a term reading this weight without joining the gate is
+    // inert rather than broken - is now true by construction instead of by attention: a
+    // package that consumes this service gets its term, and one that forgets to consume it
+    // has no chunk in the program either.
+    //
+    // **This one closes nothing, which is the whole difference from `cell` below.** `rw` is
+    // a value at the surrounding scope and the four displacements that read it sit in the
+    // stage and the slot underneath, so there is no block for a consumer's chunk to go
+    // inside - the gate is a conditional expression and its consumers are placed by name.
+    // The operators are the consumers' own and are deliberately not uniform, for the reason
+    // the comment above gives: two of the four run from -1.
+    {
+      service: 'region',
+      open: '  float rw = (',
+      body: /* glsl */ `\
+)
     ? regionWeight(p0)
     : 0.0;
+`,
+      close: '',
+    },
+    { text: /* glsl */ `\
 
   // Which cell of the room this point belongs to, and where it stands in the falling
   // pattern. Both are read at the *undisplaced* position for the reason the region above
@@ -440,87 +464,63 @@ void main() {
     // and every consumer needs both.
     {
       service: 'cell',
-      indent: '  ',
+      open: '  if (',
       body: /* glsl */ `\
+) {
     vec3 room = mat3(modelMatrix) * p0;
     vec3 wc = floor(room / latticeCell + 0.5);
 `,
+      close: '  }\n',
     },
-    { text: /* glsl */ `\
+    // The blank line between the cell's block and the displacement run belongs to neither,
+    // which is why it is a segment of its own rather than the tail of one joint or the head
+    // of the next. Written into the cell's `close` it would vanish with the glyph field;
+    // written into the turbulence chunk it would arrive a second time behind the push.
+    { text: '\n' },
+    // The displacements the region weight drives, in the order the file held them:
+    // turbulence, then the push, then the ripple. **Two displacement stages and not one,
+    // and the split is forced by the text rather than chosen.** The soft mask writes a
+    // varying in the middle of this run - it is a slot, because a build without the mask
+    // package still has to carry the crop's own dimming - and a joint standing between two
+    // chunks of one stage would have to be spliced into the middle of it, which is exactly
+    // what a stage cannot do. So the run above the mask and the run below it are two
+    // joints, and each one's chunks are ordered inside it.
+    { stage: 'v.regionDisplace' },
+    // How much of this point the region hides, which is a replacement rather than an
+    // addition: the mask and the crop's dimming are one multiply on one varying, so a
+    // package adding to it beside the core would be a second spelling of "how much is this
+    // point attenuated" and the two would have to be multiplied together somewhere anyway.
+    //
+    // **The only fallback in this file carrying text no build has ever drawn**, and it is
+    // worth saying out loud rather than leaving to be discovered. The other two that carry
+    // text at all - `v.pointSize` and `f.mark` - are the shipped statements exactly as they
+    // stood before anything claimed them, so an anchor into either is at worst in the wrong
+    // one of two live copies. This one has no original: the crop's dimming has shared its
+    // statement with the region mask since both existed, so the mask-less form is written
+    // here for the first time. What settles it is that vMask is written on every live path
+    // and read unconditionally down in the fragment stage, so an uninstalled mask has to
+    // leave a write here and the crop's half is the part belonging to every point in the
+    // frame - asserted by assembling the shipped set with the mask dropped, where `rw` has
+    // no reader left and this is the one write vMask gets.
+    {
+      slot: 'v.mask',
+      fallback: /* glsl */ `\
+  vMask = outsideCrop ? cropOutside : 1.0;
 
-  // Gated because it is the most expensive thing in this shader: eight hashes of three
-  // sines each, against the six the old sine field cost. A look with no turbulence pays
-  // none of it, which is the same bargain the ghost half of the geometry makes.
-  float amp = noise + regionNoise * rw;
-  if (amp > 0.0) {
-    pos += amp * vnoise3(p0 * noiseScale + time * noiseSpeed * vec3(0.7, 1.13, 0.31));
-  }
-
-  // Radial rather than along the field's gradient. The gradient of a rounded box is
-  // degenerate at the centre - there is no outward direction there - and flattens
-  // against the faces, where a radial push is defined everywhere and reads as a blob
-  // swelling. The guard is for the point that lands exactly on the centre, where
-  // normalize would hand back NaN and take the whole vertex with it.
-  if (regionPush != 0.0 && rw > 0.0) {
-    vec3 away = p0 - regionCentre;
-    float d = length(away);
-    if (d > 1e-4) pos += (away / d) * regionPush * rw;
-  }
-
-  // The region read a fourth way: a wave travelling out along the radius, so the volume
-  // breathes where the push only swells it. It shares the push's radial direction and its
-  // centre guard for the same reasons - the gradient of a rounded box is degenerate at the
-  // centre, and normalize there would hand back NaN and take the vertex with it.
-  //
-  // **The clock is stepped rather than continuous, which is the whole character of it.**
-  // A sine of raw time is a thing breathing; this design wants a thing being rebuilt by a
-  // machine, so the phase advances in eighth-cycles and the surface arrives at each one
-  // rather than sliding between them. Eight steps and not a parameter: the count is what
-  // makes it read as machinery, and a slider that could set it to a thousand would just
-  // be a way to author the smooth version this is deliberately not.
-  //
-  // The step is on the clock alone and not on the radius, so the wave is quantised in
-  // time and smooth in space. Quantising both would put the region on a set of shells,
-  // which is the lattice's job two blocks down and would be a second way to do it.
-  if (ripple > 0.0 && rw > 0.0) {
-    vec3 out0 = p0 - regionCentre;
-    float dist = length(out0);
-    if (dist > 1e-4) {
-      float cycles = dist * rippleFreq - floor(time * rippleSpeed * 8.0) * 0.125;
-      pos += (out0 / dist) * (sin(cycles * 6.2831853) * ripple * rw);
-    }
-  }
-
-  // Positive hides what is inside the region, negative what is outside. Carried to the
-  // fragment stage rather than culled here, because the whole point of the falloff is
-  // that the edge is soft.
-  //
-  // The crop's own dimming rides here rather than on a varying of its own, and it is
-  // the same idea rather than a similar one: both are a boundary the vertex stage knows
-  // about attenuating a fragment it cannot discard. A second varying would be a second
-  // spelling of "how much is this point attenuated", and the two would then have to be
-  // multiplied together somewhere anyway.
-  vMask = (regionMask > 0.0
-    ? 1.0 - regionMask * rw
-    : 1.0 + regionMask * (1.0 - rw))
-    * (outsideCrop ? cropOutside : 1.0);
-
-` },
-    // The displacements an effect adds to the running position, after the turbulence, the
-    // push and the ripple that the region's own uniforms drive. A stage rather than a slot
-    // because these compose and their order is the whole of what they mean: the tear shoves
-    // a band of the feed sideways and the lattice quantises wherever the point ends up, so
-    // running them the other way round would snap a position the tear then walks off the
-    // grid. The order is declared in each package rather than left to whichever the server
-    // lists first, which is what makes "the order the file held them in" a fact rather than
-    // an accident of a directory listing.
+`,
+    },
+    // The displacements an effect adds after the mask has read the region weight. A stage
+    // rather than a slot because these compose and their order is the whole of what they
+    // mean: the tear shoves a band of the feed sideways and the lattice quantises wherever
+    // the point ends up, so running them the other way round would snap a position the tear
+    // then walks off the grid. The order is declared in each package rather than left to
+    // whichever the server lists first, which is what makes "the order the file held them
+    // in" a fact rather than an accident of a directory listing.
     //
     // **A stage appends its chunks after whatever core text is left above it, so only the
-    // tail of a run can move.** The turbulence, the push and the ripple are all still core
-    // and still above this line, along with the soft mask that shares their region weight;
-    // when they move out, this joint moves up with them and their orders sit below the two
-    // here. That is a property of the joint rather than a plan - a chunk cannot be spliced
-    // into the middle of a segment, so a cut through a run is always a cut at its end.
+    // tail of a run can move.** That is what kept the turbulence, the push and the ripple
+    // core while the tear and the snap moved out, and it is why they needed a joint of
+    // their own to leave through rather than orders below these two.
     { stage: 'v.displace' },
     { text: /* glsl */ `\
   vUv = (position.xy + 0.5) / resolution;

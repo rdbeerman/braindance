@@ -151,6 +151,53 @@ test('one byte moved in any chunk moves the program it belongs to, and only that
   // is raised whenever a package moves its GLSL out, because a floor left at the count of
   // the commit that wrote it stops being a floor the moment the next package arrives - a
   // manifest that silently lost its `chunks` section would take four arms away and still
-  // clear eleven.
-  assert.ok(flipped >= 15, `only ${flipped} chunk files were flipped, so this control ran on almost nothing`);
+  // clear eleven. Eleven with the glyph field and the rain, fifteen with the glitch and the
+  // lattice, nineteen with the region family's four.
+  assert.ok(flipped >= 19, `only ${flipped} chunk files were flipped, so this control ran on almost nothing`);
+});
+
+test('the numbers place the text, and the order the packages arrive in does not', () => {
+  // **The two arms above cannot see the sort, and that was measured rather than assumed.**
+  // Taking `stages.sort(byOrder)` out of the assembler entirely leaves both of them green:
+  // the packages are read in directory order, and every shipped stage's declared order
+  // happens to be that same order - glitch before lattice on `v.displace`, glyph before rain
+  // on the two declaration stages and on `f.tone`, noise before push before ripple on
+  // `v.regionDisplace`. Six stages, six coincidences, and each one arrived honestly, because
+  // a package is named after the effect and the effects were written in roughly the order
+  // they run. So a build that lost the sort would draw the identical picture today and a
+  // different one the first time somebody adds a package whose name sorts the wrong way -
+  // which is a defect that ships and then waits.
+  //
+  // A fixture rather than a shipped set is the only thing that can hold it, for the reason
+  // above: what has to be asserted is that the *numbers* decide, and the shipped numbers
+  // agree with the alphabet. So the two packages here are named against their orders - the
+  // one that goes first is called `zeta` and the one that goes second `alpha` - and the same
+  // inversion is put through the gate, where `gateOrder` and the id disagree the same way.
+  // The gate's half is live on the shipped set as well, since the region's push consumes at
+  // 100 where its noise consumes at 200; the stage's half exists only here.
+  const spine = {
+    vertex: [
+      { text: 'head\n' },
+      { stage: 'run' },
+      { service: 'gate', open: 'if (', body: ') {\n', close: '}\n' },
+    ],
+    fragment: [{ text: 'frag\n' }],
+  };
+  const pkg = (id, order, gateOrder) => ({
+    id,
+    manifest: {
+      consumes: [{ service: 'gate', when: `${id}On`, gateOrder }],
+      chunks: [
+        { stage: 'run', order, file: 'run.vert.glsl' },
+        { stage: 'gate', file: 'gate.vert.glsl' },
+      ],
+    },
+    chunks: { 'run.vert.glsl': `${id}-run\n`, 'gate.vert.glsl': `  ${id}-gate\n` },
+  });
+  // Handed in alphabetically, which is the order the directory and `/effects` both give.
+  const packages = [pkg('alpha', 200, 200), pkg('zeta', 100, 100)];
+  const { vertexShader } = assembleShaders(spine, packages);
+  assert.equal(vertexShader,
+    'head\nzeta-run\nalpha-run\nif (zetaOn || alphaOn) {\n  zeta-gate\n  alpha-gate\n}\n',
+    'the assembler placed the chunks by the order the packages arrived in rather than by the numbers they declare');
 });

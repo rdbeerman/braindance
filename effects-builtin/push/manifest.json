@@ -21,5 +21,19 @@
       },
       "role": "master"
     }
-  }
+  },
+  "consumes": [
+    {
+      "service": "region",
+      "when": "regionPush != 0.0",
+      "gateOrder": 100
+    }
+  ],
+  "chunks": [
+    {
+      "stage": "v.regionDisplace",
+      "order": 200,
+      "file": "swell.vert.glsl"
+    }
+  ]
 }

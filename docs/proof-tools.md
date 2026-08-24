@@ -535,6 +535,12 @@ node tools/syntax-check.mjs --mutate web-citation-outlives-its-module # ... and 
 node tools/syntax-check.mjs --mutate line-citation-past-the-end # ... and the line half of that, which rots without the path rotting
 node tools/syntax-check.mjs --mutate citation-outside-the-prose # ... and one written in the C++, which is the half of the tree the walk used to skip
 node tools/syntax-check.mjs --mutate manifest-does-not-parse # ... and a shipped effect package the store would throw on must be named, not counted
+node tools/syntax-check.mjs --mutate anchor-in-dead-fallback # ... and a shader anchor that matches its file exactly once
+                                                     #   while sitting in a slot's fallback, which is a second copy
+                                                     #   of the shipped text that nothing compiles
+node tools/syntax-check.mjs --mutate anchor-duplicated-into-a-second-chunk # ... and the other half of the same
+                                                     #   row: one anchor over two sites in the assembled pair,
+                                                     #   where the edit reaches one and the count reads whole
 node tools/release-gate-check.mjs                    # the .npmrc supply-chain gate is actually armed
 node tools/release-gate-check.mjs --mutate wrong-unit # ... and must FAIL (also: no-gate, absent)
 node tools/cpp-check.mjs                             # both C++ files parse and typecheck, in all four

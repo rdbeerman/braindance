@@ -404,7 +404,7 @@ const MUTATIONS = {
   },
   // The ripple switched off the same way.
   'ripple-ignored': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/ripple/wave.vert.glsl',
     edits: [[
       '  if (ripple > 0.0 && rw > 0.0) {',
       '  if (false) {',
@@ -415,11 +415,21 @@ const MUTATIONS = {
   // only computed when one of the older three effects asks for it. **The drop-one sweep
   // cannot see this**: the scrambled set raises all four at once, so the weight is there
   // anyway and the ripple goes on working. Only the arm that raises it alone reddens.
+  //
+  // **It edits the assembler because the gate is no longer a line anybody wrote.** The
+  // region's condition is generated from the `when` of every package consuming the service,
+  // in `gateOrder`, so the state this control reproduces is the ripple's manifest declaring
+  // no `consumes` at all - which is now the way a term goes missing. The manifest itself
+  // cannot be the anchor: a package's declaration reaches the page inside the JSON
+  // `/effects/:id` builds, and staging that would mean this tool rebuilding a route's answer
+  // rather than serving a file's bytes. Dropping the same consumer out of the join is the
+  // same three-term condition, delivered at `/shader-assembly.js`, which the page imports.
+  // Held against the monolith mutated the old way: byte-identical vertex and fragment.
   'ripple-outside-the-gate': {
-    file: 'web/cloud-shader.js',
+    file: 'web/shader-assembly.js',
     edits: [[
-      '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0 || ripple > 0.0)',
-      '  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0)',
+      "        out += consumers.map((c) => c.when).join(' || ');",
+      "        out += consumers.filter((c) => c.id !== 'ripple').map((c) => c.when).join(' || ');",
     ]],
     fails: 'the ripple-alone row, and nothing else - the drop-one sweep stays green',
   },
@@ -428,7 +438,7 @@ const MUTATIONS = {
   // off the eighths it steps in, so the smooth phase lands somewhere the stepped one never
   // does rather than agreeing with it by luck at one instant.
   'ripple-clock-continuous': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/ripple/wave.vert.glsl',
     edits: [[
       '      float cycles = dist * rippleFreq - floor(time * rippleSpeed * 8.0) * 0.125;',
       '      float cycles = dist * rippleFreq - time * rippleSpeed;',

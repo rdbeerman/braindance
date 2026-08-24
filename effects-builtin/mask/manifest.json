@@ -21,5 +21,18 @@
       },
       "role": "master"
     }
-  }
+  },
+  "consumes": [
+    {
+      "service": "region",
+      "when": "regionMask != 0.0",
+      "gateOrder": 300
+    }
+  ],
+  "chunks": [
+    {
+      "slot": "v.mask",
+      "file": "soften.vert.glsl"
+    }
+  ]
 }
