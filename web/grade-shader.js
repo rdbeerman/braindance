@@ -7,13 +7,12 @@
 // any segment - so the text below is exactly what the driver is handed.
 //
 // **It is a file of its own rather than a block inside `web/post-chain.js`, and the reason
-// is the gate rather than tidiness.** `test/shader-assembly.test.mjs` holds the assembled
-// text against the literal git history carries, and it does that by evaluating the spine
-// under bare node - no page, no server, no GPU. `post-chain.js` imports three.js and three
-// of its addons, so its bytes cannot be evaluated that way at all, and a spine living there
-// would be a spine the gate could only read by parsing. The uniforms stay behind with the
-// pass, because a `THREE.Vector2` default is a constructed object and this file constructs
-// nothing.
+// is the gate rather than tidiness.** `test/shader-assembly.test.mjs` assembles this spine
+// under bare node - no page, no server, no GPU - and requires each chunk to reach the one
+// program its filename names. `post-chain.js` imports three.js and three of its addons, so
+// its bytes cannot be evaluated that way at all, and a spine living there would be a spine
+// the gate could only read by parsing. The uniforms stay behind with the pass, because a
+// `THREE.Vector2` default is a constructed object and this file constructs nothing.
 //
 // **What the split costs is the pairing**, the same obligation `web/cloud-shader.js` names:
 // every `uniform` in the assembled program has to have a key in `GRADE_UNIFORMS` in

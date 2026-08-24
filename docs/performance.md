@@ -523,6 +523,51 @@ crop-box measurement above had to move to the editor to escape. That half is
 `grabber --profile` on the sensor with `prof-summary` reading the contention, and it is
 deferred. Until both are run the honest statement is the one at the top of this subsection.
 
+## The effect extraction cost nothing in pixels, and that is a measurement
+
+Moving every effect's GLSL out of two shader files and into sixteen packages is a refactor
+exactly as long as the text reaching the driver does not change, and the ways it can change
+quietly are not exotic — a chunk boundary off by one line, a blank line kept on both sides of a
+joint, an indent normalised on the way through. None of those breaks a compile and none shows in
+a picture anybody would look twice at. So the claim is held in pixels, against one recorded
+baseline, and it was re-asked at every landing point of the work rather than once at the end.
+
+**The rail: 150 framebuffer hashes, equal at every step.** Ten shipped looks — `blackwall`,
+`cascade`, `contour`, `depth`, `ember`, `ghost`, `grille`, `rgb`, `tearline`, `voxel` — each
+rendered at 15 pinned program positions and hashed with SHA-256 over `readPixels`. The final
+run, on the tree that retired the migration gates, came back **150 of 150 equal** to the
+baseline recorded at `0da90174`.
+
+The method, because a hash comparison is only worth what its preconditions are:
+
+- **Fixture.** `captures/sample.knct`, frames 0, 4, 8, 12, 16 and 20 at stride 4, replayed with
+  3 substeps and the colour dropped. The rebuilt fixture is 2,605,152 bytes and its SHA-256 is
+  checked against the one the baseline recorded **before any look is rendered** — a comparison
+  against a different take would agree with itself perfectly and mean nothing.
+- **Buffer.** A 572x322 drawing buffer inside a 640x360 viewport at `deviceScaleFactor` 1, with
+  the output size set to `640x360`. Asserted rather than assumed, for the same reason.
+- **Rasteriser.** ANGLE's Metal renderer on an Apple M2 Max, through Playwright's bundled
+  Chromium. The unmasked renderer string is compared against the baseline's and the run refuses
+  to continue if it differs, because two GPUs round a fragment differently and their hashes are
+  not comparable.
+- **Intrinsics.** The WebSocket is intercepted and answered with nothing, so the page falls back
+  to the pinned focal length; a run where real intrinsics arrived is refused on reading
+  `focal.x !== 366`. The camera is pinned at `(0, 0.1, 1.6)` looking at `(0, 0, -2.2)`.
+- **The baseline's own shape.** It was recorded over three passes — two in one page, which is
+  what catches a look leaking into the next, and a third in a fresh browser context, which is the
+  shape a comparison run has. All three were identical.
+
+**Two re-pins are recorded rather than hidden.** The baseline moved twice, both times for an
+approved picture change rather than for a refactor: the zero-alpha discard that keeps a
+transparent fragment out of the depth buffer, and the three restored bloom terms. The second
+re-pin was measured at the time — the four core looks differed at 12 of 15 positions and the six
+bloom-bearing looks at 15 of 15, 138 of 150 hashes in all — and everything since has been equal
+at 150. A baseline re-pinned to whatever the tree does today would prove nothing, so each re-pin
+carries what moved and why.
+
+**What this does not say** is that the shaders are correct; it says they did not change.
+`registry-check` is what says each term reaches pixels, and it runs 145 rows on the same tree.
+
 ## What did not work, measured rather than assumed
 
 A negative result nobody wrote down is one somebody re-derives. All on a fixed 40-45s window

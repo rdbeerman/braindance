@@ -92,19 +92,24 @@ function revBeforeMarker(marker) {
 // is the same reason `expand-shifts-by-a-block` exists beside `bind-ignores-grid` in
 // monitor-check.
 //
-// **Every list below is read against six rows that are red on the clean tree, and they are
-// not a catch of anything.** Section 1b renders this build against the revision before the
-// registry, and that revision predates the discard that keeps a zero-alpha fragment out of
-// the depth buffer - so the five reading rows and the raster row now report 6 of 6 frames
-// differing, at 460 to 750 bytes of 921600 with worst deltas of 191 to 250. It renders the
-// five readings at defaults rather than any shipped document, and the defaults sit on the
-// hard-edged path, which is why `readBlackwall`'s row moves here while the Blackwall document
-// itself is additive and byte-identical. That is the look change the widening bought,
-// arriving in the one place in this suite that compares this build against a committed one.
-// It is reported rather than re-pinned, because a golden arm re-pinned to whatever the tree
-// does today is not a golden arm. Read a mutation's own list as rows *beyond* those six, and
-// note that two of the mutations here make them green again by putting the older behaviour
-// back.
+// **The clean tree is 145 passed, 0 failed, and every count below is a total against that.**
+// This paragraph used to say the opposite. Section 1b renders this build against the revision
+// before the registry, and that revision predates the discard that keeps a zero-alpha fragment
+// out of the depth buffer - so for a while the five reading rows and the raster row stood red
+// reporting 6 of 6 frames differing, at 460 to 750 bytes of 921600 with worst deltas of 191 to
+// 250, and every list below was written as rows *beyond* those six. The arm was then handed the
+// discard beside the unprojection's mirror it was already handing over, which is the right
+// answer for an approved change a pinned build does not have: the rows kept their claim and
+// went green, and `margins-miss-the-newborn` is the control that they still have teeth.
+//
+// **So the counts here were re-baselined after that re-pin, and they are stated as totals so
+// the next drift is visible against a true baseline.** Several of them had also been carrying
+// the wrong composition since long before it - a list naming five rows where four fire, or
+// naming a neighbouring row that does not fire at all, each of which sends the next reader
+// hunting a defect that is not there and is exactly as expensive as a missed catch. Every
+// number below was measured on this tree rather than reasoned about, and where a list once
+// predicted a row that does not fire, the prediction is recorded beside the measurement rather
+// than quietly deleted - a mutation whose reach *shrank* is worth knowing about.
 const MUTATIONS = {
   // Section 1b, the readRgb row and only that row. Alpha is the asymmetric half of this
   // blend and the place a rewrite of it actually breaks: three readings multiply
@@ -181,8 +186,14 @@ const MUTATIONS = {
       '  if (duotoneDepth > 0.0) {',
       '  if (false) {',
     ]],
-    fails: 'duotone.amount, duotone.hue, duotone.split and duotone.motion in the drop-one sweep, '
-      + 'plus the planted section\'s two motion rows, which the block being off takes with it',
+    fails: 'seven rows. The drop-one sweep names **five** - duotone.amount, duotone.hue, '
+      + 'duotone.split, duotone.span and duotone.motion - and the count beneath it reads 81 of '
+      + '89; the other five are the planted motion section losing its subject entire: the '
+      + 'raised-speed row, the hot-pole direction row, the chequered per-point row, the '
+      + 'half-moving mean row, and the span-widening row that keeps the section honest. '
+      + '**This list said four names and two rows**; the span goes with the split for the '
+      + 'structural reason above, and the planted section loses five rows rather than two '
+      + 'because every one of them reads a colour this block no longer writes',
   },
   // The sharper half of the one above, and the reason both are kept: the duotone goes on
   // working as a flat tint, so `duotone.amount` still moves pixels and only the split stops
@@ -395,12 +406,15 @@ const MUTATIONS = {
       '  if (lattice > 0.0) {',
       '  if (false) {',
     ]],
-    fails: 'eight rows, and none of them is the drop-one sweep any more - see above. Seven '
-      + 'are the planted glyph sections, which cannot draw one character per cell without '
-      + 'the snap: the thinning equality, the turbulence control, the ripple control, the '
-      + 'hash key\'s own ramp, both rows of the ink ramp, and the two-surface section\'s '
-      + 'box-against-ink guard. The eighth is the streak\'s 45-degree row, which is the '
-      + 'scrambled fixture this mutation unquantises',
+    fails: 'eight rows, and none of them is the drop-one sweep any more - see above. **All '
+      + 'eight are the planted glyph sections**, which cannot draw one character per cell '
+      + 'without the snap: the thinning equality, the turbulence control, the ripple and push '
+      + 'control, the hash key\'s own ramp, both rows of the ink ramp, the two-surface '
+      + 'section\'s box-against-ink guard and its far-surface guard. **The count was right and '
+      + 'the composition was not**: this list used to give seven to the glyph sections and the '
+      + 'eighth to the streak\'s 45-degree row, and measured, the streak row stays green while '
+      + 'the two-surface section loses a second guard. A list that names the wrong eight is as '
+      + 'expensive as one that names the wrong number, because the reader checks the names',
   },
   // The ripple switched off the same way.
   'ripple-ignored': {
@@ -409,7 +423,14 @@ const MUTATIONS = {
       '  if (ripple > 0.0 && rw > 0.0) {',
       '  if (false) {',
     ]],
-    fails: 'ripple.amount, ripple.freq and ripple.speed in the drop-one sweep, and the ripple-alone row',
+    fails: 'five rows. The drop-one sweep, naming ripple.amount, ripple.freq and ripple.speed '
+      + 'unexplained, and the count beneath it at 83 of 89; the ripple-alone row, which is the '
+      + 'one the gate is about; the clock row, since a ripple that is switched off renders the '
+      + 'same frame either side of a step boundary; and the glyph section\'s hash-order row, '
+      + 'which needs the ripple to move a point to tell "hashed before" from "hashed after". '
+      + '**This list used to name the first and third of those and stop**, which read as two '
+      + 'rows to anybody counting - the sweep is two rows rather than one, and the last two are '
+      + 'planted fixtures losing their subject',
   },
   // The gate put back the way it was before the ripple existed, so the region weight is
   // only computed when one of the older three effects asks for it. **The drop-one sweep
@@ -630,9 +651,14 @@ const MUTATIONS = {
       '  return GRADE_GATES.some(',
       '  return grade.uniforms.crush.value > 0 || GRADE_GATES.some(',
     ]],
-    fails: 'the pass-gate row for crush, all five rows of 1b (each at 6 of 6 frames and '
-      + 'about three quarters of every frame), and the boot comparison naming all four '
-      + 'gating terms',
+    fails: 'seven rows: the pass-gate row for crush, all five reading rows of 1b (each at 6 of '
+      + '6 frames and about three quarters of every frame), and the boot comparison, whose '
+      + 'landing diff names rgbsplit.amount, raster.amount and grain.amount moving from '
+      + '[0,false] to [0,true]. **`GRADE_GATES` holds five terms and this line used to say '
+      + 'four** - grain, scanlines, rgbSplit, streak and vignette, derived from the packages\' '
+      + '`gates` bindings rather than counted by hand, which is the whole point of deriving '
+      + 'them: the boot row names the three whose landing actually moves, and the number of '
+      + 'gates is a fact about the installed set rather than about this comment',
   },
   // The glyph field's master, switched off in **both** places it gates. One anchor is not
   // enough and the reason is the whole shape of this term: the vertex stage reads `glyph`
@@ -651,11 +677,12 @@ const MUTATIONS = {
       ['  if (glyph > 0.0) {', '  if (false) {'],
       ['  if (glyphMix > 0.0) {', '  if (false) {', 'effects-builtin/glyph/index.frag.glsl'],
     ],
-    fails: 'twenty-two rows on top of the six section 1b carries on the clean tree, counted out '
+    fails: 'twenty-two rows in total, on a tree that is otherwise green, counted out '
       + 'because a list that undercounts sends the next reader hunting a defect that is not '
       + 'there. **Two carry the claim**: the drop-one sweep, '
       + 'naming glyph.amount, glyph.tone, glyph.hash and glyph.rain unexplained, and the count beneath '
-      + 'it at 81 of 89. **Nineteen are the planted glyph sections losing their fixture** - '
+      + 'it at 81 of 89. **One is a neighbour**: the streak\'s right-angle row, which reads the '
+      + 'scrambled set this mutation redraws. **Nineteen are the planted glyph sections losing their fixture** - '
       + 'the thinning section\'s guard and its equality, all three turbulence rows, both '
       + 'ripple rows, the index section\'s guard, its doubling row and its distinctness row, '
       + 'the hash ramp\'s strict row, the rain key\'s own row, the strict ink row, all three '
@@ -884,7 +911,7 @@ const MUTATIONS = {
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);',
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vSize);',
     ]],
-    fails: 'five rows on top of section 1b\'s standing six. **Two carry the claim** and they '
+    fails: 'four rows, on a tree that is otherwise green. **Two carry the claim** and they '
       + 'are the two halves of it: the in-band '
       + 'cell coming back a hard bit at one colour, and the cut-away cell doing the same - '
       + 'vSize is taken before the halving as well as in the wrong unit, so this mutation is '
@@ -894,8 +921,10 @@ const MUTATIONS = {
       + 'the band drawing splats, and the reference reading puts it above at 30 pixels, so '
       + 'the far surface inks 1.71% of the frame instead of 41.42% and the at-risk '
       + 'population falls from 5875 to 264. Its claim row stays green, correctly - the near '
-      + 'margins are still discarded. **One is a neighbour**: the streak\'s 45-degree row, '
-      + 'which reads the scrambled set this mutation redraws',
+      + 'margins are still discarded. **This list said five and named a fifth that does not '
+      + 'fire**: the streak\'s 45-degree row, predicted as a neighbour reading the scrambled '
+      + 'set this mutation redraws. Measured, it stays green, so the mutation does not reach '
+      + 'that fixture and the four above are the whole of it',
   },
   // **The counterpart of the one above, and the two are the two ends of one rule.** That one
   // reads the look's reference pixels and never the buffer's; this one reads the buffer's and
@@ -995,14 +1024,23 @@ const MUTATIONS = {
         + '  fragColor = vec4(col * exposure, alpha * falloff);',
       '  fragColor = vec4(col * exposure, alpha * falloff);',
     ]],
-    fails: 'the claim row of each of the two two-surface sections, and nothing else. The '
+    fails: 'eight rows. **Two carry the claim**, one from each two-surface section: the '
       + 'character section\'s is the far surface moving under pixels the near marks never drew '
       + 'on; the newborn section\'s is the frame with an invisible cloud in it no longer being '
       + 'the frame without it. Every guard beside them stays green, because both fixtures '
       + 'still render and the sparse mark still leaves its box empty; what changes is only '
-      + 'whether an empty box is a surface. Nothing else in this file sees it, and that is the '
-      + 'coverage these two sections exist to state: every other planted section here stands '
-      + 'one wall coincident with itself, where there is nothing behind anything to hide',
+      + 'whether an empty box is a surface. Those two sections are the only planted ones that '
+      + 'can see it, and that is the coverage they exist to state: every other planted section '
+      + 'here stands one wall coincident with itself, where there is nothing behind anything to '
+      + 'hide.\n'
+      + '           **The other six are section 1b, and this line used to say "nothing else".** '
+      + 'It was true when the golden arm compared against a revision with no discard at all: '
+      + 'removing the discard made this build agree with that revision, so those six went '
+      + '*green* under this mutation and the count came out below the clean tree\'s. The arm '
+      + 'has been handed the discard since, so the old source now carries it too - and a '
+      + 'mutation that takes it out of this build makes the two disagree, at 6 of 6 frames. '
+      + 'The direction inverted with the re-pin and the sentence did not follow it, which is '
+      + 'the specific way a re-pinned baseline rots the prose around it',
   },
   // **The same repair confined back to characters**, which is the one commit's worth of state
   // between the glyph field going in and the widening. It is the wrong fix that is hardest to
@@ -1020,18 +1058,21 @@ const MUTATIONS = {
       '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;',
       '  if (softEdge == 0 && glyphMix > 0.0 && alpha * falloff <= 0.0) discard;',
     ]],
-    fails: 'the claim row of the newborn section, alone, at 365 of 184184 pixels moved with '
-      + 'all 365 behind a newborn sprite. Both guards beside it stay green - the plant is '
+    fails: 'seven rows. **The claim is the newborn section\'s**, at 365 of 184184 pixels moved '
+      + 'with all 365 behind a newborn sprite. Both guards beside it stay green - the plant is '
       + 'geometry and a condition does not move it - and so does every row of the character '
       + 'section next door, which is the whole point of this control: that section holds the '
       + 'glyph margins and cannot hold anything else, so a build that repaired only them reads '
-      + 'clean everywhere it used to be read.\n'
-      + '           **It also turns six red rows green, and a reader counting reds has to know '
-      + 'that before reading the one.** Section 1b compares this tree against a revision that '
-      + 'predates the repair entirely, and the mode presets it renders draw no characters - so '
-      + 'the confined condition is that revision\'s arithmetic exactly and the five reading '
-      + 'rows and the raster row all match again. On the clean tree those six are red, and they '
-      + 'are the shipped look movement this change bought rather than a fault',
+      + 'clean everywhere it used to be read. That is what separates this from '
+      + '`glyph-margins-occlude`, which reddens the character section\'s claim row as well.\n'
+      + '           **The other six are section 1b, and this line used to say the opposite.** '
+      + 'While the golden arm compared against a revision with no discard at all, the confined '
+      + 'condition *was* that revision\'s arithmetic on presets that draw no characters, so the '
+      + 'five reading rows and the raster row went green under this mutation and a reader '
+      + 'counting reds had to know it. The arm carries the discard now, so the confined '
+      + 'condition disagrees with it wherever the widening reaches, and the six redden at 6 of '
+      + '6 frames. Read the frame count to tell the three margin mutations apart: this one and '
+      + '`glyph-margins-occlude` move all six frames, `margins-miss-the-newborn` moves five',
   },
   // The same narrowing pointed at the other older half: a condition that reaches the disc's
   // rim and leaves a point that has not faded in yet writing depth. Written as a disjunct
@@ -1091,13 +1132,17 @@ const MUTATIONS = {
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);',
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx) + 0.02;',
     ]],
-    fails: 'seven rows, and they are one fact arriving in two places. The row that names it '
-      + 'is the glyph-of-0-is-inert equality in the defaults section. The other six are '
-      + 'section 1b - all five readings at 6 of 6 frames, plus the raster\'s cross-build row - '
+    fails: 'eight rows, and they are one fact arriving in three places. The row that names it '
+      + 'is the glyph-of-0-is-inert equality in the defaults section. **Six are '
+      + 'section 1b** - all five readings at 6 of 6 frames, plus the raster\'s cross-build row - '
       + 'because 1b renders at parameter defaults against a build that predates the glyph '
       + 'field, and a crossfade that is not exactly zero mixes a bitmask into every point of '
       + 'every one of those frames. That 1b can see this is worth knowing rather than '
-      + 'trimming: it is the only comparison here with an oracle outside the build',
+      + 'trimming: it is the only comparison here with an oracle outside the build. **The '
+      + 'eighth is the above-1080 section\'s governing row**, which asks that a cell under the '
+      + 'band in reference pixels draws no character at a taller buffer either - a leak of 0.02 '
+      + 'draws one there too, so the smaller of the two readings stops governing. This list '
+      + 'said seven and eight fire; the one it left out is that row',
   },
   // The same shape on the other master. `col *= 1.0 + rain * rainLift` is written straight
   // through with no guard, on the flare's measurement that multiplying by a computed 1.0 is

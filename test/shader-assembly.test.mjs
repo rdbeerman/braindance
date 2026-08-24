@@ -1,46 +1,41 @@
 // Every program this page compiles, assembled out of the spines and the shipped packages,
-// against the literals the two files used to hold.
+// held to the rules that decide where each chunk's text lands.
 //
-// **This is the gate the whole extraction rests on, and it is an equality rather than a
-// resemblance.** Moving GLSL out of two files and into twenty is a refactor exactly as long
-// as the text that reaches the driver does not move, and the ways it can move quietly are
-// not exotic: a chunk boundary off by one line, a blank line the spine keeps and the chunk
-// also carries, an indent normalised on the way through, a generated declaration written
-// `out float x;` where the file said something else. None of those breaks a compile and
-// none of them shows up in a picture anybody would look twice at - the shader still runs,
-// it just is not the shader that was graded. So the assembled strings are held byte for
-// byte against `git show`, and the falsification control below flips one byte in each
-// chunk file in turn to prove the equality is reading them at all.
+// **This gate used to be an equality against git history, and that half of it is gone.**
+// While the GLSL was moving out of two files and into twenty, the only claim a refactor
+// gets to make is that the text reaching the driver did not move, and the ways it can move
+// quietly are not exotic: a chunk boundary off by one line, a blank line the spine keeps
+// and the chunk also carries, an indent normalised on the way through, a generated
+// declaration written `out float x;` where the file said something else. None of those
+// breaks a compile and none of them shows up in a picture anybody would look twice at - the
+// shader still runs, it just is not the shader that was graded. So the assembled strings
+// were held byte for byte against the monoliths as `git show` served them, resolved by
+// content marker rather than by hash.
 //
-// **The revision is resolved by content and never by hash.** Preparing this repository for
-// release rewrote its history once already, which moved every hash after the first
-// rewritten commit and left a pinned sha naming nothing - a tool that dies inside `git
-// show` exits non-zero with nothing asserted, which reads exactly like a check that ran and
-// failed. So the marker is a string only the monolithic file contains, `git log -S` names
-// the commits where its count changed, and the newest revision still holding it is the one
-// this compares against. Before a split lands that is `HEAD` itself, whose blob still
-// carries the literals while the working tree no longer does; after it lands it is the
-// commit before the removal. Both are the same question - the last revision holding the
-// monolith - asked without ever writing a hash down. The two programs are pinned
-// separately, because they were cut in different commits and each names its own marker.
+// That arm was scaffolding and its own header said so: it pinned the shipped packages to a
+// historical revision, so the first intentional change to a shader would break it, and it
+// is deleted at the end of the extraction rather than carried into the next edit. What
+// replaces it is not weaker and it is not this file: the ten-look probe renders the shipped
+// looks through the real page and hashes the framebuffer, and it has come back equal to the
+// same recorded baseline at every landing point of this refactor. `docs/performance.md`
+// carries that result with its method, which is where a byte-identity claim about *pixels*
+// belongs - a picture is the only place a shader that quietly stopped being the graded one
+// would show, and a string equality against a deleted file cannot survive the next retune.
 //
-// **The two monoliths are read differently, and the difference is forced rather than
-// chosen.** `web/cloud-shader.js` imports nothing at any revision, so its literals are
-// evaluated whole through a `data:` module - which is exact by construction, escape
-// sequences included. `web/post-chain.js` imports three.js and three of its addons, and a
-// `data:` module cannot resolve a bare specifier at all, so that one is read by cutting the
-// template literal out of the source and evaluating the cut on its own. What makes that
-// safe is asserted rather than assumed: the file carries no backslash anywhere, so no
-// literal in it can hold an escaped backtick, and the first backtick after the property name
-// therefore opens the literal and the next one closes it.
+// **What stays here is everything the probe cannot see**, because it is structure rather
+// than pixels and the shipped set answers most of it by coincidence. A chunk that reaches no
+// program at all, a chunk spliced into two, a stage placed by the order the packages arrived
+// in rather than by the numbers they declare, two spines offering one joint name - each of
+// those draws a correct picture today and a wrong one the first time somebody installs a
+// package whose id sorts the wrong way. So the arms below are live: they assemble the shipped
+// spines and packages, perturb one thing, and require the difference the rules promise.
 //
-// What this does not claim is that the assembled shader is *correct*. It says the split
-// changed nothing, which is the only claim a refactor gets to make, and `registry-check`
-// is what says the terms reach pixels.
+// What this does not claim is that the assembled shader is *correct*. It says the assembler
+// puts each chunk where its manifest says, and `registry-check` is what says the terms reach
+// pixels.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -64,86 +59,6 @@ const NAMES = {
   '.grade.glsl': ['grade', 'fragmentShader'],
 };
 
-// Each monolith by the string only it contains, and by the file that used to hold it.
-//
-// The cloud's marker is the export declaration itself rather than a piece of GLSL, because
-// GLSL is exactly what moved into the chunk files and a marker that moved with it would
-// resolve to the wrong side of the split. The grade has no export to name - its literal sat
-// inside an object - so its marker is the one line of that shader which is neither a term
-// nor a comment: the hash function, which moved to the spine entire and so is absent from
-// `web/post-chain.js` at every revision after the cut and present at every one before it.
-const MONOLITHS = {
-  cloud: { file: 'web/cloud-shader.js', marker: 'export const vertexShader' },
-  grade: {
-    file: 'web/post-chain.js',
-    marker: 'float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }',
-  },
-};
-
-const git = (...args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28 });
-
-/**
- * The newest revision whose file still holds the marker.
- *
- * `git log -S` lists the commits where the marker's count changed, newest first - the one
- * that introduced it and, once the split is committed, the one that removed it. Asking
- * `HEAD` first is what makes this exact before the split lands: the working tree has
- * already dropped the marker while `HEAD`'s blob still carries it, and the `-S` walk on
- * its own would answer with the commit that *introduced* the literals, months of shader
- * work ago.
- */
-const revBeforeSplit = (program) => {
-  const { file, marker } = MONOLITHS[program];
-  if (git('show', `HEAD:${file}`).includes(marker)) return 'HEAD';
-  const touched = git('log', '-S', marker, '--format=%H', '--', file)
-    .split('\n').map((s) => s.trim()).filter(Boolean);
-  assert.ok(touched.length, `no commit in this history changes the count of ${JSON.stringify(marker)} in ${file}`);
-  return `${touched[0]}^`;
-};
-
-/**
- * One program as that revision holds it, evaluated rather than parsed.
- *
- * The cloud's file imports nothing at all - which is asserted rather than assumed, since a
- * relative specifier inside a `data:` module has no base to resolve against and would throw
- * a message about the URL rather than about the file - so the whole module evaluates and its
- * two exports are read straight off.
- *
- * The grade's cannot: it imports three.js, and stubbing that out to get at a string would be
- * a second three.js living in a test. So each of its two literals is cut from the source
- * between the backtick that follows its property name and the next backtick, and the cut is
- * evaluated on its own. **The cut is only the whole literal if no backtick in the file is
- * escaped**, so the absence of any backslash at all is asserted first - and the evaluation
- * is kept rather than trusting the cut to be its own value, because that is the half that
- * would go wrong silently if one ever arrived.
- */
-const monolithAt = async (program, rev) => {
-  const { file, marker } = MONOLITHS[program];
-  const source = git('show', `${rev}:${file}`);
-  assert.ok(source.includes(marker), `${rev} does not hold ${JSON.stringify(marker)}, so the marker resolved to the wrong revision`);
-  if (program === 'cloud') {
-    assert.equal(source.match(/^\s*import\s/m), null, `${rev}'s ${file} imports something, so it cannot be evaluated as a data: module`);
-    const { vertexShader, fragmentShader } = await evaluate(source);
-    return { vertexShader, fragmentShader };
-  }
-  assert.equal(source.includes('\\'), false,
-    `${rev}'s ${file} carries a backslash, so a backtick in it could be escaped and this cut could end in the middle of a literal`);
-  const cut = async (label) => {
-    const at = source.indexOf(`${label}: /* glsl */ \``);
-    assert.ok(at >= 0, `${rev}'s ${file} declares no ${label} literal, so the marker resolved to the wrong revision`);
-    const from = source.indexOf('`', at) + 1;
-    const to = source.indexOf('`', from);
-    assert.ok(to > from, `${rev}'s ${file} has an unterminated ${label} literal`);
-    const text = source.slice(from, to);
-    assert.ok(text.length > 0, `${rev}'s ${label} literal is empty, so this comparison would run on nothing`);
-    const { value } = await evaluate(`export const value = \`${text}\`;`);
-    return value;
-  };
-  return { vertexShader: await cut('vertexShader'), fragmentShader: await cut('fragmentShader') };
-};
-
-const evaluate = (source) => import(`data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`);
-
 /**
  * Every shipped package, in the shape `/effects/:id` answers with: the manifest, and the
  * text of every chunk it names.
@@ -165,28 +80,23 @@ const shippedPackages = () => readdirSync(BUILTIN, { withFileTypes: true })
     return { id, manifest, chunks };
   });
 
-test('the spines and the shipped packages assemble to the programs the monoliths held', async () => {
-  const after = assembleShaders(SPINES, shippedPackages());
-  for (const program of Object.keys(MONOLITHS)) {
-    const rev = revBeforeSplit(program);
-    const before = await monolithAt(program, rev);
-    assert.equal(after[program].vertexShader, before.vertexShader,
-      `the assembled ${program} vertex program is not the one ${rev} holds`);
-    assert.equal(after[program].fragmentShader, before.fragmentShader,
-      `the assembled ${program} fragment program is not the one ${rev} holds`);
-  }
-});
-
 test('one byte moved in any chunk moves the program it belongs to, and only that one', async () => {
   // The falsification control, and it flips a byte in **every** chunk rather than in one:
-  // a chunk that never reached the output would leave the equality above green while
-  // contributing nothing, and one arm aimed at one file cannot see the rest. The arms are
+  // a chunk that never reached the output would contribute nothing and no other arm here
+  // would notice, and one arm aimed at one file cannot see the rest. The arms are
   // enumerated from the manifests rather than listed here, so a package that declares a
   // chunk is asked about it by existing - which is what kept this control whole when the
   // glitch and the lattice moved out after the glyph field and the rain, and again when the
   // region family, the tone run and the grade pass followed them. The direction is asserted
   // as well as the difference, because a chunk spliced into the wrong program is a thing
-  // this assembler could do and the equality alone would only say that something moved.
+  // this assembler could do and a bare "something moved" would not tell them apart.
+  //
+  // **Both sides of the comparison are this tree's own assembly**, taken before the flip
+  // and again after it. That is what is left once the equality against the monoliths goes:
+  // the reference used to be a historical string, and asking the same question against the
+  // unflipped live build is the form that survives the next intentional shader change. The
+  // claim narrows honestly with it - this says each chunk reaches exactly the program its
+  // filename names, and it no longer says which bytes those are.
   //
   // **Every other program has to stand still, not just the sibling shader.** While there was
   // one spine, "the other one" was a pair and the assertion could name it; there are four
@@ -230,25 +140,28 @@ test('one byte moved in any chunk moves the program it belongs to, and only that
 });
 
 test('the numbers place the text, and the order the packages arrive in does not', () => {
-  // **The two arms above could not see the sort until the tone run moved out, and that was
-  // measured rather than assumed.** Taking `stages.sort(byOrder)` out of the assembler
-  // entirely used to leave both of them green: the packages are read in directory order, and
-  // every shipped stage's declared order happened to be that same order - glitch before
-  // lattice on `v.displace`, glyph before rain on the two declaration stages and on
+  // **This is the only arm in the file that can see the sort at all, and that became true
+  // when the equality against the monoliths went.** Taking `stages.sort(byOrder)` out of the
+  // assembler is invisible to the flip control above by construction: that arm assembles the
+  // tree twice with the same assembler and compares the two, so a rule dropped from the
+  // assembler is dropped from both sides and the difference it reads is unchanged. Only a
+  // reference the assembler did not produce can catch a missing rule, and the reference used
+  // to be the historical monoliths - which is what this arm now stands in for, measured
+  // rather than assumed: dropping the sort leaves the flip control green and reddens this.
+  //
+  // The shipped set cannot hold the claim either, and for a while it could not even see the
+  // defect. Every shipped stage's declared order used to agree with directory order - glitch
+  // before lattice on `v.displace`, glyph before rain on the two declaration stages and on
   // `f.tone`, noise before push before ripple on `v.regionDisplace`. Six stages, six
   // coincidences, and each one arrived honestly, because a package is named after the effect
   // and the effects were written in roughly the order they run. So a build that lost the sort
   // would draw the identical picture and a different one the first time somebody added a
-  // package whose name sorted the wrong way - a defect that ships and then waits.
-  //
-  // Two of the shipped stages disagree with the alphabet now. `f.tone` runs thermal, edges,
-  // duotone, glitch, rain against a directory handing them over as duotone, edges, glitch,
-  // rain, thermal, and `g.body` runs streak, raster, grain, vignette against grain, raster,
-  // streak, vignette - so the arms above would redden on a build that lost the sort. This
-  // one stays anyway, and not out of caution: what it asserts is that the *numbers* decide,
-  // where those two stages assert only that the current numbers and the current alphabet
-  // disagree, which is a fact about the sixteen packages installed today and would go away
-  // the moment somebody renamed one.
+  // package whose name sorted the wrong way - a defect that ships and then waits. Two shipped
+  // stages disagree with the alphabet today: `f.tone` runs thermal, edges, duotone, glitch,
+  // rain against a directory handing them over as duotone, edges, glitch, rain, thermal, and
+  // `g.body` runs streak, raster, grain, vignette against grain, raster, streak, vignette.
+  // But that is a fact about the sixteen packages installed today and goes away the moment
+  // somebody renames one, so it is not something to rest a rule on.
   //
   // A fixture rather than a shipped set is the only thing that can hold the general claim.
   // So the two packages here are named against their orders - the one that goes first is

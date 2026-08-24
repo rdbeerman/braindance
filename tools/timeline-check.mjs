@@ -263,13 +263,16 @@ const MUTATIONS = {
   // ways of saying one thing. Inert everywhere else in this file: sections 1 to 5 run
   // looks carrying no rain and no characters, where the block this edits does not execute.
   //
-  // **Three rows, and the second and third are worth knowing about before they are read as
-  // separate faults.** The one it is for is the clock-reaches-pixels guard. The no-pre-roll
-  // control goes with it, to max 0/255, and the separation row under that goes with the
-  // control - which is a fact about this fixture rather than a second defect: most of what
-  // the accumulators hold over `cascade` is the wave moving through them, so a wave that
-  // does not move leaves a pre-roll with nothing to warm. That is the same reading the note
-  // above `CASCADE_LOOK` arrives at from the other side.
+  // **One row, and this comment said three.** The one it is for is the clock-reaches-pixels
+  // guard, which comes back `max 0/255, mean 0.0000, 0.000% of pixels differ` - the picture
+  // does not move when the clock alone is moved, which is exactly the claim. The two rows
+  // predicted beside it were the no-pre-roll control and the separation row under it, on the
+  // reading that most of what the accumulators hold over `cascade` is the wave moving through
+  // them, so a wave that does not move leaves a pre-roll with nothing to warm. Measured, both
+  // stay green: the pre-roll has plenty else to warm on this fixture, so that reading was
+  // wrong about the fixture rather than about the mechanism. It is corrected here rather than
+  // deleted, because a prediction that failed is the more useful half - a reader who counts
+  // three and finds one goes looking for two faults that were never there.
   'rain-phase-unread': { file: 'effects-builtin/rain/cell.vert.glsl', edits: [[
     '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
     '    vRain = (0.0 * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',

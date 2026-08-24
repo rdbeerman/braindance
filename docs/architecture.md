@@ -124,6 +124,75 @@ name an identifier this build has not got is refused with the reason and never r
 alternative is a package that installs cleanly and breaks the *next* page load, where the only
 evidence is a console nobody has open.
 
+### Assembly: a spine with joints, and the chunks that fill them
+
+`web/cloud-shader.js` and `web/grade-shader.js` each export a **spine** — verbatim GLSL segments
+with named joints between them — and `web/shader-assembly.js` concatenates a spine with whatever
+the installed packages bring. Neither module imports anything and neither interpolates: a chunk's
+text is spliced between two segments exactly as it arrived, because every transformation on the
+way is a byte that could move without breaking a compile or showing in a picture anybody would
+look twice at.
+
+A joint is one of four kinds, and the kind decides what filling it means:
+
+- a **stage** takes any number of chunks, concatenated by the `order` each declares — which is
+  why two packages can both add uniforms to one declaration block;
+- a **slot** takes at most one claimant and carries the text to use when nothing claims it, so a
+  slot is a *replacement* and an uninstalled effect is exact identity by construction;
+- a **service** is a value the spine computes under a gate its consumers generate, the condition
+  built from each consumer's own `when` clause and joined in `gateOrder`, so a term that reads
+  the value without joining the gate is inert rather than broken;
+- **varyings** are generated from the packages' declarations in all three places at once — the
+  `out` list, the `in` list and the initialisation — so one declaration is the only statement of
+  the fact.
+
+Joint names are collected across every spine at once rather than per spine, so two spines
+offering one name is a refusal rather than a chunk quietly spliced into both. A chunk naming a
+joint nothing holds is refused by name, for the same reason the alternative design was rejected:
+tagging each chunk with its program's name means a tag nobody spelled right lands the chunk in no
+program at all, the page boots, and the effect is simply gone.
+
+### Hotload is boot, run a second time
+
+`adoptEffectPackages` rebuilds the shader programs, the parameter registry, the panel and the
+uniform cells from a set of packages, and ends by walking every value back through `params.set`.
+Boot is its first call. There is no separate install path, which is the point: a code path that
+only runs after an install is a code path nobody exercises until it matters.
+
+Parking and unparking are the serialise/restore round trip rather than two loops. An arriving
+effect finds its values in the document and applies them; a departing one finds them unrecognised
+and parks them, and the badge, the validation and the suppression prune all fall out of code that
+already existed. Pages converge by comparing revision lines every few seconds, standing down
+while an export, a preset gesture or a track evaluation is running, and asking again after the
+last read so a gesture that starts mid-poll defers it rather than being run over.
+
+**A hotload that fails part-way puts the page back.** The door is not a compiler — GLSL that is
+syntactically broken while naming only identifiers this build has gets past it, and a shader that
+will not link is a log line rather than an exception — so the page warms the swapped programs and
+treats a link failure as a throw. Restoring the open document can throw too, reachably: install a
+fork that adds a parameter while a document holds that effect and the completeness rule refuses
+the subset. Either way the page re-adopts the packages and the programs it was holding and
+restores the document it had, synchronously and without the network, because the moment there is
+nothing left to fall back to is the wrong moment to need a fetch. The corner where the rollback
+itself fails says to reload the page and repaints nothing, since a panel painted over a state no
+document describes is a page that looks well and is not.
+
+### A document may name an effect this build has not got
+
+The refusal splits three ways on one predicate. A bare name core does not know is a typo, and a
+dotted name whose package *is* installed but lacks the suffix is a half-package: both refuse. A
+dotted name whose prefix is not installed **parks** — the viewer loads, the installed part renders
+pixel-identically, and the values and tracks under that prefix go to a pool nothing evaluates and
+nothing destroys. The serialiser merges the pool back verbatim, so a load-save round trip through
+a build lacking the effect is byte-preserving per key, and `requires` carries the document's own
+entries whole so version and revision survive. Presets exclude the pool by construction: a project
+merges it back and a preset must not.
+
+Export refuses by default while anything is parked, naming the ids and versions, because a video
+leaves this machine and nothing in it says a layer of the look was absent. Suppressing is the
+operator saying this render may go without that effect, per effect and per session, and the
+deliverable's sidecar records what was skipped rather than rewriting the clip.
+
 ## Program time is the edit coordinate
 
 Source time is a position inside the capture; program time a position inside the output.

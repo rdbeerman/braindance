@@ -9479,6 +9479,23 @@ try {
     // controls are there, enabled, and wired straight to `history.commit()` on `change`.
     // That is the reachable press, and it is the one this pair of rows drives.
     //
+    // **The tab has to be put up first, and this row spent a whole run learning why.**
+    // `#crop` belongs to the `framing` group, and `buildPanel` ends by calling
+    // `hideOffTab`, so every group whose tab is not the one selected comes back
+    // `hidden`. A 404'd take leaves the Record tab up, which means `#crop` is in the
+    // document, enabled, and `display: none` - and Playwright's click waits for
+    // visibility, so pressing it cold is a thirty-second timeout that ends the run with
+    // sections 14 through 22 unasked. That is exactly the shape `web/main.js` names
+    // beside `collapses`, where the same hazard was foreseen for a *collapsible*
+    // framing group and the tab arriving over the top of it was not.
+    //
+    // Worth recording that this row was green for the wrong reason until it was not. A
+    // generated group is built with `hidden` unset, and until `buildPanel` re-applied
+    // the tab, every generated group was on screen whatever tab was up - so `#crop` was
+    // visible on the Record tab because the panel was leaking groups across tabs. The
+    // fix for that leak is what reddened this row, which is the honest order of events:
+    // the anchor was standing on a defect, and the defect's repair is what said so.
+    //
     // Read off the store rather than off the page, because the failure is a write that
     // already happened: a page-side reading of `history.baseline` would say the guard
     // exists, which is the `export-name-not-taken` mistake - a field read straight back
@@ -9494,6 +9511,11 @@ try {
     await page.waitForFunction(
       "document.getElementById('tNote')?.textContent?.includes('take-that-does-not-exist')",
       null, { timeout: 30000 }).catch(() => {});
+    // The Framing tab, so the control this block presses is on screen to be pressed. A
+    // view gesture and nothing else - the row below reads `undoDepth()` back as zero, so
+    // a tab that had quietly become an edit would be a red row here rather than a silent
+    // one.
+    await page.locator('#panelTabFraming').click();
     const failedOpen = await page.evaluate(`(() => ({
       opened: __kinect.takeOpened(),
       depth: __kinect.undoDepth(),

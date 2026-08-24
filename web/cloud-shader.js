@@ -9,13 +9,16 @@
 // that needs a value from JavaScript takes it as a uniform, which is the boundary the
 // uniform block is for and the reason any of this could move at all.
 //
-// **The text did not change when the joints arrived, and that is measured rather than
-// intended.** `test/shader-assembly.test.mjs` assembles this spine against the shipped
-// packages read off disk and asserts the two strings equal the two literals this file used
-// to hold, taken out of the last revision carrying them - so an edit here that moves a byte
-// is a red row naming which program moved, and a chunk file edited by one byte is the
-// control beside it. Until an effect actually differs from what the monolith drew, "the
-// look is unchanged" is a thing a check says rather than a thing a commit message claims.
+// **The text did not change when the joints arrived, and that was measured rather than
+// intended.** While the extraction was landing, `test/shader-assembly.test.mjs` assembled
+// this spine against the shipped packages and asserted the two strings equal the two
+// literals this file used to hold, taken out of the last revision carrying them. That arm
+// is gone - it pinned the packages to a revision, so the first intentional retune would
+// have broken it - and what carries the claim now is the ten-look probe in
+// `docs/performance.md`, which came back equal to one recorded baseline at every landing
+// point of the split and says it in pixels rather than in bytes. What stays in the test is
+// the structural half: a byte flipped in any chunk file has to move the program its name
+// promises and no other.
 //
 // **A joint is one of four kinds, and `web/shader-assembly.js` carries what each is for.**
 // A `stage` takes any number of chunks in declared order, a `slot` takes one and carries

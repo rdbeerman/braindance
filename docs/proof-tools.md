@@ -667,6 +667,39 @@ Measured on the first push after the extraction: `ERR_MODULE_NOT_FOUND: Cannot f
 'three'`, 47 tests, 4 failed, on all four CI arms while the same suite ran 68 green locally
 against an installed tree. `test/runner-control.test.mjs` is its control.
 
+**Two of those tests were scaffolding and are gone, which is why the count dropped from 120 to
+113.** Both pinned this build to a revision of its own history, and both said so in their own
+headers when they were written. `test/effect-manifests.test.mjs` held every shipped manifest
+field-for-field against the effect table the registry used to declare, materialised out of `git
+show` through a `data:` URL — six tests, deleted whole. `test/shader-assembly.test.mjs` held the
+four assembled programs byte for byte against the two monolithic literals, resolved by content
+marker rather than by hash; that one arm is deleted and the file keeps its other three, which are
+structural and live.
+
+The reason to retire them rather than carry them is that a gate pinned to history breaks on the
+first *intentional* change — a manifest retune, a shader edit — and a gate that must be deleted
+to make a legitimate change is a gate that will be deleted carelessly. What replaces the byte
+equality is not weaker and it is not in `test/`: the ten-look probe renders the shipped looks
+through the real page and hashes the framebuffer, and it came back 150 of 150 equal to one
+recorded baseline at every landing point of the extraction. `docs/performance.md` carries that
+result with its full method. What replaces the manifest equality is the coupling that survives
+intentional change: `registry-check`'s set equality, `boot-check`'s diff, and
+`tableFromPackages`' own both-direction refusals, which `web/main.js` runs at boot on every page
+load.
+
+**What left with them, recorded rather than glossed.** `placeParams` was exported only for the
+deleted gate and is module-local now, so `module-check` stops reporting it as an export nothing
+reads. Its appendix rule — where a parameter no layout order places ends up — is exercised live
+by `effect-check`, which installs a fork carrying a parameter the order has never heard of, but
+only for one package at a time. The ordering *between* two unplaced packages is stated in the
+comment above the function and asserted nowhere. The other loss is subtler and worth the
+sentence: the byte-for-byte arm compared against a string the assembler did not produce, so it
+could see a rule the assembler had stopped applying. Its surviving neighbour, the flip control,
+assembles the tree twice with the same assembler and compares the two, so a dropped rule is
+dropped from both sides. Dropping `stages.sort(byOrder)` leaves the flip control green and
+reddens only the synthetic fixture arm — measured at the retirement, and the reason that fixture
+arm exists.
+
 ```
 node tools/syntax-check.mjs                          # every JS file this repo ships parses, and the two
                                                      #   constants the two languages cannot share agree
@@ -1046,19 +1079,32 @@ figures off the 640x400 stage they were first taken at. The operational conseque
 point: **a red `readGhost` row is a finding now rather than the weather**, and so is that line's
 byte count climbing.
 
-**And it has six standing red rows again, deliberately, which is the opposite situation and has
-to be read as such.** Widening the zero-alpha discard from characters to the whole hard-edged
-path moves the four non-additive documents, and section 1b compares this build against a
-revision that predates the discard entirely — so all five reading rows and the raster row now
-report `6 of 6 frames differ`, at 460 to 750 bytes of 921,600 per frame with worst deltas of
-191 to 250. That is the approved look change arriving in the one place in this suite that
-compares this build against a committed one, and re-pinning it would turn a golden arm into a
-mirror. **The clean run is 145 assertions, 139 passed, 6 failed**, and those six are the six.
-Two mutations make them green again, which is worth knowing before reading a mutation's count:
-`margins-confined-to-glyphs` and `glyph-margins-occlude` both put the older arithmetic back, so
-each of them reports *fewer* total reds than the clean tree while reddening the row it exists
-for. The other rows to read alongside them are the two two-surface claims, at 19,765 of 75,239
-and 365 of 184,184.
+**It then had six standing red rows again, deliberately, and it does not any more — the middle
+of that story is the part worth keeping.** Widening the zero-alpha discard from characters to the
+whole hard-edged path moves the four non-additive documents, and section 1b compares this build
+against a revision that predates the discard entirely — so for a while all five reading rows and
+the raster row reported `6 of 6 frames differ`, at 460 to 750 bytes of 921,600 per frame with
+worst deltas of 191 to 250, and the clean run read 145 assertions, 139 passed, 6 failed. That was
+the approved look change arriving in the one place in this suite that compares this build against
+a committed one, and re-pinning the arm to whatever the tree drew would have turned a golden arm
+into a mirror.
+
+**What resolved it was handing the arm the change rather than re-pinning it.** The arm already
+patched one intentional divergence into the old source — the unprojection's mirror — and the
+discard is the second entry beside it, anchored exactly once on the old build's fragment output
+line and refused loudly otherwise. The rows kept their claim, which is that everything *but* the
+approved changes is identical, and they went green. **The clean run is 145 assertions, 0 failed**,
+measured repeatedly since and again at the end of the effect extraction against a server on 8503.
+`margins-miss-the-newborn` is what says they still have teeth: it un-discards the births on the
+current side alone and reddens all six plus its own planted row.
+
+**Read a mutation's count as a total now, not as rows beyond a standing set.** While the six
+stood, every list in that tool was written as rows *on top of* them, and two mutations —
+`margins-confined-to-glyphs` and `glyph-margins-occlude` — put the older arithmetic back and so
+reported *fewer* total reds than the clean tree. Neither of those readings survives the re-pin,
+and the counts in `tools/registry-check.mjs` were re-baselined as totals afterwards. The other
+rows to read alongside them are the two two-surface claims, at 19,765 of 75,239 and 365 of
+184,184.
 
 **The baseline on this branch is 0 failed at 131 assertions**, up from 89 with the glyph field's
 planted sections in — 120 before the review round added the two-surface occlusion section,
@@ -1172,6 +1218,31 @@ turns those clicks into thirty-second timeouts - which arrive as a crash with **
 assertions**, the shape this repo has twice recorded being written down as a bug found. If you
 touch either end, run `keyframe-check`; `editor-check` section 13c is the row that grades the
 mechanism itself.
+
+**And it is three rows red on this rig, in section 6b, with the same cause that section already
+warns about from one step back.** The readings are `dx 0.000 against 1.068, dz 0.000 against
+-0.712`, `during true, after true` and `0 levels`: the drag moved the node nowhere, so the two
+rows that read the consequence go with the one that reads the gesture. `during true` is the tell
+— navigation is never suspended, so the pointer-down was not taken as a grab at all.
+
+**It is not a regression, and that was measured rather than argued.** The same three rows fail
+with byte-identical readings at `9c906c4`, the revision before the install-system commit, taken
+by unpacking that tree with `git archive` into a scratch directory and running *its* copy of the
+tool against *its* own server. Two trees, one rig, identical output — so nothing in the effect
+extraction put them there, and the `keyframe 139/0` in `9c906c4`'s own commit message does not
+reproduce here.
+
+What it looks like is the class the section's own comment describes: `page.mouse` is
+viewport-relative and the projection is canvas-local, so the drag point is built by adding
+`#stage`'s rect. That correction is still right about the *origin* and the figures are wrong
+about the *size* — the tool asks for a 640x360 stage and the editor letterboxes to 510x287 inside
+a 640-wide viewport, which moves the top-down inset and puts node 1 on its bottom edge at
+`y = 126` against an inset running `y = 8` to `y = 126`. `timeline-check` asserts its stage and
+dies loudly when this happens; `keyframe-check` does not assert, so it drags at the wrong place
+and reports a feature that works as gone. **The fix worth making is the assertion, not the
+offset** — a tool whose figures are in stage pixels should refuse a stage that is not the one its
+figures are in. Unfixed here, and written down so the next reader does not re-derive it as a
+finding about dragging.
 
 **`jobs-check`** spawns its own server and renders two real jobs through
 `tools/render-worker.mjs`, so it needs a GPU browser and ffprobe. `--no-render` drops both rows
@@ -2296,6 +2367,32 @@ change landing later in the file cannot reach them. What has *not* been establis
 they are a real regression or this machine under load — three reproductions on one contended
 rig is not the clean control that question wants, and the honest state is that they were red
 before this work and red after it, at the same three rows with the same three readings.
+
+**Re-measured again at the end of the effect extraction: `545 assertions, 3 failed`**, on
+`--take fixture-1g --no-render` against a server on 8503 with a warm index, at load average 8.14,
+with the same three rows and the same three readings — `1 fallbacks`, `3 keys left`, and `dragged
+from 0.3333 to 0.3333, against a neighbour at 0.1667`. Three separate measurements now, 514 then
+530 then 545 in total, with a red set identical in identity *and* reading each time. The clean
+control on an idle machine is still owed.
+
+**That run took two attempts, and the first attempt is the more useful record.** It died at 422
+assertions with a fourth red and then a thirty-second `page.click` timeout on `#crop`, reporting
+`crop {"there":true,"disabled":false,"visible":false}` — the control in the document, enabled,
+and `display: none`. The cause was not a regression in the editor but a repair to one: a
+generated panel group is built with `hidden` unset, and until `buildPanel` learned to re-apply
+the active tab, every generated group was on screen whatever tab was up. `#crop` belongs to the
+`framing` group, so it had been visible on the Record tab because the panel was leaking groups
+across tabs, and the row pressing it had been standing on that leak. Fixing the leak reddened the
+row. The repair is one line in the tool — put the Framing tab up before reading and pressing —
+and the assertion, the reading and the population are otherwise untouched, which is what keeps
+545 comparable with the two runs above.
+
+**The shape is worth more than the instance**, and `web/main.js` had already half-written it:
+the note beside `collapses` records that a *collapsible* framing group would turn this row into a
+thirty-second timeout, because Playwright's click waits for visibility. The hazard was foreseen
+for collapsing and not for tabs, and it arrived through the tab door. A crash carrying a
+thirty-second timeout and no failed assertion is the shape `CLAUDE.md`'s third rule names — read
+the assertion count, not the exit code.
 
 **Re-measured after the Phase C work, and the readings are byte-identical**: `530 assertions,
 3 failed` on `--take fixture-1g --no-render` at load average 9.31, against the same three rows

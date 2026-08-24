@@ -15,7 +15,18 @@ node server/index.js --record           # a flag, not a path - takes are named a
                                         # placed in captures/ by the recorder
 node server/index.js --replay captures/session.knct
 node server/index.js --host 0.0.0.0     # reachable from other machines - see below
+node server/index.js --effects ~/fx     # where an installed effect package lands
+node server/index.js --builtin-effects ./effects-builtin  # what the build ships with
 ```
+
+**The two effect roots are the fork mechanism, so pointing one of them somewhere else
+moves what shadows what.** `--builtin-effects` is the shipped set and nothing in this
+program writes into it; `--effects` is the writable root an install lands in, and an id
+present in both resolves from there. Both default to directories beside the checkout, and
+the flags exist because a proof tool needs a search path it controls rather than the one
+the developer happens to have installed packages into. A server whose builtin root is
+missing refuses to boot rather than answering an empty list, since a broken install must
+not read as nothing-installed.
 
 **`--record` arms the *first* take rather than offering the recorder.** The flag is read
 once at boot and spent when you stop that take; arming again is the record button. So
@@ -388,7 +399,10 @@ with either refused by name. A refused package leaves nothing behind.
 reassembled and swapped, the registry and the panel are rebuilt from the new set, and every value
 is written back through the same door a slider uses — so the controls show what the registry
 holds, the values in flight are where they were, and a newly installed effect's parked values
-come back and apply. A package that changed no GLSL is adopted without recompiling anything,
+come back and apply. What you were looking at survives it: the tab that was up stays up, a group
+you had collapsed stays collapsed, and the preset picker still lists what it listed. Each of
+those was read once at boot before, so after the first install the panel either lost them or went
+on reporting a state it no longer had. A package that changed no GLSL is adopted without recompiling anything,
 which is what keeps a retune from clearing the trails on a page mid-playback. Other browsers
 converge on their own within a few seconds; the poll stands down while an export, a preset
 gesture or a keyframe evaluation is running, because a rebuild between two frames of a render is

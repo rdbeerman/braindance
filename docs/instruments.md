@@ -368,6 +368,23 @@ than a controlled sample** — the load during the individual runs was not recor
 below is the one with an idle-machine arm under it. The suspicion worth an hour is the same one as
 above: a settle that returns before the thing it was waiting on has been applied.
 
+**A second signature, and the arithmetic in it names the mechanism.** On 2026-08-24 the same
+guard fired reading `the stage came out 338x190`, four times across one session at load averages
+of 9 to 13. It is the same uniform-scaling tell — 338 over 640 and 190 over 360 are both 0.528 —
+but the numbers say more than that. The tool sizes its viewport as `360 + strip + shell` after
+measuring the furniture, and 190 is exactly `398 − 208`, where 398 is `360 + 0 + 38` and 208 is
+the furniture the run then actually had. So the strip measured **zero** and the shell measured 38:
+the timeline strip is hidden until the take opens, the furniture is read between `__kinect`
+publishing and the transport existing, and a take that opens a beat late leaves the strip hidden
+at exactly that moment. The recorded 533x300 is the same subtraction with the other term missing —
+`508 − 208`, where 508 is the *initial* `360 + TIMELINE_H_GUESS` viewport, so there the resize had
+not landed rather than the strip being absent. **One guard, two ways for the furniture to be read
+at the wrong moment**, and both of them are a race between the measurement and the take.
+
+That makes the fix a wait rather than a constant: measure the furniture after the strip is on
+screen, which is after the transport exists, rather than before it. Not made here — the runs were
+recovered by re-running, which the rate makes cheap — but the mechanism is no longer a suspicion.
+
 ### A third intermittent in the same tool, and this one may not be the instrument at all
 
 **3 of 19**, and it gets its own entry because the first reading of it was wrong in the way this
@@ -2979,7 +2996,7 @@ mutation rather than by reading the code, which is the argument for the rule tha
 tool is mutation-tested rather than reasoned about.
 
 **A sort whose subject is already sorted.** The shader assembler places each stage's chunks by
-the `order` their manifests declare, and `test/shader-assembly.test.mjs` holds the assembled
+the `order` their manifests declare, and `test/shader-assembly.test.mjs` held the assembled
 programs byte for byte against the monolith — so taking `stages.sort(byOrder)` out of the
 assembler entirely ought to redden it. It does not. The packages are read in directory order and
 every shipped stage's declared order *is* that order: glitch before lattice on `v.displace`,
@@ -2998,6 +3015,18 @@ the alphabet: two synthetic packages named against their orders — the one that
 `gateOrder`. The gate's half is live on the shipped set as well, since the region's push consumes
 at 100 where its noise consumes at 200; the stage's half exists only in the fixture, and saying so
 is the point.
+
+**And the fixture became the only thing holding it when the byte-for-byte arm was retired**, which
+is worth writing down because the reason generalises past this one rule. That arm compared against
+a string the assembler did not produce, so it could see a rule the assembler had *stopped applying*.
+Its neighbour, the flip control, cannot: it assembles the tree, perturbs one chunk, assembles again
+and compares the two, and a rule dropped from the assembler is dropped from both sides of that
+comparison. Measured at the retirement rather than argued — taking `stages.sort(byOrder)` out again
+leaves the flip control green and reddens the fixture arm alone, with the message naming the arrival
+order. **A differential arm reads what a change did; only an external reference reads what the code
+no longer does.** So when a historical reference is dropped, the question to ask of every arm left
+standing is which of the two it is, and any rule that had only the reference holding it needs a
+fixture built for it before the reference goes.
 
 **A counter that is zero in both builds.** The face drag had to be shown to arm a redraw
 rather than render out of its own handler, and the first counter reached for was

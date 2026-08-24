@@ -105,6 +105,18 @@ to start. **save** writes yours to `presets/`, and **export** and **import** mov
 between machines as JSON. Every scalar underneath is still yours to move, and a row you have
 changed grows a **↺** that puts just that one back.
 
+**The effects those sliders drive are packages on disk, and they follow the same two-root
+rule.** Sixteen ship in `effects-builtin/`, each a manifest beside the GLSL it splices into the
+shaders, and the page assembles both point-cloud programs, the grade pass, the parameter
+registry and the panel out of whatever is installed. `effects/` is the writable root: a package
+installed there under a shipped id shadows it, and deleting that copy brings the shipped one
+back, so there is always something to fall back to. A page that is open when an install happens
+rebuilds itself rather than needing a reload, and a clip naming an effect this machine has not
+got still opens — the missing part is carried, a badge in the application bar says what is
+parked, and export refuses until you say it may go without it.
+[Installing an effect](docs/reference.md#installing-an-effect-and-taking-one-away) has the
+routes, the rules the door enforces and the `--effects` flags.
+
 ### 2. Find it in the gallery
 
 **Gallery** on the menu, or the link in any surface's header.
@@ -289,10 +301,10 @@ edits, offline.
 ## Going deeper
 
 - **[docs/reference.md](docs/reference.md)** is the command line, the viewer and timeline
-  controls, levelling a canted mount, the five readings and presets.
+  controls, levelling a canted mount, the five readings, presets, and installing an effect.
 - **[docs/architecture.md](docs/architecture.md)** is how the pieces fit, the four surfaces,
-  program time as the edit coordinate, surface memory, frame interpolation and the `.knct`
-  wire format.
+  the effect store and how the shaders are assembled from it, program time as the edit
+  coordinate, surface memory, frame interpolation and the `.knct` wire format.
 - **[docs/performance.md](docs/performance.md)** is what this costs: rendering cost, the USB
   topology that was the whole bottleneck, the OpenCL and CPU depth solves, and the things
   that looked obviously worth doing and were measured not to be.

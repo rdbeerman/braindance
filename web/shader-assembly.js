@@ -16,17 +16,19 @@
 //
 // **Assembly is concatenation and nothing else.** A chunk's text is spliced between two
 // verbatim segments exactly as it arrived - not re-indented, not substituted into, not
-// wrapped - because the property this whole split rests on is that the shipped set
+// wrapped - because the property this whole split rested on is that the shipped set
 // assembles to the four literals the two files used to hold, byte for byte, and every
-// transformation on the way is a byte that can move. `test/shader-assembly.test.mjs`
-// holds that equality against the last revision carrying each monolith and refuses a
-// single flipped byte in any chunk, which is what makes "verbatim" a measurement rather
-// than an intention.
+// transformation on the way is a byte that can move. While the split was landing,
+// `test/shader-assembly.test.mjs` held that equality against the last revision carrying
+// each monolith; that arm is retired with the extraction it was scaffolding for, and the
+// standing evidence is the ten-look probe recorded in `docs/performance.md`. What is left
+// here to be right about is placement, and the test still refuses a flipped byte in any
+// chunk that fails to move exactly the program its name promises.
 //
 // **Nothing is imported here and nothing may be.** The spine is data handed in and the
 // packages are data handed in, so this module is a pure function of its two arguments -
-// which is what lets the gate evaluate it under bare node beside a `git show` of the old
-// file, with no page and no server standing around it. The same argument
+// which is what lets the gate assemble the shipped tree under bare node, with no page and
+// no server standing around it, and perturb one rule at a time. The same argument
 // `web/effect-manifests.js` makes about the registry's conversion: one statement of it,
 // used by the live page and by the test, because a test with its own copy of the
 // assembler would be a second assembler agreeing with itself.

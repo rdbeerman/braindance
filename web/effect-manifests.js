@@ -109,8 +109,17 @@ export const CORE_PANEL_GROUP_KEYS = Object.freeze([
  * With the shipped sixteen installed the appendix is empty and this returns the
  * order unchanged, which is what keeps every number downstream of it - the registry's
  * declaration order, the panel's rows, the scramble table - the bytes they were.
+ *
+ * **Not exported, and it used to be.** The bare-node gate that imported it held the
+ * appendix's arithmetic directly - two packages named against their ids, a fork adding
+ * a fifth key - and that gate was scaffolding pinned to a historical revision, retired
+ * with the extraction. What exercises this rule now is `effect-check`, which installs a
+ * fork carrying a parameter the order has never heard of and drives the page with it, so
+ * the single-package case is live and the between-package ordering above is stated here
+ * and asserted nowhere. Anybody adding a second unplaced package should read that as the
+ * gap it is.
  */
-export const placeParams = (packages, order) => {
+const placeParams = (packages, order) => {
   const placed = new Set(order);
   const appendix = [];
   for (const p of [...packages].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
