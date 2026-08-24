@@ -1,109 +1,68 @@
-// The manifests against the live table, both directions, under bare node.
+// The assembled effect table against the one the registry used to declare, under
+// bare node.
 //
-// Step S2b of the effect-package refactor authors sixteen manifests from
-// `web/effect-params.js`, and for one landing window the same forty-one parameters
-// are stated twice: once in the table the registry still assembles from, once in the
-// packages the registry will assemble from. Two statements of one thing drift - that
-// is this repo's oldest lesson - so the window is held shut by this file: every
-// manifest parameter must equal its table entry field for field, every table entry
-// must appear in exactly one manifest, and the per-effect order must match, because
-// the registry's declaration order is cut from the table in contiguous runs and the
-// scramble table couples to it. When the registry flips to assembling from the
-// manifests, the table side of this test is deleted with the table.
+// Step S3 deleted the effect table module: the registry assembles its forty-one
+// effect entries from the shipped manifests through `tableFromPackages` now. What
+// held the manifests honest while the table existed was a field-for-field equality
+// against it; what holds them honest after its deletion is the same equality
+// against the table as git history holds it - materialised from the revision that
+// created it, through a `data:` URL, which is the whole reason that module was
+// written import-free. Same fixture, same claim, no second implementation: the
+// conversion under test is the very function the page runs.
 //
-// The comparator is exercised against a tampered copy rather than trusted: a gate
-// that cannot fail is a gate in name, and the tamper is one field one step off -
-// the smallest drift the window could admit.
+// This gate is scaffolding by design. It pins the manifests to a historical
+// revision, so the first intentional change to an effect parameter breaks it -
+// at which point it is deleted with a reason, and what remains is the live
+// coupling (registry-check's set equality and scramble order) that survives
+// intentional change.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EFFECT_PARAMS } from '../web/effect-params.js';
+import { tableFromPackages } from '../web/effect-manifests.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILTIN = join(ROOT, 'effects-builtin');
 
-const readManifests = () => Object.fromEntries(
-  readdirSync(BUILTIN, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => [e.name, JSON.parse(readFileSync(join(BUILTIN, e.name, 'manifest.json'), 'utf8'))]),
-);
+// Pinned by content marker rather than by hash, because a hash dies under
+// filter-repo: the revision is the first one that exported the table.
+const TABLE_REV = execFileSync('git',
+  ['log', '-S', 'export const EFFECT_PARAMS', '--reverse', '--format=%H', '--', 'web/effect-params.js'],
+  { cwd: ROOT, encoding: 'utf8' }).trim().split('\n')[0];
 
-// The table entry a manifest parameter implies, in the table's own vocabulary - the
-// fields the registry consumes and nothing else, so `role`/`under`/`panelGroups`
-// (presentation the manifests own outright) do not enter the equality.
-const impliedEntry = (manifest, short) => {
-  const p = manifest.params[short];
-  const entry = {
-    def: p.def, min: p.min, max: p.max, step: p.step, kind: p.kind, label: p.label,
-    group: p.panel.group, on: p.bind.on, uniform: p.bind.uniform,
-  };
-  if (p.bind.transform !== undefined) entry.transform = p.bind.transform;
-  if (p.bind.gates !== undefined) entry.gates = p.bind.gates;
-  return entry;
+const oldTable = async () => {
+  const src = execFileSync('git', ['show', `${TABLE_REV}:web/effect-params.js`], { cwd: ROOT, encoding: 'utf8' });
+  const mod = await import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);
+  return mod.EFFECT_PARAMS;
 };
 
-const tableEntry = (spec) => {
-  const entry = {
-    def: spec.def, min: spec.min, max: spec.max, step: spec.step, kind: spec.kind, label: spec.label,
-    group: spec.group, on: spec.on, uniform: spec.uniform,
-  };
-  if (spec.transform !== undefined) entry.transform = spec.transform;
-  if (spec.gates !== undefined) entry.gates = spec.gates;
-  return entry;
-};
+const packagesOnDisk = () => readdirSync(BUILTIN, { withFileTypes: true })
+  .filter((e) => e.isDirectory())
+  .map((e) => ({ id: e.name, manifest: JSON.parse(readFileSync(join(BUILTIN, e.name, 'manifest.json'), 'utf8')) }));
 
-const compare = (manifests, table) => {
-  const problems = [];
-  const seen = new Set();
-  for (const [id, manifest] of Object.entries(manifests)) {
-    if (manifest.id !== id) problems.push(`${id}/manifest.json declares id ${JSON.stringify(manifest.id)}`);
-    if (manifest.format !== 1) problems.push(`${id} declares format ${JSON.stringify(manifest.format)}`);
-    const shorts = Object.keys(manifest.params);
-    const tableOrder = Object.keys(table).filter((n) => n.startsWith(`${id}.`)).map((n) => n.slice(id.length + 1));
-    if (JSON.stringify(shorts) !== JSON.stringify(tableOrder)) {
-      problems.push(`${id} declares [${shorts}] where the table orders [${tableOrder}]`);
-    }
-    for (const short of shorts) {
-      const name = `${id}.${short}`;
-      seen.add(name);
-      if (!Object.hasOwn(table, name)) { problems.push(`${name} is in no table entry`); continue; }
-      const implied = impliedEntry(manifest, short);
-      const declared = tableEntry(table[name]);
-      if (JSON.stringify(implied) !== JSON.stringify(declared)) {
-        problems.push(`${name}: manifest implies ${JSON.stringify(implied)}, table declares ${JSON.stringify(declared)}`);
-      }
-      // The door's own rule, held here while the door does not exist yet: a master
-      // must default inert, because an effect's presence at defaults must not change
-      // any document's render.
-      if (manifest.params[short].role === 'master' && table[name].def !== 0 && table[name].def !== false) {
-        problems.push(`${name} is a master defaulting to ${table[name].def}`);
-      }
-    }
-  }
-  for (const name of Object.keys(table)) {
-    if (!seen.has(name)) problems.push(`${name} is in the table and in no manifest`);
-  }
-  return problems;
-};
+// The order is read off the historical table itself - its own key order, which
+// interleaves below effect granularity - rather than restated here, so the
+// reference decides and this file cannot drift from it.
+const orderOf = (table) => Object.keys(table);
 
-test('the sixteen manifests state exactly what the table states', () => {
-  const manifests = readManifests();
-  assert.equal(Object.keys(manifests).length, 16, 'sixteen builtin packages');
-  const problems = compare(manifests, EFFECT_PARAMS);
-  assert.deepEqual(problems, []);
+test('the manifests assemble into the table the registry declared', async () => {
+  const reference = await oldTable();
+  const assembled = tableFromPackages(packagesOnDisk(), orderOf(reference));
+  // Stringified, deliberately: key order is part of the claim - the registry's
+  // declaration order is cut from this table in runs, and the scramble coupling
+  // is itself a stringified equality.
+  assert.equal(JSON.stringify(assembled), JSON.stringify(reference));
 });
 
-test('the comparator refuses one field one step off', () => {
-  const manifests = readManifests();
-  const tampered = JSON.parse(JSON.stringify(manifests));
-  tampered.rain.params.speed.def += tampered.rain.params.speed.step;
-  const problems = compare(tampered, EFFECT_PARAMS);
-  assert.ok(problems.some((p) => p.startsWith('rain.speed:')),
-    `a one-step drift in rain.speed must be named, got: ${problems.join(' | ') || 'nothing'}`);
-  // And the tamper is the only thing it found - a comparator drowning a real
-  // finding in false ones is as unreadable as one finding nothing.
-  assert.equal(problems.length, 1, problems.join(' | '));
+test('the equality refuses one field one step off', async () => {
+  const reference = await oldTable();
+  const packages = packagesOnDisk();
+  const rain = packages.find((p) => p.id === 'rain');
+  rain.manifest.params.speed.def += rain.manifest.params.speed.step;
+  const assembled = tableFromPackages(packages, orderOf(reference));
+  assert.notEqual(JSON.stringify(assembled), JSON.stringify(reference),
+    'a one-step drift in rain.speed must break the equality');
 });

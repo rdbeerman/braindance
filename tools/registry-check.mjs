@@ -328,7 +328,7 @@ const MUTATIONS = {
   //
   // **It anchors a branch of the shared applier now rather than this parameter's own
   // closure, and that costs it nothing.** The forty-one effect parameters are declared as
-  // data in `web/effect-params.js` and `effectApply` in `web/main.js` is what turns a
+  // data in the effect manifests and `effectApply` in `web/main.js` is what turns a
   // binding into a write, so there is no `duotoneHue` line left to anchor. `degToRad` is
   // the transform of exactly one of the forty-one - this hue - so mutating the branch and
   // mutating the parameter are still the same act, and the row set below is unchanged.
@@ -521,7 +521,7 @@ const MUTATIONS = {
   //
   // **This control got broader when the effect parameters became data, and the widening is
   // a real loss of resolution rather than a stronger check.** There is no `streakAxis` line
-  // left to anchor: the forty-one are declared in `web/effect-params.js` and `effectApply`
+  // left to anchor: the forty-one are declared in the effect manifests and `effectApply`
   // in `web/main.js` builds the write, with `axisDeg` stated once for the two angles that
   // take it. So the anchor is that one branch, and mutating it feeds degrees to both
   // `streak.angle` and `raster.angle`. The name is kept because it is what

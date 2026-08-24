@@ -46,7 +46,7 @@ import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.
 // nothing at all, which is what lets a check pull an older revision of it out of `git show`
 // and evaluate that text under bare node with no page standing around it. What turns a row
 // of it into the closure the registry stores is `effectApply`, beside `PARAMS`.
-import { EFFECT_PARAMS } from './effect-params.js';
+import { tableFromPackages, withEffectGroups } from './effect-manifests.js';
 // One number out of the halo, and nothing else. `bloom-pass.js` holds the pass and
 // `post-chain.js` is what constructs it; what this file still needs is the reference the
 // chain is frozen at, because `resize` sizes that chain and `resize` lives here. The two
@@ -940,6 +940,54 @@ async function fitCropToTake(id, near, far) {
 // turn that row into a thirty-second timeout, which is a crash carrying no failed
 // assertion rather than a finding.
 //
+// ------------------------------------------------ the installed effects, fetched
+//
+// The registry assembles from the effect packages the server holds, so the packages
+// come first and the module waits for them: a top-level await, because everything
+// below - the panel spine, the parameter table, the boot-time reset - is built from
+// what arrives here, and a page that raced its own registry would be the panel and
+// the parameters disagreeing about what exists. A fetch rather than an import,
+// deliberately: `module-check` walks the static graph and data crossing it as
+// modules would join that graph as code, when what crosses here is JSON a server
+// answered. A package that cannot be fetched fails the boot loudly - `__kinect`
+// never publishes and every tool reports DID NOT RUN - which is the honest shape
+// until the missing-effect surface exists to say something better.
+const effectPackages = await (async () => {
+  const listed = await fetch('/effects');
+  if (!listed.ok) throw new Error(`GET /effects answered ${listed.status} - the registry cannot assemble without its packages`);
+  const { effects } = await listed.json();
+  return Promise.all(effects.map(async ({ id }) => {
+    const res = await fetch(`/effects/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`GET /effects/${id} answered ${res.status} - the registry cannot assemble without its packages`);
+    return res.json();
+  }));
+})();
+
+// Where each effect parameter lands in the registry's declaration order. This is
+// the client's layout fact, not the packages': the order is load-bearing (the
+// scramble table couples to it, the panel's row order inside a group falls out of
+// it), it interleaves below effect granularity - `noise.region` sits in the region
+// run beside the push and mask it works with, not beside its own master - and
+// nothing in one package can know where the whole build wants each parameter.
+// `tableFromPackages` refuses a name listed here that no package declares, and a
+// declared parameter this list does not place, so the list and the shipped set are
+// held equal both ways at boot rather than trusted.
+const EFFECT_PARAM_ORDER = [
+  'glyph.amount', 'glyph.tone', 'glyph.hash', 'glyph.rain',
+  'noise.amount', 'noise.scale', 'noise.speed', 'lattice.amount',
+  'glitch.amount', 'glitch.density', 'glitch.shove', 'glitch.tint',
+  'glitch.bands', 'glitch.axis', 'glitch.rate', 'push.amount',
+  'noise.region', 'mask.amount', 'ripple.amount', 'ripple.freq',
+  'ripple.speed', 'thermal.amount', 'edges.amount', 'duotone.amount',
+  'duotone.hue', 'duotone.split', 'duotone.span', 'duotone.motion',
+  'rain.amount', 'rain.speed', 'rain.span', 'rain.trail',
+  'rgbsplit.amount', 'raster.amount', 'raster.angle', 'raster.pitch',
+  'raster.hard', 'grain.amount', 'streak.amount', 'streak.angle',
+  'vignette.amount',
+];
+
+const EFFECT_PARAMS = tableFromPackages(effectPackages, EFFECT_PARAM_ORDER);
+
 // `reveals` is the escape hatch beside it, and exactly one group needs one. A group's
 // default rule is that it is in use when its own parameters are, and `Reading · detail`
 // is *also* governed by another group's values - so the rule lives on the entry with the
@@ -947,7 +995,23 @@ async function fitCropToTake(id, near, far) {
 // it. A closure widens the default rule and must not replace it: which groups are open
 // is the look's diff against its defaults, and a group that dropped its own parameters
 // out of its rule would be carrying values the panel had stopped accounting for.
-const PANEL_GROUPS = [
+//
+// **The core spine only.** The four groups that exist solely for one effect package -
+// rain, glitch, glyph, raster - travel with their packages now, each carrying its
+// anchor into this spine (`after` a core key) and an order among packages sharing an
+// anchor, and `withEffectGroups` below splices them in. The placement arguments that
+// used to sit on the entries stay here, beside the anchors they argue about, because
+// a manifest is JSON and prose does not survive it: the rain anchors after `style`
+// because it decides what colour a point takes and works over round splats, so its
+// home must not depend on glyphs being on - filing it with the glyph field because
+// the two were designed together is the grouping this panel has refused twice. The
+// glitch anchors after `signal` rather than inside `displacement` or `post`, because
+// being adjacent in the render order is not a reason to be adjacent on a tab. The
+// glyph anchors after `points` at the stage it belongs to - it decides what mark
+// gets drawn. The raster anchors after `post` on the glitch's own precedent: a term
+// that grows sub-controls gets a group rather than crowding its neighbours, and its
+// four controls are one idea where `post`'s five are five.
+const CORE_PANEL_GROUPS = [
   // The five readings of the take, which were five buttons and one integer uniform
   // until they became five look parameters. They mix rather than exclude, so this is
   // sliders and not a segmented control: RGB at 0.6 against depth at 0.4 is a 60/40
@@ -964,15 +1028,6 @@ const PANEL_GROUPS = [
   // for each. Everything that stylises the image lives here, and the tuning params
   // reveal naturally when their parent effect is enabled because they share a group.
   { key: 'style', label: 'Style', tab: 'look', lookgroup: true, collapses: true },
-  // The rain gets a group of its own beside `Style`, following the precedent the raster
-  // set: a term that grows sub-controls gets a group rather than crowding the group it
-  // started in, and `Style` already carries about fifteen controls. It is here rather than
-  // next to `Glyph` because these groups are stages of the pipeline and not subject
-  // headings - the rain decides what colour a point takes, which is what `Style` is about,
-  // and it works over round splats, so its home must not depend on glyphs being switched
-  // on. Filing it with the glyph field because the two were designed together is exactly
-  // the grouping this panel has refused twice.
-  { key: 'rain', label: 'Rain', tab: 'look', lookgroup: true, collapses: true },
   // Framing: what you can see, and where you are seeing it from. `sensor view` is
   // navigation and writes nothing - distinct from `look through it` in the camera
   // group, which adopts the program camera whose pose is document state.
@@ -1021,15 +1076,10 @@ const PANEL_GROUPS = [
   // one rather than a tidy one. Both displace points before projection, so both are the
   // displacement stage - but `displacement` is the turbulence field, and the region's
   // scramble adds into its amplitude and reuses its scale and speed, so those two have
-  // to be readable together or a look gets tuned against half of itself. Glitch shares
-  // no uniform with either of them and reads no region. It sat in `displacement` for
-  // long enough that its slider was somewhere nobody stylising an image would think to
-  // look, which is the whole of what "we cannot control the glitches" turned out to
-  // mean, and being adjacent in the render order is not a reason to be adjacent on a
-  // tab. It is not in `post` either: that group is the full-screen grade and this moves
-  // geometry, so filing it there would be the subject-heading move these groups exist
-  // to refuse.
-  { key: 'glitch', label: 'Glitch', tab: 'look', lookgroup: true, collapses: true },
+  // to be readable together or a look gets tuned against half of itself. The glitch,
+  // which shares no uniform with either and reads no region, anchors its own group
+  // after `signal` from its package - the full argument for that placement sits on
+  // the spine's header above.
   { key: 'displacement', label: 'Displacement', tab: 'region', lookgroup: true, collapses: true },
   // One region in the room, read three ways: it displaces, it scrambles, and it
   // masks. Everything here is metres in the sensor frame, so a look holds at any
@@ -1039,25 +1089,11 @@ const PANEL_GROUPS = [
   // enum could not keyframe and these sliders can.
   { key: 'region', label: 'Region (metres)', tab: 'region', lookgroup: true, collapses: true },
   { key: 'points', label: 'Points', tab: 'look', lookgroup: true, collapses: true },
-  // And the glyph field immediately under `Points`, on the raster's precedent and at the
-  // stage it belongs to: it decides what mark gets drawn, which is what `Points` is about.
-  // The cost this and `Rain` above accept together is that the falling-code look is
-  // authored in two places on the panel, which is worth watching - the reason `Glitch` left
-  // `Displacement` was that nobody stylising an image thought to look for it there - but
-  // both are groups named after what they do, so neither is hidden inside something else.
-  { key: 'glyph', label: 'Glyph', tab: 'look', lookgroup: true, collapses: true },
   // The three terms that accumulate across frames, together. Fade and wake are the
   // surface memory and trails is the afterimage buffer; they were two groups apart
   // while doing one thing, which is how a look gets tuned twice.
   { key: 'motion', label: 'Motion', tab: 'look', lookgroup: true, collapses: true },
   { key: 'post', label: 'Post', tab: 'look', lookgroup: true, collapses: true },
-  // The raster gets a group of its own, following the precedent the glitch rework set: a
-  // term that grows sub-controls gets a group rather than crowding its neighbours. It
-  // sits immediately under `post` because it is the same pass - the grade - and the four
-  // controls in it are one idea, where the five left in `post` are five separate ones.
-  // Splitting on that basis rather than on "these are all post effects" is the same call
-  // the glitch made when it left `displacement`.
-  { key: 'raster', label: 'Raster', tab: 'look', lookgroup: true, collapses: true },
   // The two parameters that are not part of the clip, in the one group that says so.
   // They are tagged `view` in the registry, they get no keyframe control and no
   // preset carries them - and while they sat inside look groups that read as an
@@ -1073,6 +1109,11 @@ const PANEL_GROUPS = [
   },
 ];
 
+// The spine plus every group the installed packages declare, spliced at their
+// anchors - the list every consumer below iterates, under the name they have
+// always iterated it by.
+const PANEL_GROUPS = withEffectGroups(CORE_PANEL_GROUPS, effectPackages);
+
 /**
  * The effect a dotted name belongs to, or null for a core parameter. The dot is the
  * namespace: `glyph.tone` is the glyph effect's tone key, `cell` is the core grid.
@@ -1083,7 +1124,7 @@ const PANEL_GROUPS = [
  *
  * It sits above the registry rather than beside the four functions built on it, because
  * the same line decides which half of the registry a name is declared in: the dotted ones
- * come out of `web/effect-params.js` and the bare ones are written out below. The
+ * come out of the effect manifests and the bare ones are written out below. The
  * assertion under `PARAMS` asks both halves against this function, and an assertion cannot
  * call something declared seven thousand lines further down - that reach is a dead zone
  * rather than a forward reference, and it is the fault this file has shipped twice.
@@ -1099,7 +1140,7 @@ const effectOf = (name) => {
  * Forty-one parameters do the same thing - one number into one uniform - and they used to
  * do it as forty-one hand-written closures, where the ordinary case could be got subtly
  * wrong in a way nothing reads back and where a reader had to check every one to find out
- * which cases there were. `web/effect-params.js` declares them as data now, and this is the
+ * which cases there were. the manifests declare them as data now, and this is the
  * one place that data becomes behaviour.
  *
  * **The uniform table is resolved when the write happens and never when the closure is
@@ -1154,7 +1195,7 @@ function effectApply(bind) {
  * builds a group's rows in registry order and the groups are stages of the pipeline rather
  * than subject headings. So the registry keeps the positions and the table keeps the
  * declarations, and a run is named by its two ends rather than by listing its members - one
- * effect parameter added to `web/effect-params.js` between two ends lands in `PARAMS` at
+ * effect parameter added to a manifest between two ends lands in `PARAMS` at
  * the right place by existing, which is the whole reason not to restate the names here.
  *
  * `tag: 'look'` is constant across all forty-one and is added here rather than repeated
@@ -1166,7 +1207,7 @@ const effectSlice = (first, last) => {
   const from = names.indexOf(first);
   const to = names.indexOf(last);
   if (from === -1 || to === -1 || to < from) {
-    throw new Error(`${first}..${last} is not a run of web/effect-params.js in that order`);
+    throw new Error(`${first}..${last} is not a run of the assembled effect table in that order`);
   }
   return Object.fromEntries(names.slice(from, to + 1).map((name) => {
     const bind = EFFECT_PARAMS[name];
@@ -1198,7 +1239,7 @@ const PARAMS = {
     group: 'points', label: 'additive glow', apply: setAdditive },
 
   // The glyph field: its master and the three keys under it. Declared in
-  // `web/effect-params.js` with the rest of the effect parameters, and spread in here at
+  // the effect manifests with the rest of the effect parameters, and spread in here at
   // the position they have always held - the panel builds its rows in this order.
   ...effectSlice('glyph.amount', 'glyph.rain'),
 
@@ -1454,12 +1495,12 @@ const PARAMS = {
     apply: (v) => { afterimage.uniforms.damp.value = v; afterimage.enabled = v > 0; } },
   // Every term of the one combined grade pass except its toe, which is `crush` below and is
   // the one of the nine that must not gate the pass. Five of these do gate it, and which
-  // five is a `gates` flag in `web/effect-params.js` rather than a line of wiring repeated
+  // five is a `gates` flag in the manifests rather than a line of wiring repeated
   // five times here.
   ...effectSlice('rgbsplit.amount', 'vignette.amount'),
   // The toe under the grade's Reinhard curve, and **the one term sharing that pass which
   // deliberately does not gate it** - the five that do carry `gates` in
-  // `web/effect-params.js`, and this one is written out here with no such flag anywhere,
+  // the manifests, and this one is written out here with no such flag anywhere,
   // because it is a core parameter rather than an effect's. That is the whole of its wiring
   // and it is worth the paragraph, because the symmetry is the thing a reader will reach to
   // restore.
@@ -1572,7 +1613,7 @@ for (const name of READINGS) {
 for (const name of Object.keys(EFFECT_PARAMS)) {
   if (!Object.hasOwn(PARAMS, name)) {
     throw new Error(
-      `${name} is declared in web/effect-params.js and reaches no registry entry: it would `
+      `${name} is declared by an installed effect and reaches no registry entry: it would `
       + 'be a look term with no slider and no track, and a document naming it would be refused',
     );
   }
@@ -1581,7 +1622,7 @@ for (const name of Object.keys(PARAMS)) {
   if (effectOf(name) !== null && !Object.hasOwn(EFFECT_PARAMS, name)) {
     throw new Error(
       `${name} is an effect parameter written out in the registry rather than declared in `
-      + 'web/effect-params.js: it is a second copy of a binding, and the copy is what drifts',
+      + 'a manifest: it is a second copy of a binding, and the copy is what drifts',
     );
   }
 }
