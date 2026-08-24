@@ -2793,6 +2793,28 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
   }
   againstSource.js = againstSource.js.replace(OLD_UNPROJECT_X, MIRRORED_UNPROJECT_X);
 
+  // The second intentional divergence, beside the first as the comment above asks. The
+  // zero-alpha discard is an approved change to the picture: a fragment at alpha 0 is
+  // invisible in colour and solid in depth, and the hard-edged path discards it now -
+  // points born at vFade 0 and the disc rim at exactly r2 0.25 stopped occluding what
+  // sits behind them. The old arm has no such discard, so left alone these six rows
+  // report 460 to 750 bytes of 921600 per frame - the approved movement, measured when
+  // the discard landed - as a finding about the readings. The patch hands the old build
+  // the same rule in its own source, exactly the discard-only A/B that established the
+  // change touches nothing but the occluders; what the rows keep comparing is everything
+  // else, which is their claim. The current arm's own repair is still refusable:
+  // `--mutate margins-miss-the-newborn` un-discards the births on the current side only,
+  // and these rows redden about it against the patched old arm.
+  const OLD_FRAG_OUTPUT = '  fragColor = vec4(col * exposure, alpha * falloff);';
+  const DISCARDED_FRAG_OUTPUT = '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;\n'
+    + '  fragColor = vec4(col * exposure, alpha * falloff);';
+  const outHits = againstSource.js.split(OLD_FRAG_OUTPUT).length - 1;
+  if (outHits !== 1) {
+    throw new Error(`${AGAINST_REV}:web/main.js states the fragment output ${outHits} times, expected exactly 1`
+      + ' - refusing to compare an arm with the zero-alpha discard against one without it and report it as a reading');
+  }
+  againstSource.js = againstSource.js.replace(OLD_FRAG_OUTPUT, DISCARDED_FRAG_OUTPUT);
+
   // Both arms are pinned to the same frames and the same camera, so the only thing
   // that differs between them is the shader. `params.reset()` first on each, because a
   // reading has to be measured against the same defaults the other arm booted with.
