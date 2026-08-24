@@ -85,5 +85,17 @@
       "after": "post",
       "order": 100
     }
+  ],
+  "chunks": [
+    {
+      "stage": "g.decl",
+      "order": 200,
+      "file": "decl.grade.glsl"
+    },
+    {
+      "stage": "g.body",
+      "order": 200,
+      "file": "lines.grade.glsl"
+    }
   ]
 }

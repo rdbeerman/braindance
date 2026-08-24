@@ -539,8 +539,12 @@ node tools/syntax-check.mjs --mutate anchor-in-dead-fallback # ... and a shader 
                                                      #   while sitting in a slot's fallback, which is a second copy
                                                      #   of the shipped text that nothing compiles
 node tools/syntax-check.mjs --mutate anchor-duplicated-into-a-second-chunk # ... and the other half of the same
-                                                     #   row: one anchor over two sites in the assembled pair,
+                                                     #   row: one anchor over two sites in the assembled text,
                                                      #   where the edit reaches one and the count reads whole
+node tools/syntax-check.mjs --mutate anchor-duplicated-into-a-second-program # ... and the same duplicate placed
+                                                     #   in the *other* program, which is the arm that says the
+                                                     #   count sums over every assembled string rather than
+                                                     #   asking each one on its own
 node tools/release-gate-check.mjs                    # the .npmrc supply-chain gate is actually armed
 node tools/release-gate-check.mjs --mutate wrong-unit # ... and must FAIL (also: no-gate, absent)
 node tools/cpp-check.mjs                             # both C++ files parse and typecheck, in all four

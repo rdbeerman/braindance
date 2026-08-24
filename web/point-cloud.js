@@ -27,8 +27,6 @@
 import * as THREE from 'three';
 import { DEPTH_H, DEPTH_W, POINTS } from './format.js';
 import { scene } from './scene.js';
-import { cloudSpine } from './cloud-shader.js';
-import { assembleShaders } from './shader-assembly.js';
 import { statePrev } from './surface-memory.js';
 
 // The depth pair's defaults, named once because three separate things have to agree
@@ -76,13 +74,19 @@ export let cloud = null;
  * seeded with the ghost target that exists by then - and that seed is not dead, it is what
  * the first frame samples before the first step of the memory has run.
  *
- * `packages` is the installed effects, each with its manifest and the text of the chunks
- * it declares, and it is passed in for the same reason the cells are: the fetch that
- * produced them is `web/main.js`'s, so this module compiles a shader without ever knowing
- * there is a server - which is what lets the gate run the same assembler under bare node
- * with the packages read off disk instead.
+ * `program` is the assembled `{ vertexShader, fragmentShader }` pair, and it is passed in
+ * for the same reason the cells are: the packages it was assembled from were fetched by
+ * `web/main.js`, so this module compiles a shader without ever knowing there is a server -
+ * which is what lets the gate run the same assembler under bare node with the packages read
+ * off disk instead.
+ *
+ * **The assembly itself moved up to that boot rather than happening here**, and the reason
+ * is the second spine. `web/shader-assembly.js` takes every spine in one call so that a
+ * joint name means one place across the whole build and a chunk naming a joint nothing holds
+ * is refused by name; assembling the cloud on its own would have had to answer for the grade
+ * pass's chunks somehow, and both available answers are wrong.
  */
-export function buildPointCloud(sourceCells, packages) {
+export function buildPointCloud(sourceCells, program) {
   // Two vertices per depth pixel: one for the live point, one for the ghost it
   // leaves behind. Shedding needs both on screen at once. The ghost half is left
   // out of the draw range entirely when nothing can be shed, so it costs nothing.
@@ -373,23 +377,24 @@ export function buildPointCloud(sourceCells, packages) {
     sinceFrameSec: { value: 0 },
   };
 
-  // The two programs those uniforms feed, assembled here rather than imported whole. The
-  // spine in `web/cloud-shader.js` carries the text every point in the frame is drawn by
-  // and the joints the installed effects splice into; `assembleShaders` concatenates the
-  // two. Nine hundred lines of GLSL sitting between the table above and the hundred places
-  // in `web/main.js` that write it put the two ends of one parameter out of sight of each
-  // other, which is why the text moved out at all, and an effect's own GLSL travelling with
-  // its parameters is the same argument one file further.
+  // The two programs those uniforms feed, assembled at the boot in `web/main.js` rather
+  // than imported whole. The spine in `web/cloud-shader.js` carries the text every point in
+  // the frame is drawn by and the joints the installed effects splice into. Nine hundred
+  // lines of GLSL sitting between the table above and the hundred places in `web/main.js`
+  // that write it put the two ends of one parameter out of sight of each other, which is
+  // why the text moved out at all, and an effect's own GLSL travelling with its parameters
+  // is the same argument one file further.
   //
   // What did not move is the obligation between the two: every uniform the assembled pair
   // declares needs a key here, nothing checks it in either direction, and a uniform with no
   // key is a silent zero rather than an error. Nine of those declarations are in the glyph
-  // and rain packages now rather than in the spine, which widens where the obligation is
-  // written down without changing what it is - `test/cloud-shader.test.mjs` asks it of the
-  // shipped GLSL wherever the shipped GLSL lives. Five of the keys hold cells
-  // `web/gpu-textures.js` owns rather than cells this table made, which leaves the
-  // obligation exactly where it was and moves only who may write them.
-  const { vertexShader, fragmentShader } = assembleShaders(cloudSpine, packages);
+  // and rain packages rather than in the spine, which widens where the obligation is written
+  // down without changing what it is - `test/cloud-shader.test.mjs` asks it of the assembled
+  // program rather than of any file, so a term arriving in a package is inside the question
+  // and one sitting in a slot's fallback, which nothing compiles, is correctly outside it.
+  // Five of the keys hold cells `web/gpu-textures.js` owns rather than cells this table
+  // made, which leaves the obligation exactly where it was and moves only who may write them.
+  const { vertexShader, fragmentShader } = program;
   material = new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
     uniforms,

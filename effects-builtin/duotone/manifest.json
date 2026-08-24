@@ -90,5 +90,12 @@
       },
       "under": "amount"
     }
-  }
+  },
+  "chunks": [
+    {
+      "stage": "f.tone",
+      "order": 300,
+      "file": "tone.frag.glsl"
+    }
+  ]
 }

@@ -21,5 +21,12 @@
       },
       "role": "master"
     }
-  }
+  },
+  "chunks": [
+    {
+      "stage": "f.tone",
+      "order": 200,
+      "file": "outline.frag.glsl"
+    }
+  ]
 }

@@ -176,7 +176,7 @@ const MUTATIONS = {
   // right answer and a fifth would mean some other parameter had quietly become reachable
   // only through the duotone.
   'duotone-ignored': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/duotone/tone.frag.glsl',
     edits: [[
       '  if (duotoneDepth > 0.0) {',
       '  if (false) {',
@@ -191,7 +191,7 @@ const MUTATIONS = {
   // cannot draw the silhouette this parameter exists for, which is exactly the shape of
   // failure that ships looking like a control that works.
   'duotone-ignores-depth': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/duotone/tone.frag.glsl',
     edits: [[
       '    float k = smoothstep(duotoneSplit - w * 0.5, duotoneSplit + w * 0.5, t);',
       '    float k = 0.5;',
@@ -205,7 +205,7 @@ const MUTATIONS = {
   // lands in a uniform nothing reads. The plain shape, and the drop-one sweep is what sees
   // it: a parameter whose picture never changes when you take it away.
   'duotone-span-ignored': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/duotone/tone.frag.glsl',
     edits: [[
       '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
       '    float w = 1.0;',
@@ -224,7 +224,7 @@ const MUTATIONS = {
   // parameter was added to remove, reinstated in a form nothing that renders one range can
   // detect.
   'duotone-span-against-a-frozen-range': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/duotone/tone.frag.glsl',
     edits: [[
       '    float w = duotoneSpan / max(0.001, farClip - nearClip);',
       '    float w = duotoneSpan / 5.95;',
@@ -299,7 +299,7 @@ const MUTATIONS = {
   // in this file can fail on a default that leaks, because every other comparison here either
   // has the term raised on both sides or has the block switched off entirely.
   'motion-leaks-at-zero': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/duotone/tone.frag.glsl',
     edits: [[
       '    k = mix(k, 1.0, duotoneMotion * smoothstep(0.0, 1200.0, vSpeed));',
       '    k = mix(k, 1.0, (duotoneMotion + 0.02) * smoothstep(0.0, 1200.0, vSpeed));',
@@ -347,7 +347,7 @@ const MUTATIONS = {
   // the only row that can see it is the drop-one sweep, where reverting a parameter that
   // reaches nothing changes no pixel.
   'crush-ignored': {
-    file: 'web/post-chain.js',
+    file: 'web/grade-shader.js',
     edits: [[
       '      col = max(col - crush, 0.0) * 1.12;',
       '      col = max(col - 0.018, 0.0) * 1.12;',
@@ -365,7 +365,7 @@ const MUTATIONS = {
   // bearing, green means it does not and the branch should come out, because a fast path
   // that is bit-identical to the slow one is the second implementation this repo refuses.
   'raster-recomputes-the-default': {
-    file: 'web/post-chain.js',
+    file: 'effects-builtin/raster/lines.grade.glsl',
     edits: [[
       '        if (scanAxis.x == 0.0 && scanAxis.y == 1.0 && scanPitch == 1.3 && scanHard == 0.0) {',
       '        if (false) {',
@@ -464,7 +464,7 @@ const MUTATIONS = {
   // change. The drop-one sweep is where that shows, because reverting a parameter nothing
   // reads leaves the image where it was.
   'streak-ignored': {
-    file: 'web/post-chain.js',
+    file: 'effects-builtin/streak/fall.grade.glsl',
     edits: [[
       '      if (streak > 0.0) {',
       '      if (false) {',
@@ -497,7 +497,7 @@ const MUTATIONS = {
   // is the sharper half of `duotone-ignored`: that one asks whether the term is wired up at
   // all, this one asks whether it does the thing it is named for.
   'streak-ignores-angle': {
-    file: 'web/post-chain.js',
+    file: 'effects-builtin/streak/fall.grade.glsl',
     edits: [[
       '          vec3 tap = texture2D(tDiffuse, vUv + d * texel * streakAxis).rgb;',
       '          vec3 tap = texture2D(tDiffuse, vUv + vec2(0.0, d * texel.y)).rgb;',
@@ -569,7 +569,7 @@ const MUTATIONS = {
   // is reverted. This is the vertical column grille the whole of D1 is for, so a build
   // that quietly lost it would be drawing television scanlines under a green run.
   'raster-ignores-angle': {
-    file: 'web/post-chain.js',
+    file: 'effects-builtin/raster/lines.grade.glsl',
     edits: [[
       '          float coord = dot(vUv * ref, scanAxis);',
       '          float coord = vUv.y * ref.y;',
@@ -580,7 +580,7 @@ const MUTATIONS = {
   // nothing about the shipped picture moves - which is the point, and which leaves the
   // drop-one sweep as the only thing that can tell the two builds apart.
   'raster-pitch-fixed': {
-    file: 'web/post-chain.js',
+    file: 'effects-builtin/raster/lines.grade.glsl',
     edits: [[
       '          float wave = sin(coord * scanPitch + time * 2.0) * 0.5 + 0.5;',
       '          float wave = sin(coord * 1.3 + time * 2.0) * 0.5 + 0.5;',
@@ -592,7 +592,7 @@ const MUTATIONS = {
   // and a build without it draws rotated softness at every setting - which looks like a
   // raster right up until you compare it against a reference frame.
   'raster-hard-ignored': {
-    file: 'web/post-chain.js',
+    file: 'effects-builtin/raster/lines.grade.glsl',
     edits: [[
       '          line = mix(wave, smoothstep(0.5 - w, 0.5 + w, wave), scanHard);',
       '          line = wave;',
@@ -617,11 +617,18 @@ const MUTATIONS = {
   // by 1, which is two compilers rounding a fragment differently, and 1b compares pictures
   // now. All five of its rows are green at baseline, so all five reddening here is five
   // clean signals rather than four and a widening.
+  // **The anchor moved when the gate stopped being a list**, and it plants the same defect
+  // it always did: `crush` joining the terms that switch the pass on. The five names used to
+  // be five hand-written lines here and are read off the packages' `gates` bindings now, so
+  // there is no `rgbSplit` line left to add a disjunct to - and `crush` has no package to
+  // carry a binding, which is the whole reason it is the term this control is about. So the
+  // edit puts it in front of the derived test, which is exactly what a build that gated it
+  // would compute.
   'crush-gates-the-grade': {
     file: 'web/main.js',
     edits: [[
-      '  return grade.uniforms.rgbSplit.value > 0',
-      '  return grade.uniforms.crush.value > 0 || grade.uniforms.rgbSplit.value > 0',
+      '  return GRADE_GATES.some(',
+      '  return grade.uniforms.crush.value > 0 || GRADE_GATES.some(',
     ]],
     fails: 'the pass-gate row for crush, all five rows of 1b (each at 6 of 6 frames and '
       + 'about three quarters of every frame), and the boot comparison naming all four '
@@ -1254,7 +1261,9 @@ const mutatedSource = (() => {
  * **The second branch is the effects' own GLSL, which the page fetches rather than
  * imports.** A chunk under `effects-builtin/<id>/<name>` has no URL of its own under
  * `web/`; it is answered by `/effects/:id/file/:name`, which is the route the boot in
- * `web/main.js` reads it out of before `assembleShaders` splices it into the material. So
+ * `web/main.js` reads it out of before `assembleShaders` splices it into the point cloud's
+ * material or the grade pass's shader - one route for both, since a chunk names the joint it
+ * joins rather than the program it feeds. So
  * a mutation that edits a chunk is delivered at the fetch rather than at the module - and
  * from Playwright's side those are the same interception, because `page.route` sees a
  * `fetch` exactly as it sees a script tag. Everything else is a refusal: a spec naming a

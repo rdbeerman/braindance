@@ -126,7 +126,7 @@ const MUTATIONS = {
   // this is the control and not a line invented for the purpose. The glyph chunk's `else`
   // branch carries the old clamp statement verbatim - the chunk's own comment says it is
   // kept byte-identical on purpose - so the anchor still appears exactly once in the
-  // assembled pair, and only applying the edit and finding the programs unmoved can see it.
+  // assembled programs, and only applying the edit and finding them unmoved can see it.
   'anchor-in-dead-fallback': {
     file: 'tools/export-check.mjs',
     edits: [[
@@ -146,6 +146,25 @@ const MUTATIONS = {
   'anchor-duplicated-into-a-second-chunk': {
     file: 'effects-builtin/glitch/tear.vert.glsl',
     edits: [['  vGlitch = 0.0;', '  vGlitch = 0.0;\n  if (lattice > 0.0) {']],
+  },
+
+  // The same rule's third control, and the one the grade pass made necessary. Both plants
+  // above put their duplicate in the same *program* as the anchor, so a count that
+  // partitioned by program - asking each of the four assembled strings on its own rather
+  // than summing them - would go on catching both while claiming something it no longer
+  // tested. That partition is the tempting shape, because a file belongs to a program and it
+  // reads as tidier to ask its own; what it misses is a line living in two programs at once,
+  // which is exactly what a shared idea copied between the point shader and the grade would
+  // be.
+  //
+  // So `streak-ignored`'s guard is planted in the thermal package's tone chunk, which feeds
+  // the cloud's fragment program. Its own file still matches once, the anchor row above stays
+  // green, and each program taken alone still counts one - only the sum over all of them
+  // sees two, and only then would the edit reach one of the two sites and be recorded under
+  // the whole mutation's name.
+  'anchor-duplicated-into-a-second-program': {
+    file: 'effects-builtin/thermal/heat.frag.glsl',
+    edits: [['  if (thermal > 0.0) {', '  if (thermal > 0.0) {\n      if (streak > 0.0) {']],
   },
 
   // The third half of the same row, and the one that says the walk reaches outside the
@@ -208,15 +227,21 @@ if (mutateAt !== -1 && !MUTATIONS[mutation]) {
 // the split began and 4 after `scene.js`, `curve.js` and `record-poll.js`; it was 9 with
 // `world-tilt.js`, `export-sizes.js` and `plan-geometry.js` beside them, 11 with
 // `view-window.js` and `clip-range.js`, 13 with `cloud-shader.js` and `bloom-pass.js`,
-// 15 with `gpu-textures.js` and `surface-memory.js`, 16 with `post-chain.js`, and it is
-// 17 with `point-cloud.js`. `test` moves with it for the same reason - most of those
+// 15 with `gpu-textures.js` and `surface-memory.js`, 16 with `post-chain.js`, and 17 with
+// `point-cloud.js`. It is 18 with `grade-shader.js`, which is the first of these to be cut
+// out of a module other than `main.js` - the grade pass's GLSL had to leave `post-chain.js`
+// because a spine has to evaluate under bare node and that file imports three.js. Two
+// modules arrived between those without the floor following them, `shader-assembly.js` and
+// `effect-manifests.js`, so the number is under the tree by more than one; that is the slack
+// this file's own header asks for, a tripwire rather than a manifest.
+// `test` moves with it for the same reason - most of those
 // modules arrived with a test file, which is most of why they are modules - but it has
 // stopped moving, and the last three phases are why. `surface-memory.js` asks the live
 // context whether it can render to float, `post-chain.js` hands a composer a renderer and
 // `point-cloud.js` imports both of them, so none of the three can be imported under bare
 // node at all, and a floor that counted a test nobody can write would be a floor that has
 // to be lowered later.
-const FLOORS = { server: 5, test: 10, tools: 12, web: 17 };
+const FLOORS = { server: 5, test: 10, tools: 12, web: 18 };
 
 // **Two different questions, so two different sets, and the difference is the point.**
 // `PARSES` is what `node --check` can be handed and have its answer mean anything - a
@@ -984,27 +1009,45 @@ const withoutStringBodies = (src) => {
   // hypothetical: `export-check`'s `pointsize-absolute` sat in that fallback for a commit,
   // green the whole time, and it was found by reading rather than by any check.
   //
-  // So every anchor into one of the three files the two programs are built out of is asked
-  // two more questions, and they catch different things. **It appears exactly once in the
-  // assembled pair**, which finds a line that reaches no program and a line that reaches two
-  // sites where the edit would reach one - a half-delivered mutation recorded under the
-  // whole one's name. And **applying the edit moves one of the two programs**, which is the
-  // one that sees the dead fallback, because the fallback's twin is the live chunk's own
-  // text: the count is 1 either way and only the edit can tell which copy it landed in.
+  // So every anchor into one of the files the programs are built out of is asked two more
+  // questions, and they catch different things. **It appears exactly once across every
+  // assembled program**, which finds a line that reaches no program and a line that reaches
+  // two sites where the edit would reach one - a half-delivered mutation recorded under the
+  // whole one's name. And **applying the edit moves one of them**, which is the one that
+  // sees the dead fallback, because the fallback's twin is the live chunk's own text: the
+  // count is 1 either way and only the edit can tell which copy it landed in.
   //
-  // The third file is `web/shader-assembly.js`. It is here because the emit is text as much
-  // as the spine is - an anchor on a branch the assembler never takes is the same dead
-  // control wearing JavaScript - and it can be here because it imports nothing, so its bytes
-  // evaluate under a `data:` module the way the spine's do. The count question is not asked
-  // of it: its anchors are JavaScript and the programs are GLSL.
+  // **Across every program and not within the one the file belongs to**, which is what the
+  // grade pass made a real question rather than a wording. There are two spines now and four
+  // assembled strings, and a line copied from the point shader into the grade's would count
+  // once in each if the question were asked per program - so the sum is taken over all of
+  // them, exactly as `assembleShaders` collects the joints of every spine before reading a
+  // package. A count that partitioned by file would have been a rule that got weaker every
+  // time this repo grew a program.
+  //
+  // The assembler is in the list too. It is here because the emit is text as much as a spine
+  // is - an anchor on a branch the assembler never takes is the same dead control wearing
+  // JavaScript - and it can be here because it imports nothing, so its bytes evaluate under
+  // a `data:` module the way the spines' do. The count question is not asked of it: its
+  // anchors are JavaScript and the programs are GLSL.
+  //
+  // **`web/post-chain.js` is deliberately not in this list, and the exclusion has a
+  // mechanism behind it rather than a promise.** It holds the grade pass's uniform table and
+  // not a byte of its GLSL, and it imports three.js, so it could not be evaluated here even
+  // if it did. The thing that keeps that honest is that it has nothing left to anchor a
+  // shader mutation on: every GLSL anchor that used to name it names `web/grade-shader.js`
+  // or a chunk now, and one that drifted back would be an anchor into a file with no shader
+  // in it.
   //
   // Nothing here needs a server, a browser or a package. `assembleShaders` is concatenation
   // over data handed in, and the manifests and chunks are files - which is the whole reason
   // the assembler was written import-free and pure.
-  const SPINE = 'web/cloud-shader.js';
+  const SPINES = { cloud: 'web/cloud-shader.js', grade: 'web/grade-shader.js' };
+  const SPINE_EXPORT = { cloud: 'cloudSpine', grade: 'gradeSpine' };
   const ASSEMBLER = 'web/shader-assembly.js';
+  const isSpine = (file) => Object.values(SPINES).includes(file);
   const isChunk = (file) => /^effects-builtin\/[^/]+\/[^/]+\.glsl$/.test(file);
-  const buildsTheProgram = (file) => file === SPINE || file === ASSEMBLER || isChunk(file);
+  const buildsTheProgram = (file) => isSpine(file) || file === ASSEMBLER || isChunk(file);
 
   const moduleOf = (source) => import(`data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`);
   // A string replacement rather than a pattern one: `String.replace` reads `$&` and its
@@ -1014,11 +1057,12 @@ const withoutStringBodies = (src) => {
 
   // **These three read through the substitution where the row above reads off disk**, and
   // the seam is the point rather than an inconsistency: what assembles is the question here,
-  // so a control that stages one of the three files has to reach this and must not reach the
+  // so a control that stages one of the four files has to reach this and must not reach the
   // anchor-existence row, where it would report its own anchor as stale.
-  let clean = null, spineSource = null, assemblerSource = null, basePackages = null;
+  let clean = null, spineSources = null, assemblerSource = null, basePackages = null;
   try {
-    spineSource = sourceWithMutation(SPINE);
+    spineSources = Object.fromEntries(Object.entries(SPINES)
+      .map(([name, file]) => [name, sourceWithMutation(file)]));
     assemblerSource = sourceWithMutation(ASSEMBLER);
     const builtin = join(ROOT, 'effects-builtin');
     // The manifests are read off disk even so: `manifest-does-not-parse` is the
@@ -1041,7 +1085,10 @@ const withoutStringBodies = (src) => {
   }
 
   const assembleStaged = async (staged = {}) => {
-    const { cloudSpine } = await moduleOf(staged.spine ?? spineSource);
+    const spines = {};
+    for (const [name, source] of Object.entries(spineSources)) {
+      spines[name] = (await moduleOf(staged.spines?.[name] ?? source))[SPINE_EXPORT[name]];
+    }
     const { assembleShaders } = await moduleOf(staged.assembler ?? assemblerSource);
     const packages = basePackages.map((p) => ({ ...p, chunks: { ...p.chunks } }));
     if (staged.chunk) {
@@ -1050,7 +1097,16 @@ const withoutStringBodies = (src) => {
       if (!pkg) throw new Error(`${staged.chunk.file} names an effect package this build does not ship`);
       pkg.chunks[name] = staged.chunk.text;
     }
-    return assembleShaders(cloudSpine, packages);
+    return assembleShaders(spines, packages);
+  };
+
+  // Every assembled string, flattened, so the count below is over the whole build rather
+  // than over whichever pair a file happens to belong to.
+  const everyProgram = (built) => Object.values(built)
+    .flatMap((p) => [p.vertexShader, p.fragmentShader]);
+  const sameProgram = (a, b) => {
+    const x = everyProgram(a), y = everyProgram(b);
+    return x.length === y.length && x.every((s, i) => s === y[i]);
   };
 
   if (basePackages) {
@@ -1135,26 +1191,27 @@ const withoutStringBodies = (src) => {
         if (!clean || !buildsTheProgram(file) || typeof to !== 'string') continue;
         programChecked++;
         if (file !== ASSEMBLER) {
-          const inProgram = (clean.vertexShader.split(from).length - 1)
-            + (clean.fragmentShader.split(from).length - 1);
+          const inProgram = everyProgram(clean)
+            .reduce((n, text) => n + text.split(from).length - 1, 0);
           if (inProgram !== 1) {
             miscounted++;
-            fail(`${name}/${mutation} anchors on text appearing ${inProgram} times in the assembled vertex and fragment programs, not once`
+            fail(`${name}/${mutation} anchors on text appearing ${inProgram} times in the assembled programs, not once`
               + ` - ${inProgram === 0 ? 'it matches its file and reaches no program, so the edit lands in text nothing compiles'
                 : 'the edit reaches one of those sites and the control would be recorded under the whole mutation\'s name'}`);
           }
         }
         // Staged against what assembles rather than against what `targetSource` read, so a
-        // running control that moved one of the three files is not silently reverted here
+        // running control that moved one of the four files is not silently reverted here
         // by an edit applied to the tree's own copy of it.
         const chunkOf = (rel) => {
           const [, id, chunk] = rel.split('/');
           return basePackages.find((p) => p.id === id)?.chunks[chunk] ?? '';
         };
+        const spineNamed = Object.entries(SPINES).find(([, path]) => path === file)?.[0];
         let after = null;
         try {
           after = await assembleStaged(
-            file === SPINE ? { spine: swap(spineSource, from, to) }
+            spineNamed ? { spines: { [spineNamed]: swap(spineSources[spineNamed], from, to) } }
               : file === ASSEMBLER ? { assembler: swap(assemblerSource, from, to) }
                 : { chunk: { file, text: swap(chunkOf(file), from, to) } },
           );
@@ -1162,9 +1219,9 @@ const withoutStringBodies = (src) => {
           dead++;
           fail(`${name}/${mutation} staged against ${file} and the programs would not assemble - ${String(err.message).split('\n')[0]}`);
         }
-        if (after && after.vertexShader === clean.vertexShader && after.fragmentShader === clean.fragmentShader) {
+        if (after && sameProgram(after, clean)) {
           dead++;
-          fail(`${name}/${mutation} edits ${file} and neither assembled program moves`
+          fail(`${name}/${mutation} edits ${file} and no assembled program moves`
             + ' - a slot carries a second copy of the shipped text, so an anchor can match its file exactly once'
             + ' and still sit in the copy nothing compiles');
         }
@@ -1198,7 +1255,7 @@ const withoutStringBodies = (src) => {
   }
 
   // The assembled-program half gets its own line rather than being folded into the one
-  // above, because it counts a different population - the anchors into the three files the
+  // above, because it counts a different population - the anchors into the four files the
   // shaders are built out of, which is a fraction of the whole - and a total covering both
   // would read as though every anchor had been asked the harder question.
   if (clean === null) {
@@ -1208,10 +1265,10 @@ const withoutStringBodies = (src) => {
     fail('no anchor was checked against the assembled shader programs, so that rule passed on nothing'
       + ' - either the mutations stopped naming the spine and the chunks, or this scan is looking in the wrong place');
   } else if (dead || miscounted) {
-    console.log(`  program/ ${programChecked} shader anchors checked against the assembled pair, `
+    console.log(`  program/ ${programChecked} shader anchors checked against the assembled programs, `
       + [dead && `${dead} reaching no program`, miscounted && `${miscounted} not appearing exactly once`].filter(Boolean).join(', '));
   } else {
-    console.log(`  program/ all ${programChecked} shader anchors appear once in the assembled pair and move it when applied`);
+    console.log(`  program/ all ${programChecked} shader anchors appear once across the assembled programs and move one when applied`);
   }
 }
 
@@ -1325,7 +1382,7 @@ console.log(`\n${total} JavaScript files, ${failed} failed`);
 // execute rather than parse**, and they are named rather than buried. The specification row
 // imports a copy of `server/protocol.js`, which is a module of constants with no imports of
 // its own, and reads its exported values; nothing is called and no behaviour is exercised.
-// The anchor row imports `web/cloud-shader.js` and `web/shader-assembly.js` the same way and
+// The anchor row imports the two spines and `web/shader-assembly.js` the same way and
 // does call one function - `assembleShaders`, which concatenates the strings it is handed
 // and touches nothing outside them. Both files import nothing, which is what lets their
 // bytes evaluate here at all. Everything else is `node --check` and nothing runs.

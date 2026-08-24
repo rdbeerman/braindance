@@ -1,12 +1,25 @@
-// The two programs the point cloud compiles, assembled out of a core spine and whatever
-// effect packages are installed.
+// The programs this page compiles, assembled out of a core spine each and whatever effect
+// packages are installed.
+//
+// **Every spine is assembled in one call, and that is a refusal rather than a convenience.**
+// There are two of them now - the point cloud's pair in `web/cloud-shader.js` and the grade
+// pass's in `web/grade-shader.js` - and a chunk names the joint it joins, never the program
+// it belongs to. So the joints of every spine are collected together before a package is
+// read, one name means one place across all of them, and a chunk naming a joint nothing
+// holds is refused by name. Assembling one spine at a time would have made that refusal
+// impossible: the grade's assembly would meet the glyph field's `v.decl` chunk, and the only
+// two answers available would be to throw on a chunk that is perfectly well placed
+// elsewhere, or to skip it - which is the same silent absence as a typo, wearing the clothes
+// of a design. The alternative considered and rejected was tagging every chunk with its
+// program's name, which reintroduces exactly that: a tag nobody spelled right lands the
+// chunk in no program at all, the page boots, and the effect is simply gone.
 //
 // **Assembly is concatenation and nothing else.** A chunk's text is spliced between two
 // verbatim segments exactly as it arrived - not re-indented, not substituted into, not
 // wrapped - because the property this whole split rests on is that the shipped set
-// assembles to the two literals the file used to hold, byte for byte, and every
+// assembles to the four literals the two files used to hold, byte for byte, and every
 // transformation on the way is a byte that can move. `test/shader-assembly.test.mjs`
-// holds that equality against the last revision carrying the monolith and refuses a
+// holds that equality against the last revision carrying each monolith and refuses a
 // single flipped byte in any chunk, which is what makes "verbatim" a measurement rather
 // than an intention.
 //
@@ -60,34 +73,40 @@
 const byOrder = (a, b) => (a.order - b.order) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
- * Every joint the spine holds, by kind.
+ * Every joint every spine holds, by kind.
  *
- * Collected before any package is read so a chunk can be refused against the spine
+ * Collected before any package is read so a chunk can be refused against the spines
  * rather than against whatever happens to be in the map by the time it is reached, and
  * a name declared twice is refused here: two joints sharing a name would take one
- * package's chunk to two places in the program, which compiles and draws twice.
+ * package's chunk to two places, which compiles and draws twice. **Across the spines and
+ * not within one**, which is what makes one name mean one place in the whole build - two
+ * spines both offering a `decl` would otherwise be a chunk that lands in a program its
+ * author never named, and no arm anywhere would report it as anything but a look that
+ * changed.
  */
-const jointsOf = (spine) => {
+const jointsOf = (spines) => {
   const stages = new Set();
   const slots = new Map();
   const services = new Map();
   const claim = (name, where) => {
     if (stages.has(name) || slots.has(name) || services.has(name)) {
-      throw new Error(`the shader spine declares ${JSON.stringify(name)} twice, so a chunk naming it would be spliced in two places`);
+      throw new Error(`the shader spines declare ${JSON.stringify(name)} twice, so a chunk naming it would be spliced in two places`);
     }
     if (where === 'stage') stages.add(name);
   };
-  for (const program of [spine.vertex, spine.fragment]) {
-    for (const entry of program) {
-      if (entry.stage !== undefined) claim(entry.stage, 'stage');
-      // The entry rather than the name alone, because whether a service opens a scope
-      // decides what its consumers owe it, and that is a property of the spine's text.
-      else if (entry.service !== undefined) {
-        claim(entry.service, 'service');
-        services.set(entry.service, entry);
-      } else if (entry.slot !== undefined) {
-        claim(entry.slot, 'slot');
-        slots.set(entry.slot, entry);
+  for (const spine of Object.values(spines)) {
+    for (const program of [spine.vertex, spine.fragment]) {
+      for (const entry of program) {
+        if (entry.stage !== undefined) claim(entry.stage, 'stage');
+        // The entry rather than the name alone, because whether a service opens a scope
+        // decides what its consumers owe it, and that is a property of the spine's text.
+        else if (entry.service !== undefined) {
+          claim(entry.service, 'service');
+          services.set(entry.service, entry);
+        } else if (entry.slot !== undefined) {
+          claim(entry.slot, 'slot');
+          slots.set(entry.slot, entry);
+        }
       }
     }
   }
@@ -111,19 +130,24 @@ const chunkText = (pkg, file) => {
 };
 
 /**
- * The two programs, as source text, from a spine and the installed packages.
+ * Every program, as source text, from the spines and the installed packages.
+ *
+ * `spines` is a map of program name to spine, and the answer is a map of the same names to
+ * a `{ vertexShader, fragmentShader }` pair each - so the caller asks for a program by the
+ * name it handed in rather than by position, and adding a third spine is one more key at
+ * both ends.
  *
  * `packages` are the objects `/effects/:id` answers with, each carrying its `manifest`
  * and a `chunks` map of file name to text. A package with no `chunks` section in its
- * manifest contributes nothing and is not an error: half of the sixteen shipped effects
- * are parameters over code the spine already holds. That number was "most" while the glyph
- * field, the rain, the glitch and the lattice were the only packages carrying GLSL, and it
- * is eight against eight now that the region family has moved out - a sentence worth
- * keeping current rather than approximately true, since it is the one a reader checks
- * before wondering why their package assembled to nothing.
+ * manifest contributes nothing and is not an error: some of the sixteen shipped effects
+ * are parameters over code a spine already holds. That number was "most" while the glyph
+ * field, the rain, the glitch and the lattice were the only packages carrying GLSL, it was
+ * eight against eight once the region family moved out, and the tone run and the grade
+ * leave three - a sentence worth keeping current rather than approximately true, since it
+ * is the one a reader checks before wondering why their package assembled to nothing.
  */
-export function assembleShaders(spine, packages) {
-  const joints = jointsOf(spine);
+export function assembleShaders(spines, packages) {
+  const joints = jointsOf(spines);
   const stages = new Map([...joints.stages].map((name) => [name, []]));
   const slots = new Map();
   const services = new Map([...joints.services.keys()].map((name) => [name, []]));
@@ -263,5 +287,7 @@ export function assembleShaders(spine, packages) {
     return out;
   };
 
-  return { vertexShader: emit(spine.vertex), fragmentShader: emit(spine.fragment) };
+  return Object.fromEntries(Object.entries(spines).map(([name, spine]) => [
+    name, { vertexShader: emit(spine.vertex), fragmentShader: emit(spine.fragment) },
+  ]));
 }

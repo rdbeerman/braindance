@@ -22,5 +22,12 @@
       },
       "role": "master"
     }
-  }
+  },
+  "chunks": [
+    {
+      "stage": "g.body",
+      "order": 300,
+      "file": "grain.grade.glsl"
+    }
+  ]
 }

@@ -101,6 +101,12 @@ import {
   geometry, uniforms, material, cloud, buildPointCloud, setAdditive,
   CLIP_NEAR_DEFAULT, CLIP_FAR_DEFAULT, CROP_LIMIT, cropReach, croppedOut,
 } from './point-cloud.js';
+// The text those two builders compile, and the concatenator that makes it. Source text and
+// a pure function over it - nothing here touches a GPU, which is why the same three imports
+// serve the gate under bare node.
+import { cloudSpine } from './cloud-shader.js';
+import { gradeSpine } from './grade-shader.js';
+import { assembleShaders } from './shader-assembly.js';
 
 // ------------------------------------------------ the installed effects, fetched
 //
@@ -149,6 +155,21 @@ const effectPackages = await (async () => {
     return pkg;
   }));
 })();
+
+// Every program this page compiles, in one call, before either builder runs.
+//
+// **One call and not one per spine**, which is the property the refusals rest on. A chunk
+// names the joint it joins and never the program it belongs to, so `assembleShaders` has to
+// see every spine at once to know that a name it does not recognise is nobody's - and a
+// build that assembled the cloud on its own would meet the grade pass's chunks with only two
+// answers available, throwing on text that is perfectly well placed elsewhere or skipping
+// it. The second is what a program-name tag on each chunk would have bought: a tag nobody
+// spelled right lands its text in no program at all, the page boots, the shader compiles,
+// and the effect is simply gone.
+//
+// It sits beside the fetch that feeds it rather than inside either builder, because the two
+// builders run seven hundred lines apart and the packages are one answer to one question.
+const shaderPrograms = assembleShaders({ cloud: cloudSpine, grade: gradeSpine }, effectPackages);
 
 // Which of the two surfaces this page is, decided by the path. One document still
 // serves both, because there is one renderer and one image pipeline and splitting
@@ -249,11 +270,14 @@ buildSurfaceMemory();
 // handed over rather than reached for, so the one place the two are wired together is this
 // line.
 //
-// The packages go the same way and for the same reason. The material is assembled out of
-// the spine and whatever effects are installed, so the cloud needs them - and handing them
-// over here rather than having `point-cloud.js` fetch them keeps the module free of the
-// network, which is what lets the same assembler run under bare node in the gate.
-buildPointCloud(sourceCells, effectPackages);
+// The assembled program goes the same way and for the same reason. The material is compiled
+// out of the spine and whatever effects are installed, so the cloud needs the text - and
+// assembling it above rather than having `point-cloud.js` fetch its own packages keeps the
+// module free of the network, which is what lets the same assembler run under bare node in
+// the gate. It also leaves one assembly site for the two programs, which is what the grade
+// pass's spine needed: a chunk is placed by the joint it names, and only a call that sees
+// every spine can tell a joint nobody holds from one another spine does.
+buildPointCloud(sourceCells, shaderPrograms.cloud);
 
 // And the one cell in that table the hardware fills rather than the registry or the
 // transport. `ALIASED_POINT_SIZE_RANGE` is what this GPU will actually rasterise a point
@@ -344,12 +368,14 @@ function applyWorldTilt() {
 // ---------------------------------------------------------------- post chain
 //
 // Moved to `post-chain.js`. The composer, the trails, the bloom instance and the grade
-// shader are there, and so is the order the image is put through them in, which is that
-// file's whole opinion. What is here is the moment the chain is built, which is a decision
-// about this program's boot rather than about the passes: the render pass is handed the
-// scene it draws, so it is built after the cloud above, and it is built by a call rather
-// than by an import, so the moment reads in the order it happens in.
-buildPostChain();
+// pass's uniform table are there, and so is the order the image is put through them in,
+// which is that file's whole opinion; the grade's own GLSL is in `grade-shader.js` beside
+// the cloud's, because a spine has to evaluate under bare node and `post-chain.js` imports
+// three.js. What is here is the moment the chain is built, which is a decision about this
+// program's boot rather than about the passes: the render pass is handed the scene it draws,
+// so it is built after the cloud above, and it is built by a call rather than by an import,
+// so the moment reads in the order it happens in.
+buildPostChain(shaderPrograms.grade);
 
 let renderScale = 1;
 
@@ -895,12 +921,31 @@ function updateDrawRange() {
   geometry.setDrawRange(0, shedding ? POINTS * 2 : POINTS);
 }
 
+/**
+ * The grade terms whose being up is what makes the pass worth running, read off the
+ * packages rather than listed here.
+ *
+ * A binding declares `gates` when a non-zero value has to switch the pass on, and five of
+ * the shipped effects do. That used to be five lines of `grade.uniforms.X.value > 0` in the
+ * function below, which was true of the shipped set and true by transcription: a package
+ * installed next year would have written its term into the pass and left the pass shut, so
+ * its slider would have moved a uniform nothing ran and the effect would have been silently
+ * absent - the shape this repo keeps case files about. Derived, a package is counted by
+ * existing.
+ *
+ * **What is not derived is `crush`.** It shares the pass and deliberately does not gate it,
+ * because it defaults to 0.018 rather than to 0 and so is up in every document there has
+ * ever been - gating it would run a full-screen read and write for the four shipped presets
+ * that ask for no grade at all. It is a core parameter with no package, so it is outside
+ * this list by construction rather than by being left out of it, and `registry-check`'s gate
+ * matrix asserts that negative rather than leaving it as an omission.
+ */
+const GRADE_GATES = effectPackages.flatMap((pkg) => Object.values(pkg.manifest.params ?? {})
+  .filter((p) => p.bind?.on === 'grade' && p.bind.gates)
+  .map((p) => p.bind.uniform));
+
 function gradeNeeded() {
-  return grade.uniforms.rgbSplit.value > 0
-    || grade.uniforms.scanlines.value > 0
-    || grade.uniforms.grain.value > 0
-    || grade.uniforms.vignette.value > 0
-    || grade.uniforms.streak.value > 0;
+  return GRADE_GATES.some((name) => grade.uniforms[name].value > 0);
 }
 
 // ------------------------------------------------- fitting the box to the footage

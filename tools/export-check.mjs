@@ -326,7 +326,7 @@ const MUTATIONS = {
     'vSize = gl_PointSize;',
   ]] },
   // Grain and scanlines go back to being sized in framebuffer pixels.
-  'grade-absolute': { file: 'web/post-chain.js', edits: [[
+  'grade-absolute': { file: 'web/grade-shader.js', edits: [[
     `      float k = resolution.y / 1080.0;
       vec2 ref = resolution / k;`,
     `      float k = 1.0;
@@ -386,7 +386,7 @@ const MUTATIONS = {
   // is the reading that says these rows have one guard rather than two.
   //
   // Only the split reverts, so the claim cannot be carried by the other two.
-  'rgbsplit-absolute': { file: 'web/post-chain.js', edits: [[
+  'rgbsplit-absolute': { file: 'effects-builtin/rgbsplit/split.grade.glsl', edits: [[
     'vec2 off = dir * rgbSplit * texel * 8.0;',
     'vec2 off = dir * rgbSplit * (1.0 / resolution) * 8.0;',
   ]] },
@@ -451,7 +451,7 @@ const MUTATIONS = {
       + '    }',
     ],
   ] },
-  'grain-continuous': { file: 'web/post-chain.js', edits: [[
+  'grain-continuous': { file: 'effects-builtin/grain/grain.grade.glsl', edits: [[
     'float n = hash(floor(vUv * ref) + fract(time) * 137.0);',
     'float n = hash(vUv * ref + fract(time) * 137.0);',
   ]] },
@@ -536,7 +536,7 @@ const MUTATIONS = {
     [
       '      float k = resolution.y / 1080.0;',
       '      float k = resolution.x / 1728.0;',
-      'web/post-chain.js',
+      'web/grade-shader.js',
     ],
   ] },
   // The failure path reaches back to the output it did not write. This is the
@@ -618,9 +618,10 @@ function mutatedSource(name) {
 function servedAt(file) {
   if (file.startsWith('effects-builtin/')) {
     // The effects' own GLSL, which the page fetches out of `/effects/:id/file/:name` and
-    // `assembleShaders` splices into the cloud's material - so a mutation that edits a
-    // chunk is delivered at the fetch rather than at a module, which from Playwright's
-    // side is the same interception.
+    // `assembleShaders` splices into the cloud's material or the grade pass's shader - so a
+    // mutation that edits a chunk is delivered at the fetch rather than at a module, which
+    // from Playwright's side is the same interception. The route is the same for both
+    // programs, because a chunk names the joint it joins rather than the program it feeds.
     const parts = file.split('/');
     if (parts.length !== 3) {
       throw new Error(`${file} is not an effect package file - a chunk is <id>/<name> under effects-builtin/`);

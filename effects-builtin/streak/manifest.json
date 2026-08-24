@@ -40,5 +40,17 @@
       },
       "under": "amount"
     }
-  }
+  },
+  "chunks": [
+    {
+      "stage": "g.decl",
+      "order": 100,
+      "file": "decl.grade.glsl"
+    },
+    {
+      "stage": "g.body",
+      "order": 100,
+      "file": "fall.grade.glsl"
+    }
+  ]
 }

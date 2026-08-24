@@ -1437,6 +1437,20 @@ the move finds an anchor over none. `--mutate anchor-in-dead-fallback` repoints
 neighbouring package's chunk — a *different* file, since a duplicate inside its own is already
 refused one rule up — and is the control for the first.
 
+**The count had to grow a third control the moment there were two spines, and the reason is
+that both plants above sit inside one program.** Cutting the grade pass out of
+`web/post-chain.js` gave this build four assembled strings rather than two, and the tempting
+shape for the count is to ask each program about the anchors of the files that feed *it* —
+which reads as tidier, keeps every existing control catching, and stops testing the thing the
+rule now claims. A line living in two programs at once counts one in each, so a per-program
+count sees nothing. `--mutate anchor-duplicated-into-a-second-program` plants
+`streak-ignored`'s guard, which belongs to the grade, in the thermal package's tone chunk,
+which feeds the cloud's fragment program: its own file still matches once and the sum is two.
+Measured rather than argued — with the count rewritten as a maximum over the four strings
+instead of a sum, `anchor-duplicated-into-a-second-chunk` still comes back 1 failed and this
+one comes back 0, which is what makes it an arm rather than a fourth way of saying the same
+thing.
+
 **`web/shader-assembly.js` is inside the rule as well, and the count is not asked of it.** An
 anchor on a branch the emit never takes is the same dead control wearing JavaScript, so the move
 half covers it; its anchors are JavaScript and the two programs are GLSL, so the count half would

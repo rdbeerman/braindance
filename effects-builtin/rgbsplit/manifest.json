@@ -22,5 +22,11 @@
       },
       "role": "master"
     }
-  }
+  },
+  "chunks": [
+    {
+      "slot": "g.fetch",
+      "file": "split.grade.glsl"
+    }
+  ]
 }
