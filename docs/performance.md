@@ -252,6 +252,81 @@ replacement's cost without pricing its picture. Whether that is a regrade somebo
 or a gain this chain is missing wants a decision rather than another measurement, and until
 one is taken the section above should be read as a cost result only.
 
+### The decision, and the three terms it turned out to be
+
+**Taken on 2026-08-24: the graded brightness is restored.** Nine of the ten shipped looks
+were graded on 08-02 and 08-08, before the swap, so the brighter output is what their
+authors intended; `cascade` is the one authored inside the dim regime and its `bloom` moves
+in the same change to hold it. The paragraph above stands as the state before the decision
+rather than being replaced by it.
+
+**It was three dropped terms and not a gain, which is worth more than the decision.** The
+comparison this time is against `124a90b^` itself - a worktree at `fb03887`, its own server,
+the same `sample` capture by hash, both stages driven to 960x600 where the two builds' chains
+come out the same five sizes, every arm repeated across two browser launches with zero spread
+and the first bloom-bearing arm of each page discarded, because a frame that engages the pass
+pays its compile and reads 1.5114 where every repeat reads 7.1614. On that rig `fb03887` reads
+17.4846 to `f14b4be^`'s 17.3797, and Blackwall with `bloom` 0 comes back **identical to four
+decimals and 0.000/255 on the worst of forty tiles**, which is what says the rest of the
+difference is the pass.
+
+1. **`renderer.autoClear` was never dropped, so the accumulating chain did not accumulate.**
+   Read off the pass's own targets in half float: as it shipped all five levels carry a mean
+   of 9.67e-3, and with the flag held down they carry 9.68e-3, 1.94e-2, 2.90e-2, 3.87e-2 and
+   4.84e-2 - one, two, three, four and five octaves, which is what the pass's comment always
+   claimed. Four fifths of the halo was being wiped by the renderer between draws.
+2. **The composite's `3.0`**, which `UnrealBloomPass` carries as "backwards compatibility
+   with previous alpha-based intensity" and which had no counterpart here.
+3. **The per-mip `bloomFactors` and the radius that mirrors them**, which is one term and
+   the reason `radius` meant two different things across the swap - a weight mirror in
+   `[0, 1]` there, a tent tap spacing in texels here, and `0.7` carried over verbatim. The
+   old composite's arithmetic checks out to four figures against its own targets:
+   `3.0 * 0.5 * sum(w * mip)` predicts 3.2913e-2 where the target reads **3.2902e-2**.
+
+**What the restoration lands on, and what it does not.** Blackwall at one 960x600 buffer,
+`bloom` 0.5, against `fb03887`: **14.4805 against 17.4846, a ratio of 0.82818**, with the
+worst of forty tile means down from 45.828/255 to 21.360. At 0.45 it reads 0.85627 and at 0.8
+it reads 0.70718, so the residual is not a constant - it grows with the glow. **The residual
+is the halo's width and it is not a droppable term.** `UnrealBloomPass` blurs each mip with a
+baked Gaussian, and at the coarse end those kernels span the frame - 22 taps across a
+15x10 mip - where a down/up chain gets its width from one tent per octave. Measured by
+widening that tent while the energy stays put at ~4.3e-2: 0.828 at the shipped 0.7, 0.870 at
+1.0, 0.945 at 1.5, 1.012 at 2.0 and 1.093 at 3.0, with the worst tile still improving at 3.0
+and coverage still 35% against the old halo's 78%. Mean and tile disagree about where the
+optimum is, so there is no measured value to take and the tent is held at 0.7 - **picking 2.0
+because the mean lands on 1.0 would be the fudge factor this whole exercise is about.**
+
+**Only Blackwall is comparable across the swap, which is a result about the other four.**
+Every other look carrying bloom also carries a duotone, and `bcfdb98` gave the duotone a ramp
+width in metres after `fb03887` - so `ember` and `tearline` already differ by 5.17% and 5.16%
+with the glow *off*, and their glow-up ratios of 1.25236 and 1.35194 are two changes read as
+one. `voxel` carries the glyph field's exposure regrade on top of that. A cross-build reading
+of any of them is not a reading of this pass.
+
+**`cascade` cannot be held, and the reason is the parameter rather than the pass.** Fifteen
+pinned program positions of `captures/sample.knct` over 0 to 0.9933s at a 640x360 buffer,
+device scale 1, minimising mean absolute deviation per RGB channel against frames captured on
+the pre-fix tree - the shape `docs/instruments.md` records for `voxel`. The search wants
+**0.015 to 0.0167 at a MAD of 2.19**, which is the 0.15/9 the restored gain predicts. It
+cannot have it: `bloom` is declared with a `step` of 0.05 and `normalise` snaps every write to
+that grid, so the reachable values are 0 and 0.05. Against a reference of mean channel 35.171
+and 32.22% lit, they read:
+
+| `bloom` | MAD | worst channel | mean channel | lit |
+| --- | --- | --- | --- | --- |
+| 0.15, unchanged | 24.9910 | 210/255 | 60.163 | 48.28% |
+| 0.05, **shipped** | 7.3004 | 161/255 | 42.441 | 35.88% |
+| 0 | 4.7586 | 138/255 | 30.413 | 21.63% |
+| 0.0167, unreachable | 2.1926 | 96/255 | - | - |
+
+**0 wins the MAD and was not taken.** At 0 the pass does not run, so the criterion is reached
+by deleting the thing it measures, and the frame loses a third of its lit coverage - 21.63%
+against the reference's 32.22%, where 0.05 sits at 35.88%. That is CLAUDE.md's rule about an
+object every observation skips, arriving as a number. The same table at 960x600, a size the
+search did not tune at, keeps the same ordering: 27.8610, 8.5002, 4.8568. **A `step` of 0.01
+on `bloom` would let 0.015 hold `cascade` at a MAD of 2.19**, and that is a registry change
+somebody should decide on rather than one this change made.
+
 **`bloom-reference-1080` is now inert for a new reason, and that is a hole to close
 rather than a result to bank.** It was already uncaught before this change, blinded by
 those two rows being red anyway. It is still uncaught now that they are green, and the

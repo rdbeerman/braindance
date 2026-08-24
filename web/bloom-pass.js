@@ -52,8 +52,72 @@ import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
  * the chain and blending onto it at the bottom aliased a texture with its own render
  * target. Bloom is still light added to a picture rather than a picture built from one -
  * what changed is where the addition is written.
+ *
+ * **Three terms of the pass this replaces were dropped when it was written, and all three
+ * are here now.** Every graded look but one was graded against the old pass, and measured
+ * at one 960x600 buffer with the two builds' chains identical in size, Blackwall's frame
+ * came back at a mean luminance of 7.16 against 17.48 - the same look, one commit apart.
+ * The three are listed here because each is a different kind of mistake and only one of
+ * them is arithmetic:
+ *
+ * 1. **`renderer.autoClear` was left on**, so the accumulating up chain did not
+ *    accumulate. `WebGLRenderer.render` clears the bound target when `autoClear` is set,
+ *    which it is by default and which `EffectComposer` never changes - `RenderPass` and
+ *    `UnrealBloomPass` both switch it off around their own draws and put it back. Every
+ *    additive upsample here was therefore drawing onto a target that had just been wiped,
+ *    so each level replaced the level below instead of being laid over it and the five
+ *    octaves collapsed to one. Measured off the pass's own targets: as it shipped, all
+ *    five read a mean of 9.67e-3, and with `autoClear` held down they read 9.68, 1.94e-2,
+ *    2.90e-2, 3.87e-2 and 4.84e-2 - exactly the 1, 2, 3, 4, 5 the paragraph above claims.
+ * 2. **The composite's `3.0`**, which `UnrealBloomPass` carries with the comment "for
+ *    backwards compatibility with previous alpha-based intensity". It is a plain gain on
+ *    the summed mips and it had no counterpart here.
+ * 3. **The per-mip `bloomFactors`, and `radius` as the thing that mirrors them.** Those
+ *    two are one term: the old composite weights its five mips by
+ *    `lerpBloomFactor(bloomFactors[i])`, and `lerpBloomFactor` lerps each factor towards
+ *    `1.2 - factor` by `bloomRadius`. The set sums to 3.0 at every radius, because
+ *    `sum(1.2 - 2f)` over `[1, 0.8, 0.6, 0.4, 0.2]` is zero - so the weights decide the
+ *    halo's *shape* and never its total. At the 0.7 the looks were graded at they come
+ *    out `[0.44, 0.52, 0.60, 0.68, 0.76]`, nearly inverted, which is what put most of the
+ *    old halo in the coarse octaves. **This is the term that made `radius` mean two
+ *    different things across the swap**: it is a weight mirror in `[0, 1]` there and was
+ *    read as a tent tap spacing in texels here, so `0.7` was carried over verbatim into an
+ *    argument that had stopped meaning what it meant. The tent keeps its spacing under a
+ *    name of its own below.
+ *
+ * Together those are `3.0 * sum(weights) = 9.0` of gain on a five-octave sum against the
+ * 1.0 this applied to one octave. The measurements the restoration lands on are in
+ * `docs/performance.md`, beside the ones that priced its cost.
  */
 export const BLOOM_LEVELS = 5;
+
+// The old composite's per-mip weights, finest mip first, and the gain over them.
+//
+// **Kept as the two literals rather than as the 1.8 they multiply out to**, because the
+// product is only 1.8 while every octave here has the same mean, and the arithmetic that
+// is actually correct is a weighted sum. `bloomWeights` is the mirror `lerpBloomFactor`
+// applies; `BLOOM_COMPAT_GAIN` is the `3.0` the composite opens with.
+//
+// The factor set stays inside this module and the function is what crosses, which is the
+// rule `module-check` states about an array leaving a boundary: a `const` holding an array
+// is a channel anybody can write into, and a caller that pushed a sixth factor onto this
+// one would change the halo of every look from wherever it did it. Nothing outside loses
+// anything by that, because `bloomWeights(0)` is the set - the mirror is the identity at
+// radius zero - so a reader that wants the factors asks for them at the radius where they
+// are the answer.
+const BLOOM_FACTORS = [1.0, 0.8, 0.6, 0.4, 0.2];
+export const BLOOM_COMPAT_GAIN = 3.0;
+export const bloomWeights = (radius) => BLOOM_FACTORS.map((f) => f + radius * (1.2 - 2.0 * f));
+
+// How far apart the tent's taps sit, in texels of the level being read.
+//
+// **A constant rather than a parameter, and it is here because `radius` stopped being
+// able to carry it.** It was `radius` until the weight set above came back, and 0.7 is the
+// number that was in that argument - which arrived from the old pass meaning something
+// else entirely. It is held at 0.7 rather than moved to the 1.0 a textbook tent would use,
+// because nothing has ever graded against a wider one and this restoration is about the
+// terms that went missing rather than the ones that were merely odd.
+const TENT_SPACING = 0.7;
 
 // Thirteen taps in the pattern Jimenez's filter uses - a centre, four at half a texel and
 // eight on the diagonals a texel out - weighted so the result is a smooth partition of
@@ -107,14 +171,25 @@ const bloomUpShader = /* glsl */ `
   precision highp float;
   uniform sampler2D tSource;
   uniform vec2 texel;
-  uniform float radius;
+  uniform float spacing, weight;
   varying vec2 vUv;
 
   void main() {
-    // The sample radius is what the bloom radius moves, and it moves it here rather than
-    // in a composite weight: widening the tent widens every octave together, which is
-    // the same knob the pass this replaces spelled as a lerp between two weight sets.
-    vec2 t = texel * radius;
+    // The composite's weights, applied here because in this chain there is no composite
+    // to apply them in. The pass this replaces blurred five mips and summed them at the
+    // end, so a weight per mip was a coefficient in one shader; the octaves here
+    // accumulate on the way up, so the only place an octave can be weighted against its
+    // neighbour is the step that adds it. The weight uniform is therefore the RATIO
+    // between two adjacent weights - the target already holds everything coarser, so
+    // scaling what arrives scales every octave above this one together, and the products
+    // come out as the weight set. The render method below does that arithmetic and says
+    // why it is exact.
+    //
+    // An earlier note here said putting a look term in the resampling was the thing to
+    // avoid, and that is still true of the strength, which is why the strength is still
+    // in the blend. It was not true of the weights, and reading it as though it were is
+    // how they came to be missing.
+    vec2 t = texel * spacing;
     vec3 sum = texture2D(tSource, vUv + vec2(-t.x,  t.y)).rgb * 0.0625;
     sum += texture2D(tSource, vUv + vec2( 0.0,   t.y)).rgb * 0.125;
     sum += texture2D(tSource, vUv + vec2( t.x,   t.y)).rgb * 0.0625;
@@ -124,7 +199,7 @@ const bloomUpShader = /* glsl */ `
     sum += texture2D(tSource, vUv + vec2(-t.x,  -t.y)).rgb * 0.0625;
     sum += texture2D(tSource, vUv + vec2( 0.0,  -t.y)).rgb * 0.125;
     sum += texture2D(tSource, vUv + vec2( t.x,  -t.y)).rgb * 0.0625;
-    gl_FragColor = vec4(sum, 1.0);
+    gl_FragColor = vec4(sum * weight, 1.0);
   }
 `;
 
@@ -169,7 +244,8 @@ export class BloomPass extends Pass {
       uniforms: {
         tSource: { value: null },
         texel: { value: new THREE.Vector2() },
-        radius: { value: radius },
+        spacing: { value: TENT_SPACING },
+        weight: { value: 1 },
       },
       vertexShader: bloomVertexShader,
       fragmentShader: bloomUpShader,
@@ -227,6 +303,29 @@ export class BloomPass extends Pass {
 
   render(renderer, writeBuffer, readBuffer) {
     const previousTarget = renderer.getRenderTarget();
+    // **Held down for the whole pass, and this is the line whose absence cost the halo
+    // four of its five octaves.** `WebGLRenderer.render` clears the bound target when
+    // `autoClear` is set - it is set by default, and `EffectComposer` never touches it -
+    // so every additive upsample below was landing on a target that had just been wiped
+    // and the accumulation the chain is built on never happened. `RenderPass` and
+    // `UnrealBloomPass` both save it, drop it and put it back, and this does the same.
+    // The explicit `clear()` calls below are what clears from here on, which is why they
+    // are not redundant even though `autoClear` would have done it.
+    const previousAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+
+    // The old composite's weight set at this radius, and the ratios that reproduce it in
+    // an accumulating chain. Recomputed per frame because `radius` is a property anything
+    // may write, the same way `strength` and `threshold` are read here rather than cached.
+    //
+    // **Why the ratios are exact.** Writing `w` for the weights and `S(i)` for octave `i`
+    // spread back up to full size, the up loop below computes
+    // `T(i-1) = S(i-1) + r(i) * T(i)`, so `T(0)` comes out as the sum of
+    // `S(i) * product(r(1..i))`. Setting `r(i) = w(i) / w(i-1)` telescopes that product to
+    // `w(i) / w(0)`, and the blend's `w(0)` puts the missing factor back - so the pass
+    // delivers `3.0 * strength * sum(w(i) * S(i))`, which is the old composite's
+    // arithmetic with the mips it never had.
+    const weights = bloomWeights(this.radius);
 
     // Down. The first level reads the frame and cuts the darks; the rest read the level
     // above them, which is what makes this a chain rather than five blurs of one image.
@@ -248,23 +347,26 @@ export class BloomPass extends Pass {
     for (let i = this.targets.length - 1; i > 0; i--) {
       const source = this.targets[i];
       this.upMaterial.uniforms.tSource.value = source.texture;
-      this.upMaterial.uniforms.radius.value = this.radius;
+      this.upMaterial.uniforms.weight.value = weights[i] / weights[i - 1];
       this.upMaterial.uniforms.texel.value.set(1 / source.width, 1 / source.height);
       renderer.setRenderTarget(this.targets[i - 1]);
       this.quad.render(renderer);
     }
 
     // And the two are summed into the buffer the composer will swap to. `strength` is
-    // applied here and only here, so the look control stays outside the resampling.
+    // applied here and only here, so the look control stays outside the resampling - and
+    // the two constants beside it are the composite's, carrying the factor the ratios
+    // above divided out along with the gain the old pass opened with.
     this.quad.material = this.blendMaterial;
     this.blendMaterial.uniforms.tPicture.value = readBuffer.texture;
     this.blendMaterial.uniforms.tBloom.value = this.targets[0].texture;
-    this.blendMaterial.uniforms.strength.value = this.strength;
+    this.blendMaterial.uniforms.strength.value = this.strength * BLOOM_COMPAT_GAIN * weights[0];
     renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
     renderer.clear();
     this.quad.render(renderer);
 
     renderer.setRenderTarget(previousTarget);
+    renderer.autoClear = previousAutoClear;
   }
 
   dispose() {

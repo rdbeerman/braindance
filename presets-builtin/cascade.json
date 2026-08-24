@@ -76,7 +76,7 @@
     "rain.speed": 0.55,
     "rain.span": 1.3,
     "rain.trail": 0.45,
-    "bloom": 0.15,
+    "bloom": 0.05,
     "trails": 0.15,
     "raster.amount": 0.25,
     "raster.angle": 0,

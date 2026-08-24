@@ -2314,6 +2314,37 @@ apart on one machine, so the direction is not in doubt whatever those numbers we
 but the disagreement is a fact about this repository's records and belongs on the page rather
 than in a commit message.
 
+**And a fourth, found on 2026-08-24 when somebody finally asked what the one term was.** It
+was three terms, one of which is a bug rather than arithmetic: `BloomPass` never dropped
+`renderer.autoClear`, so its additive up chain drew onto targets the renderer wiped between
+draws and four of the halo's five octaves were thrown away every frame. **Nothing in this
+suite could see it, and the reason is a class rather than an oversight.** Every arm that
+touches bloom compares two renders and judges a *ratio* — 960x600 against 1920x1200, this
+tree against a pinned revision, one mutation against none — and a chain missing four octaves
+draws a halo of the right width in the right places at one fifth the brightness, so it
+divides out of every one of them. `bloom-buffer-sized` still caught its mutation, the two
+rebase rows were already exempt, and `registry-check`'s section 1b runs at `bloom` 0. **Ask
+of any quantity a suite only ever compares whether anything measures it, and not only whether
+something moves with it.**
+
+What now holds it is `test/bloom-chain.test.mjs`, which had the cheap half of this already
+and gains three rows: the weight set sums to 3.0 at every radius and comes out
+`[0.44, 0.52, 0.60, 0.68, 0.76]` at the graded 0.7, the per-step ratios telescope back into
+`3.0 * strength * sum(w * octave)`, and **the pass drops `autoClear` and hands it back**. That
+last one needs no GPU, which is the point: the pass reaches for exactly five things on a
+renderer — the bound target, `autoClear`, `setRenderTarget`, `clear` and `render` — so a
+five-property stub records the discipline and reads the uniform the pass has just bound, which
+is what stops the two arithmetic rows being a formula the test believes rather than the one
+the pass performs. Its falsification control is a renderer whose `autoClear` will not go down,
+which puts every draw in exactly the position `124a90b` left them in.
+
+Mutation-tested rather than reasoned about, seven of seven caught and each read for the
+assertion that fired: `autoClear` never dropped, never handed back, the up chain unweighted,
+the blend without its gain, `BLOOM_COMPAT_GAIN` at 1.0, the weights flattened to one and the
+factor set reversed. The first four and the sixth land on the `autoClear` row, the seventh on
+the weight-set row, and the fifth reddens three. The baseline was re-run after each and comes
+back 9 of 9.
+
 ### The half measured by hand is the half the next round finds
 
 `readPathFor` used to treat every `stat` failure as "there is no fork" and fall back to the
