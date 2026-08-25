@@ -32,14 +32,35 @@ redesigning.** That has happened repeatedly and reporting was the right move eve
 
 ## Before you commit
 
+**A contribution is proven working code, and code on its own is not.** "Your job is to deliver
+code you have proven to work" —
+[Simon Willison](https://simonwillison.net/2025/Dec/18/code-proven-to-work/). A thousand-line
+patch costs a minute to produce and an hour to read, so the proving is the part that carries the
+value, and a change that only happens to work is luck. Work an agent produced gets *more*
+scrutiny than a hand-written change rather than less: one pass is rarely enough, and the name on
+the commit is yours either way.
+
 - **Every feature gets a full end-to-end run before it is committed.** Drive the real surface a
   person touches — `playwright-cli` for the browser, the proof tool for the thing it proves — and
   watch the change happen. A passing unit test is not a rendered frame, a `curl` is not a click,
   and "the code looks right" is not evidence.
+- **An automated test you have not watched fail is not a test.** Write the test for the thing you
+  just did by hand, then revert the change and watch it go red before putting the change back.
+  That is rule 1 of "Writing a check" — a falsification control — asked of an ordinary test as
+  well as of a proof tool.
+- **Say what happens off the happy path.** Name the inputs outside it — the empty one, the
+  malformed one, the worst one — and either handle them or say in one line what they do. An edge
+  nobody named is an edge nobody tested.
 - **Run the checks your change is under**: `node tools/syntax-check.mjs` for anything at all,
   `npm run test:unit`, and the proof tools covering the surface you touched.
 - **Report what actually ran** — which tools, which rows, which numbers. A check you skipped is a
   check you say out loud you skipped.
+
+Then four questions, and a "not sure" to any of them means it is not ready: have you watched this
+work, would the naming still read honestly to someone in six months, did you test the edges, and
+could you walk the person who asked through the change end to end? Speed without quality is
+negative value — a sloppy change spends more of a reviewer's time than it saved of yours, and it
+goes on spending.
 
 ## What not to build
 
@@ -252,6 +273,10 @@ thing that should be touching capture bytes.
   alternatives, no restating the line below, no bold-lead paragraphs, no section banners. The
   code is meant to be self-explanatory and the pages under `docs/` carry the long form. When in
   doubt, delete it.
+- **Names are contracts.** A name that needs a comment to say what it really holds is lying, and
+  so is one you would explain as "x, but really y" — rename the thing instead. The same test
+  applies to an abstraction: if you cannot say what it does end to end and part by part, in plain
+  words, it will not hold together when the next person changes it.
 - Commits: imperative subject, then a body explaining the why and carrying the measurements with
   their methods.
 - **`pointSize` is pixels at 1080p**, and every screen-space term with it. A project saved before
