@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { doorRefusal, forkRefusal } from '../server/effect-door.js';
+import { MAX_EFFECT_ID, doorRefusal, forkRefusal } from '../server/effect-door.js';
 import { snapScalar } from '../web/format.js';
 import { cloudSpine } from '../web/cloud-shader.js';
 import { gradeSpine } from '../web/grade-shader.js';
@@ -184,6 +184,39 @@ test('the door bounds how much of a package it will take', () => {
   assert.equal(brokenBy('thermal', (c) => {
     c.manifest.chunks.push({ stage: 'f.decl', order: 900, file: 'heat.frag.glsl' });
   }), null, 'and two different joints naming one file is not, which is what the rule above is a distinction from');
+});
+
+// **How long an id may be, which is a bound on a directory name rather than on taste.** An
+// id is what the package's directory is called, and every copy this program renames out of
+// the way is that name plus a suffix - so an id with no room left under `NAME_MAX` for one
+// is a package that installs perfectly well and can never be moved afterwards. What that
+// cost was the boot gate: it renames a refused package to `<id>.<seq>.incompatible`, the
+// rename answered `ENAMETOOLONG`, and the throw came out of the gate written to stop a
+// broken package taking the program down.
+//
+// **Both directions, and the accepting one is at the bound rather than well inside it**, so
+// a build whose bound had drifted anywhere at all fails one of these two rows. The donor is
+// dropped out of `beside` for the accepting row: renaming a shipped package's id leaves the
+// original standing beside its own copy, which collides on every slot and varying it
+// declares and would refuse the candidate for a reason that has nothing to do with its name.
+test('an id is a directory name, so the door bounds how long it may be', () => {
+  const all = shipped();
+  const donor = all.find((p) => p.id === 'thermal');
+  const renamed = (id) => doorRefusal(
+    { id, manifest: { ...JSON.parse(JSON.stringify(donor.manifest)), id }, chunks: { ...donor.chunks } },
+    { beside: beside(all, 'thermal'), spines: SPINES },
+  );
+  assert.equal(renamed('t'.repeat(MAX_EFFECT_ID)), null,
+    `an id of exactly ${MAX_EFFECT_ID} characters is inside the bound and must not be refused by it`);
+  assert.match(renamed('t'.repeat(MAX_EFFECT_ID + 1)), new RegExp(`declares an id of ${MAX_EFFECT_ID + 1} characters`),
+    'and one character past it is refused by name, before it is a rename that cannot be made');
+  // The shipped ids are the must-accept control for this bound the same way the whole set is
+  // for the door: a bound that had crept down to something a real package trips over would
+  // pass both rows above and refuse the build's own packages.
+  for (const pkg of all) {
+    assert.ok(pkg.id.length <= MAX_EFFECT_ID,
+      `the shipped ${pkg.id} is ${pkg.id.length} characters, which this build's own door would refuse`);
+  }
 });
 
 // **Which program a binding is checked against, which is a question the door used to answer

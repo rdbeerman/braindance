@@ -144,7 +144,7 @@ exit code (rule 3).
 | `level-check.mjs` | levelling: the room turns and every surface keeps its meaning | port 8377 free |
 | `vcam-check.mjs` | the output to OBS, and the take it must not touch | port 8361 free |
 | `guard-check.mjs` | the socket's origin rule, the bind, the rebinding rule | port 8321 free |
-| `jobs-check.mjs` | the queue, the pin, a real render, a job this build cannot read | port 8231, a GPU browser, ffprobe |
+| `jobs-check.mjs` | the queue, the pin, a real render, a job this build cannot read | ports 8231 and 8232, a GPU browser, ffprobe |
 | `effect-check.mjs` | installing an effect: revisions, the door, the hotload, park and restore | port 8281 free, a GPU browser |
 | `effect-conformance-check.mjs` | every installed effect draws nothing at all when it is off | `--url`, a GPU browser |
 | `module-check.mjs` | the boundaries in `web/`: the import graph, what crosses it | nothing |
@@ -155,7 +155,7 @@ exit code (rule 3).
 | `release-gate-check.mjs` | the `.npmrc` supply-chain gate is actually armed | the npm registry |
 
 **Eight spawn their own server, so what they need is a free port rather than a running one** —
-`guard-check` on 8321, `jobs-check` on 8231, `effect-check` on 8281, `level-check` on 8377,
+`guard-check` on 8321, `jobs-check` on 8231 *and 8232*, `effect-check` on 8281, `level-check` on 8377,
 `monitor-check` on 8341, `vcam-check` on 8361, `boot-check` on 8391, and `library-check` across
 `--node-port` and `--mac-port`..`+16`, which default to 8210 and 8211..8227. The distinction is not bookkeeping: a
 tool that finds a stranger already listening on its port is answered by the stranger and asserts

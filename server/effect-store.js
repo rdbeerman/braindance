@@ -35,7 +35,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, join } from 'node:path';
-import { doorRefusal, forkRefusal } from './effect-door.js';
+import { MAX_EFFECT_ID, doorRefusal, forkRefusal } from './effect-door.js';
 
 // The same shape `VALID_ID` enforces for takes, restated for effect ids and package
 // file names rather than imported: an id is the namespace prefix a parameter carries
@@ -110,6 +110,37 @@ export class EffectStore {
     // `install` and `remove` are the only writers, and the two places anything else does are
     // proof-tool fixtures standing a package up past the door on purpose.
     this.generation = 0;
+  }
+
+  /**
+   * The two things this store does *to* its user root, run once and only by the process
+   * that is going to serve out of it.
+   *
+   * **Constructing this store writes nothing, and that is the whole of what this method
+   * is.** Both of the calls below rename directories: the recovery puts a crashed
+   * install's aside back, and the gate renames a package this build cannot use out of the
+   * way. Run at construction - which is where they were - they ran in *every* process that
+   * got as far as building a store, including the one that was about to die on
+   * `EADDRINUSE` because a server was already serving that same root. That process
+   * renamed under the live one's feet, and it could rename a revision that had been
+   * installed since it started reading: a fresh, good install quarantined by a second
+   * process that never validated it and never answered a request.
+   *
+   * **The port is the lock, because the deployment already has one.** Two servers on one
+   * root is exactly two servers on one port, and the kernel settles that argument for us -
+   * so this is called from inside `listen`'s callback, after the bind has succeeded, and
+   * the loser of the race exits having touched nothing. No lock file, no pid file, nothing
+   * to be left behind by a machine that lost power holding it.
+   *
+   * **Nothing can be answered out of an unsettled store, and the reason is narrow enough
+   * to be worth stating rather than assumed.** The socket is accepting by the time this
+   * runs, so a client's bytes may already be in the kernel's buffer - but a request
+   * handler is a callback on a later turn of the event loop, and everything below is
+   * synchronous `fs`. So the whole of this method happens before the first `request`
+   * event is dispatched. It is the synchrony that makes the ordering sufficient: an
+   * `await` anywhere in here would open exactly the window this note says is closed.
+   */
+  claimUserRoot() {
     this.recoverInterruptedInstalls();
     // After the recovery and not before it: a package the recovery puts back is a package
     // this store now serves, so it is one the gate below has to have asked about. Neither
@@ -169,36 +200,156 @@ export class EffectStore {
    * it is worth a line carrying the door's own sentence in the log of the start that made
    * it.
    *
-   * It costs one assembly per *user* package, which is a string concatenation over the
-   * shipped set and is paid once at boot. A machine with no forks pays nothing at all,
-   * because the loop walks the user root and that root is where forks are.
+   * **The second pass validates one candidate at a time against what has already been
+   * validated, and never against a peer that has not been.** Handing the door
+   * `loaded(id)` - which is every other package on disk, checked or not - made one broken
+   * fork answer for its neighbours: the door assembles `[...beside, candidate]` and reports
+   * the assembler's message under the *candidate's* name, so a healthy `alpha` doored
+   * beside an unvalidated `zeta` whose chunk names a joint this build dropped came back
+   * "alpha does not assemble", and both were quarantined. Which of the two was blamed
+   * depended on the lexical order the walk happened to reach them in, so the same pair of
+   * directories cost one package or two according to what they were called. Here a
+   * candidate is asked against the builtins - minus the ones a survivor shadows - plus the
+   * survivors, and a package that passes joins `beside` for the next one.
+   *
+   * **Run to convergence rather than in one sweep, because a single sweep would refuse
+   * what the install door accepts.** A package may legitimately read another's varying -
+   * the glyph field reads the rain's `vRain`, which is the whole of what its rain key is -
+   * and the door offers a candidate every *other* installed package's varyings, so
+   * installing a self-contained `zeta` and then an `alpha` that reads its varying is a pair
+   * this build's own door lets through. One lexical sweep meets `alpha` while `zeta` is
+   * still unvalidated, finds the name nowhere, and quarantines a package that has been
+   * working since the day it landed - the boot gate refusing what the install door took,
+   * which is the drift the whole "one gate asked twice" arrangement exists to make
+   * impossible. So the pass repeats while it is still promoting anybody, and what is left
+   * when it stops promoting is what is genuinely refused, each under the sentence it was
+   * last refused with.
+   *
+   * **A collision between two user packages is blamed on the lexically later one, and that
+   * is a choice rather than an accident.** Two forks claiming one slot cannot both stand;
+   * the first round validates the earlier id against the builtins alone, so it survives,
+   * and the later one then collides against a survivor and is the one renamed aside. It is
+   * deterministic, it is the same answer on every machine holding those two directories,
+   * and it is arbitrary - there is no fact in either package about which of them should
+   * lose. The residual it leaves is a *mutually* dependent pair, each reading a name the
+   * other declares: neither can ever be promoted, so both are set aside. That state is
+   * unreachable through the install door, which takes them one at a time and would have
+   * refused whichever arrived first, so it is hand placement or nothing.
+   *
+   * It costs one assembly per *user* package per round, which is a string concatenation
+   * over the shipped set and is paid once at boot; a machine with no forks pays nothing at
+   * all, because the loop walks the user root and that root is where forks are.
    */
   refuseIncompatiblePackages() {
+    // **Pass one, and it has no rule of its own about the length of a name.** A directory
+    // called more characters than `MAX_EFFECT_ID` is one no install of this build could have
+    // written, and it is refused by the door in the pass below like everything else, under
+    // the door's own sentence - a length test here as well would be that rule spelled twice,
+    // and `setAside` truncates whatever it is handed, so the rename the length was ever
+    // about goes through from either pass.
+    const readable = [];
     for (const id of this.idsIn(this.dir)) {
       try {
-        this.packageOf(id);
+        readable.push(this.packageOf(id));
       } catch (err) {
         this.setAside(id, `it cannot be read as a package at all: ${err.message}`);
       }
     }
-    for (const id of this.idsIn(this.dir)) {
-      const candidate = this.packageOf(id);
-      const shadowed = this.builtin(id);
-      const refusal = doorRefusal(candidate, { beside: this.loaded(id), spines: this.spines })
-        ?? (shadowed ? forkRefusal(candidate, shadowed) : null);
-      if (refusal) this.setAside(id, refusal);
+
+    // Read once for the whole gate rather than per candidate, and read from the shipped
+    // root by name: `packageOf` resolves through `rootFor`, which answers with the user's
+    // copy, so asking it for a builtin a candidate's unvalidated neighbour shadows would
+    // hand back the neighbour - the very package this pass is refusing to trust.
+    const builtins = new Map(this.idsIn(this.builtinDir).map((id) => [id, this.builtin(id)]));
+    const survivors = new Map();
+    const refusals = new Map();
+    let pending = readable;
+    let promoted = true;
+    while (promoted && pending.length) {
+      promoted = false;
+      const stillPending = [];
+      for (const candidate of pending) {
+        // A survivor shadows the builtin of its id by landing second in this map, which is
+        // the same rule `rootFor` applies and is why the two are built as one map rather
+        // than as two lists. The candidate's own id goes entirely - the question the door
+        // asks is what the build looks like *with the candidate in place of* whatever holds
+        // that id now, and leaving the builtin in would collide the fork with what it forks.
+        //
+        // Sorted by id afterwards, which is the order `list()` answers in and therefore the
+        // order the page assembles from. A stage concatenates its chunks in the order the
+        // packages arrive, so a gate that assembled the same set in a different order would
+        // be asking about a program the page will not build.
+        const standing = new Map([...builtins, ...survivors]);
+        standing.delete(candidate.id);
+        const beside = [...standing.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
+        const shadowed = builtins.get(candidate.id) ?? null;
+        const refusal = doorRefusal(candidate, { beside, spines: this.spines })
+          ?? (shadowed ? forkRefusal(candidate, shadowed) : null);
+        if (refusal) {
+          refusals.set(candidate.id, refusal);
+          stillPending.push(candidate);
+          continue;
+        }
+        survivors.set(candidate.id, candidate);
+        promoted = true;
+      }
+      pending = stillPending;
     }
+    for (const candidate of pending) this.setAside(candidate.id, refusals.get(candidate.id));
   }
 
-  /** One package out of the way, under a name no read resolves, with the reason said out loud. */
+  /**
+   * One package out of the way, under a name no read resolves, with the reason said out
+   * loud - and a package that cannot be moved left where it is rather than taking the
+   * server down with it.
+   *
+   * **The stem is truncated because the aside is longer than the id it is made from.**
+   * `NAME_MAX` is 255 bytes and this appends about thirty characters to the name, so a
+   * directory called two hundred and forty characters of anything - which an older build
+   * would have installed, since the id rule had no length in it - threw `ENAMETOOLONG` out
+   * of `renameSync`, out of the gate, out of the constructor, and the server did not start.
+   * A gate written to stop one broken package taking the program down cannot be the thing
+   * that does it. See `MAX_EFFECT_ID` for the arithmetic.
+   *
+   * **The sequence is bumped rather than trusted.** The name carries a pid and a
+   * millisecond, which are unique enough for one process asiding one package and are not a
+   * guarantee: two truncated stems that agree in their first 64 characters, or a second
+   * package refused inside the same millisecond, collide - and a rename onto an existing
+   * directory answers `ENOTEMPTY` as readily as `EEXIST`, so both are retried.
+   *
+   * **And a rename that still will not go leaves the package where it is, loudly.** The
+   * alternative is throwing, which is a server that will not boot over a package that is
+   * merely broken - and this program's whole install design is arranged around the machine
+   * that upgraded being the machine that still comes up. A build serving a package it has
+   * announced it cannot use is a page that fails with a sentence in the log naming exactly
+   * why; a build that will not start is a machine with nothing to read at all.
+   */
   setAside(id, refusal) {
-    const aside = join(this.dir, `${id}.${process.pid}.${Date.now().toString(36)}.incompatible`);
-    renameSync(join(this.dir, id), aside);
+    const stem = id.slice(0, MAX_EFFECT_ID);
+    const seq = `${process.pid}.${Date.now().toString(36)}`;
+    let lastErr = null;
+    for (let bump = 0; bump < 16; bump++) {
+      const aside = join(this.dir, `${stem}.${seq}${bump ? `.${bump}` : ''}.incompatible`);
+      if (existsSync(aside)) continue;
+      try {
+        renameSync(join(this.dir, id), aside);
+      } catch (err) {
+        lastErr = err;
+        if (err.code === 'EEXIST' || err.code === 'ENOTEMPTY') continue;
+        break;
+      }
+      console.warn(`effect ${id} was installed by an earlier build of this program and this one refuses it: `
+        + `${refusal} - the package has been renamed to ${basename(aside)} rather than deleted, so it is still `
+        + `there to be repaired and moved back, and ${existsSync(join(this.builtinDir, id))
+          ? 'the shipped package answers for that id again'
+          : 'nothing answers for that id now, so a document holding its values parks them'}`);
+      return true;
+    }
     console.warn(`effect ${id} was installed by an earlier build of this program and this one refuses it: `
-      + `${refusal} - the package has been renamed to ${basename(aside)} rather than deleted, so it is still `
-      + `there to be repaired and moved back, and ${existsSync(join(this.builtinDir, id))
-        ? 'the shipped package answers for that id again'
-        : 'nothing answers for that id now, so a document holding its values parks them'}`);
+      + `${refusal} - and it could not be renamed out of the way either: ${lastErr?.message ?? 'every name this store tried was taken'}. `
+      + 'It is still where it was and this server is still serving it, because a build that comes up with a package '
+      + 'it has said it cannot use is one somebody can read this line on. Move the directory by hand');
+    return false;
   }
 
   /**

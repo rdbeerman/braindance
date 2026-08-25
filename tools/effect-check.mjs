@@ -108,6 +108,10 @@
 //   node tools/effect-check.mjs --mutate adopt-outside-the-transaction    # must FAIL
 //   node tools/effect-check.mjs --mutate every-failure-is-final          # must FAIL
 //   node tools/effect-check.mjs --mutate boot-adopts-a-stale-fork        # must FAIL
+//   node tools/effect-check.mjs --mutate the-gate-doors-a-package-against-its-neighbours # must FAIL
+//   node tools/effect-check.mjs --mutate the-gate-runs-before-the-bind   # must FAIL
+//   node tools/effect-check.mjs --mutate the-aside-keeps-the-whole-name  # must FAIL
+//   node tools/effect-check.mjs --mutate a-refused-body-is-a-failed-read # must FAIL
 //
 // It spawns its own server on a port nothing else in the suite uses and needs none
 // running. A GPU browser, a free port 8281, no capture, no sensor and no ffmpeg.
@@ -547,6 +551,86 @@ const MUTATIONS = {
   'boot-adopts-a-stale-fork': {
     file: 'server/effect-store.js',
     edits: [['    this.refuseIncompatiblePackages();', '    void this.refuseIncompatiblePackages;']],
+  },
+
+  /**
+   * `the-gate-doors-a-package-against-its-neighbours` puts the boot gate's second pass back
+   * to asking the door about each candidate with *every* other package beside it, checked or
+   * not, which is how it shipped. The door assembles `[...beside, candidate]` and reports the
+   * assembler's message under the candidate's name, so one fork this build cannot assemble
+   * made every fork on the machine come back "does not assemble" - and which of them was
+   * blamed depended on the lexical order the walk happened to reach them in.
+   *
+   * What must redden is section 12's must-accept pair: the healthy fork of `rain` staged
+   * beside the broken `thermal` is quarantined for its neighbour's joint, and the row
+   * counting what is left standing sees an empty user root. Everything else in that section
+   * stays green, because a store that quarantines too much still hands `thermal` back to the
+   * builtin and still boots a page.
+   */
+  'the-gate-doors-a-package-against-its-neighbours': {
+    file: 'server/effect-store.js',
+    edits: [[
+      '        const standing = new Map([...builtins, ...survivors]);\n'
+      + '        standing.delete(candidate.id);\n'
+      + '        const beside = [...standing.values()].sort((a, b) => (a.id < b.id ? -1 : 1));',
+      '        const beside = this.loaded(candidate.id);',
+    ]],
+  },
+
+  /**
+   * `the-gate-runs-before-the-bind` puts the recovery and the boot gate back at construction,
+   * which is where they were: every process that got as far as building a store ran them,
+   * including one about to die on `EADDRINUSE` over a root another server was already
+   * serving. The call in `listen` is left standing, so the winner still gates exactly once
+   * and every other section is untouched - what the edit adds is the loser doing it too.
+   *
+   * What must redden is the last row of section 13 and only that: the second server renames
+   * the fork in its own root before the bind fails, so a process that never answered a
+   * request has quarantined a package it never validated.
+   */
+  'the-gate-runs-before-the-bind': {
+    file: 'server/effect-store.js',
+    edits: [['    this.generation = 0;\n  }', '    this.generation = 0;\n    this.claimUserRoot();\n  }']],
+  },
+
+  /**
+   * `the-aside-keeps-the-whole-name` stops truncating the stem an aside is built from, which
+   * is how it shipped - at a time when nothing bounded how long an id could be. `NAME_MAX` is
+   * 255 bytes and the suffix is about thirty characters, so a directory installed by that
+   * build under a two-hundred-character name cannot be renamed at all: `ENAMETOOLONG` out of
+   * `renameSync`, out of the gate written to keep one broken package from taking the server
+   * down.
+   *
+   * What must redden is the row in section 12 about the over-long directory. The server still
+   * comes up on this build rather than dying, because the rename is caught and the package is
+   * left where it is - which is the other half of the same repair and is why the row reads
+   * both ends: the name it had is gone, and what it became is short enough to exist.
+   */
+  'the-aside-keeps-the-whole-name': {
+    file: 'server/effect-store.js',
+    edits: [['    const stem = id.slice(0, MAX_EFFECT_ID);', '    const stem = id;']],
+  },
+
+  /**
+   * `a-refused-body-is-a-failed-read` puts back the frame that erased the mark on its way out
+   * of the fetch. Every deterministic shape refusal a read can make - a listing that is not a
+   * list, a manifest that is not an object, a `chunks` that arrived as a string - is minted
+   * as a refusal at its throw site and then re-framed here for the chip, and a plain
+   * `new Error` at that frame threw the classification away. The set the store is serving is
+   * refetched whole every six seconds forever, which is the loop the block exists to stop.
+   *
+   * Aimed at the frame rather than at a throw site, because the frame is where every one of
+   * them passes: an edit to one throw would leave the other two proving nothing. Section 14
+   * is what must redden, and its second row is the one that matters - the first says the page
+   * refused the package at all, which both builds do.
+   */
+  'a-refused-body-is-a-failed-read': {
+    file: 'web/main.js',
+    edits: [[
+      '    const framed = `the installed effects changed and this page could not read them: ${err.message}`;\n'
+      + '    throw err.effectRefusal ? effectRefusal(framed) : new Error(framed);',
+      '    throw new Error(`the installed effects changed and this page could not read them: ${err.message}`);',
+    ]],
   },
 
   /**
@@ -2836,10 +2920,78 @@ try {
   writeFileSync(join(staleFork, 'manifest.json'), `${JSON.stringify(doctored, null, 2)}\n`);
   writeFileSync(join(staleFork, 'heat.frag.glsl'), readFileSync(join(BUILTIN_ROOT, 'thermal/heat.frag.glsl'), 'utf8'));
   writeFileSync(join(staleFork, 'witness.marker'), 'the author\'s own copy of a package this build cannot use\n');
-  ok('a fork this build can no longer assemble is staged where a fork installed by an earlier build would be',
-    existsSync(join(staleFork, 'manifest.json')), `user root holds ${userRootHolds().join(', ')}`);
+
+  // **A second fork beside it with nothing wrong with it, which is the control this section
+  // did not have.** Every row below reads a store that has quarantined something, and a gate
+  // that renamed *every* user package aside would satisfy all of them: thermal would answer
+  // from the builtin, the page would boot, the aside would be there. What says the gate is a
+  // gate rather than a wall is a fork it must keep - and keeping it is exactly what the gate
+  // failed to do, because the door assembles `[...beside, candidate]` and reports the
+  // assembler's message under the candidate's name. Doored beside an unvalidated thermal,
+  // this healthy package came back "rain does not assemble" and both were set aside.
+  //
+  // `rain` rather than any other, because it sorts before `thermal`: a walk in lexical order
+  // reaches the healthy one first, with the broken one still in `beside`, which is the
+  // arrangement that made the blame land on the wrong package. It is a verbatim fork at a new
+  // version - every parameter kept, every chunk copied byte for byte - so nothing about it
+  // can be refused except by contamination from its neighbour.
+  const healthy = JSON.parse(readFileSync(join(BUILTIN_ROOT, 'rain/manifest.json'), 'utf8'));
+  healthy.version = '2.0.0';
+  const healthyFork = join(USER_ROOT, 'rain');
+  rmSync(healthyFork, { recursive: true, force: true });
+  mkdirSync(healthyFork, { recursive: true });
+  writeFileSync(join(healthyFork, 'manifest.json'), `${JSON.stringify(healthy, null, 2)}\n`);
+  for (const c of healthy.chunks ?? []) {
+    writeFileSync(join(healthyFork, c.file), readFileSync(join(BUILTIN_ROOT, 'rain', c.file), 'utf8'));
+  }
+
+  // **And a directory with a name longer than an id may be, which used to stop the server
+  // booting rather than be refused by it.** `NAME_MAX` is 255 bytes and every aside this
+  // program makes is the id plus about thirty characters, so a package installed by a build
+  // whose id rule had no length in it could not be renamed at all: `ENAMETOOLONG` out of
+  // `renameSync`, out of the gate, out of the process. A gate written to stop one broken
+  // package taking the program down cannot be the thing that does it.
+  // **240 characters, sized against `NAME_MAX` rather than picked for looking long.** The
+  // first attempt at this fixture was 100, and it proved nothing: the aside is the name plus
+  // about thirty characters, so 100 renames to 128 and lands well inside the 255 a filesystem
+  // takes - the mutation that removes the truncation renamed it perfectly well and the row
+  // stayed green on a build with the defect in it. A fixture has to sit *outside* the bound it
+  // is about and inside every other one: 240 is a directory a filesystem will make and an
+  // aside it will not, and truncating brings it back to 94.
+  const overlong = 'z'.repeat(240);
+  const overlongDir = join(USER_ROOT, overlong);
+  rmSync(overlongDir, { recursive: true, force: true });
+  mkdirSync(overlongDir, { recursive: true });
+  writeFileSync(join(overlongDir, 'manifest.json'), `${JSON.stringify({
+    format: 1, id: overlong, version: '1.0.0', title: 'A name from a build with no bound on one', params: {},
+  }, null, 2)}\n`);
+
+  ok('a fork this build can no longer assemble is staged where a fork installed by an earlier build would be, beside a healthy one and a name too long to rename',
+    existsSync(join(staleFork, 'manifest.json')) && existsSync(join(healthyFork, 'manifest.json'))
+      && existsSync(join(overlongDir, 'manifest.json')),
+    `user root holds ${userRootHolds().map((n) => (n.length > 20 ? `${n.slice(0, 12)}…(${n.length})` : n)).join(', ')}`);
 
   await start();
+
+  // **The must-accept row, and it is the one every other row in this section is silent
+  // about.** A gate that quarantined the lot passes all of them.
+  const servedRain = await getJson('/effects/rain');
+  ok('the healthy fork beside it is still served, so the gate refuses a package rather than everything standing next to one',
+    servedRain.status === 200 && servedRain.body.builtin === false
+      && servedRain.body.manifest?.version === '2.0.0',
+    `answered ${servedRain.status}, builtin=${servedRain.body.builtin}, `
+    + `version ${JSON.stringify(servedRain.body.manifest?.version)}`);
+  ok('and it is the only user package left standing, so exactly one of the three staged directories is serving',
+    userRootHolds().filter((n) => !n.includes('.')).join(',') === 'rain',
+    `user root holds ${userRootHolds().map((n) => (n.length > 20 ? `${n.slice(0, 12)}…(${n.length})` : n)).join(', ')}`);
+
+  // The over-long name, which can only be moved by truncating it. Asserted by both ends: it
+  // is gone from the name it had, and what it became is short enough to exist.
+  const overlongAsides = userRootHolds().filter((n) => n.startsWith('z') && n.endsWith('.incompatible'));
+  ok('the directory whose name is longer than an id is set aside under a truncated one, rather than throwing out of the gate and taking the boot with it',
+    !existsSync(overlongDir) && overlongAsides.length === 1 && overlongAsides[0].length < 255,
+    `${existsSync(overlongDir) ? `it still holds its own ${overlong.length}-character name` : 'its own name is gone'}, `
+    + `and the user root holds ${overlongAsides.length} aside for it${overlongAsides[0] ? ` at ${overlongAsides[0].length} characters` : ''}`);
 
   const servedThermal = await getJson('/effects/thermal');
   ok('the next start hands the id back to the package this build ships, rather than serving a fork it cannot assemble',
@@ -2892,6 +3044,162 @@ try {
     booted === null
       ? `no __kinect published: ${bootErrors[0]?.slice(0, 130) ?? 'nothing arrived on the page error channel'}`
       : `__kinect published, thermal.amount ${booted ? 'in' : 'missing from'} the registry`);
+
+  // ============ 13. the process that is not going to serve does not quarantine anything
+  //
+  // **The gate renames directories, and it used to do it at construction - which is before
+  // the port is held.** Every process that got as far as building a store ran it, including
+  // one about to die on `EADDRINUSE` because a server was already serving that same root. So
+  // starting a second server by hand on a machine that already had one renamed the live
+  // one's packages out from under it, and it could rename a revision installed since the
+  // loser started reading: a fresh, good install quarantined by a process that never
+  // validated it and never answered a request.
+  //
+  // **The port is the lock, because the deployment already has one.** Two servers on one
+  // effects root is two servers on one port, and the kernel settles that - so the gate is
+  // called from inside `listen`'s callback and the loser exits having touched nothing. What
+  // makes that sufficient is that everything the gate does is synchronous `fs`: the socket
+  // is accepting by then, but a request handler is a callback on a later turn, so no route
+  // is answered out of a store that has not been gated.
+  //
+  // **Its own user root, and that is the whole fixture.** The loser has to be pointed at a
+  // directory holding something the gate would quarantine, and the root the winner is
+  // serving has already been gated - so a second server aimed there would find nothing to
+  // do and the row would pass on every build there has ever been.
+  console.log('\n[effect] 13. a second server on a held port renames nothing');
+
+  const loserRoot = join(WORK, 'effects-loser');
+  rmSync(loserRoot, { recursive: true, force: true });
+  const loserFork = join(loserRoot, 'thermal');
+  mkdirSync(loserFork, { recursive: true });
+  writeFileSync(join(loserFork, 'manifest.json'), `${JSON.stringify(doctored, null, 2)}\n`);
+  writeFileSync(join(loserFork, 'heat.frag.glsl'), readFileSync(join(BUILTIN_ROOT, 'thermal/heat.frag.glsl'), 'utf8'));
+  writeFileSync(join(loserFork, 'witness.marker'), 'the copy a process that never served must not touch\n');
+  ok('a second effects root is staged holding a fork this build refuses, and a server is already listening on the port',
+    existsSync(join(loserFork, 'witness.marker')) && readdirSync(loserRoot).join(',') === 'thermal',
+    `the loser's root holds ${readdirSync(loserRoot).join(', ')}`);
+
+  const loser = spawn(process.execPath, [
+    join(WORK, 'server/index.js'), '--port', String(PORT),
+    '--effects', loserRoot, '--builtin-effects', BUILTIN_ROOT,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const loserOut = [];
+  loser.stdout.on('data', (c) => loserOut.push(c.toString()));
+  loser.stderr.on('data', (c) => loserOut.push(c.toString()));
+  // Killed rather than waited out if it somehow serves, so a build where the bind succeeded
+  // is a red row and a named one rather than a run that hangs here for the rest of the day.
+  let loserDeadline = null;
+  const loserCode = await Promise.race([
+    new Promise((done) => { loser.on('close', done); }),
+    new Promise((done) => { loserDeadline = setTimeout(() => { loser.kill('SIGKILL'); done('never exited'); }, 20000); }),
+  ]);
+  clearTimeout(loserDeadline);
+  const loserSaid = loserOut.join('');
+  // The fixture's own delivery: it lost the bind rather than exiting for some other reason,
+  // because a process that died on a bad flag would leave the directory alone too.
+  ok('the second server loses the port and exits without serving, which is the only reason it must not have gated anything',
+    loserCode !== 0 && loserCode !== 'never exited' && /EADDRINUSE/.test(loserSaid),
+    `exited ${loserCode}, and its output ${/EADDRINUSE/.test(loserSaid) ? 'names EADDRINUSE' : `does not name EADDRINUSE: ${loserSaid.split('\n').filter(Boolean).slice(-1)[0]?.slice(0, 110) ?? '(nothing)'}`}`);
+  // **The row the fixture exists for.** A gate that ran at construction has already renamed
+  // this by the time the bind fails, so the directory is gone from its own name and an
+  // `.incompatible` is sitting beside it - written by a process that never answered a
+  // request and never validated what it was renaming.
+  ok('and the fork in its root is exactly where it was, because a process that never held the port never gated anything',
+    existsSync(join(loserFork, 'witness.marker')) && readdirSync(loserRoot).join(',') === 'thermal',
+    `the loser's root holds ${readdirSync(loserRoot).join(', ') || 'nothing'}`);
+
+  // ============ 14. a package this store is serving that this page cannot read
+  //
+  // **A refusal and a read error are told apart by whether asking again could answer
+  // differently, and that line does not run along "the fetch worked".** A 200 carrying a
+  // manifest whose `chunks` is a string is served content: the store answers exactly the
+  // same thing on the next tick and the tick after it, so a page that treats it as a read
+  // that did not work refetches every package every six seconds for the life of the page,
+  // which is the loop the refused-signature block exists to stop.
+  //
+  // **Written straight into the user root while the server is up, and both halves of that
+  // are the fixture.** The install door refuses this manifest, so it cannot arrive through a
+  // route; the boot gate refuses it too, so it cannot survive a restart. What is left is the
+  // one way a store comes to be serving it - something wrote the directory - and that is
+  // also how a page meets a package written by a build that read the field differently.
+  console.log('\n[effect] 14. a package the store serves and this page refuses, asked once');
+
+  const shapeless = join(USER_ROOT, 'shapeless');
+  rmSync(shapeless, { recursive: true, force: true });
+  mkdirSync(shapeless, { recursive: true });
+  writeFileSync(join(shapeless, 'manifest.json'), `${JSON.stringify({
+    format: 1,
+    id: 'shapeless',
+    version: '1.0.0',
+    title: 'Shapeless',
+    params: {
+      amount: {
+        def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', label: 'shapeless',
+        panel: { group: 'style', tab: 'look' }, bind: { on: 'points', uniform: 'thermal' }, role: 'master',
+      },
+    },
+    chunks: 'this is not a list of chunks',
+  }, null, 2)}\n`);
+  const listedShapeless = await getJson('/effects');
+  const shapelessListed = (listedShapeless.body.effects ?? []).some((e) => e.id === 'shapeless');
+  // **Every driver call here is guarded, and the guard is the repair `docs/instruments.md`
+  // prescribes for exactly this position.** A mutation elsewhere in this tool can leave the
+  // page with no `__kinect` at all - `temporaries-are-visible` puts a half-written install in
+  // the listing, so the page cannot assemble and never publishes - and an unguarded
+  // `evaluate` on that page throws out of the section and ends the run, which turns three
+  // rows that would have gone red into three rows nobody measured. Caught, the rows below
+  // read a page that answered nothing and redden, which is the true consequence of a build
+  // whose page does not come up and is a cascade rather than a truncation.
+  const poll = () => bootPage.evaluate(() => globalThis.__kinect.effects.pollNow()).catch(() => {});
+  await poll();
+  // Waited for by the state rather than by a pause: the poll's own interval shares this
+  // control with the driver, so a `pollNow` the reentrancy guard turned away leaves the row
+  // below reading a page that has not tried yet. The note is what the failed rebuild writes.
+  const shapelessNote = await bootPage.waitForFunction(
+    "/shapeless/.test(document.getElementById('tNote')?.textContent ?? '')", null, { timeout: 20000 },
+  ).then(() => bootPage.evaluate(() => document.getElementById('tNote')?.textContent ?? '')).catch(() => '');
+  ok('the store is serving a package whose manifest this page refuses, and the page says so rather than adopting it',
+    shapelessListed && /shapeless/.test(shapelessNote),
+    `the listing ${shapelessListed ? 'carries' : 'does not carry'} shapeless, and the note reads "${shapelessNote.trim().slice(0, 90)}"`);
+
+  // **Counted in the driver rather than read off the page**, for the reason section 9's
+  // block is: what separates "no rebuild" from "no poll" is that the listing is still being
+  // fetched while the package reads stay at zero. A row whose subject is an absence needs
+  // something present in the same breath, or a page that had stopped polling - or crashed -
+  // is the strongest evidence for it.
+  let shapelessListReads = 0;
+  let shapelessPackageReads = 0;
+  await bootPage.route('**/effects', async (route) => { shapelessListReads += 1; await route.continue(); });
+  await bootPage.route('**/effects/shapeless', async (route) => { shapelessPackageReads += 1; await route.continue(); });
+  await poll();
+  for (let waited = 0; waited < 20000 && shapelessListReads < 2; waited += 100) await wait(100);
+  await poll();
+  await wait(500);
+  await bootPage.unroute('**/effects');
+  await bootPage.unroute('**/effects/shapeless');
+  ok('and it is not fetched again on every tick, because a body this build refuses is served content rather than a read that did not work',
+    shapelessListReads >= 2 && shapelessPackageReads === 0,
+    `${shapelessListReads} listings read and ${shapelessPackageReads} package reads in the window`);
+
+  // **The other direction, and it has to be a set the page has not seen rather than the one
+  // it had.** Taking the package away puts the store back at the bytes and the generation it
+  // was at when this page booted, so a row asking whether the page "recovered" would be
+  // asking whether it still holds what it never let go of - true on a page that had crashed
+  // in the same breath. So the block is lifted by installing something instead: a revision
+  // this page has not refused has to be adopted, which needs the poll running, the fetch
+  // working and the rebuild landing.
+  rmSync(shapeless, { recursive: true, force: true });
+  const afterShapeless = await put('probe', probePackage());
+  const adoptedAfter = await poll()
+    .then(() => bootPage.waitForFunction(
+      "globalThis.__kinect.params.names().includes('probe.amount')", null, { timeout: 20000 },
+    ))
+    .then(() => true).catch(() => false);
+  ok('and a revision this page has not refused is still adopted afterwards, so the block is keyed to the set rather than latched on the page',
+    afterShapeless.status === 200 && adoptedAfter === true,
+    `${afterShapeless.status}: ${afterShapeless.body.error ?? 'installed'}, and the page `
+    + `${adoptedAfter ? 'adopted it' : 'never adopted it'}`);
+
   await browser.close();
   browser = null;
 } catch (err) {

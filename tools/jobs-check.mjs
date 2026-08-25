@@ -281,6 +281,48 @@ const MUTATIONS = {
     + '  };\n'
     + '  const readEffectsNow = async () => {\n',
   ]] },
+  // **The preflight read asked once, which is how it shipped.** It runs after the claim and
+  // before the first heartbeat, so a connection reset there failed a claimed job through
+  // `/finish` into a terminal state - and a worker and its server are two processes with a
+  // restart, a proxy or a moment of `EHOSTUNREACH` between them. The budget is edited rather
+  // than the loop, because one attempt *is* the shipped shape and a loop deleted by hand
+  // would also delete the timeout and the checks, which the mutation below is about.
+  //
+  // What must redden is the blip arm's take-resolution row and its skew line - the job comes
+  // back naming a read instead of getting past the preflight - and the outage arm's row
+  // asserting the worker asked more than once.
+  'preflight-asks-once': { file: 'tools/render-worker.mjs', edits: [[
+    '  const EFFECT_READ_TRIES = 4;', '  const EFFECT_READ_TRIES = 1;',
+  ]] },
+  // **A read that did not work read as a store with nothing in it, which is how it shipped.**
+  // `.json()` parses an error body perfectly well and `?? []` takes a missing `effects` key
+  // as an empty listing, so a 500 - or a 200 from a proxy reporting its own failure, which no
+  // status check can see - came back as the sentence about a worker that has no `rain`, from
+  // a machine that has rain.
+  //
+  // What must redden is the pair of rows in each arm that read *which sentence* the job came
+  // back under. The outcome is `failed` on both builds, which is what makes those rows the
+  // discriminating ones rather than the ones about state.
+  'preflight-reads-a-failure-as-an-empty-store': { file: 'tools/render-worker.mjs', edits: [[
+    '        const res = await fetch(`${URL_}/effects`, { signal: AbortSignal.timeout(5000) });\n'
+    + '        if (!res.ok) throw new Error(`it answered ${res.status}`);\n'
+    + '        const body = await res.json();\n'
+    + '        if (!body || !Array.isArray(body.effects)) {\n'
+    + "          throw new Error('it answered a body that is not a list of installed packages');\n"
+    + '        }\n'
+    + '        for (const e of body.effects) {\n'
+    + '          if (!e || typeof e.id !== \'string\') throw new Error(`it listed the entry ${JSON.stringify(e)}, which names no id`);\n'
+    + '        }\n'
+    + '        return {\n'
+    + '          installed: new Set(body.effects.map((e) => e.id)),\n'
+    + '          versions: new Map(body.effects.map((e) => [e.id, e.version])),\n'
+    + '        };',
+    '        const listing = (await (await fetch(`${URL_}/effects`)).json()).effects ?? [];\n'
+    + '        return {\n'
+    + '          installed: new Set(listing.map((e) => e.id)),\n'
+    + '          versions: new Map(listing.map((e) => [e.id, e.version])),\n'
+    + '        };',
+  ]] },
   'heartbeat-stops-on-first-error': { file: 'tools/render-worker.mjs', edits: [[
     '      const beatOnce = () => { heartbeat().catch((err) => missedBeat(err.message)); };',
     '      const beatOnce = () => { heartbeat().catch((err) => { stopBeating(); console.error(`[worker] ${job.id} heartbeat: ${err.message}`); }); };',
@@ -537,16 +579,23 @@ const enqueue = (over = {}) => post('/jobs', {
 const refusedBecause = (res, needle) => res.status === 400 && String(res.body.error ?? '').includes(needle);
 
 /**
- * A forwarding proxy that destroys the socket on the first heartbeat and answers
- * nothing, which is the one failure the worker's beat used to turn into permanent
- * silence.
+ * A forwarding proxy that interferes with exactly one kind of request on its way through,
+ * and carries everything else verbatim.
  *
- * **`ECONNRESET` at the worker's `fetch` is what this is for, and nothing cheaper
- * produces it.** A 500 from the server resolves with a status rather than throwing, and
- * a 409 is handled inside the beat, so a transport-level failure is the only thing that
- * reaches the rejection path - and reaching it is the whole claim. Dropping the socket
- * without a response is exactly a reused keep-alive connection the far end had already
- * closed, or a moment of `EHOSTUNREACH` on a worker pointed at a remote `--url`.
+ * **One proxy with the interference handed in, rather than one proxy per failure.** Two
+ * arms need a broken link between a worker and its server - the heartbeat that gets
+ * dropped, and the `/effects` read the preflight makes - and the forwarding half of this
+ * is thirty lines of `Host` headers, raw sockets and WebSocket upgrades that would be
+ * copied wrong the second time. What differs between them is a predicate and a response,
+ * so that is the argument: `interfere(req, res, state)` handles the request and answers
+ * true, or leaves it alone and answers false.
+ *
+ * **`ECONNRESET` at the worker's `fetch` is what the heartbeat policy is for, and nothing
+ * cheaper produces it.** A 500 from the server resolves with a status rather than
+ * throwing, and a 409 is handled inside the beat, so a transport-level failure is the only
+ * thing that reaches the rejection path - and reaching it is the whole claim. Dropping the
+ * socket without a response is exactly a reused keep-alive connection the far end had
+ * already closed, or a moment of `EHOSTUNREACH` on a worker pointed at a remote `--url`.
  *
  * **It carries the whole render rather than the queue calls, because the worker has one
  * `--url`.** It resolves the take over it, loads `/edit` over it, and the page opens the
@@ -559,15 +608,11 @@ const refusedBecause = (res, needle) => res.status === 400 && String(res.body.er
  * `Origin` names this proxy and `originAllowed` compares the two, so rewriting `Host`
  * to the server's would turn every mutating request the page makes into a 403.
  */
-async function startDroppingProxy(listenPort, targetPort) {
-  const state = { dropped: 0 };
+async function startInterferingProxy(listenPort, targetPort, interfere) {
+  const state = { dropped: 0, failed: 0, served: 0 };
   const target = { host: '127.0.0.1', port: targetPort };
   const proxy = createServer((req, res) => {
-    if (state.dropped === 0 && req.method === 'POST' && /^\/jobs\/[^/]+\/heartbeat$/.test(req.url ?? '')) {
-      state.dropped++;
-      req.socket.destroy();
-      return;
-    }
+    if (interfere(req, res, state)) return;
     const up = request({ ...target, path: req.url, method: req.method, headers: req.headers }, (upRes) => {
       res.writeHead(upRes.statusCode ?? 502, upRes.headers);
       upRes.pipe(res);
@@ -600,9 +645,50 @@ async function startDroppingProxy(listenPort, targetPort) {
   return {
     state,
     url: `http://localhost:${listenPort}`,
-    close: () => { proxy.closeAllConnections?.(); proxy.close(); },
+    close: () => new Promise((done) => {
+      proxy.closeAllConnections?.();
+      proxy.close(() => done());
+    }),
   };
 }
+
+/** The first heartbeat dropped on the floor with no answer at all. */
+const dropsOneHeartbeat = (req, res, state) => {
+  if (state.dropped > 0 || req.method !== 'POST' || !/^\/jobs\/[^/]+\/heartbeat$/.test(req.url ?? '')) return false;
+  state.dropped++;
+  req.socket.destroy();
+  return true;
+};
+
+/**
+ * The worker's own `/effects` reads answered badly, and the browser's left alone.
+ *
+ * **`Referer` is what tells the two apart, and something has to.** The worker opens a page
+ * on the same `--url` and that page polls `/effects` every six seconds through this same
+ * proxy - so a one-shot failure planted on the address is as likely to be spent on a tick
+ * of the page's poll as on the read it was staged for, which is the shape
+ * `docs/instruments.md` files under an interception sharing a route. A `fetch` from node
+ * sends no `Referer` and a request the browser makes from a loaded document always does,
+ * so the discrimination is a property of who is asking rather than a count of how many
+ * have asked.
+ *
+ * `answer` decides what a caught read gets: `null` is a 500 carrying the error body a
+ * server sends, and a body is a 200 carrying it - the misconfigured proxy that reports its
+ * own failure with a success status, which is the one shape a status check cannot see.
+ * `times` is how many of them are caught, so an arm can stage a blip or an outage.
+ */
+const failsWorkerEffectReads = ({ times = 1, answer = null } = {}) => (req, res, state) => {
+  if (req.method !== 'GET' || !/^\/effects\/?$/.test(req.url ?? '')) return false;
+  if (req.headers.referer !== undefined) return false;
+  // Counted before the budget is spent, so the detail on a row can say how many of the
+  // worker's reads this policy saw as well as how many it answered badly.
+  state.served++;
+  if (state.failed >= times) return false;
+  state.failed++;
+  res.writeHead(answer === null ? 500 : 200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(answer ?? { error: 'the store could not be read' }));
+  return true;
+};
 
 try {
   const serverLog = await startServer();
@@ -1190,7 +1276,7 @@ try {
     // interval being shortened in the worker for the benefit of the instrument. The
     // failure budget is a count of consecutive failures, so a short interval spends the
     // same seven and just does it sooner.
-    const proxy = await startDroppingProxy(PROXY_PORT, PORT);
+    const proxy = await startInterferingProxy(PROXY_PORT, PORT, dropsOneHeartbeat);
     proxies.push(proxy);
     const beaten = await enqueue({ capture: take.hash, output: 'jobs-check-heartbeat', width: 320, height: 180 });
     const beatWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
@@ -1216,6 +1302,10 @@ try {
       'and it went on saying so afterwards - a beat that stops for good on one dropped connection leaves a live render looking dead to the queue',
       `heartbeat ${beatRecord.heartbeat ?? 'null'} against claimed ${beatRecord.claimed ?? 'null'}`
       + `, ${((beatRecord.heartbeat ?? 0) - (beatRecord.claimed ?? 0)) / 1000}s apart`);
+    // Closed here rather than in the `finally`, because the two arms further down want this
+    // same port for a proxy with a different policy on it - and a listener nobody closed is
+    // an `EADDRINUSE` that reads as a machine with a stranger on the port.
+    await proxy.close();
 
     section('the store a worker answers from is read per job, not per worker');
     // **A worker takes up to sixteen jobs and used to answer for all of them out of one
@@ -1323,6 +1413,99 @@ try {
     check(preflightCode !== 'timed out',
       '  and the worker took both jobs and exited, so both readings above are its whole account of the run',
       `exit ${preflightCode}, ${printed.split('\n').filter((l) => l.includes('renders with')).length} skew lines printed`);
+
+    section('a queue call that did not work is not a store with nothing in it');
+    // **The preflight asks the server what is installed, and every way that question can
+    // fail used to be answered as "nothing is".** `.json()` on a 500 parses the error body
+    // perfectly well, `?? []` read the missing `effects` key as an empty listing, and the
+    // gate then refused the job with the sentence about a worker that has no `rain` - naming
+    // a package the machine has and sending whoever reads the queue to install something
+    // that is already there. And it ran once: one connection reset between a worker and its
+    // own server, in the seconds after a claim and before the first heartbeat, failed a
+    // claimed job through `/finish` into a terminal state.
+    //
+    // **Two fixtures, because there are two rules and one of them is invisible to the
+    // other.** A 500 answered once is a blip a retry clears, and the reading is that the job
+    // gets past the preflight at all. A 200 carrying an error body is the shape a status
+    // check cannot see, and the reading is which sentence the failure comes back under.
+    //
+    // Neither job renders, on the arm above's reasoning: the preflight and the skew line
+    // both come before the take is resolved, so a job naming a capture no take here hashes
+    // reaches them and fails one step later. The take sentence is what says the preflight
+    // was passed.
+    for (const job of (await get('/jobs')).jobs ?? []) {
+      if (job.state === 'queued') rmSync(join(jobsDir, `${job.id}.json`), { force: true });
+    }
+    // A worker under a proxy that answers one of its `/effects` reads with a 500 and leaves
+    // every read the browser makes alone - the page it opens polls the same address every
+    // six seconds through the same proxy, so a plant that could not tell them apart would be
+    // spent on a tick of that poll as readily as on the read it was staged for.
+    const rainNow = ((await get('/effects')).effects ?? []).find((e) => e.id === 'rain');
+    check(typeof rainNow?.version === 'string',
+      'rain is installed on this worker at a version this arm reads off the store rather than assuming, since the arm above forks it',
+      `rain ${rainNow ? `is at ${rainNow.version}` : 'is not installed'}`);
+    const blipProxy = await startInterferingProxy(PROXY_PORT, PORT, failsWorkerEffectReads({ times: 1 }));
+    proxies.push(blipProxy);
+    const blipped = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-effects-blip' });
+    const blipWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', blipProxy.url, '--name', 'jobs-check-effects-blip', '--drain', '--max', '1'],
+    { stdio: ['ignore', 'pipe', 'pipe'] });
+    const blipLog = [];
+    blipWorker.stdout.on('data', (c) => blipLog.push(c.toString()));
+    blipWorker.stderr.on('data', (c) => blipLog.push(c.toString()));
+    await new Promise((done) => { blipWorker.on('close', done); });
+    const blipRecord = await get(`/jobs/${blipped.body.id}`);
+    const blipPrinted = blipLog.join('');
+    const blipError = String(blipRecord.error ?? '');
+    await blipProxy.close();
+    // The fixture's own delivery, before anything is read off it: exactly one read was
+    // answered 500, and it was one the worker made rather than one its page made.
+    check(blipProxy.state.failed === 1,
+      'exactly one referer-less GET /effects was answered 500, so what follows is about the read the worker makes rather than about a tick of the page\'s poll',
+      `${blipProxy.state.failed} answered 500 of ${blipProxy.state.served} referer-less reads seen`);
+    check(/no take on this worker hashes/.test(blipError),
+      'and the job still reaches the take resolution, so one failed read of the store does not fail a job the worker had already claimed',
+      `state ${blipRecord.state ?? 'never settled'}${blipError ? `, ${blipError.slice(0, 90)}` : ''}`);
+    // **The discriminating row, and it is about which sentence rather than about which
+    // outcome.** A build that refused here would also come back `failed`, so the outcome
+    // says nothing; what says it is that the words the queue records send somebody to the
+    // right machine. A read that did not work is not a package this worker has not got, and
+    // the two answers are two different jobs of work for whoever reads them.
+    check(!/this worker has no/.test(blipError) && !/this worker has no/.test(blipPrinted),
+      'and it is never told the worker has no rain, which is the sentence a failed queue call used to come back as',
+      blipError ? blipError.slice(0, 110) : 'no error recorded at all');
+    check(new RegExp(`${blipped.body.id} renders with rain ${rainNow?.version?.replace(/\./g, '\\.')} where the job asks for 9\\.9\\.9`).test(blipPrinted),
+      '  and the skew line quotes the version this machine holds, so the retry read a real listing rather than being waved through with an empty one',
+      (blipPrinted.split('\n').find((l) => l.includes('renders with')) ?? 'no skew line printed at all').slice(0, 130));
+
+    // **The second fixture, and the one a status check cannot see.** A proxy that reports
+    // its own failure with a 200 answers `res.ok` true and `.json()` parses its error body,
+    // so the only thing between that and "nothing is installed" is holding the body to the
+    // shape a listing has. Every attempt is caught here rather than one, because the claim
+    // is about the sentence a genuine outage comes back under.
+    const outageProxy = await startInterferingProxy(PROXY_PORT, PORT,
+      failsWorkerEffectReads({ times: 99, answer: { error: 'this proxy could not reach the store' } }));
+    proxies.push(outageProxy);
+    const outaged = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-effects-outage' });
+    const outageWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', outageProxy.url, '--name', 'jobs-check-effects-outage', '--drain', '--max', '1'],
+    { stdio: ['ignore', 'pipe', 'pipe'] });
+    const outageLog = [];
+    outageWorker.stdout.on('data', (c) => outageLog.push(c.toString()));
+    outageWorker.stderr.on('data', (c) => outageLog.push(c.toString()));
+    await new Promise((done) => { outageWorker.on('close', done); });
+    const outageRecord = await get(`/jobs/${outaged.body.id}`);
+    const outageError = String(outageRecord.error ?? '');
+    await outageProxy.close();
+    check(outageProxy.state.failed >= 2,
+      'every referer-less GET /effects is answered 200 with a body that is not a listing, and the worker asked more than once',
+      `${outageProxy.state.failed} answered that way`);
+    check(/could not read/.test(outageError) && /\/effects/.test(outageError),
+      'so the job fails naming the read it could not make, which is the one fact whoever reads the queue needs',
+      `state ${outageRecord.state ?? 'never settled'}${outageError ? `, ${outageError.slice(0, 110)}` : ''}`);
+    check(!/this worker has no/.test(outageError),
+      '  and not as a worker missing a package, which is what a 200 carrying an error body used to be read as',
+      outageError ? outageError.slice(0, 110) : 'no error recorded at all');
   } else {
     console.log('  ...   render row skipped by --no-render, so nothing here proves a job becomes a file');
   }

@@ -4254,3 +4254,32 @@ survive it*, and the way to check it is to re-run the mutations whose fixture ch
 through the new block, not the ones the new block is about. The repair that would make position
 stop mattering is the one this page already prescribes and this tool has not had: guard every
 driver call a mutation can make throw, at all six sites rather than at the one that failed.
+
+## Every row in a section read a store that had quarantined something
+
+`effect-check` section 12 stages a fork this build cannot assemble, restarts the server, and asks
+five things: the id answers with the shipped package, the fork is renamed aside with its files
+intact, the aside is in no listing and no read, the start said so in the door's own sentence, and
+a page opened on that store boots. Every one of those is satisfied by a gate that renames *every*
+user package aside. A wall passes the whole section, and the section is the only place the gate
+is driven at all.
+
+That is not hypothetical, which is the part worth keeping. The gate handed the door
+`loaded(candidate)` — every other package on disk, validated or not — and the door assembles
+`[...beside, candidate]` and reports the assembler's message under the *candidate's* name. So a
+healthy fork doored beside a broken one came back "does not assemble" and both were quarantined,
+and which of the two was blamed depended on the lexical order the walk reached them in. The
+section could not see it: thermal went back to the builtin either way.
+
+**The population that says a gate is a gate rather than a wall is the one it must keep**, and it
+is the same argument `test/effect-door.test.mjs` opens with about the sixteen shipped packages —
+made there against the door and not made here against the gate, on a surface where the two are
+meant to be one rule asked twice. The row that closes it is a second fork staged beside the
+broken one, verbatim at a new version so nothing about it can be refused except by contamination
+from its neighbour, with an id that sorts *first* so a lexical walk meets it while the broken one
+is still unchecked. It reads that the id still answers from the user root, and a second row reads
+that it is the only user package still standing.
+
+**A refusing gate has this shape wherever it appears**: a section whose rows all read the state
+after a refusal is blind to over-refusal, however many rows it has. Ask what a rule that refused
+everything would fail here, and if the answer is nothing, the missing row is a must-accept.

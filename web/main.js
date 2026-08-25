@@ -200,7 +200,20 @@ const tornRead = (why) => Object.assign(new Error(why), { tornRead: true });
  *
  * So the two are separated where the difference is known, which is at the throw. A read
  * error carries no mark and the next tick tries again; a refusal carries this one and is
- * asked once. **A property and not a subclass, and not a substring of the message**, for
+ * asked once.
+ *
+ * **The line between them is whether asking again could answer differently, and it does not
+ * run along "the fetch worked".** A read is where both kinds live. A dropped socket, a 500,
+ * a server restarting mid-set: the revision on the other side may be perfectly good and only
+ * another attempt can say, so those stay unmarked. A 200 whose body is not a list of
+ * packages, a manifest that is not an object, a `chunks` that arrived as a string - those are
+ * what this store is *serving*, and it serves the same thing on the next tick and the tick
+ * after that. Refetching every package six seconds apart to be told the same thing is what
+ * the block exists to stop, whether the sentence came from the assembler or from a shape rule
+ * one request earlier. So the mark is minted at those throw sites too, and every frame it
+ * passes through carries it rather than deciding it again.
+ *
+ * **A property and not a subclass, and not a substring of the message**, for
  * the reason `tornRead` above is one and one more besides: the sentences these errors carry
  * are written for a person to read on a chip, so a classification that matched words in
  * them would be re-decided by every edit to the prose. Declared up here beside `tornRead`
@@ -225,12 +238,18 @@ async function listEffects() {
   if (!res.ok) throw new Error(`GET /effects answered ${res.status} - the registry cannot assemble without its packages`);
   const body = await res.json();
   if (!body || !Array.isArray(body.effects) || !Number.isFinite(body.generation)) {
-    throw new Error('GET /effects answered a body that is not a list of installed packages and a generation - '
+    // **Marked, because the answer is what is *being served* rather than a fetch that did
+    // not work.** A body of the wrong shape comes back the same way on the next tick and
+    // on every tick after it, so an unmarked throw here is a full refetch every six seconds
+    // for the life of the page against a store that has already given its answer. See
+    // `effectRefusal`, and see `!res.ok` above for the direction that is genuinely worth
+    // asking again.
+    throw effectRefusal('GET /effects answered a body that is not a list of installed packages and a generation - '
       + 'this page reads both of those there, and something else at that address is not a store this build can converge on');
   }
   for (const entry of body.effects) {
     if (!entry || typeof entry.id !== 'string' || typeof entry.rev !== 'string') {
-      throw new Error(`GET /effects listed the entry ${JSON.stringify(entry)} - every entry is an id and the `
+      throw effectRefusal(`GET /effects listed the entry ${JSON.stringify(entry)} - every entry is an id and the `
         + 'revision of the package behind it, and the comparison that decides whether this page is up to date is over exactly those two');
     }
   }
@@ -262,6 +281,30 @@ async function readEffectPackages(effects) {
     if (pkg?.rev !== rev) {
       throw tornRead(`effect ${id} was listed at revision ${rev} and answered for at ${pkg?.rev} - `
         + 'the store changed between the list this read opened with and the package it then asked for');
+    }
+    // **The manifest held to the shape the three lines under it walk, and marked as a
+    // refusal when it is not that shape.** A body with no manifest object reached
+    // `pkg.manifest.chunks` and threw a `TypeError`, and a `chunks` that arrived as a
+    // string or an object threw on `.map` - both of them out of a function the poll reads
+    // the *class* of the failure off, and both unmarked, so a store serving a malformed
+    // package was refetched whole every six seconds forever. It is served content and it is
+    // deterministic, which is the definition the mark carries: see `effectRefusal`. A file
+    // name that is not a string belongs here too, because the next line builds a URL out of
+    // it and `/effects/rain/file/undefined` is a 404 that reads as a transport failure.
+    if (!pkg.manifest || typeof pkg.manifest !== 'object' || Array.isArray(pkg.manifest)) {
+      throw effectRefusal(`GET /effects/${id} answered with no manifest object - a package is a manifest and `
+        + 'its chunks, and this page assembles both shader programs out of what the manifest names');
+    }
+    if (pkg.manifest.chunks !== undefined && !Array.isArray(pkg.manifest.chunks)) {
+      throw effectRefusal(`effect ${id} was served with its chunks as ${JSON.stringify(pkg.manifest.chunks)} - `
+        + 'a manifest\'s chunks are the list this page walks to fetch the text it splices, and a package '
+        + 'that has none of them leaves the key out rather than putting something else there');
+    }
+    for (const c of pkg.manifest.chunks ?? []) {
+      if (!c || typeof c.file !== 'string') {
+        throw effectRefusal(`effect ${id} declares the chunk entry ${JSON.stringify(c)}, which names no file - `
+          + 'the file name is what the next request is built out of, so an entry without one asks this page for a URL nobody wrote');
+      }
     }
     // Named once and fetched once. A manifest may point two joints at one file, and a
     // second request for the same bytes would be a second answer to a question with one.
@@ -3161,8 +3204,16 @@ async function reloadEffects() {
   try {
     fetched = await fetchEffectPackages();
   } catch (err) {
-    // Unmarked, deliberately: the next tick asks again.
-    throw new Error(`the installed effects changed and this page could not read them: ${err.message}`);
+    // **The mark travels through this frame rather than being decided in it.** A read is
+    // where both kinds of failure live: a dropped socket is a fetch that did not work and
+    // the next tick is what finds out, and a body the shape rules refuse is content this
+    // store is serving and will go on serving. The classification is made at each throw
+    // site down there, where the difference is known, so this re-frames the sentence for
+    // the chip and carries whatever the throw decided - a plain `new Error` here erased the
+    // mark on every refusal a read can make, and put a deterministic malformed package back
+    // on the six-second loop the property exists to take it off.
+    const framed = `the installed effects changed and this page could not read them: ${err.message}`;
+    throw err.effectRefusal ? effectRefusal(framed) : new Error(framed);
   }
   try {
     programs = assembleShaders(SPINES, fetched);

@@ -478,10 +478,20 @@ node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the sh
 node tools/effect-check.mjs                               # installing an effect: revisions, the door, the hotload, park and restore
 node tools/effect-check.mjs --mutate temporaries-are-visible # ... the id filter the store lists directories through, widened, so
                                                           #     a crashed install's `<id>.<seq>.tmp` becomes a package `/effects`
-                                                          #     lists and `rootFor` resolves. Reddens exactly the two rows of
-                                                          #     section 10 that are about a half-written package, which is why
-                                                          #     that section is last - staged earlier it would redden every
-                                                          #     section after it with a fault five sections away
+                                                          #     lists and `rootFor` resolves. Reddens **six** rows, measured:
+                                                          #     the two of section 10 that are about a half-written package,
+                                                          #     section 12's page-boot row, and section 14's three, which need
+                                                          #     a page that came up. Section 10 is late for the reason those
+                                                          #     first two are the ones it is *about* - staged earlier it would
+                                                          #     redden every section after it with a fault five sections away.
+                                                          #     **It reddened two and ended early at 110 before this round**,
+                                                          #     measured in a detached worktree at `5d8cd33` with the
+                                                          #     unmutated control green at 119/0 there: the mutated store's
+                                                          #     gate ran in the constructor and the server never came up at
+                                                          #     section 11's restart, so a third of the tool was never put to
+                                                          #     that build. Running the gate after the bind, and a `setAside`
+                                                          #     that logs a rename it cannot make instead of throwing, is what
+                                                          #     turned a truncated run into four more measured rows
 node tools/effect-check.mjs --mutate rebuild-skips-the-panel # ... the panel built on the first run and never again, which is the
                                                           #     rebuild somebody writes who thinks of the panel as boot
                                                           #     furniture. `boot-check` stays green, because boot is the run
@@ -636,7 +646,9 @@ node tools/effect-check.mjs --mutate poll-retries-a-refused-set # ... the block 
                                                           #     moved and the same rebuild is attempted every six seconds
                                                           #     forever - every package refetched, both programs
                                                           #     reassembled, the material disposed, the accumulators
-                                                          #     reset. Reddens one row at the end of section 9
+                                                          #     reset. Reddens two rows, measured: the one at the end of
+                                                          #     section 9 and section 14's, which is the same block asked
+                                                          #     about a shape refusal rather than an assembly one
 node tools/effect-check.mjs --mutate adopt-outside-the-transaction # ... the adoption put back outside the `try` the rollback
                                                           #     hangs off, so a throw out of the adoption itself - a package
                                                           #     written into the store past the door, naming a panel group
@@ -674,12 +686,60 @@ node tools/effect-check.mjs --mutate boot-adopts-a-stale-fork # ... the store's 
                                                           #     so a fork naming a joint an upgrade removed goes on shadowing
                                                           #     the builtin it forks. Aimed at the call rather than at the
                                                           #     method body, because the defect was that nothing re-validated
-                                                          #     rather than that something validated wrongly. Reddens **five**
-                                                          #     rows of section 12, measured, and the staging row above them
-                                                          #     stays green. The last of the five is the one the finding is
-                                                          #     about: a page opened on that store publishes no `__kinect` at
+                                                          #     rather than that something validated wrongly. Reddens **ten**
+                                                          #     rows, measured: seven in section 12 and the three of section
+                                                          #     14, which need a page that came up. The staging row stays
+                                                          #     green and so does the must-accept row - a gate that never ran
+                                                          #     serves the healthy fork too, which is what makes that row a
+                                                          #     control for over-refusal rather than for this. The one the
+                                                          #     finding is about is the page: it publishes no `__kinect` at
                                                           #     all, because `assembleShaders` throws while `web/main.js` is
                                                           #     still evaluating
+node tools/effect-check.mjs --mutate the-gate-doors-a-package-against-its-neighbours # ... the boot gate's second pass back to
+                                                          #     asking the door about each candidate with every other package
+                                                          #     beside it, checked or not, which is how it shipped. The door
+                                                          #     assembles `[...beside, candidate]` and reports what fails
+                                                          #     under the *candidate's* name, so one fork this build cannot
+                                                          #     assemble made its innocent neighbours come back "does not
+                                                          #     assemble" - and which was blamed depended on the lexical
+                                                          #     order the walk reached them in. Reddens **two** rows,
+                                                          #     measured: the healthy fork staged beside the broken one, and
+                                                          #     the count of what is left standing. Every other row of
+                                                          #     section 12 stays green, because a store that quarantines too
+                                                          #     much still hands the id back to the builtin and still boots
+node tools/effect-check.mjs --mutate the-gate-runs-before-the-bind # ... the recovery and the gate back at construction, which
+                                                          #     is where they were: every process that got as far as building
+                                                          #     a store ran them, including one about to die on `EADDRINUSE`
+                                                          #     over a root another server was already serving. The call in
+                                                          #     `listen` is left standing, so the winner still gates once and
+                                                          #     nothing else moves. Reddens **one** row, measured - section
+                                                          #     13's last - and the two before it stay green, because the
+                                                          #     loser still loses the bind and still exits either way
+node tools/effect-check.mjs --mutate the-aside-keeps-the-whole-name # ... the truncation dropped from the stem an aside is
+                                                          #     built from, which is how it shipped when nothing bounded an
+                                                          #     id's length. `NAME_MAX` is 255 and the suffix is about thirty
+                                                          #     characters, so a directory from that build cannot be renamed
+                                                          #     at all. Reddens **two** rows, measured: the over-long
+                                                          #     directory and the count of what is left standing. The server
+                                                          #     still comes up, which is the other half of the repair - the
+                                                          #     rename is caught and the package left where it is. **The
+                                                          #     fixture is 240 characters and the first one was 100**, which
+                                                          #     proved nothing: 100 renames to 128 and lands inside the 255 a
+                                                          #     filesystem takes, so the mutated build renamed it perfectly
+                                                          #     well and the row stayed green on a build with the defect in
+                                                          #     it. A fixture has to sit outside the bound it is about
+node tools/effect-check.mjs --mutate a-refused-body-is-a-failed-read # ... the frame that erases the refusal mark on its way
+                                                          #     out of the fetch. Every deterministic shape refusal a read
+                                                          #     can make - a listing that is not a list, a manifest that is
+                                                          #     not an object, a `chunks` that arrived as a string - is
+                                                          #     minted as a refusal at its throw site, and a plain
+                                                          #     `new Error` at that frame threw the classification away, so
+                                                          #     the set the store is serving was refetched whole every six
+                                                          #     seconds forever. Aimed at the frame rather than at a throw
+                                                          #     site, because every one of them passes through it. Reddens
+                                                          #     **one** row, measured: section 14's second. The first stays
+                                                          #     green, because both builds refuse the package - what differs
+                                                          #     is whether they go on asking
 node tools/effect-conformance-check.mjs --url http://localhost:8080 # the plugin contract: every installed effect draws nothing at all when it is off
 node tools/effect-conformance-check.mjs --mutate leaks-at-zero # ... a floor under the rain's master, so the package contributes at
                                                           #     the term it is meant to be absent at. Served over an
@@ -734,7 +794,11 @@ node tools/guard-check.mjs --mutate reads-answer-any-page # ... the reads a cros
 node tools/jobs-check.mjs                                 # step 8: the queue, the pin, a real render, and a job
                                                           #   whose deliverable this build cannot read, which has to
                                                           #   come back failed rather than rendered - the batch path
-                                                          #   adopted past the version gate until it did
+                                                          #   adopted past the version gate until it did.
+                                                          #   **It wants 8232 as well as 8231**: three arms put a
+                                                          #   forwarding proxy between a worker and the server, one
+                                                          #   policy at a time on `--proxy-port`, which defaults to
+                                                          #   the port above plus one
 node tools/jobs-check.mjs --mutate claim-ignores-renderer # ... and must FAIL mutated
 node tools/jobs-check.mjs --mutate envelope-takes-the-callers-requires # ... the effects a job needs, taken from a field beside
                                                           #     the document instead of derived from it - a job that can lie
@@ -783,6 +847,33 @@ node tools/jobs-check.mjs --mutate preflight-snapshot-is-taken-once # ... the wo
                                                           #     measured: the *second* job's version. The first job's is the
                                                           #     control and stays green, because a worker that read the store
                                                           #     once is right about the first job by construction
+node tools/jobs-check.mjs --mutate preflight-asks-once    # ... the retry budget on that read cut to one attempt, which is
+                                                          #     how it shipped. The read runs after the claim and before the
+                                                          #     first heartbeat, so one connection reset there failed a
+                                                          #     claimed job through `/finish` into a terminal state - and a
+                                                          #     worker and its server are two processes with a restart, a
+                                                          #     proxy or a moment of `EHOSTUNREACH` between them. Reddens
+                                                          #     **three** rows, measured: the blip arm's take-resolution row
+                                                          #     and its skew line, because the job now comes back naming a
+                                                          #     read instead of getting past the preflight, and the outage
+                                                          #     arm's row asserting the worker asked more than once
+node tools/jobs-check.mjs --mutate preflight-reads-a-failure-as-an-empty-store # ... the status check, the shape check and the
+                                                          #     entry check pulled off that read, leaving `?? []` where they
+                                                          #     were, which is how it shipped. `.json()` parses an error body
+                                                          #     perfectly well and a missing `effects` key read as an empty
+                                                          #     listing, so a 500 - or a 200 from a proxy reporting its own
+                                                          #     failure, which no status check can see - came back as the
+                                                          #     sentence about a worker that has no `rain`, from a machine
+                                                          #     that has rain. Reddens **six** rows, measured, across both
+                                                          #     arms; the pair that discriminates is *which sentence* each
+                                                          #     job came back under, because the state is `failed` on both
+                                                          #     builds. **Two fixtures and two proxy policies**: a 500 served
+                                                          #     once is the blip a retry clears, a 200 carrying an error body
+                                                          #     every time is the outage a status check cannot see. Both
+                                                          #     answer only *referer-less* `GET /effects` - the worker's page
+                                                          #     polls the same address through the same proxy, so a plant
+                                                          #     that could not tell them apart would be spent on a tick of
+                                                          #     that poll as readily as on the read it was staged for
 node tools/module-check.mjs                               # the boundaries in web/: the import graph, what an import names, what crosses it
 node tools/module-check.mjs --mutate cycle-planted        # ... the import web/scene.js's own header says does not exist
 node tools/module-check.mjs --mutate cycle-through-a-second-spelling # ... and the same ring written the way the other page writes its imports

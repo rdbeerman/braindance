@@ -236,6 +236,11 @@ const PRESETS = new DocumentStore(
 // gates disagreeing about which joints exist, which is exactly the disagreement the boot
 // gate is there to catch.
 const SPINES = { cloud: cloudSpine, grade: gradeSpine };
+// Constructed here and *settled* down in `listen`'s callback, which is one arrangement
+// rather than two steps: building the store reads, and `claimUserRoot` writes. Two servers
+// pointed at one effects root is two servers on one port, so the process that loses the bind
+// exits before it has renamed anything of the winner's - which is what it used to do, from
+// here, on its way to `EADDRINUSE`. See `EffectStore.claimUserRoot`.
 const EFFECTS = new EffectStore(
   resolve(flag('--effects', join(ROOT, 'effects'))),
   resolve(flag('--builtin-effects', join(ROOT, 'effects-builtin'))),
@@ -3035,6 +3040,13 @@ try {
 }
 
 httpServer.listen(PORT, HOST, () => {
+  // **First thing inside the bind and before the line announcing it.** The recovery and the
+  // boot gate rename directories under the effects root, and the port is what says this
+  // process is the one entitled to: a second server on the same root loses the bind, never
+  // reaches here, and quarantines nothing of the live one's. Ahead of the log line so a
+  // reader - and `effect-check`, which asserts on this stream - meets the gate's sentences
+  // before the address, rather than in whichever order two writes happen to land in.
+  EFFECTS.claimUserRoot();
   console.log(`[server] viewer on http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   if (HOST !== LOOPBACK) {
     console.log(`[server] reachable from the network on ${HOST} - anyone who can route here can drive the recorder`);

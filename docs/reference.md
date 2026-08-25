@@ -378,12 +378,22 @@ the job with a reason naming it** rather than rendering, unless the job was queu
 `suppressEffects` covering it. A version the worker has and the job did not ask for is logged
 and rendered, which is the same call the editor's notice makes.
 
+**A queue call that did not work is never read as a store with nothing in it.** The worker asks
+its own server what is installed once per job, and a failed answer — a dropped connection, a 500,
+a proxy reporting its own failure with a 200 — is retried a few times seconds apart before the
+job is failed at all. If it still cannot read, the job comes back naming *the read*, never
+naming a package the machine has not got: those two sentences send whoever is looking at the
+queue to two different machines, and only one of them is about the job.
+
 ### Installing an effect, and taking one away
 
 `PUT /effects/<id>` installs a package and `DELETE /effects/<id>` removes one. The body is
 `{manifest, chunks}` — the manifest as JSON and a map of file name to GLSL text — and the id in
 the path is the namespace its parameters carry, so a manifest declaring a different one is
-refused rather than guessed at.
+refused rather than guessed at. An id is lowercase letters and digits, up to 64 of them: it is a
+directory name, and every copy this program renames out of the way is that name with a suffix on
+it, so an id long enough to leave no room for one under `NAME_MAX` is a package nothing could set
+aside once it was installed.
 
 **An install lands in `effects/` and never in `effects-builtin/`**, which is the whole of the
 fork mechanism: a package installed under a shipped id shadows it, and deleting that copy brings
@@ -458,6 +468,14 @@ back, and the shipped package answers for that id again
 Nothing deletes that directory. Fix what the sentence names, rename it back to `<id>`, and
 restart — or install the repaired package over the top, which leaves the aside where it is for
 you to remove by hand.
+
+One package refused this way never costs its neighbours: each is held against the shipped set
+plus the packages already validated beside it, so a fork that cannot assemble is renamed aside on
+its own and the healthy ones next to it go on serving. And if the rename itself cannot be made —
+a filesystem that refuses it, a name already taken sixteen ways — the server still comes up, says
+so on the same line, and goes on serving the package it has just announced it cannot use. A build
+that boots with a broken package is one you can read this log on; a build that will not boot is a
+machine with nothing to read at all.
 
 ## Levelling a canted mount
 

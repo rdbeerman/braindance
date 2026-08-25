@@ -97,6 +97,30 @@ const MIN_PARAM_PLACES = decimalsOf(MIN_PARAM_STEP);
 const VALID_EFFECT_ID = /^[a-z][a-z0-9]*$/;
 const VALID_FILE_NAME = /^[a-z0-9][a-z0-9._-]*$/i;
 
+/**
+ * The longest an effect id may be, which is a fact about the filesystem rather than about
+ * taste - and it is exported rather than restated because the store builds a *longer* name
+ * out of it.
+ *
+ * **An id is a directory name and every aside this program makes is that name plus a
+ * suffix.** `NAME_MAX` is 255 bytes on every filesystem this program runs on, and the
+ * longest suffix anything here appends is the boot gate's: a dot, a pid of up to seven
+ * digits, a dot, a base-36 millisecond stamp of eight characters, an optional collision
+ * counter, and `.incompatible` - about thirty characters. So a 64-character id asides at
+ * ninety-four and a 240-character one cannot be renamed at all, which is `ENAMETOOLONG`
+ * thrown out of the gate written to stop a broken package taking the server down with it.
+ *
+ * 64 rather than the 225 the arithmetic would allow, because an id is the namespace every
+ * one of the package's parameters carries - `rain.speed` reads as a name and a
+ * two-hundred-character prefix reads as damage - and the bound has to leave room for the
+ * store to build a name that fits whatever it needs to append next.
+ *
+ * The rule reads the id's length in UTF-16 code units, which is the same number as bytes
+ * here: `VALID_EFFECT_ID` is lowercase ASCII, so a character is a byte and there is no
+ * encoding step between this count and the one the kernel makes.
+ */
+export const MAX_EFFECT_ID = 64;
+
 // A GLSL name, which is what a uniform binding, a varying and an identifier all are.
 const GLSL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -364,6 +388,18 @@ export function doorRefusal(candidate, { beside = [], spines }) {
   if (typeof id !== 'string' || !VALID_EFFECT_ID.test(id)) {
     return `${JSON.stringify(id)} is not an effect id - an id is the namespace its parameters carry, `
       + 'so it is lowercase letters and digits with nothing in it that could read as a path';
+  }
+  // **Refused by name here so it is never a filesystem error somewhere else.** The id is a
+  // directory name and everything this program renames aside is that name plus a suffix, so
+  // an id long enough to leave no room for one is a package that installs perfectly and
+  // cannot be moved out of the way afterwards - `ENAMETOOLONG` out of the boot gate, which
+  // is the server failing to start over a package the gate exists to survive. See
+  // `MAX_EFFECT_ID` for the arithmetic.
+  if (id.length > MAX_EFFECT_ID) {
+    return `effect ${id.slice(0, 24)}… declares an id of ${id.length} characters and this build takes `
+      + `${MAX_EFFECT_ID} - an id is a directory name, and every copy this program renames out of the way `
+      + 'is that name with a suffix on it, so an id with no room for one is a package nothing could set '
+      + 'aside once it was in place';
   }
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
     return `effect ${id} arrives with no manifest object - a package is a manifest and its chunks, and half of that is not a package`;

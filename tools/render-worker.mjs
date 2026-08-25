@@ -146,13 +146,63 @@ try {
    * The listing carries the manifest's own `version` per id, the same string the page's
    * badge quotes, so the worker and the editor read one field rather than two spellings of
    * a fact.
+   *
+   * **A read that did not work is never an empty store, and the two used to be the same
+   * answer.** `.json()` on a 500 parses `{"error":"..."}` perfectly well, `?? []` read the
+   * missing `effects` key as "nothing installed", and the gate below then refused the job
+   * with the sentence about a worker that has no `rain` - naming a package the machine has
+   * and blaming the render for a queue call that failed. Somebody reads that sentence and
+   * installs a package that is already there. So the status is checked, the shape is checked,
+   * and anything short of a listing throws with the read in it.
+   *
+   * **Retried, because one connection reset used to fail a claimed job for good.** This runs
+   * inside the claim and before the heartbeat, so a transport failure here is a job going
+   * through `/finish` as `failed` - a terminal state, on a queue whose whole point is that a
+   * job that could have rendered does. A worker and its server are two processes that a
+   * restart, a proxy or a moment of `EHOSTUNREACH` come between, and every one of those is
+   * over in seconds. Four attempts about two and a half seconds apart is roughly ten
+   * seconds of trying, which is comfortably inside the queue's two-minute silence window,
+   * so nothing requeues the job underneath a worker that is still asking.
+   *
+   * **A timeout per attempt, for the reason the heartbeat has one.** undici's default header
+   * timeout is around 300s, so a black-hole outage that drops packets without an RST leaves
+   * one attempt hanging for minutes and the retry budget above measuring something other
+   * than wall-clock seconds.
    */
+  const EFFECT_READ_TRIES = 4;
+  const EFFECT_READ_GAP_MS = 2500;
   const readInstalledEffects = async () => {
-    const listing = (await (await fetch(`${URL_}/effects`)).json()).effects ?? [];
-    return {
-      installed: new Set(listing.map((e) => e.id)),
-      versions: new Map(listing.map((e) => [e.id, e.version])),
-    };
+    let last = null;
+    for (let attempt = 0; attempt < EFFECT_READ_TRIES; attempt++) {
+      if (attempt) await new Promise((r) => { setTimeout(r, EFFECT_READ_GAP_MS); });
+      try {
+        const res = await fetch(`${URL_}/effects`, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) throw new Error(`it answered ${res.status}`);
+        const body = await res.json();
+        if (!body || !Array.isArray(body.effects)) {
+          throw new Error('it answered a body that is not a list of installed packages');
+        }
+        for (const e of body.effects) {
+          if (!e || typeof e.id !== 'string') throw new Error(`it listed the entry ${JSON.stringify(e)}, which names no id`);
+        }
+        return {
+          installed: new Set(body.effects.map((e) => e.id)),
+          versions: new Map(body.effects.map((e) => [e.id, e.version])),
+        };
+      } catch (err) {
+        last = err;
+      }
+    }
+    // **Its own sentence, and the one thing it must never be is the sentence below about a
+    // package this worker has not got.** A job failed here failed because the worker could
+    // not find out what is installed, which says nothing at all about what is installed -
+    // and the two answers send whoever reads the queue to two different machines.
+    throw new Error(
+      `this worker could not read ${URL_}/effects in ${EFFECT_READ_TRIES} attempts `
+      + `${EFFECT_READ_GAP_MS / 1000}s apart, so it does not know which effect packages this machine holds and will `
+      + `not guess: ${last?.message ?? 'no attempt reported why'}. This is a failure to read the queue's own server `
+      + 'rather than anything about the job or the look it names',
+    );
   };
 
   /**
@@ -244,10 +294,11 @@ try {
     try {
       // The store as it stands now, read before the gate that reads it rather than before
       // the loop that reaches the gate - see `readInstalledEffects`. Inside the try, so a
-      // server that cannot be read is this job coming back `failed` with the fetch's own
-      // message rather than the worker dying before its first claim: a worker that cannot
-      // ask what is installed cannot honestly gate anything, and the queue's contract is
-      // that a claim ends in an outcome with a reason.
+      // server that cannot be read - after it has been asked several times over ten seconds
+      // - is this job coming back `failed` naming the read rather than the worker dying
+      // before its first claim: a worker that cannot ask what is installed cannot honestly
+      // gate anything, and the queue's contract is that a claim ends in an outcome with a
+      // reason.
       const { installed, versions } = await readInstalledEffects();
       // Asked first, because everything below it costs: a take resolution, a page load,
       // a settle and a render. A job this machine cannot draw whole is refused here with

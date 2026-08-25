@@ -149,16 +149,30 @@ the build it was made on: upgrade the program and the spine may have dropped or 
 that fork's GLSL names, or the builtin it shadows may have grown a parameter it does not carry.
 Nothing about the fork changes and it goes on shadowing the upgraded builtin, so the page fetches
 it and `assembleShaders` throws while `web/main.js` is still evaluating — no `__kinect`, neither
-surface opening, and the machine that upgraded is the machine that stops working. So the store's
-constructor re-runs `doorRefusal` and `forkRefusal` over every package in the *user* root, against
-this build's spines; a package either of them now refuses is renamed to
-`<id>.<seq>.incompatible`, which is invisible to every read by the rule the `.tmp` suffix relies
-on and is swept by nothing, and the shipped package answers for that id again. Renamed and never
-deleted, because a fork is authored work and "this build cannot use it" is not a reason to
-destroy it; announced in the log with the door's own sentence, because an id that used to answer
-with somebody's fork and now answers with the builtin is a change nobody asked for. Only the user
-root, because a builtin is this build's own package and one this build cannot assemble is a broken
-build rather than a migration.
+surface opening, and the machine that upgraded is the machine that stops working. So the store
+re-runs `doorRefusal` and `forkRefusal` over every package in the *user* root, against this
+build's spines; a package either of them now refuses is renamed to `<id>.<seq>.incompatible`,
+which is invisible to every read by the rule the `.tmp` suffix relies on and is swept by nothing,
+and the shipped package answers for that id again. Renamed and never deleted, because a fork is
+authored work and "this build cannot use it" is not a reason to destroy it; announced in the log
+with the door's own sentence, because an id that used to answer with somebody's fork and now
+answers with the builtin is a change nobody asked for. Only the user root, because a builtin is
+this build's own package and one this build cannot assemble is a broken build rather than a
+migration.
+
+Two things about *when* and *against what*, both of which were wrong in ways that quarantined
+packages nothing was wrong with. The gate runs from inside `listen`'s callback rather than at
+construction, because it renames directories and the port is what says this process is the one
+entitled to: two servers on one effects root is two servers on one port, so the loser of the bind
+exits having touched nothing. It is sound because everything the gate does is synchronous `fs` —
+the socket is accepting by then, but a request handler is a callback on a later turn of the event
+loop, so no route is ever answered out of a store that has not been gated. And each package is
+doored against the builtins plus the packages already *validated* rather than against everything
+on disk: the door assembles `[...beside, candidate]` and reports what fails under the candidate's
+name, so one unusable fork used to make its innocent neighbours come back "does not assemble",
+with the blame landing on whichever the walk reached first. The pass repeats while it is still
+promoting packages, because a package may legitimately read another's varying and a single sweep
+would refuse a pair this build's own install door accepts.
 
 ### Assembly: a spine with joints, and the chunks that fill them
 
