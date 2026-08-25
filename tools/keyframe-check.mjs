@@ -1815,11 +1815,12 @@ console.log('\n== 3b. a seek that jumps from a cheap look to an expensive one ==
 console.log('\n== 3c. a pre-roll whose window is dearer than its target ==');
 {
   await setRetime(FLAT);
-  await applyLook(BLACKWALL_LOOK);
+  await applyLook(RGB_LOOK);
   // Fade and wake at zero and unkeyed, so the surface half computes 0 and cannot
   // mask the trails half by being the larger of the two.
   await page.evaluate(`globalThis.__kinect.params.apply(${src({ fade: 0, wake: 0 })})`);
-  await setTracks({ trails: [{ t: 0, value: 0.95 }, { t: 7.8, value: 0.95 }, { t: 8.0, value: 0.5 }] });
+  const dampTrack = [{ t: 0, value: 0.95 }, { t: 7.8, value: 0.95 }, { t: 8.0, value: 0.5 }];
+  await setTracks({ trails: dampTrack });
   await settle();
 
   const TARGET = 8.0;
@@ -1841,7 +1842,7 @@ console.log('\n== 3c. a pre-roll whose window is dearer than its target ==');
   let needed = 0;
   for (let n = 1; n <= 400; n += 1) {
     product *= scalarAt(
-      [{ t: 0, value: 0.95 }, { t: 7.8, value: 0.95 }, { t: 8.0, value: 0.5 }],
+      dampTrack,
       TARGET - (n - 1) / seen.fps,
     );
     needed = n;
@@ -1900,7 +1901,7 @@ console.log('\n== 4. program time maps to source time through the curve ==');
 
     const wantSource = probes.map((p) => retimeAt(curve, p));
     const sourceErr = worst(read.source.map((v, i) => Math.abs(v - wantSource[i])));
-    const wantBracket = wantSource.map((s) => bracketOf(s));
+    const wantBracket = read.source.map((s) => bracketOf(s));
     const bracketBad = read.bracket.filter((b, i) => b !== wantBracket[i]).length;
     // The program length is the point at which the curve first reaches the end of
     // the take, computed here from the tool's own curve by bisection.

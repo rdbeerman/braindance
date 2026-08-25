@@ -106,15 +106,15 @@ node tools/registry-check.mjs --mutate margins-confined-to-glyphs # ... the same
                                                                   #     wrong fix the character section cannot refuse
 node tools/registry-check.mjs --mutate margins-miss-the-newborn   # ... and narrowed the other way, to the disc's rim and not
                                                                   #     the point that has not faded in yet
-node tools/timeline-check.mjs --url http://localhost:8080 # step 4: seek equals playback
-node tools/timeline-check.mjs --mutate preroll-constant   # ... and must FAIL mutated
-node tools/timeline-check.mjs --mutate draft-always-resets # ... and must FAIL mutated
-node tools/timeline-check.mjs --mutate reading-write-skips-repaint # ... and must FAIL mutated
-node tools/timeline-check.mjs --mutate rain-accumulates   # ... the rain integrated frame to frame, so a seek lands
+node tools/timeline-check.mjs --url http://localhost:8080 --take fixture-1g # step 4: seek equals playback
+node tools/timeline-check.mjs --take fixture-1g --mutate preroll-constant   # ... and must FAIL mutated
+node tools/timeline-check.mjs --take fixture-1g --mutate draft-always-resets # ... and must FAIL mutated
+node tools/timeline-check.mjs --take fixture-1g --mutate reading-write-skips-repaint # ... and must FAIL mutated
+node tools/timeline-check.mjs --take fixture-1g --mutate rain-accumulates   # ... the rain integrated frame to frame, so a seek lands
                                                           #     where playback never would. Its section applies a
                                                           #     rain-raised look of its own, because every other arm
                                                           #     in that file renders the term completely inert
-node tools/timeline-check.mjs --mutate rain-phase-unread  # ... and the same clock written correctly and read by
+node tools/timeline-check.mjs --take fixture-1g --mutate rain-phase-unread  # ... and the same clock written correctly and read by
                                                           #     nothing, which both arms agree about perfectly. It is
                                                           #     the control for the guard rather than for the claim:
                                                           #     what reddens is the row that moves the clock alone
@@ -2756,6 +2756,8 @@ with anything. The names are enumerated and the tools are not. The ten that are 
 need something
 the sweep does not currently arrange - a private server, a GPU browser, a built prefix - so
 wiring them is real work rather than a longer array.
+Replay runs use `fixture-1g`; set `SWEEP_TAKE` when the server names another take that satisfies
+both tools' duration floors.
 
 ## `editor-check` is three rows red at `7cb273d`, and they are not yours
 
@@ -2894,29 +2896,30 @@ than 30.** So size fixtures by *frame count*, not duration: five minutes of its 
 rewritten monotonic stamps — real depth and real JPEGs, only the u64 at payload offset 8 moves.
 Say so whenever a number rests on one.
 
-**And no page can tell you which sample a checkout has, which is why two tools now refuse a
+**And no page can tell you which sample a checkout has, which is why three tools now refuse a
 take instead of assuming one.** `captures/` is gitignored, so every sentence written here about
 "the sample" describes a file the next machine may not hold — and they have already disagreed.
 The paragraph above says 9.3fps; `keyframe-check`'s header said 284 frames over 30.36s and its
 section 6d said 49.79s; the file in this tree is 284 frames over **9.42s at 30.03fps**. One
 frame count, four durations, all of them written down as facts.
 
-The damage is not the prose. `editor-check` seeks to 30s and `keyframe-check` retimes through
-source 20s, and on a 9.42s take every one of those clamps: **ten rows redden in `editor-check`
-and four in `keyframe-check` against a build with nothing wrong with it**, and — the half worth
-fearing — two more `keyframe-check` rows *pass*, because the key they drag has left the ruler
-and a gesture that never happened also never slid a key under its neighbour. Seven of the ten
-and all four of the four go green on a 75.6s fixture with nothing in `web/` changed.
+The damage is not the prose. `timeline-check` targets 12s, `editor-check` seeks to 30s and
+`keyframe-check` retimes through source 20s. On a 9.42s take every one clamps: one row reddens in
+`timeline-check`, ten in `editor-check` and four in `keyframe-check` against a build with nothing
+wrong with it. The quieter half is that two more `keyframe-check` rows *pass*, because the key they
+drag has left the ruler and a gesture that never happened also never slid a key under its
+neighbour. The long fixture makes those fixture failures go away with nothing in `web/` changed.
 
-So both declare a `NEEDS_TAKE_SEC` and exit 2 naming the shortfall, in the same direction and
+So all three declare a `NEEDS_TAKE_SEC` and exit 2 naming the shortfall, in the same direction and
 for the same reason as `requireMutationDelivered`: a red row reads as a catch, so a fixture
 that cannot hold the gesture has to be the harness declining. The declaration is held against
 the file's own literal seek targets by a scan of its own source, so a row added later that
-seeks deeper cannot quietly fall outside it. **The control for both is `--take sample`**: exit
+seeks deeper cannot quietly fall outside it. **The control for all three is `--take sample`**: exit
 2 with nothing asserted, where the same command used to run to the end and report failures.
 
 ```
 node tools/make-fixture.js captures/sample.knct captures/fixture-1g.knct --loops 8
+node tools/timeline-check.mjs --url http://localhost:8080 --take fixture-1g
 node tools/editor-check.mjs   --url http://localhost:8080 --take fixture-1g --no-render
 node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g
 ```

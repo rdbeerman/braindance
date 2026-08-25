@@ -378,6 +378,14 @@ const index = await (await fetch(`${URL_BASE}/capture/${TAKE}/index`)).json();
 const stamps = index.frames.stampMs;
 const TIMES = stamps.map((s) => (s - stamps[0]) / 1000);
 const DURATION = TIMES[TIMES.length - 1];
+const NEEDS_TAKE_SEC = 12;
+
+if (!(DURATION >= NEEDS_TAKE_SEC)) {
+  console.log(`\n[timeline] DID NOT RUN - the take "${TAKE}" holds ${DURATION.toFixed(2)}s of source and `
+    + `these rows need ${NEEDS_TAKE_SEC}s. Point --take at a longer capture `
+    + '(tools/make-fixture.js loops a short one).');
+  process.exit(2);
+}
 
 function bracketOf(sourceSec) {
   let lo = 0;
@@ -763,7 +771,7 @@ console.log('\n== 1. the same program position, reached two ways ==');
 // Well inside the take on purpose. A target close enough to the head that the
 // pre-roll is clipped by it would prove the equality against a shorter warm-up
 // than the one under test, which is an easier claim wearing this one's name.
-const TARGET_SEC = 12.0;
+const TARGET_SEC = NEEDS_TAKE_SEC;
 {
   const config = { ...BLACKWALL, rate: 1, fps: 30, targetSec: TARGET_SEC, frames: null };
   const played = await arm({ ...config, kind: 'playback', label: 'played' });

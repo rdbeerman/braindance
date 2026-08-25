@@ -3053,6 +3053,34 @@ The tell for this class is a row that fails on a value *near* a boundary — 85%
 window, a value of exactly zero — rather than one that fails by a mile. A build that
 genuinely lost the window would put the marker nowhere near the edge of it.
 
+Three more arrived together in a full replay run. `timeline-check` targeted 12 seconds
+while its documented default opened the 9.43-second sample. The transport clamped correctly
+and the rain-clock row alone failed at 9.43 against 12, which read as a product defect. It now
+refuses a take shorter than `NEEDS_TAKE_SEC` before it opens Chromium, and the documented run
+names `fixture-1g`.
+
+That refusal also closed the door on `sweep-all` before it could enumerate timeline mutations:
+enumeration was a child run too, and still inherited `sample`. Take selection now belongs to the
+common child-command path, so enumeration and the mutation it names cannot use different
+fixtures. With that path disabled, the focused sweep stopped before its first assertion. With it
+enabled, `preroll-constant` ran on `fixture-1g` and reddened 13 rows.
+
+`keyframe-check` compared the transport's source-frame bracket at the page's computed source
+time against a bracket computed at the tool's source time. Those times agreed to 1.1ns, but one
+probe sat exactly on a capture stamp and the rounding put the two readings on opposite sides of
+it. The source-time row already holds the mapping. The bracket row now feeds the page's exact
+source time through an independent walk of the capture index, so it asks only whether the
+transport chose the indexed pair for the value it used. A temporary off-by-one mutation still
+reddened both bracket rows at 25 of 25, plus two downstream refusals.
+
+The trails control in the same tool had the other fixture failure: the wrong closed-form
+pre-roll differed from playback by only 3/255 over 0.021% of pixels under Blackwall, below the
+control's own 16/255 floor. Lowering the floor would have calibrated the row to the failure.
+The same frame under the shipped RGB look differs by 71/255 over 0.336%, while the correct
+window remains byte-identical. `trails-damp-at-target` then reddens exactly the two claim rows.
+**A fixture includes the look as well as the take**; a correct arithmetic difference is not a
+falsification control until the picture makes that difference observable.
+
 ## A probe placed where both builds answer the same thing
 
 Four instruments written for the crop box in one session were each aimed somewhere the

@@ -36,6 +36,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const OUT = resolvePath(argv.includes('--out') ? argv[argv.indexOf('--out') + 1] : join(ROOT, '.sweep-all'));
 const URL = process.env.SWEEP_URL ?? 'http://localhost:8080';
+const TAKE = process.env.SWEEP_TAKE ?? 'fixture-1g';
 const CRASH = 'Execution context was destroyed';
 const TOOLS = ['library', 'timeline', 'keyframe', 'export'];
 
@@ -50,7 +51,11 @@ rmSync(join(OUT, 'SUMMARY.txt'), { force: true });
 
 function run(tool, args, timeoutMs = 900_000) {
   return new Promise((resolve) => {
-    const child = spawn('node', [`tools/${tool}-check.mjs`, ...args], { cwd: ROOT });
+    const toolArgs = [...args];
+    if ((tool === 'timeline' || tool === 'keyframe') && !toolArgs.includes('--take')) {
+      toolArgs.push('--take', TAKE);
+    }
+    const child = spawn('node', [`tools/${tool}-check.mjs`, ...toolArgs], { cwd: ROOT });
     // Decoded through a StringDecoder rather than by concatenating Buffers. `out += c`
     // calls toString() per chunk, so a multi-byte sequence straddling a chunk boundary
     // becomes two replacement characters and the line it was on is corrupted - which

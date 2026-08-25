@@ -133,7 +133,7 @@ exit code (rule 3).
 | `determinism-check.mjs` | same program time, same image | a capture |
 | `index-check.mjs` | the index, the hash, the frame API | `--url` against a running server |
 | `registry-check.mjs` | one registry, sliders as views of it, every look term live | `--url` |
-| `timeline-check.mjs` | seek equals playback | `--url` |
+| `timeline-check.mjs` | seek equals playback | `--url`, a take of ≥12s |
 | `keyframe-check.mjs` | tracks, the retime curve, undo | `--url`, a take of ≥24s |
 | `export-check.mjs` | resolution, export, the file | `--url`, ffmpeg and ffprobe |
 | `editor-check.mjs` | the editor's controls exist, and pressing them changes something | `--url`, a take of ≥32s |
@@ -214,9 +214,9 @@ than footage** — no depth jitter, no confidence gate chattering on a flat wall
 — so say which sample a number came from. **It refuses to overwrite an existing capture**, because
 the path it runs at is where a machine with a sensor keeps real footage: bare refuses and names
 the size and date of what it declined to destroy, `--force` replaces, `--if-missing` leaves an
-existing one alone and exits 0. `editor-check` and `keyframe-check` exit 2 naming the shortfall on
-a take shorter than they need, because on the short sample they redden rows about a build with
-nothing wrong with it.
+existing one alone and exits 0. `timeline-check`, `editor-check` and `keyframe-check` exit 2 naming
+the shortfall on a take shorter than they need, because on the short sample they redden rows about
+a build with nothing wrong with it.
 
 ## Three things that are easy to get backwards
 
