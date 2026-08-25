@@ -15,7 +15,18 @@ node server/index.js --record           # a flag, not a path - takes are named a
                                         # placed in captures/ by the recorder
 node server/index.js --replay captures/session.knct
 node server/index.js --host 0.0.0.0     # reachable from other machines - see below
+node server/index.js --effects ~/fx     # where an installed effect package lands
+node server/index.js --builtin-effects ./effects-builtin  # what the build ships with
 ```
+
+**The two effect roots are the fork mechanism, so pointing one of them somewhere else
+moves what shadows what.** `--builtin-effects` is the shipped set and nothing in this
+program writes into it; `--effects` is the writable root an install lands in, and an id
+present in both resolves from there. Both default to directories beside the checkout, and
+the flags exist because a proof tool needs a search path it controls rather than the one
+the developer happens to have installed packages into. A server whose builtin root is
+missing refuses to boot rather than answering an empty list, since a broken install must
+not read as nothing-installed.
 
 **`--record` arms the *first* take rather than offering the recorder.** The flag is read
 once at boot and spent when you stop that take; arming again is the record button. So
@@ -128,9 +139,9 @@ The tear is applied in the sensor's frame before the camera sees it, so it is on
 screen-horizontal from head-on: orbit around a torn band and it shoves in depth instead, and
 a levelled room tears along the angle the mount was really at. That is the effect saying the
 *volume* is corrupt rather than the picture, and it is why the group sits at the displacement
-stage next to what moves points rather than in `Post` next to `scanlines`.
+stage next to what moves points rather than in `Post` next to `raster.amount`.
 
-**`lattice`** rebuilds the volume on a grid: every axis quantised to `cell m`, so surfaces
+**`lattice.amount`** rebuilds the volume on a grid: every axis quantised to `cell m`, so surfaces
 break into steps and the cloud reads as something being reconstructed rather than something
 that was measured. It is the last displacement applied, after the tear, so what gets snapped
 is where the point actually ends up — a grid cut before the turbulence would be smoothly
@@ -139,7 +150,90 @@ rather than with the bracket: level a canted mount afterwards and the grid does 
 The cell is metres in the room like the other displacements, so a look gives the same grid at
 any export size.
 
-**`ripple`** is the region read a fourth way, after displacing, scrambling and masking: a wave
+**`glyph.amount`** draws every point as a character rather than as a round splat, and it has no grid
+of its own — it rides `lattice.amount` and `cell`, which already cut the room into cubes and
+move each point to the centre of the cube it falls in. One cell draws one character, so the
+characters stand in the room at the size the room gives them and recede with it, which is
+what a pass stamping text onto the finished frame could not draw at all. The master
+crossfades the mark rather than switching it: at 0.5 every cell is a dot with a character
+glowing inside it, and the sprite grows from `pointSize` to cell-sized along the same blend,
+so one character comes to stand for one cube of room.
+
+**Riding the lattice is why glyphs read as characters only near `lattice.amount` 1.0.** The lattice
+is a blend from the measured surface to the reconstructed one rather than a switch, so at 0.5
+each point sits halfway to its cell centre and you get several copies of one character
+smeared along that path. At `lattice.amount` 1.0 with `glyph.amount` 0 you have the `voxel` recipe fully
+engaged — every point on its cell centre, drawn as a round splat — and raising `glyph.amount` turns
+those dots into characters without moving one of them. The shipped `voxel` document is not that
+picture, and the difference is worth knowing before you reach for it as a reference: it names
+`lattice.amount` 0.55 on a 3.5cm cell, halfway along the blend this paragraph opened on, so it keeps
+some of the smear deliberately.
+**At `lattice.amount` 0 with `glyph.amount` 1 the picture is mush**, because every one of the 217,088 points
+draws a cell-sized character at its own unquantised position — that is authoring rather than a
+defect, and nothing gates one control on the other.
+
+**Three keys decide which character a cell draws, and they add and wrap rather than mixing.**
+`tone key` reads the luminance the cell is about to draw at, `hash key` reads a hash of the
+cell itself, and `rain key` reads the falling counter passing through it; the three weights
+sum into one index into a table of sixty-four 8x8 bitmasks and wrap. They sum rather than
+blend the way the five readings do because character indices do not average — character 3
+half-and-half with character 9 is character 6, an unrelated symbol rather than anything
+between the two. All three are weights from 0 to 1, and `hash key` is the only one of them
+that defaults to 1 rather than to 0 — so raising `glyph.amount` on its own gives the field one key,
+the cell's, which is the reading the reference frames have. It reaches nothing while `glyph.amount`
+is 0.
+
+**The table is sorted by ink**, punctuation at the sparse end and dense kana at the other, so
+the tone key reads it as a tone ramp and the hash key reads the same table as noise with
+neither having to choose. What that costs is a latin ramp: a luminance sweep runs through
+kana, so the picture is ASCII art drawn in an alphabet that is not ASCII. There is no depth
+key because the readings already have one — put `readDepth` up and the colour ramp is
+distance, which the tone key then reads as a depth band.
+
+**The mark crossfades back to the round splat at whichever floor it hits first: the look's own,
+between sixteen and eight reference pixels, or what the buffer can actually resolve**, so the
+near room is text and the far room is texture. At full `glyph.amount` on `cascade`'s 5.5cm cell the
+look's band is 4.0 to 8.0 metres out, the same metres at 1080p and in a 4K export; a buffer
+shorter than 1080 pulls the boundary nearer because eight framebuffer pixels stop existing
+sooner, which is the buffer being honest about what it can draw rather than the look changing.
+The reason the floor exists at all is that an 8x8 bitmask sampled
+across eight pixels is a different random set of bits every time the camera moves rather than a
+small character, which bloom then amplifies. Clamping the
+sprite to a legible minimum instead would keep far cells readable and stop them being
+cell-sized, which collapses the recession at depth into the flat screen grid a cell-per-cube
+was chosen over. A keyed camera `fov` sweeps the band the same way walking closer does — a
+zoom makes characters resolve out of texture mid-clip — and that is the recession being true
+rather than a defect: the marks are objects in the room at a size the room gives them, and a
+narrower field gives every object more pixels.
+
+**`rain.amount`** is a term of its own rather than a setting inside the glyph field, and it works
+over round splats. It computes one scalar per point out of world height and program time,
+brightens what a drop head passes, and the glyph field's `rain key` reads that same scalar to
+scramble the character — one source and two consumers, the arrangement `duotone` already has,
+so a wave descending through a room is reachable for any look that is not drawing text and
+`voxel` gets it for nothing. `fall m/s` is how fast a head descends, `head gap m` how many
+metres of column separate one head from the next, and `trail m` how many metres of afterglow
+sit above it: 0.55, 1.3 and 0.45 by default. Only `trail m` belongs to `rain.amount` alone — `fall
+m/s` and `head gap m` shape the drop coordinate *both* consumers read, so with `rain.amount` at 0 and
+`glyph.amount` and `rain key` up they still move the picture, by changing which character the passing
+counter scrambles a cell to. With both masters at 0 none of the three reaches a pixel, which
+is what keeps a look that never asked for any of this rendering the frame it always did. A head
+every `head gap` metres rather than one head that wraps is what keeps two or three running in
+a column at once, and the trail sitting *above* the head is what makes it read as falling
+rather than as a band sliding through. Nothing in it accumulates — the value is a pure
+function of program time and world position, so a seek lands on exactly the frame playback
+would have drawn there, which `timeline-check` holds.
+
+**The two groups sit at the two stages they belong to rather than together.** `Glyph` is
+immediately after `Points`, because what mark gets drawn is what `Points` is about, and `Rain`
+is beside `Style`, because what colour a point takes is what `Style` is about — so the rain's
+home does not depend on glyphs being switched on. The cost that accepts is that the
+falling-code look is authored in two places on the panel, and `cascade` is the shipped
+document that holds it: the lattice at 1.0 on a 5.5cm cell, `glyph.amount` at 1.0, the hash key full
+and the rain key at 0.6, the rain at 0.8 falling 0.55 m/s with heads 1.3m apart, over a depth
+reading with a green duotone, a toe and bloom on top.
+
+**`ripple.amount`** is the region read a fourth way, after displacing, scrambling and masking: a wave
 travelling out along the radius, in metres at a full weight, so the volume breathes where
 `push` only swells it. `ripple per m` is its spacing and `ripple hz` its speed — and the wave
 advances in eighths of a cycle rather than sliding, which is the character rather than a
@@ -160,16 +254,17 @@ leak, so it is kept narrow and cyan. **`rim`** brightens depth discontinuities a
 subject its edge, but under additive blending plus bloom it washes broad surfaces white, so
 turn it down before turning down bloom.
 
-**The five Post terms share one pass, and the pass carries the tonemap.** `rgb split`,
-`scanlines`, `grain`, `streak` and `vignette` each switch it on, because a full-screen read and
+**The seven grade terms share one pass, and the pass carries the tonemap.** `rgb split`,
+`raster.amount`, `grain.amount`, `streak.amount`, `halation.amount`, `stock.amount` and
+`vignette.amount` each switch it on, because a full-screen read and
 write that changes nothing is worth skipping. What rides along with it is the highlight rolloff
-and the black-toe crush, so a look with all five at zero is not the same image without five
+and the black-toe crush, so a look with all seven at zero is not the same image without seven
 effects: it also has lifted blacks and no rolloff, and additive accumulation clips to flat
-white where it would otherwise keep its hue. Raising any one of the five brings the grade back.
+white where it would otherwise keep its hue. Raising any one of the seven brings the grade back.
 The vignette used to be part of that bundle and is now its own control, which is why a project
 saved before it existed loses its corner falloff until it names one.
 
-**`streak`** bleeds light across the frame. Each pixel gathers back along the streak's axis and
+**`streak.amount`** bleeds light across the frame. Each pixel gathers back along the streak's axis and
 keeps the brightest thing it finds, decayed by distance, so a highlight smears the way a sensor
 smears one down a column of wells — sixteen taps at geometric spacing, reaching about 168 pixels
 at the 1080p reference. `streak angle` beside it is which way, in degrees, and **0 is straight
@@ -183,6 +278,22 @@ sensor's own frame and has no square to mean it in. It is a gather over the curr
 than a buffer that accumulates across frames: a buffer would smear along whatever the camera did
 last, so an orbit would drag every streak sideways and a seek would arrive carrying the streak
 the scrub built rather than the one playback would have.
+
+**`halation.amount`** is the warm ring film puts around a highlight, with three settings under it
+in a `Halation` group of its own on the raster's precedent — a term that grows sub-controls gets
+a heading rather than crowding `Post`. What makes it worth having beside bloom is the colour. A bloom halo is the highlight's own colour spread
+outward, so a cold window blooms cold; on film the light goes through the emulsion, scatters off
+the base behind it and exposes it a second time, and what comes back is red-orange whatever
+colour went in. So what this gathers is a brightness and not a colour: sixteen taps on a disc
+around each pixel, each one counted by how far its luminance sits above `halation threshold` and
+by how far away it is, and the colour comes from `halation tint` alone — 0 is deep red, 1 is
+amber, and there is no hue control because a look asks how much of a ramp it wants rather than
+for a different ramp. `halation radius` is how wide the ring is, in pixels at the 1080p
+reference like every other screen-space term, and it widens the ring without dimming it: the
+taps are normalised by their own distance weights, so what the falloff decides is the ring's
+shape and not how much light is in it. Raise `halation threshold` and only the brightest things
+scatter; drop it and the whole frame starts to glow. The three settings are inert while the
+amount is at zero, which is what keeps them from switching the pass on by themselves.
 
 **`trails`** is the buffer that paragraph rules out, and the one look term whose length is
 counted in frames rather than in seconds. It hands its value straight to the afterimage pass's
@@ -232,6 +343,157 @@ is read rather than refused: its ratio is the shape it was framed at, and its pi
 handed to the deliverable, so it renders exactly what it rendered before. A hand-typed size
 of a shape the table has nothing for keeps its own size and lights no shape button, which is
 honest rather than tidy — the stage really is that shape.
+
+### A clip that needs an effect this build has not got
+
+A look parameter is named after the effect it belongs to — `rain.speed`, `glyph.tone` — and a
+document lists the effects it is built from. Open a clip whose list names one this machine
+does not have, and the clip **opens**: the installed part renders, and the values and keys
+under the missing effect are parked, which means they are carried and never evaluated. Saving
+writes every parked key back holding exactly the value it arrived with, so working on somebody
+else's clip on a machine without their effects costs nothing and destroys nothing. It is the
+values that are preserved and not the file: the parked keys land after the installed ones and
+the numbers go through a JSON round trip, so the document's revision moves. A name this build
+simply does not know is still refused, and so is a name whose effect *is* here with a key that
+is not — a typo and a half-installed package are both broken, and only a whole effect that is
+absent gets parked. A document that names an effect only through a keyframe track and carries
+none of its values is refused too, on the same rule as a document that names half of one:
+every effect a clip uses arrives whole or not at all.
+
+The application bar says so while such a clip is open: `missing: rain 1.0.0 — 4 values, 2
+tracks parked`, one entry per missing effect, quoting the version the document was authored
+against and counting what is being carried. Beside each entry is a **suppress** toggle.
+
+**An effect that is here at another version gets a line on the same bar and nothing else**:
+`document requires glyph 1.0.0, installed is 2.0.0`. The clip loads and the installed version
+draws it, because a version string says nothing about which direction is compatible and
+refusing would put a wall in front of every clip on the machine the first time an effect was
+retuned. What the load owes is the sentence, since only the person reading it knows whether
+the difference matters. There is no toggle beside it and export is not refused for it. The
+notice goes on the next save, and that is the design rather than a bug: the list is derived
+from what is installed, so saving records the version this machine actually built with.
+
+**Export is refused while anything the clip needs is missing**, and the refusal names the
+effects and their versions. That is the point of parking rather than the price of it: a video
+leaves this machine and nothing in it says a layer of the look was absent when it was made, so
+the one artifact that cannot explain itself is the one this build will not produce by accident.
+Pressing **suppress** on an entry is the operator saying that this render may go without that
+effect. It is per effect — suppress one while another is still missing and the export is still
+refused, naming the other — and it is session state rather than document state, so it never
+travels with the clip. **It is also per document**: opening another project ends every
+suppression, even one missing the same effect, because a decision about this render of this
+clip is not a decision about the next one. An undo keeps it, since an undo is the same clip.
+The render's own record, the `.job.json` beside the video, carries a
+`suppressed` list of the ids and versions it went without, and keeps the parked values, so the
+file says what was skipped instead of pretending the clip never asked.
+
+A queued render is the same rule with nobody watching. The job carries the effects its project
+requires — **derived at the queue from the namespaces the project's own values and tracks
+carry**, so a body whose list disagrees with its values is refused at enqueue by name rather
+than queued and discovered inside a render — and a worker that has not got one of them **fails
+the job with a reason naming it** rather than rendering, unless the job was queued with
+`suppressEffects` covering it. A version the worker has and the job did not ask for is logged
+and rendered, which is the same call the editor's notice makes.
+
+**A queue call that did not work is never read as a store with nothing in it.** The worker asks
+its own server what is installed once per job, and a failed answer — a dropped connection, a 500,
+a proxy reporting its own failure with a 200 — is retried a few times seconds apart before the
+job is failed at all. If it still cannot read, the job comes back naming *the read*, never
+naming a package the machine has not got: those two sentences send whoever is looking at the
+queue to two different machines, and only one of them is about the job.
+
+### Installing an effect, and taking one away
+
+`PUT /effects/<id>` installs a package and `DELETE /effects/<id>` removes one. The body is
+`{manifest, chunks}` — the manifest as JSON and a map of file name to GLSL text — and the id in
+the path is the namespace its parameters carry, so a manifest declaring a different one is
+refused rather than guessed at. An id is lowercase letters and digits, up to 64 of them: it is a
+directory name, and every copy this program renames out of the way is that name with a suffix on
+it, so an id long enough to leave no room for one under `NAME_MAX` is a package nothing could set
+aside once it was installed.
+
+**An install lands in `effects/` and never in `effects-builtin/`**, which is the whole of the
+fork mechanism: a package installed under a shipped id shadows it, and deleting that copy brings
+the shipped one back. Nothing reachable from the network can edit or remove what the build shipped
+with, so there is always a package to fall back to — and a `DELETE` aimed at a builtin nothing is
+forking is refused by name rather than silently doing nothing. Deleting a package that exists only
+in `effects/` uninstalls it, at which point every open document's values under it park exactly as
+they would on a machine that never had it.
+
+**A package that this build could not compile is refused at the door, and the refusal names the
+rule it broke.** That matters more than it sounds: a package is GLSL spliced into two shader
+programs and a table of parameters spliced into the registry, and both of those are assembled
+while the page is still loading — so a bad package that landed would not fail its install, it
+would fail the *next page load*, with nothing on screen and the only evidence in a console nobody
+has open. So the door runs before a byte is written: the id and the manifest have to agree, the
+package format has to be one this build reads (a later one is refused rather than adapted), a file
+name has to be a bare name in the package's own directory, at most one parameter may be the
+master and its default has to be the value the effect is absent at, the kind and the binding have
+to be ones the registry implements, every uniform a parameter binds has to be declared by some
+program and every uniform the package declares has to be bound by one of its own parameters or
+listed under `hostDriven`, every joint a chunk names has to exist in a spine, and every identifier
+a chunk reaches for has to be something this build has. Four more rules are about the package as a
+whole rather than about one entry in it, because every rule above is satisfied as many times as a
+package repeats a correct entry: a package holds at most 64 files and 256 KiB of chunk text (the
+widest that ships holds eight files and under 17 kilobytes, and every read of the store hashes
+every file of every package), a binding has to be the *shape* of the uniform it writes — `axisDeg`
+needs a `vec2` and everything else a `float` — a step may not be finer than `1e-6`, which is a
+grid neither the rounding nor a 32-bit float can resolve, and a parameter may only name a panel
+group this build holds or one its own package declares, with a package group key that collides
+with either refused by name. A refused package leaves nothing behind.
+
+**A page that is open when an install happens rebuilds itself.** Both shader programs are
+reassembled and swapped, the registry and the panel are rebuilt from the new set, and every value
+is written back through the same door a slider uses — so the controls show what the registry
+holds, the values in flight are where they were, and a newly installed effect's parked values
+come back and apply. A newly installed package stays out of the sidebar until it is added or used.
+What you were looking at survives it: the tab that was up stays up, a group
+you had collapsed stays collapsed, and the preset picker still lists what it listed. Each of
+those was read once at boot before, so after the first install the panel either lost them or went
+on reporting a state it no longer had. A package that changed no GLSL is adopted without recompiling anything,
+which is what keeps a retune from clearing the trails on a page mid-playback. Other browsers
+converge on their own within a few seconds; the poll stands down while an export, a preset
+gesture or a keyframe evaluation is running, because a rebuild between two frames of a render is
+a file that changes look halfway through — and it asks again after its last read, so a gesture
+that starts while it is reading defers it rather than being run over by it.
+
+**A package this build stores and cannot compile is a rollback and a sentence.** The door checks
+vocabulary and is not a compiler, so GLSL that is syntactically broken while naming only things
+this build has gets through it — and a shader that will not link is a log line in WebGL rather
+than an exception. The page detects it while it warms the swapped programs and refuses the
+install: it goes back to the effects it was drawing with, keeps the document it had, and says
+which shader did not compile.
+
+A fork may add parameters and retune the ones it inherits. It may not **drop** one: the panel's
+declaration order places every shipped parameter by hand, so a fork short of one is a build whose
+registry cannot assemble at all, and that is refused at the door with the names it dropped.
+
+**An upgrade can refuse a fork that was fine when you installed it, and it says so at startup
+rather than at the next page load.** A fork is held against the build it was installed on, and
+this program's shaders gain, lose and rename the joints a chunk can name — so a new build may not
+be able to assemble a fork an old one accepted, and the fork would still shadow the shipped
+package it forks. The store therefore asks the install door about every package in `effects/`
+each time it starts. One the door now refuses is renamed to `<id>.<seq>.incompatible`, the shipped
+package answers for that id again, and the log line names the id and the rule:
+
+```
+effect rain was installed by an earlier build of this program and this one refuses it: effect
+rain does not assemble into this build's shaders: ... - the package has been renamed to
+rain.4711.k2p9.incompatible rather than deleted, so it is still there to be repaired and moved
+back, and the shipped package answers for that id again
+```
+
+Nothing deletes that directory. Fix what the sentence names, rename it back to `<id>`, and
+restart — or install the repaired package over the top, which leaves the aside where it is for
+you to remove by hand.
+
+One package refused this way never costs its neighbours: each is held against the shipped set
+plus the packages already validated beside it, so a fork that cannot assemble is renamed aside on
+its own and the healthy ones next to it go on serving. And if the rename itself cannot be made —
+a filesystem that refuses it, a name already taken sixteen ways — the server still comes up, says
+so on the same line, and goes on serving the package it has just announced it cannot use. A build
+that boots with a broken package is one you can read this log on; a build that will not boot is a
+machine with nothing to read at all.
 
 ## Levelling a canted mount
 
@@ -295,7 +557,7 @@ so they keyframe: the colour's saturation, the depth ramp's gamma, the ghost she
 exponent and fill, the contour's bands per metre and line thickness, and the Blackwall scan
 speed. Each defaults to the literal it replaced.
 
-**The duotone sits on top of all five**, beside `thermal` and `edges` and for their reason:
+**The duotone sits on top of all five**, beside `thermal.amount` and `edges.amount` and for their reason:
 a term written into one reading is inert in every other. It is a tonal transform rather than
 a tint, because its two poles carry luminance as well as hue — the near one runs toward black
 and the far one toward hot, so one term gives both the depth-keyed palette and the near-black
@@ -334,7 +596,7 @@ than further because a line thinner than the pixel drawing it is aliasing rather
 lines, and it is the one that makes the other two worth having: an angle over a sine only ever
 buys rotated softness, where the references are hard line grilles.
 
-They are settings of `scanlines` rather than terms beside it, so only the master gates the
+They are settings of `raster.amount` rather than terms beside it, so only the master gates the
 grade pass — raise the angle with the master at zero and nothing happens, which is deliberate,
 since switching a full-screen pass on to draw nothing is the no-op the gate exists to refuse.
 The angle is one parameter behind a two-component uniform, computed in double on the way
@@ -342,44 +604,82 @@ through for the reason `contourWidth`'s two band edges are: taking the sine in t
 allowed to be a couple of thousandths off, and a raster meant to run along y then leaks a
 whisker of x.
 
+**`film stock`** is the emulsion's own colour, in a `Film stock` group of its own, and it keys
+on exposure rather than on distance. That is what separates it from the duotone above: the
+duotone is keyed to depth, replaces the colour outright and runs per point, where this biases
+the colour the assembled frame already has — so a point, the bloom halo around it and the
+halation ringing that halo are toned together, which nothing in the point program can do. It is
+built to leave exposure alone: the tint it applies is divided by its own luminance, so raising
+the master to 1 moves colour and not brightness (measured over three frames, mean luma 124.91 at
+one end of the balance against 125.06 at the other, a spread of 0.12%).
+
+`stock balance` is the axis between two stocks and **its two halves are different shapes**. At
+-1 it is a tungsten-balanced stock shot in daylight: shadows cool toward cyan-blue and highlights
+stay warm, which is the split most people mean by a film look. At +1 it is the mismatch the
+other way round and the whole frame sits warm, because both stocks put warm highlights up and
+what actually walks along the axis is the shadow. `stock split` is the luminance where cool
+becomes warm and `stock latitude` is how wide the crossover is either side of it — they go on
+deciding where and how wide across the whole axis, they simply stop straddling a hue boundary
+once the balance is past neutral. All three are settings of `stock.amount` and are inert while
+it is at zero.
+
 `crush` is the toe under the grade's Reinhard curve, promoted from a literal and defaulting to
-it. It is a sub-control of the grade pass rather than a fifth term gating it — raise it on its
-own and nothing happens, because the pass only runs when the split, the scanlines, the grain
-or the vignette asks for it. That asymmetry is deliberate: its default is not zero, so gating
+it. It is a sub-control of the grade pass rather than an eighth term gating it — raise it on its
+own and nothing happens, because the pass only runs when one of the seven terms above asks for
+it. That asymmetry is deliberate: its default is not zero, so gating
 on it would hold the pass open for every look there has ever been.
 
 The panel is generated from the registry at boot. A parameter is one entry naming its group
 and label, and the row, bounds, readout and keyframe control are built from that, so an
-effect cannot get a control the registry does not own. The generator refuses to boot if the
-rows it emitted are not the parameters that were declared.
+effect cannot get a control the registry does not own. Package-effect rows are hidden until
+the effect is added with **+ add effect** or any of its values or tracks carries work.
+Removing one resets every value and deletes every track in one confirmed, undoable edit.
+The local rack preference is panel state, not project state. The generator refuses to boot
+if the rows it emitted are not the parameters that were declared.
 
 ## Presets
 
 Selecting Blackwall used to apply twelve post-chain values with it. They are separate now: a
 preset is look values and nothing else, so applying one never moves your camera.
 
-A preset is `{ version, values }`, and the keys it names are its scope. Nine ship read-only
-from `presets-builtin/` and are marked `·` in the picker. Five of them — `rgb`, `depth`,
+A preset is `{ version, values }`, plus a `requires` list when the look touches any effect,
+and the keys it names in `values` are its scope. A parameter's key is dotted by the effect it
+belongs to — `glyph.tone`, `raster.pitch` — and a core value that belongs to no effect stays
+bare, like `pointSize` or `readDepth`. `requires` is `[{ id, version }]`, one entry per effect
+the values touch, derived from them rather than typed: a look that never raises the rain
+carries no entry for it. Ten ship read-only from `presets-builtin/` and are marked `·` in the
+picker. Five of them — `rgb`, `depth`,
 `ghost`, `contour` and `blackwall` — are one per reading and differ in little else, so they
 are where a grade starts, with `blackwall.json` carrying the twelve values the old mode
-wrote. The other four — `ember`, `grille`, `voxel` and `tearline` — are graded looks in
-their own right: each reads Blackwall and spends a duotone, a raster and a toe on top of it,
-so applying one takes a finished grade rather than clearing the desk. Nothing in the format
-marks the difference and nothing should — they are all documents, and the split is
-editorial. A preset naming two values is equally valid, and applying it leaves everything
-else where the grade left it.
+wrote. The other five — `ember`, `grille`, `voxel`, `tearline` and `cascade` — are graded
+looks in their own right: the first four read Blackwall and `cascade` reads depth, and each
+spends a duotone, a raster and a toe on top of that reading, so applying one takes a finished
+grade rather than clearing the desk.
+Nothing in the format marks the difference and nothing should — they are all documents, and
+the split is editorial. A preset naming two values is equally valid, and applying it leaves
+everything else where the grade left it.
 
-**All nine name the whole look**, which is the 68 look values outside the framing group, so
-picking one gives you that look whatever was on screen before it. Framing — levelling, the
-clip planes, the crop box — is the shot rather than the look, so no shipped document names
-it and picking one never reframes what you framed. `none` is the one entry that does reach
-the framing, because it is the way back to the defaults rather than a tenth look.
-`library-check` holds the rule against the registry, so a look parameter added later fails
-all nine until each of them names it.
+**All ten name the whole look**: the 36 core values every look owes regardless of which
+effects it uses, plus every parameter of each effect the document itself touches — so picking
+one gives you that look whatever was on screen before it. Applying a whole look resets every
+effect the document does not claim back to that effect's own defaults, which is what makes
+leaving an effect out and writing it in at its defaults describe the same look; a document
+naming four core-only readings owes 36 values, and one naming Blackwall's five effects owes
+36 plus their 14. Framing — levelling, the clip planes, the crop box — is the shot rather
+than the look, so no shipped document names it and picking one never reframes what you
+framed. `none` is the one entry that does reach the framing, because it is the way back to
+the defaults rather than an eleventh look. `library-check` holds the rule against the
+registry: a new core value fails all ten until each names it, and a new parameter added to an
+effect fails only the documents whose `requires` already claims that effect — an effect
+nothing has reached yet fails nothing, because nothing claims it.
 
-Saving and exporting both ask which values go in, every box ticked, so a sparse preset takes
-deliberate effort. The boxes derive from the registry, so a parameter added later appears
-under its own heading by existing.
+Saving and exporting both ask which values go in, every box ticked by default, so a sparse
+preset takes deliberate effort. A whole-look save still sheds what it can: an effect sitting
+wholly at its own defaults leaves no trace in the saved file, because the whole-look apply
+above restores that same effect to those same defaults whenever the document does not claim
+it — lossless by construction rather than by argument. A subset save sheds nothing, because a
+picked value at its default is still a value somebody chose. The boxes derive from the
+registry, so a parameter added later appears under its own heading by existing.
 
 **The five reading weights tick and untick together.** A file naming any reading has to name
 all five, because the ones it omits stay at whatever the clip was already wearing, and two
@@ -388,9 +688,10 @@ that is not about the reading, which is fine. `refusePresetBody` refuses everyth
 between.
 
 **A partial preset does not stamp the clip**, because the stamp answers "what look is this
-clip wearing" and three of sixty-eight values did not answer it. The two surfaces that report
-an apply say which of the two happened, and a document naming the whole look stamps whether
-it also names the framing or not — the framing is not part of the answer.
+clip wearing" and a document short even one of the values its own core and effects call for
+did not answer it. The two surfaces that report an apply say which of the two happened, and a
+document naming the whole look stamps whether it also names the framing or not — the framing
+is not part of the answer.
 
 **Saving over a shipped name forks it**: the write lands in your library and shadows the
 built-in, and deleting the fork brings the shipped look back.
@@ -408,5 +709,8 @@ validates, so `editor-check` section 12 drives the round trip in a browser, with
 
 Documents from before the readings are version 3 and will not open, and there is nothing to
 run: the one-shot conversion this repo used to ship was deleted once every document it could
-act on had already been converted. A version 3 or 4 file is refused, naming its own version,
-and stays refused.
+act on had already been converted. This build reads version 6 alone — a version 5 document
+still spelled its parameters bare (`glyphTone` rather than `glyph.tone`) and carried no
+`requires` list, so it is refused the same way a version 3 or 4 one is, and there is no
+conversion for it either: every document this project holds was re-authored at 6. A file from
+any older version is refused, naming its own version, and stays refused.

@@ -285,7 +285,13 @@ if (!existsSync(SOURCE)) {
 // behind any crash, which is the one state a proof tool must never produce.
 rmSync(WORK, { recursive: true, force: true });
 mkdirSync(WORK, { recursive: true });
-for (const dir of ['server', 'tools', 'web']) {
+// `effects-builtin` is in this list because the effect store refuses to BOOT without its
+// shipped root - deliberately, so a broken install cannot read as nothing-installed. A
+// staged tree without it is a server this tool can never start, and the run then reports
+// `DID NOT RUN` with no assertions at all rather than reddening a row, which is the shape
+// nobody reads. It is copied rather than symlinked like the trees beside it, so a mutation
+// naming a chunk under it could not reach the repo's own source.
+for (const dir of ['server', 'tools', 'web', 'effects-builtin']) {
   cpSync(join(REPO, dir), join(WORK, dir), { recursive: true });
 }
 for (const name of ['node_modules', 'vendor', 'captures']) {

@@ -1,10 +1,1009 @@
 # The proof-tool suite in detail
 
-`CLAUDE.md` carries the invocation list — what exists and how to run it. This file is what
-each tool needs, what its exit codes mean, and the per-tool facts that are only worth having
-when you are about to run or edit that tool.
+This is the whole of the suite: how to run each tool, every `--mutate` control it must FAIL
+under, what it needs before it will run, what its exit codes mean, and the per-tool facts that
+are only worth having when you are about to run or edit that tool. `CLAUDE.md` carries the index
+— one line per tool, what it proves and what it needs — and sends you here for the rest.
 
 For the method behind the suite, see `docs/instruments.md`.
+
+## The invocation list
+
+**Every tool, how to run it, and every `--mutate` control it must FAIL under.** This list used
+to live in `CLAUDE.md`, which is loaded into every session; it is here now because it is
+reference read on a condition rather than a rule anybody needs in their head. `CLAUDE.md` keeps
+the index — which tool proves what, and what it needs before it will run — and `syntax-check`
+still enforces that every tool in `tools/` is named there.
+
+```
+node tools/determinism-check.mjs                    # step 1: same program time, same image
+node tools/determinism-check.mjs --clock --before HEAD~1
+node tools/index-check.mjs --url http://localhost:8123   # step 2: index, hash, frame API
+node tools/registry-check.mjs --url http://localhost:8080 # step 3: one registry, sliders as views
+node tools/registry-check.mjs --mutate mix-ignores-normalisation  # ... and must FAIL mutated
+node tools/registry-check.mjs --mutate rgb-contributes-no-alpha   # ... and must FAIL mutated
+node tools/registry-check.mjs --mutate duotone-ignored            # ... the tonal transform the rest of the look sits on
+node tools/registry-check.mjs --mutate duotone-ignores-depth      # ... and that it is keyed on depth, which is the whole claim
+node tools/registry-check.mjs --mutate duotone-span-ignored       # ... the width of that key, promoted back to the literal it replaced
+node tools/registry-check.mjs --mutate duotone-span-against-a-frozen-range # ... and that the width is metres, which only two clip ranges at once can see
+node tools/registry-check.mjs --mutate duotone-hue-in-degrees     # ... a unit no picture comparison can see the shape of
+node tools/registry-check.mjs --mutate vspeed-ignored             # ... the motion half of the same transform, and the speed it keys on
+node tools/registry-check.mjs --mutate vspeed-unnormalised        # ... that the speed is a rate, which only two planted spans can see
+node tools/registry-check.mjs --mutate vspeed-ignores-the-gate    # ... and that a jump past the snap threshold is a surface, not motion
+node tools/registry-check.mjs --mutate vspeed-reads-one-texel     # ... and that it is a value per point, which a uniformly moving plant cannot see
+node tools/registry-check.mjs --mutate motion-leaks-at-zero       # ... the default, which is the one place this term has to be exactly absent
+node tools/registry-check.mjs --mutate spansec-nominal            # ... the gap it is divided by, taken off the transport rather than assumed
+node tools/registry-check.mjs --mutate crush-ignored              # ... the toe, promoted to the literal it defaults to
+node tools/registry-check.mjs --mutate crush-gates-the-grade      # ... and the one term in that pass that must not gate it
+node tools/registry-check.mjs --mutate raster-recomputes-the-default # ... the raster's default path reached rather than recomputed, at the value the shipped look names
+node tools/registry-check.mjs --mutate raster-ignores-angle       # ... the axis a raster runs along
+node tools/registry-check.mjs --mutate raster-pitch-fixed         # ... its line frequency, promoted from the literal it defaults to
+node tools/registry-check.mjs --mutate raster-hard-ignored        # ... and the duty cycle, without which an angle only buys rotated softness
+node tools/registry-check.mjs --mutate glitch-axis-ignored        # ... the axis a tear's bands are cut along
+node tools/registry-check.mjs --mutate lattice-ignored            # ... the grid the volume is rebuilt on
+node tools/registry-check.mjs --mutate ripple-ignored             # ... the region's fourth reading
+node tools/registry-check.mjs --mutate ripple-outside-the-gate    # ... and the gate that decides whether it is inert, which the sweep cannot see
+node tools/registry-check.mjs --mutate ripple-clock-continuous    # ... its clock, which steps rather than breathes
+node tools/registry-check.mjs --mutate streak-ignored             # ... the bleed, and whether it reaches a pixel at all
+node tools/registry-check.mjs --mutate streak-ignores-angle       # ... and which way it runs, which the drop-one sweep cannot see
+node tools/registry-check.mjs --mutate streak-angle-in-degrees    # ... in the unit no picture comparison can see the shape of
+node tools/registry-check.mjs --mutate glyph-ignored              # ... the mark the room is drawn out of, switched off at both
+                                                                  #     of the stages it gates - one anchor leaves the characters
+                                                                  #     still being drawn at the old sprite size
+node tools/registry-check.mjs --mutate glyph-hash-per-point       # ... a character keyed on the point rather than on the cell it
+                                                                  #     fell in, which draws characters either way and is the
+                                                                  #     difference between a room made of code and a fog of it
+node tools/registry-check.mjs --mutate glyph-hash-on-the-displaced-point # ... and read after the turbulence moved the point, which
+                                                                  #     is the defect the probe this came out of shipped and which
+                                                                  #     is bit-identical to the fix wherever nothing is displacing
+node tools/registry-check.mjs --mutate glyph-hash-after-the-region # ... and read after the other two displacements, which run
+                                                                  #     before the turbulence and sat at zero in every arm - so
+                                                                  #     the one above cannot see it. Both are inlined together,
+                                                                  #     because the pair share a radial direction and a build
+                                                                  #     hashing after them hashes the drawn position exactly
+node tools/registry-check.mjs --mutate crossfade-reads-the-reference # ... the legibility band counted in reference pixels alone,
+                                                                  #     which is the unit every other glyph arm agrees with and
+                                                                  #     so the one none of them can refuse
+node tools/registry-check.mjs --mutate crossfade-before-the-halving # ... and the same reading taken one line early, so a cut-away
+                                                                  #     cell drawn at half its pixels is crossfaded as though it
+                                                                  #     had all of them
+node tools/registry-check.mjs --mutate crossfade-ignores-the-buffer-scale # ... and the same band counted in the buffer's pixels
+                                                                  #     alone, which no arm below 1080 can refuse and which lets
+                                                                  #     a view parameter move the graded look
+node tools/registry-check.mjs --mutate rain-key-counts-whole-drops # ... the drop counter handed to the index raw, which is inert
+                                                                  #     at exactly the weight the key should be loudest at
+node tools/registry-check.mjs --mutate glyph-index-averages       # ... the three keys mixed rather than summed, caught on scale
+                                                                  #     rather than on the character - the document's own
+                                                                  #     discriminator is the same number under both compositions
+node tools/registry-check.mjs --mutate glyph-tone-ignored         # ... the tonal key, and the ink ordering under it that no
+                                                                  #     comparison of two pictures can see
+node tools/registry-check.mjs --mutate rain-ignored               # ... the falling wave, at the lift and at the counter both
+node tools/registry-check.mjs --mutate rain-trail-below-the-head  # ... and which side of the head its afterglow sits on, without
+                                                                  #     which the wave reads as rising
+node tools/registry-check.mjs --mutate rain-climbs                # ... and which way the whole pattern travels, which is a
+                                                                  #     different claim from that one and which no single frame
+                                                                  #     holds - the trail is still above a head going the wrong way
+node tools/registry-check.mjs --mutate rain-span-in-frames        # ... its head gap in metres of room rather than in frames of
+                                                                  #     whatever the link is doing, which only two link speeds see
+node tools/registry-check.mjs --mutate normalisation-floor-restored # ... the pile-up fix, planted because no shipped look reaches
+                                                                  #     the band - a sprite grown to a cell moves the floor from
+                                                                  #     19cm out to where a person stands
+node tools/registry-check.mjs --mutate glyph-leaks-at-zero        # ... and the master exactly absent at 0, which is what nine of
+                                                                  #     the ten shipped looks rest on - cascade is the tenth and
+                                                                  #     the only one that draws a character at all. The eight-of-ten
+                                                                  #     population next door is a different set: that one is the
+                                                                  #     lattice-zero looks the compensation has to leave alone
+node tools/registry-check.mjs --mutate rain-leaks-at-zero         # ... the other master, on the same terms
+node tools/registry-check.mjs --mutate compensation-leaks-at-lattice-zero # ... and the energy correction, which rides no master at
+                                                                  #     all and so is excused by neither
+node tools/registry-check.mjs --mutate glyph-margins-occlude      # ... a fragment at exactly zero alpha writing depth, which is
+                                                                  #     invisible geometry per point on the hard-edged path. Its
+                                                                  #     two sections are the only ones here standing two surfaces
+                                                                  #     up: every other plants one wall coincident with itself,
+                                                                  #     where nothing is behind anything to be hidden
+node tools/registry-check.mjs --mutate margins-confined-to-glyphs # ... the same discard narrowed back to characters, which is
+                                                                  #     the state one commit of this history was in and the
+                                                                  #     wrong fix the character section cannot refuse
+node tools/registry-check.mjs --mutate margins-miss-the-newborn   # ... and narrowed the other way, to the disc's rim and not
+                                                                  #     the point that has not faded in yet
+node tools/timeline-check.mjs --url http://localhost:8080 # step 4: seek equals playback
+node tools/timeline-check.mjs --mutate preroll-constant   # ... and must FAIL mutated
+node tools/timeline-check.mjs --mutate draft-always-resets # ... and must FAIL mutated
+node tools/timeline-check.mjs --mutate reading-write-skips-repaint # ... and must FAIL mutated
+node tools/timeline-check.mjs --mutate rain-accumulates   # ... the rain integrated frame to frame, so a seek lands
+                                                          #     where playback never would. Its section applies a
+                                                          #     rain-raised look of its own, because every other arm
+                                                          #     in that file renders the term completely inert
+node tools/timeline-check.mjs --mutate rain-phase-unread  # ... and the same clock written correctly and read by
+                                                          #     nothing, which both arms agree about perfectly. It is
+                                                          #     the control for the guard rather than for the claim:
+                                                          #     what reddens is the row that moves the clock alone
+                                                          #     under a still frame
+node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, retime curve, undo
+node tools/keyframe-check.mjs --mutate pose-linear        # ... and must FAIL mutated
+node tools/keyframe-check.mjs --mutate pose-ignores-ease  # ... the camera's handles, which shape when it arrives and never
+                                                          #     where it goes. Separable from `pose-linear` on purpose and the
+                                                          #     counts are how you tell: 4 rows here against that one's 6, and
+                                                          #     every route row stays green, because a camera ignoring its
+                                                          #     handles still travels the same curve at the wrong times
+node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, export, the file
+node tools/export-check.mjs --mutate pointsize-absolute   # ... and must FAIL mutated
+node tools/export-check.mjs --mutate cropoutside-reaches-the-export # ... the crop box's faint pass, one edit from being in a deliverable
+node tools/export-check.mjs --mutate faint-survives-at-zero # ... and a cut point kept at alpha zero, invisible and still occluding
+node tools/export-check.mjs --mutate export-ignores-missing-effects # ... the door on a clip whose look this build cannot draw
+                                                          #     whole. Reddens 4: the refusal row, the still-refused-for-the-other
+                                                          #     row, and the two in the leak block that stand on a refusal
+                                                          #     happening at all - the second document's export and the console
+                                                          #     line it drains. The suppress, record and complete rows stay green
+node tools/export-check.mjs --mutate suppression-outlives-its-document # ... a suppression made about one clip carried into the
+                                                          #     next document opened, which is how it shipped: the loader prunes
+                                                          #     the set and two documents missing one effect are indistinguishable
+                                                          #     to a prune. Reddens the leak row and the refusal beside it, and
+                                                          #     leaves the keep row green, because the prune it does not touch is
+                                                          #     what makes a suppression survive an undo
+node tools/export-check.mjs --mutate suppress-is-global   # ... and the same door answering a per-effect question globally,
+                                                          #     which only the two-missing-effects row can see - with one
+                                                          #     missing, both implementations refuse nothing
+node tools/export-check.mjs --mutate deliverable-forgets-suppressed # ... and the record's half: a file that went without a
+                                                          #     layer of the look and does not say so. One row
+node tools/export-check.mjs --mutate bloom-buffer-sized   # ... the glow's chain following the buffer, which is the only live catcher
+                                                          #     in this suite for the reference the chain is frozen at. Its sibling
+                                                          #     `bloom-reference-1080` is NOT caught by anything here and is not a
+                                                          #     regression - `test/bloom-chain.test.mjs` is what holds that half,
+                                                          #     and docs/instruments.md has the measurement
+node tools/library-check.mjs                              # step 7: library, recorder, routes
+node tools/library-check.mjs --mutate plant-open-take     # ... and must FAIL
+node tools/library-check.mjs --mutate open-decides-its-own-reason  # ... one take, one refusal, whichever surface asks
+node tools/library-check.mjs --mutate menu-decides-its-own-reason  # ... and the menu is a surface too
+node tools/library-check.mjs --mutate refusal-without-a-badge      # ... a reason the server declares and no page can badge
+node tools/library-check.mjs --mutate refusal-declared-but-never-pushed # ... and one nothing can ever earn
+node tools/library-check.mjs --mutate openable-recomputes-the-band # ... and a band that decides for itself beside the table
+node tools/library-check.mjs --mutate recording-decides-openable-itself # ... and the take being written, which answered twice
+node tools/library-check.mjs --mutate node-admits-an-old-manifest  # ... a node one build behind, refused at the link
+node tools/library-check.mjs --mutate node-admits-an-old-record-state # ... and behind on the other route, whose absent field is not an idle recorder
+node tools/library-check.mjs --mutate badges-inherit-from-object   # ... and one build ahead, whose reason still badges
+node tools/library-check.mjs --mutate refusals-must-be-nonempty    # ... and a healthy node not refused for being healthy
+                                                                   #     (wide: takes the link off, so it stops at 125 of 392 -
+                                                                   #      read the rows, not the total. docs/instruments.md says why)
+node tools/library-check.mjs --mutate grid-declared-twice          # ... and the sensor grid stated once
+node tools/library-check.mjs --mutate grid-declared-in-another-spelling # ... whatever notation the second one is in
+node tools/library-check.mjs --mutate grid-declared-with-a-leading-dot # ... including the one with no leading digit
+node tools/library-check.mjs --mutate grid-loses-a-dimension       # ... both halves of it, each asked for on its own
+node tools/library-check.mjs --mutate tile-height-follows-content  # ... the gallery's geometry
+node tools/library-check.mjs --mutate poster-height-in-js          # ... and its poster's box
+node tools/library-check.mjs --mutate viewer-splat-one             # ... and the viewer's density
+node tools/library-check.mjs --mutate gallery-has-no-way-back      # ... the way out
+node tools/library-check.mjs --mutate plant-unswept-menu-item      # ... every control has a driver
+node tools/library-check.mjs --mutate rename-ignores-hash          # ... rename, one term per mutation
+node tools/library-check.mjs --mutate rename-orphans-marks         # ...
+node tools/library-check.mjs --mutate rename-during-a-shoot        # ...
+node tools/library-check.mjs --mutate rename-clobbers-under-a-race  # ... and two at once
+node tools/library-check.mjs --mutate viewer-decides-for-itself    # ... one take, one set of actions, whichever surface
+node tools/library-check.mjs --mutate viewer-drops-focus-on-rebuild # ... the arrows survive the rebuild they cause
+node tools/library-check.mjs --mutate menu-close-strands-focus     # ... and a menu selection
+node tools/library-check.mjs --mutate run-strands-focus            # ... and an action that held the surface down
+node tools/library-check.mjs --mutate reveal-drops-the-path        # ... what the file manager was told
+node tools/library-check.mjs --mutate reveal-answers-any-caller    # ... and who may start a process
+node tools/library-check.mjs --mutate poll-refreshes-every-tick     # ... the gallery follows the recorder rather than the page load
+node tools/library-check.mjs --mutate pulse-ignores-the-node        # ... and the recorder it follows is the one holding the sensor
+node tools/library-check.mjs --mutate health-answers-beside-the-table # ... a route answering outside the table is one no sweep can see
+node tools/library-check.mjs --mutate empty-window-keeps-its-start  # ... a window with no frames in it still closes
+node tools/library-check.mjs --mutate respawns-count-a-colour-toggle # ... and a restart somebody asked for is not the sensor flapping
+node tools/library-check.mjs --mutate respawns-dip-before-the-spawn  # ... and the count does not read low while that restart is in flight
+node tools/library-check.mjs --mutate openpath-drops-at-the-stop     # ... a take is the recorder's until its index exists, not until it stops
+node tools/library-check.mjs --mutate poll-first-tick-is-blind       # ... and the first tick answers against the grid already painted
+node tools/library-check.mjs --mutate poll-forgets-a-failed-refresh  # ... and a refresh that failed leaves its transition unseen
+node tools/library-check.mjs --mutate poll-ticks-overlap             # ... while one that has not come back is not asked again
+node tools/library-check.mjs --mutate press-survives-a-cancelled-gesture # ... a press the browser took back, ended - the
+                                                                     #     editor handles `pointercancel` in nine places and
+                                                                     #     the gallery handled it in none. The tap row after
+                                                                     #     it stays green
+node tools/library-check.mjs --mutate manifest-trusted-past-id-and-hash # ... a peer's manifest checked on every field rather
+                                                                     #     than on the two that reach a path, because the rest
+                                                                     #     are spread into the listing and drawn. Reddens the
+                                                                     #     field row and leaves the two build-gate rows green
+node tools/library-check.mjs --mutate refresh-paints-a-stale-listing # ... and a slow listing does not paint over a newer one,
+                                                                     #     which is a second caller rather than the poll twice -
+                                                                     #     the three rows above it stay green, and that is the split
+node tools/library-check.mjs --mutate superseded-refresh-reports-success # ... and the discarded caller is told the newer one's
+                                                                     #     answer rather than a success of its own - the poll
+                                                                     #     acts on that sentence, so a success nothing earned
+                                                                     #     advanced its fingerprint past a transition no paint
+                                                                     #     ever showed
+node tools/library-check.mjs --mutate download-ignores-the-volume    # ... a download asked against the disk before a byte
+                                                                     #     moves, because the byte ceiling holds the node to
+                                                                     #     its claim and a truthful take larger than the free
+                                                                     #     space breaks the shoot recording to the same volume
+node tools/library-check.mjs --mutate post-action-poll-discarded     # ... and a press asks again rather than taking the answer in flight
+node tools/library-check.mjs --mutate listing-never-times-out        # ... and a listing nothing will answer frees itself
+node tools/library-check.mjs --mutate delete-guesses-past-an-unreachable-node # ... a node that did not answer is not a node with nothing on it
+node tools/library-check.mjs --mutate first-load-bounded       # ... a cold library is slow for a reason, and the load is not the poll
+node tools/library-check.mjs --mutate first-load-strands-the-page  # ... and a first listing that fails leaves a page that still works
+node tools/library-check.mjs --mutate listing-ignores-client-abort # ... a caller that gave up takes the node fetch with it
+node tools/library-check.mjs --mutate signal-bound-after-an-await # ... and bound before the walk rather than after it, which
+                                                                   #     is the shape three of the four routes shipped: every
+                                                                   #     call site passes a signal and the presence row stays
+                                                                   #     green, because what is wrong is when it was created.
+                                                                   #     Reddens the ordering row alone - read the rows
+node tools/library-check.mjs --mutate cancel-watches-the-consumed-request # ... including on a route that read its body before asking
+node tools/library-check.mjs --mutate listing-takes-a-refusal-as-a-library # ... and a refusal that parses is not a library
+node tools/library-check.mjs --mutate faint-fixed-in-one-page       # ... one token, and the page that drifts is named
+node tools/library-check.mjs --mutate extent-reads-one-frame        # ... the cloud's reach measured over the take rather than its first frame
+node tools/library-check.mjs --mutate extent-cache-ignores-the-range # ... and cached against the depth range it was computed for
+node tools/library-check.mjs --mutate write-overwrites-builtin # ... and must FAIL
+node tools/library-check.mjs --mutate list-swallows-unreadable # ... and must FAIL
+node tools/library-check.mjs --mutate open-take-swallows-library # ... and must FAIL
+node tools/library-check.mjs --mutate one-refusal-for-older-versions # ... one sentence for every version, which
+                                                                   #     collapses the three bands `versionRefusal`
+                                                                   #     still keeps now the migration is gone:
+                                                                   #     older, later, and a version field that is
+                                                                   #     not a number at all
+node tools/library-check.mjs --mutate open-ignores-format          # ... the capture's generation, at all four doors at once
+node tools/library-check.mjs --mutate save-forgets-the-parked-pool # ... a document opened on a machine without one of its
+                                                                   #     effects and saved back with that effect's values gone,
+                                                                   #     which is the destructive shape parking exists to
+                                                                   #     prevent. Reddens 5: the reopen row, the two value rows,
+                                                                   #     the row asking what else is under the prefix, and the
+                                                                   #     second-trip row. The requires row stays green - this
+                                                                   #     mutation keeps the entry - and so do the two load rows,
+                                                                   #     because the load half is untouched - read the rows
+node tools/library-check.mjs --mutate skew-goes-unreported         # ... the version a document was authored against, compared
+                                                                   #     with nothing, which is how it shipped. Reddens the two
+                                                                   #     rows about the mismatched document - the hook and the
+                                                                   #     sentence on the bar - and leaves the matched control
+                                                                   #     green, since a build reporting nothing agrees with a
+                                                                   #     correct one about a document with nothing to report
+node tools/library-check.mjs --mutate completeness-reads-the-values-only # ... the per-effect completeness rule asked of the
+                                                                   #     values and not the tracks, so a clip whose only use of
+                                                                   #     an effect is a keyframe track loaded and was rewritten
+                                                                   #     on save. Reddens the track-only refusal alone; the
+                                                                   #     values-truncation row beside it stays green, because
+                                                                   #     that document reaches the loop either way
+node tools/library-check.mjs --mutate save-forgets-the-parked-requires # ... and the same merge's other half, keeping the values
+                                                                   #     and dropping the claim. Reddens the entry row, the
+                                                                   #     reopen row, and the second-trip row that stands on it
+node tools/library-check.mjs --mutate shipped-look-drops-a-value   # ... a shipped look with a hole in it, which is the last look staying under the next one
+node tools/library-check.mjs --mutate complete-look-drops-a-group  # ... and the definition those documents are written against, which is code where they are data
+node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g # the editor's controls: that they exist, that pressing them changes something
+node tools/editor-check.mjs --mutate export-name-not-taken --no-render # ... the output name read out of a deliverable
+                                                                       #     and never written into one, which is the
+                                                                       #     defect this branch shipped: the row walks it
+                                                                       #     out to the server and back through an
+                                                                       #     adoption, because a field read straight back
+                                                                       #     proves only that an input holds text
+node tools/editor-check.mjs --mutate aspect-skips-the-letterbox --no-render # ... the shape written into the document
+                                                                       #     and the stage not framed to it, which is the
+                                                                       #     one thing putting the shape on the document
+                                                                       #     was for. Reads the stage's own box rather than
+                                                                       #     the button that was just pressed, so a build
+                                                                       #     that lights the control and reframes nothing
+                                                                       #     fails here and passes on the attribute
+node tools/editor-check.mjs --mutate badge-counts-the-registry --no-render # ... the badge for a missing effect counting off
+                                                                       #     the registry rather than off the parked pool,
+                                                                       #     which prints `0 values, 0 tracks parked` - the
+                                                                       #     same line a build that *dropped* them would
+                                                                       #     print. Reddens the exact-sentence row of 15b
+node tools/editor-check.mjs --mutate suppress-toggle-is-a-latch --no-render # ... and the toggle beside it going only one
+                                                                       #     way, so a decision about one render becomes a
+                                                                       #     decision about the session. Reddens the
+                                                                       #     press-it-again row alone
+node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
+node tools/editor-check.mjs --mutate plant-unswept-control --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate ends-reaches-the-selection --no-render # ... `ends` shaping the selected key instead of the
+                                                                       #     move's two ends, which is `smooth` under another
+                                                                       #     name and halts the camera at an interior key
+node tools/editor-check.mjs --mutate ends-skips-the-arrival --no-render # ... and reaching only the departure, which is half the
+                                                                       #     reported defect surviving the fix for it
+node tools/editor-check.mjs --mutate glide-is-a-cubic --no-render      # ... the quintic dropped to a cubic, whose rate still
+                                                                       #     reaches zero at the key - so every velocity row stays
+                                                                       #     green and only the degree is gone with the
+                                                                       #     acceleration claim resting on it
+node tools/editor-check.mjs --mutate elevation-moves-the-curve --no-render # ... `+pt` appending a control point rather than
+                                                                       #     elevating, which is the one wrong implementation
+                                                                       #     that leaves the count right and moves the camera.
+                                                                       #     Only the sampled-curve row can see it, which is why
+                                                                       #     that row samples the render instead of reading the
+                                                                       #     handles back - every handle is meant to move
+node tools/editor-check.mjs --mutate handle-clamped-to-the-segment --no-render # ... a control point clamped to the segment's ends
+                                                                       #     rather than to its own neighbours, which was
+                                                                       #     complete while a side held one point - then the
+                                                                       #     neighbours *were* the ends - and lets two cross
+                                                                       #     once a side holds more. Only a drag of a point
+                                                                       #     that is not index 0 can see it
+node tools/editor-check.mjs --mutate points-reach-the-retime --no-render # ... and the point controls offered on the retime,
+                                                                       #     whose unit-box monotonicity proof is a proof about
+                                                                       #     a cubic and nothing else
+node tools/editor-check.mjs --mutate ease-gate-hardcodes-scalar --no-render # ... the ease gate naming one kind instead of asking
+                                                                       #     the table, which is what locked the camera out
+node tools/editor-check.mjs --mutate pose-segments-never-shaped --no-render # ... and a pose segment that never has a shape to
+                                                                       #     edit, which is the NaN the old subtraction returned
+node tools/editor-check.mjs --mutate pose-lane-draws-flat --no-render  # ... the lane's drawn curve, which every other pose row
+                                                                       #     reads past on its way to the evaluator
+node tools/editor-check.mjs --mutate pose-handle-overshoots --no-render # ... a pose handle leaving the unit box, which sends the
+                                                                       #     camera past the pose it was keyed at
+node tools/editor-check.mjs --mutate beads-evenly-spaced --no-render   # ... and the path's beads marking distance rather than
+                                                                       #     time, which is an overlay that redraws the route
+node tools/editor-check.mjs --mutate import-skips-normalise --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate import-saves-before-validating --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate picker-ignores-the-boxes --no-render # ... the subset a preset is written with
+node tools/editor-check.mjs --mutate readings-tick-alone --no-render   # ... and the five weights that move as one
+node tools/editor-check.mjs --mutate apply-says-nothing --no-render    # ... and that applying one says so, on the control that inherited the gesture
+node tools/editor-check.mjs --mutate effect-rack-shows-every-effect --no-render # ... a fresh sidebar showing every installed package without Add. Reddens eight rack rows
+node tools/editor-check.mjs --mutate effect-rack-ignores-touched --no-render # ... active values and tracks left hidden because they were not added. Reddens three rack rows
+node tools/editor-check.mjs --mutate effect-rack-remove-keeps-tracks --no-render # ... Remove resetting values while leaving the effect's keyframes behind. Reddens one rack row
+node tools/editor-check.mjs --mutate effect-rack-reset-forgets-effect --no-render # ... reset making the last touched effect disappear under the pointer. Reddens one rack row
+node tools/editor-check.mjs --mutate group-never-reveals --no-render      # ... a panel group is open because the clip says so
+node tools/editor-check.mjs --mutate reveal-ignores-tracks --no-render    # ... and a keyframe counts where the value does not
+node tools/editor-check.mjs --mutate override-prunes-only-on-toggle --no-render # ... and the override the document, not the toggle, has caught up with
+node tools/editor-check.mjs --mutate panel-row-skips-parameter --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate nav-at-the-foot --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate panel-tabs-show-everything --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate dialog-close-strands-focus --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate obs-forgets-custom-resolution --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate orbit-pumps-on-change --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate camera-motion-keeps-history --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate orbit-uses-scrub-draft --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate orbit-arms-into-playback --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate orbit-arms-stale-position --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate release-seeks-past-target --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate pin-keeps-orbit-armed --no-render  # ... and must FAIL
+node tools/editor-check.mjs --mutate camkey-takes-the-passing-pose --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate rate-holds-cuts --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate rate-holds-keys --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate undo-skips-cuts --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate zoom-about-centre --no-render     # ... and must FAIL
+node tools/editor-check.mjs --mutate pointer-ignores-view --no-render  # ... and must FAIL
+node tools/editor-check.mjs --mutate marks-ignore-view --no-render     # ... and must FAIL
+node tools/editor-check.mjs --mutate mini-ignores-edges --no-render    # ... and must FAIL
+node tools/editor-check.mjs --mutate splitter-unclamped --no-render    # ... and must FAIL
+node tools/editor-check.mjs --mutate rail-ignores-scroll --no-render   # ... and must FAIL
+node tools/editor-check.mjs --mutate splitter-forgets --no-render      # ... and must FAIL
+node tools/editor-check.mjs --mutate mini-wheel-uses-ruler --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate shortcuts-ignore-consumed --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate rate-ends-on-change --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate takeover-ignored --no-render      # ... and must FAIL
+node tools/editor-check.mjs --mutate wheel-ignores-deltamode --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate pan-keys-unbound --no-render      # ... and must FAIL
+node tools/editor-check.mjs --mutate lanes-eat-touch --no-render       # ... and must FAIL
+node tools/editor-check.mjs --mutate keys-yield-touch --no-render      # ... and must FAIL
+node tools/editor-check.mjs --mutate deliverable-keeps-gesture --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate window-clamp-ratchets --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate detent-eats-loaded-rate --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate anchor-floors-to-frame --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate keyup-ends-any-gesture --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate pause-keeps-resume --no-render   # ... and must FAIL
+node tools/editor-check.mjs --mutate bounds-compare-off-grid --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate detent-in-rate-units --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate zoom-pans-at-the-clamp --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate note-skips-title --no-render      # ... the whole of a long refusal stays reachable
+node tools/editor-check.mjs --mutate tick-seeks-source-seconds --no-render # ... a mark tick seeks where it is drawn
+node tools/editor-check.mjs --mutate offer-ignores-take-hash --no-render # ... the resume offer joins on footage, not on a name
+node tools/editor-check.mjs --mutate resume-waits-for-every-list --no-render # ... and a broken neighbouring library does not strand it
+node tools/editor-check.mjs --mutate resume-fetches-the-moving-name --no-render # ... and restores the document it offered, not what the name holds by then
+node tools/editor-check.mjs --mutate resume-restores-without-keeping --no-render # ... and keeps it, so the recovery outlives the tab
+node tools/editor-check.mjs --mutate shortcuts-reject-altgr --no-render # ... the mark keys work on the layouts that need AltGr to type them
+node tools/editor-check.mjs --mutate marks-ignore-the-clip-range --no-render # ... and offer only the marks a trimmed clip can reach
+node tools/editor-check.mjs --mutate tick-seeks-outside-the-trim --no-render # ... the ruler's ticks obey the same rule the keys do
+node tools/editor-check.mjs --mutate beyond-mark-loses-focus --no-render # ... a mark past the end still answers a keyboard
+node tools/editor-check.mjs --mutate clip-range-unclamped --no-render # ... a trim the program cannot hold
+node tools/editor-check.mjs --mutate clip-bound-coerces-nonnumeric --no-render # ... and a trim that is not a time at all
+node tools/editor-check.mjs --mutate refusal-strands-the-picker --no-render # ... and the menu that named what was refused
+node tools/editor-check.mjs --mutate resize-skips-repaint --no-render # ... and the picture a resize clears
+node tools/editor-check.mjs --mutate resume-races-the-autosave --no-render # ... the recovery is written after the edits already on the wire
+node tools/editor-check.mjs --mutate restore-accepts-view-track --no-render # ... and a track the writer never writes
+node tools/editor-check.mjs --mutate prune-ignores-movement --no-render # ... a stored collapse, against the boot it has to survive
+node tools/editor-check.mjs --mutate panel-rederives-per-write --no-render # ... and what the panel costs the render path
+node tools/editor-check.mjs --mutate envelope-unchecked --no-render     # ... the half of a preset document nothing used to read
+node tools/editor-check.mjs --mutate reset-missing-on-a-row --no-render # ... a reset per look scalar, enumerated off the registry
+node tools/editor-check.mjs --mutate reset-skips-a-tab --no-render      # ... and a whole inspector that lost them
+node tools/editor-check.mjs --mutate reset-remembers-its-own-state --no-render # ... what a row offers, re-read rather than remembered
+node tools/editor-check.mjs --mutate reset-collapses-the-slot --no-render # ... and the slot kept for it, so the row does not move
+node tools/editor-check.mjs --mutate reset-strands-focus --no-render    # ... the caret after the press that removed its own control
+node tools/editor-check.mjs --mutate reset-writes-around-the-registry --no-render # ... and a press that is a registry write rather than an assignment
+node tools/editor-check.mjs --mutate format-segments-paint-the-press --no-render # ... the export format shown, read off the deliverable rather than off the last click
+node tools/editor-check.mjs --mutate box-drag-pumps-renders --no-render # ... a crop face dragged out of the animation loop rather than out of its own handler
+node tools/editor-check.mjs --mutate resize-ignores-the-dock --no-render # ... the picture drawn full height under a bar drawn over its last 72px
+node tools/editor-check.mjs --mutate collapse-by-display --no-render   # ... and the panel a touchscreen could shut and never reopen
+node tools/editor-check.mjs --mutate collapsed-keeps-the-editor-height --no-render # ... the collapsed panel's box, which two rules of equal weight decided by source order
+node tools/editor-check.mjs --mutate collapsed-keeps-the-tab-rail --no-render # ... and the half of that a lower rule cannot fix, because `:not()` carries its argument's weight
+node tools/editor-check.mjs --mutate dock-sensor-takes-the-centre --no-render # ... a dock button forwarding faithfully to the neighbouring control
+node tools/editor-check.mjs --mutate dock-offers-the-take-on-the-editor --no-render # ... and `record` offered on the surface that never polls a recorder to paint it
+node tools/editor-check.mjs --mutate fit-lands-after-history-begins --no-render # ... the box a take opens with, which is the clip rather than the first thing you can undo
+node tools/editor-check.mjs --mutate fit-outlives-a-restored-project --no-render # ... and a document's own box, which only the ordering still protects
+node tools/editor-check.mjs --mutate play-button-skips-pausetransport --no-render # ... the one pause on this surface that did
+                                                                       #     not take the transport. **NOT caught by this suite**,
+                                                                       #     and that is recorded rather than left to be
+                                                                       #     rediscovered: the two pre-roll rows beside it pass
+                                                                       #     on both builds, because a pause pressed inside a
+                                                                       #     play's own pre-roll holds either way. The generation
+                                                                       #     guard protects a resume queued by *another* gesture,
+                                                                       #     and in each of those the transport is already paused,
+                                                                       #     so the button is a play rather than a pause. The fix
+                                                                       #     is consistency with the helper this file's own
+                                                                       #     comment mandates, not a demonstrated defect -
+                                                                       #     docs/instruments.md has the measurement
+node tools/editor-check.mjs --mutate toggle-plays-over-a-pending-play --no-render # ... the *demonstrated* defect on the same button:
+                                                                       #     the toggle reading `playing` alone, which is false
+                                                                       #     for the whole stretch a play spends awaiting the
+                                                                       #     accurate seek a draft forces, so the press that
+                                                                       #     meant stop started a second play. Reddens the
+                                                                       #     pending-outcome row and leaves the pending-window
+                                                                       #     row above it green - read the rows
+node tools/editor-check.mjs --mutate play-resolves-past-its-pause --no-render # ... and the transport's half of that claim: a pending
+                                                                       #     play that never rechecks its generation resolves
+                                                                       #     into `playing` over the pause that landed inside
+                                                                       #     it. Same row - two ways to break one claim, and it
+                                                                       #     needs both halves standing
+node tools/editor-check.mjs --mutate picker-keeps-a-refused-look --no-render # ... and the picker left naming a look the apply
+                                                                       #     refused, which the deliverable menu forty lines
+                                                                       #     away already reverts. The refusal itself is
+                                                                       #     unchanged, so only the revert row reddens
+node tools/editor-check.mjs --mutate restorekey-skips-handle-invariants --no-render # ... the ease-handle invariants asked of
+                                                                       #     the drag that makes a value and never of the
+                                                                       #     loader that reads one back, though the docstring
+                                                                       #     over it claimed them. Reddens the two per-side
+                                                                       #     refusal rows and leaves the look-overshoot and
+                                                                       #     fold rows green, because the bound is per kind
+                                                                       #     and the fold is the segment's own check
+node tools/editor-check.mjs --mutate restore-skips-the-fold-check --no-render # ... that check: whole-curve monotonicity asked once
+                                                                       #     per segment with both handles in hand. The per-side
+                                                                       #     ordering rule it replaced refused the legal crossed
+                                                                       #     polygons `elevate` produces - the editor could save
+                                                                       #     a document its own reload declined - and could not
+                                                                       #     see a fold spanning the join at all. Reddens the
+                                                                       #     fold row alone; the legal-crossed row beside it is
+                                                                       #     the half that fails on the build this replaced
+node tools/editor-check.mjs --mutate restore-admits-descending-times --no-render # ... the walk's other question: a pair whose times
+                                                                       #     descend skipped as merely coincident, so a damaged
+                                                                       #     track installs unsorted and keyBefore's binary
+                                                                       #     search selects segments nobody authored. Reddens
+                                                                       #     the descending-times row alone
+node tools/editor-check.mjs --mutate reset-forgets-the-pivot --no-render # ... the orbit's home aim, which `OrbitControls`
+                                                                       #     captures in its constructor before the target is
+                                                                       #     written and which no rebuild carried across.
+                                                                       #     Reddens the two pivot rows and leaves the position
+                                                                       #     row green, because the position was never the half
+                                                                       #     that was broken - read the rows
+node tools/editor-check.mjs --mutate commit-ignores-null-baseline --no-render # ... the recovery slot of the take that *was*
+                                                                       #     open, spent by a take that never opened. The
+                                                                       #     `!EDITING` guard beside it is about the surface
+                                                                       #     and cannot see this: `begin()` is the last thing
+                                                                       #     `openTake` does, so a failed open leaves `/edit`
+                                                                       #     interactive with a null baseline. Reddens exactly
+                                                                       #     two rows in section 13 - the press being recorded,
+                                                                       #     and what it destroyed - so read the rows
+node tools/boot-check.mjs                                 # the post-boot state diff: every control shows the value the registry holds
+node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the shipped fault put back - the boot write landing
+                                                          #     before the panel generator has filled its Maps, which reaches
+                                                          #     no control, throws nothing, and leaves a page whose sliders
+                                                          #     are lying. Reddens exactly one row of nine and leaves the
+                                                          #     write-sweep row beside it green, because that one is about the
+                                                          #     live path and the fault is in the boot write - read the rows
+node tools/boot-check.mjs --mutate effect-rack-shows-every-effect # ... every installed package row shown on a fresh recorder.
+                                                          #     Reddens exactly the package-row visibility assertion
+node tools/effect-check.mjs                               # installing an effect: revisions, the door, the hotload, park and restore
+node tools/effect-check.mjs --mutate temporaries-are-visible # ... the id filter the store lists directories through, widened, so
+                                                          #     a crashed install's `<id>.<seq>.tmp` becomes a package `/effects`
+                                                          #     lists and `rootFor` resolves. Reddens **six** rows, measured:
+                                                          #     the two of section 10 that are about a half-written package,
+                                                          #     section 12's page-boot row, and section 14's three, which need
+                                                          #     a page that came up. Section 10 is late for the reason those
+                                                          #     first two are the ones it is *about* - staged earlier it would
+                                                          #     redden every section after it with a fault five sections away.
+                                                          #     **It reddened two and ended early at 110 before this round**,
+                                                          #     measured in a detached worktree at `5d8cd33` with the
+                                                          #     unmutated control green at 119/0 there: the mutated store's
+                                                          #     gate ran in the constructor and the server never came up at
+                                                          #     section 11's restart, so a third of the tool was never put to
+                                                          #     that build. Running the gate after the bind, and a `setAside`
+                                                          #     that logs a rename it cannot make instead of throwing, is what
+                                                          #     turned a truncated run into four more measured rows
+node tools/effect-check.mjs --mutate rebuild-skips-the-panel # ... the panel built on the first run and never again, which is the
+                                                          #     rebuild somebody writes who thinks of the panel as boot
+                                                          #     furniture. `boot-check` stays green, because boot is the run
+                                                          #     that builds it; six rows redden, one in section 3 and the rest
+                                                          #     across 7, 8 and 9 - everything downstream of a panel that is
+                                                          #     not the registry
+node tools/effect-check.mjs --mutate install-skips-the-uniform-cells # ... the JavaScript cell a new binding needs, never minted.
+                                                          #     No shipped package notices - every one of the sixteen binds a
+                                                          #     uniform some hand-written table already holds - and a
+                                                          #     seventeenth throws inside the value walk. Reddens six rows of
+                                                          #     section 3 and ends the run early; the count is a floor
+node tools/effect-check.mjs --mutate reinstall-leaves-it-parked # ... the parking predicate widened to every dotted name, so a
+                                                          #     value belonging to an installed effect parks anyway. The badge
+                                                          #     still appears on the uninstall, which is what makes it worth
+                                                          #     having: nine rows redden, four across sections 4 and 5 and five
+                                                          #     more in section 6, and the badge-appeared row stays green. The
+                                                          #     document it leaves behind is one the loader refuses in both
+                                                          #     directions, so section 6's rebuild reddens on the rollback's own
+                                                          #     refusal rather than on the install's.
+                                                          #     **It ends the run early and always has**, which this line did
+                                                          #     not say: the document it leaves behind makes section 7's first
+                                                          #     unguarded `reload()` throw. Measured 2026-08-24 at both ends of
+                                                          #     this round's changes - 52 of the 91 assertions the tool had at
+                                                          #     `4b63f80`, and 55 of 111 now, nine red either way. The count is
+                                                          #     a floor and the tool says so
+node tools/effect-check.mjs --mutate rollback-keeps-the-new-registry # ... the rollback runs the loader again and runs it against
+                                                          #     the packages that just arrived rather than the ones this page
+                                                          #     had - the half-rollback somebody writes who reads the failure as
+                                                          #     being about the document. Reddens six rows: four in section 6 -
+                                                          #     the sentence, the registry's contents, the signature, and what a
+                                                          #     save writes - and the two rollbacks of section 9. The picture
+                                                          #     cannot see it, because the parameter the fork adds is inert at
+                                                          #     its default and the image is identical either way, which is why
+                                                          #     a pixel row is not enough to hold this.
+                                                          #     **Ten now, measured 2026-08-24**: the four extra are the two
+                                                          #     blocks at the end of section 9, which are second rollback
+                                                          #     fixtures and go red with the first. Six at `4b63f80`, so the
+                                                          #     four are this round's and the line above was right about its
+                                                          #     own tree
+node tools/effect-check.mjs --mutate rebuild-remakes-the-buttons # ... the memo taken off the two closures that emit the framing
+                                                          #     group's hand-written rows, so every rebuild makes fresh buttons
+                                                          #     carrying the right ids and none of the wiring. Reddens three rows
+                                                          #     of section 7: the control pressed and the node the status was
+                                                          #     written into carry the claim, and the precondition above them
+                                                          #     goes red because the status write it builds the fixture out of is
+                                                          #     the very thing the mutation stops landing. Measured, 2026-08-24 -
+                                                          #     this line said "two rows and nothing else" for as long as nobody
+                                                          #     had counted, which is the undercount docs/instruments.md warns a
+                                                          #     Must-redden line produces when it names the claim rows alone
+node tools/effect-check.mjs --mutate rebuild-forgets-the-tab # ... the showing tab not re-applied to the groups the generator has
+                                                          #     just made, so one install puts every tab's groups on screen at
+                                                          #     once. Reddens one row of section 7
+node tools/effect-check.mjs --mutate rebuild-keeps-the-paint # ... `groupPainted` left holding state strings written against
+                                                          #     elements the rebuild threw away, so a group whose values did not
+                                                          #     move is skipped by the first refresh and comes back open with no
+                                                          #     `aria-expanded`. Reddens two rows of section 7: the claim, and
+                                                          #     the precondition above it, which is the group the mutation
+                                                          #     prevents from being shut in the first place. Measured 2026-08-24;
+                                                          #     one run also reddened section 8's read-across-two-revisions row
+                                                          #     and a re-run on the same tree did not, so that one is the
+                                                          #     intermittent that row's own poll is about rather than a cascade
+node tools/effect-check.mjs --mutate rebuild-keeps-the-picker # ... the preset subset dialog built once and never again. An
+                                                          #     installed effect gets no checkbox and an uninstalled one leaves
+                                                          #     a box whose handler reads `PARAMS` for a name that is gone.
+                                                          #     Reddens two rows of section 7, one per direction
+node tools/effect-check.mjs --mutate gates-are-frozen-at-boot # ... the grade gate list computed once, off the packages installed
+                                                          #     while the module evaluated. All sixteen shipped effects are in
+                                                          #     it, so nothing about them notices; a grade effect installed
+                                                          #     afterwards writes into a pass that stays shut. Reddens one row
+                                                          #     of section 8
+node tools/effect-check.mjs --mutate every-reload-warms    # ... the warm run whether or not the programs moved, so a package
+                                                          #     that changed only its manifest clears the accumulators a page
+                                                          #     mid-playback is holding. Reddens one row of section 8, and the
+                                                          #     control beside it stays green because that one must warm
+node tools/effect-check.mjs --mutate swap-keeps-the-old-program # ... the program swap put back to `needsUpdate` alone. Three
+                                                          #     releases a program only from a material's `dispose` event, so
+                                                          #     every GLSL-changing install leaves one linked and cached.
+                                                          #     Reddens one row of section 8
+node tools/effect-check.mjs --mutate poll-checks-once      # ... the stand-down asked on the way into the tick and never again,
+                                                          #     so a rebuild lands inside a gesture that opened while it was
+                                                          #     reading. Reddens one row of section 8
+node tools/effect-check.mjs --mutate poll-takes-any-body   # ... `GET /effects` no longer held to the shape its readers assume,
+                                                          #     so a 200 carrying anything else reaches the signature
+                                                          #     comparison and throws out of the interval callback. Reddens one
+                                                          #     row of section 8. Two edits, because defusing the array check
+                                                          #     alone leaves the entry loop throwing inside the poll's own
+                                                          #     catch - which is handled, so the mutation reproduced nothing
+                                                          #     and the run came back NOT CAUGHT
+node tools/effect-check.mjs --mutate poll-guards-late      # ... the reentrancy guard raised after the list comes back rather
+                                                          #     than on the way in, so two ticks overlap and the older read can
+                                                          #     win. Reddens one row of section 8
+node tools/effect-check.mjs --mutate reads-need-not-agree  # ... the verification read taken off the end of the package fetch,
+                                                          #     so a set read across an install is one package from before it
+                                                          #     beside another from after. Reddens **two** rows of section 8,
+                                                          #     measured 2026-08-24: it takes the whole comparison out, so
+                                                          #     both the moved-revision row and the generation row below it
+                                                          #     go. This line read "one row" for as long as there was one
+                                                          #     term to remove
+node tools/effect-check.mjs --mutate list-reads-need-not-agree-on-generation # ... the generation term dropped from that
+                                                          #     same comparison, leaving the contents term it had before.
+                                                          #     A revision is a hash of bytes, so a change that is
+                                                          #     *undone* hashes back to what it was: a fork installed and
+                                                          #     deleted again restores the shipped package, and both
+                                                          #     listings are then identical across a window the page read
+                                                          #     some of its chunks out of. Its own spec rather than a
+                                                          #     second edit of the row above, because no comparison and
+                                                          #     the wrong comparison fail differently. Reddens one row of
+                                                          #     section 8
+node tools/effect-check.mjs --mutate package-read-need-not-match-the-list # ... and the same window one request further
+                                                          #     in, where neither listing can reach: a package answering
+                                                          #     for a revision the list did not name hands this page that
+                                                          #     package's manifest and file index out of the other
+                                                          #     revision. Reddens one row of section 8
+node tools/effect-check.mjs --mutate door-takes-any-expansion # ... the bound on how much text a manifest asks to have
+                                                          #     spliced, leaving the two that count what it carries. A
+                                                          #     file counts once in each of those and once per descriptor
+                                                          #     in the assembler, so the two numbers come apart without
+                                                          #     limit. Reddens two rows of section 2 - the refusal and
+                                                          #     the residue, because the package now lands on disk - and
+                                                          #     the sweep after them is what keeps it to two rather than
+                                                          #     carrying a sixty-file fixture into every section below
+node tools/effect-check.mjs --mutate seeding-skips-existing-cells # ... the uniform seeding back to minting only what is
+                                                          #     missing, so a cell whose binding changed shape keeps the
+                                                          #     shape from the build before. Reddens four rows at the end
+                                                          #     of section 9 and the run still finishes: the rollback dies inside
+                                                          #     the table it is rolling back through and prints the
+                                                          #     reload-the-page sentence, `probeShapeAxis is a number`
+                                                          #     where the registry demands a vector, and three values are
+                                                          #     left parked by a page that never got its document back
+node tools/effect-check.mjs --mutate departed-uniforms-keep-their-value # ... a uniform the registry has stopped binding
+                                                          #     left holding whatever the slider last put there. Nothing
+                                                          #     else ever writes those cells and the chunk reading it
+                                                          #     does not stop, so the term runs on with no control
+                                                          #     anywhere that can move it. Reddens three rows of section
+                                                          #     8, and the third is the one worth reading: with every
+                                                          #     control back at its default the picture is the one the
+                                                          #     raised term drew, hash for hash. The first is the grade
+                                                          #     gate's uninstall row, which asserted this defect
+                                                          #     approvingly until this round - see docs/instruments.md
+node tools/effect-check.mjs --mutate store-generation-never-moves # ... the store no longer counting its own changes,
+                                                          #     which is the control neither client-side mutation above
+                                                          #     can be: the arm that drives them fabricates a moved
+                                                          #     generation in an interception, so a store that never
+                                                          #     moved the number would satisfy every one of them while
+                                                          #     the coherent read compared equal numbers forever.
+                                                          #     Reddens the two rows of section 2 that read it off the
+                                                          #     real store, and must leave section 8's arm green -
+                                                          #     the two measure opposite ends of one wire
+node tools/effect-check.mjs --mutate poll-retries-a-refused-set # ... the block on a set this page has already failed to
+                                                          #     adopt. A rollback puts the old signature back on purpose,
+                                                          #     so the tick's own comparison goes on saying the store has
+                                                          #     moved and the same rebuild is attempted every six seconds
+                                                          #     forever - every package refetched, both programs
+                                                          #     reassembled, the material disposed, the accumulators
+                                                          #     reset. Reddens two rows, measured: the one at the end of
+                                                          #     section 9 and section 14's, which is the same block asked
+                                                          #     about a shape refusal rather than an assembly one
+node tools/effect-check.mjs --mutate adopt-outside-the-transaction # ... the adoption put back outside the `try` the rollback
+                                                          #     hangs off, so a throw out of the adoption itself - a package
+                                                          #     written into the store past the door, naming a panel group
+                                                          #     nothing holds - walks past it and leaves a registry with no
+                                                          #     panel drawn from it. Reddens one row of section 9
+node tools/effect-check.mjs --mutate a-broken-shader-is-warm # ... the throw dropped from the end of the warm, leaving a link
+                                                          #     failure where three.js puts it: a console line. The install
+                                                          #     succeeds, the poll announces success, and the cloud draws
+                                                          #     nothing. Reddens two rows of section 9
+node tools/effect-check.mjs --mutate the-sweep-eats-the-last-copy # ... the sweep removing every aside it finds and the recovery
+                                                          #     pass removed with it, so a crash between an install's two
+                                                          #     renames loses the package to the next install of that id.
+                                                          #     Reddens **three** rows of section 11, measured 2026-08-24 at
+                                                          #     `4b63f80` as well as here: the copy that does not come back,
+                                                          #     the aside left beside nothing, and the uninstall row under
+                                                          #     them, which needs a package to have been there to remove.
+                                                          #     This line said two for as long as nobody had counted
+node tools/effect-check.mjs --mutate package-files-follow-links # ... `statSync` back where `lstatSync` is, so the file route
+                                                          #     asks what a name points at rather than what it is. Reddens one
+                                                          #     row of section 10, and the ordinary file beside it stays green
+node tools/effect-check.mjs --mutate every-failure-is-final # ... the block on a refused set put back on *every* way a
+                                                          #     rebuild can fail, which is how it shipped: a refusal and a read
+                                                          #     error are the same three lines from the poll's side, so one
+                                                          #     server restart between the listing and a package fetch blocked
+                                                          #     a revision that was never anything but good until something
+                                                          #     else moved the store. Reddens **one** row, measured - the read
+                                                          #     error's "next tick adopts it" - and leaves the two refusal rows
+                                                          #     beside it green, which is what makes the pair a discrimination
+                                                          #     rather than two rows about one thing.
+                                                          #     `poll-retries-a-refused-set` is its mirror and fires the other
+                                                          #     row, measured, so the two terms separate exactly
+node tools/effect-check.mjs --mutate boot-adopts-a-stale-fork # ... the store's boot gate never asked, which is every build
+                                                          #     before it existed: a package that got through the door once is
+                                                          #     served forever, whatever this build's spines have done since,
+                                                          #     so a fork naming a joint an upgrade removed goes on shadowing
+                                                          #     the builtin it forks. Aimed at the call rather than at the
+                                                          #     method body, because the defect was that nothing re-validated
+                                                          #     rather than that something validated wrongly. Reddens **ten**
+                                                          #     rows, measured: seven in section 12 and the three of section
+                                                          #     14, which need a page that came up. The staging row stays
+                                                          #     green and so does the must-accept row - a gate that never ran
+                                                          #     serves the healthy fork too, which is what makes that row a
+                                                          #     control for over-refusal rather than for this. The one the
+                                                          #     finding is about is the page: it publishes no `__kinect` at
+                                                          #     all, because `assembleShaders` throws while `web/main.js` is
+                                                          #     still evaluating
+node tools/effect-check.mjs --mutate the-gate-doors-a-package-against-its-neighbours # ... the boot gate's second pass back to
+                                                          #     asking the door about each candidate with every other package
+                                                          #     beside it, checked or not, which is how it shipped. The door
+                                                          #     assembles `[...beside, candidate]` and reports what fails
+                                                          #     under the *candidate's* name, so one fork this build cannot
+                                                          #     assemble made its innocent neighbours come back "does not
+                                                          #     assemble" - and which was blamed depended on the lexical
+                                                          #     order the walk reached them in. Reddens **two** rows,
+                                                          #     measured: the healthy fork staged beside the broken one, and
+                                                          #     the count of what is left standing. Every other row of
+                                                          #     section 12 stays green, because a store that quarantines too
+                                                          #     much still hands the id back to the builtin and still boots
+node tools/effect-check.mjs --mutate the-gate-runs-before-the-bind # ... the recovery and the gate back at construction, which
+                                                          #     is where they were: every process that got as far as building
+                                                          #     a store ran them, including one about to die on `EADDRINUSE`
+                                                          #     over a root another server was already serving. The call in
+                                                          #     `listen` is left standing, so the winner still gates once and
+                                                          #     nothing else moves. Reddens **one** row, measured - section
+                                                          #     13's last - and the two before it stay green, because the
+                                                          #     loser still loses the bind and still exits either way
+node tools/effect-check.mjs --mutate the-aside-keeps-the-whole-name # ... the truncation dropped from the stem an aside is
+                                                          #     built from, which is how it shipped when nothing bounded an
+                                                          #     id's length. `NAME_MAX` is 255 and the suffix is about thirty
+                                                          #     characters, so a directory from that build cannot be renamed
+                                                          #     at all. Reddens **two** rows, measured: the over-long
+                                                          #     directory and the count of what is left standing. The server
+                                                          #     still comes up, which is the other half of the repair - the
+                                                          #     rename is caught and the package left where it is. **The
+                                                          #     fixture is 240 characters and the first one was 100**, which
+                                                          #     proved nothing: 100 renames to 128 and lands inside the 255 a
+                                                          #     filesystem takes, so the mutated build renamed it perfectly
+                                                          #     well and the row stayed green on a build with the defect in
+                                                          #     it. A fixture has to sit outside the bound it is about
+node tools/effect-check.mjs --mutate a-refused-body-is-a-failed-read # ... the frame that erases the refusal mark on its way
+                                                          #     out of the fetch. Every deterministic shape refusal a read
+                                                          #     can make - a listing that is not a list, a manifest that is
+                                                          #     not an object, a `chunks` that arrived as a string - is
+                                                          #     minted as a refusal at its throw site, and a plain
+                                                          #     `new Error` at that frame threw the classification away, so
+                                                          #     the set the store is serving was refetched whole every six
+                                                          #     seconds forever. Aimed at the frame rather than at a throw
+                                                          #     site, because every one of them passes through it. Reddens
+                                                          #     **one** row, measured: section 14's second. The first stays
+                                                          #     green, because both builds refuse the package - what differs
+                                                          #     is whether they go on asking
+node tools/effect-conformance-check.mjs --url http://localhost:8080 # the plugin contract: every installed effect draws nothing at all when it is off
+node tools/effect-conformance-check.mjs --mutate leaks-at-zero # ... a floor under the rain's master, so the package contributes at
+                                                          #     the term it is meant to be absent at. Served over an
+                                                          #     interception rather than written, because this tool runs against
+                                                          #     a server somebody else started and has no staged tree to edit.
+                                                          #     Reddens exactly one row - rain's drop equality - and no other
+                                                          #     effect's; the two arms that hold the master at zero cannot see
+                                                          #     it, because the sub-keys are behind the `rain > 0.0` gate
+node tools/monitor-check.mjs                              # step 9: the monitor's decimation, the take it must not touch, and the picture it shows
+node tools/monitor-check.mjs --mutate decimate-reaches-recorder  # ... and must FAIL mutated
+node tools/monitor-check.mjs --mutate bind-ignores-grid          # ... and must FAIL mutated
+node tools/monitor-check.mjs --mutate expand-shifts-by-a-block   # ... and must FAIL mutated
+node tools/monitor-check.mjs --mutate colour-off-keeps-the-texture # ... the cloud stops wearing the last JPEG
+node tools/sensor-view-check.mjs                          # the intrinsics a take was shot with, against a build that assumes them
+node tools/sensor-view-check.mjs --mutate fov-hardcoded   # ... and must FAIL mutated
+node tools/sensor-view-check.mjs --mutate no-repaint      # ... and must FAIL mutated
+node tools/level-check.mjs                                # levelling: the room turns, and the crop, the top-down and the sensor view keep their meaning
+node tools/level-check.mjs --mutate tilt-ignored          # ... and must FAIL mutated
+node tools/level-check.mjs --mutate crop-follows-tilt     # ... and must FAIL mutated
+node tools/level-check.mjs --mutate plan-ignores-tilt     # ... and must FAIL mutated
+node tools/level-check.mjs --mutate plan-skips-vertical-crop # ... and must FAIL mutated
+node tools/level-check.mjs --mutate region-follows-tilt   # ... and must FAIL mutated
+node tools/level-check.mjs --mutate sensor-view-ignores-tilt # ... and must FAIL mutated
+node tools/level-check.mjs --mutate level-order-swapped   # ... the pair's composition order, seen by the one surface that leans both ways
+node tools/level-check.mjs --mutate reset-keeps-roll      # ... and must FAIL mutated
+node tools/level-check.mjs --mutate plan-box-ignores-tilt # ... the crop box drawn in the room the shader deliberately does not test in
+node tools/level-check.mjs --mutate crop-switch-reaches-only-the-shader # ... and the switch over it, asked of the reader that is not the shader
+node tools/level-check.mjs --mutate x-not-mirrored        # the sensor's frames arrive mirrored, and the one fixture in the suite that is not symmetric about the optical axis
+node tools/level-check.mjs --mutate plan-x-not-mirrored   # ... asked of the top-down too, because a sign fixed in the shader alone leaves the plan reflected
+node tools/vcam-check.mjs                                 # the output to OBS: the colour camera, the take it must not touch, and the source's picture
+node tools/vcam-check.mjs --mutate hd-upscales-registered # ... and must FAIL mutated
+node tools/vcam-check.mjs --mutate hd-reencodes-in-flight # ... the bytes, where the picture is right
+node tools/vcam-check.mjs --mutate hd-reaches-recorder    # ... and must FAIL mutated
+node tools/vcam-check.mjs --mutate refusal-ignores-webcam # ... what the take is told the stream costs
+node tools/vcam-check.mjs --mutate pose-skips-the-registry # ... the camera pose in a socket patch, put through the
+                                                          #     registry the parameters beside it already go through.
+                                                          #     Four finite numbers are not a rotation, and the source
+                                                          #     was drawing with whatever arrived. Reddens the refusal
+                                                          #     row and leaves the pose-still-arrives row green
+node tools/vcam-check.mjs --mutate patch-params-applied-one-at-a-time # ... and the parameter half of the same patch, whole or
+                                                          #     not at all - applied one name at a time, a refused name
+                                                          #     kept the rest and the source drew half a frame nobody
+                                                          #     sent. Reddens the half-right-patch row alone
+node tools/guard-check.mjs                                # the socket's origin rule, the bind, and the rebinding rule
+node tools/guard-check.mjs --mutate upgrade-skips-origin  # ... and must FAIL mutated
+node tools/guard-check.mjs --mutate host-accepts-a-name   # ... and must FAIL mutated
+node tools/guard-check.mjs --mutate reads-answer-any-page # ... the reads a cross-origin `<img>` can start, which
+                                                          #     `originAllowed` cannot see: an `<img>` sends no Origin at
+                                                          #     all, so the header that separates it from the capture node
+                                                          #     is `sec-fetch-site`. Reddens the cross-origin row and
+                                                          #     leaves the same-origin, absent and navigation rows green
+node tools/jobs-check.mjs                                 # step 8: the queue, the pin, a real render, and a job
+                                                          #   whose deliverable this build cannot read, which has to
+                                                          #   come back failed rather than rendered - the batch path
+                                                          #   adopted past the version gate until it did.
+                                                          #   **It wants 8232 as well as 8231**: three arms put a
+                                                          #   forwarding proxy between a worker and the server, one
+                                                          #   policy at a time on `--proxy-port`, which defaults to
+                                                          #   the port above plus one
+node tools/jobs-check.mjs --mutate claim-ignores-renderer # ... and must FAIL mutated
+node tools/jobs-check.mjs --mutate envelope-takes-the-callers-requires # ... the effects a job needs, taken from a field beside
+                                                          #     the document instead of derived from it - a job that can lie
+                                                          #     about what it needs. Queue semantics, so `--no-render`.
+                                                          #     One row
+node tools/jobs-check.mjs --mutate envelope-trusts-the-documents-requires # ... and the same lie one field in, which is the
+                                                          #     shape this door actually shipped: `project.requires` copied
+                                                          #     whole, and the caller hands over the whole body. Reddens the
+                                                          #     two document-disagreement rows and leaves the row above's
+                                                          #     and the carried-whole row green - the two are not one control
+node tools/jobs-check.mjs --mutate envelope-takes-a-repeated-requires-id # ... one id claimed twice in a document's
+                                                          #     requires list, which the two disagreement rules beside it
+                                                          #     read as claimed once: one asks membership and the other
+                                                          #     asks a set, and the envelope then resolves each used id
+                                                          #     with `find`, keeping the first entry and dropping the
+                                                          #     rest. A document claiming two versions of one effect was
+                                                          #     recorded as whichever came first and refused late, at the
+                                                          #     loader. Queue semantics, so `--no-render`. One row
+node tools/jobs-check.mjs --mutate queue-takes-any-requires-shape # ... the entries' own shape, read but never held to one,
+                                                          #     which is how this door shipped: the list was taken if it
+                                                          #     happened to be an array and dropped otherwise, and no entry
+                                                          #     in it was ever asked what it was. The comparisons beside it
+                                                          #     are about which *ids* a list claims and an unreadable entry
+                                                          #     claims none, so `[{}]`, an entry with no version, an id that
+                                                          #     could never name a package and a stray key all agreed with a
+                                                          #     document that names nothing. Queue semantics, so
+                                                          #     `--no-render`. Reddens **seven** rows - one per shape,
+                                                          #     measured - and leaves the twin beside them green, because a
+                                                          #     well-formed entry is taken on both builds
+node tools/jobs-check.mjs --mutate worker-door-waved-open # ... the worker's door on an effect it has not got. It needs a
+                                                          #     render, like `heartbeat-stops-on-first-error`, and it
+                                                          #     reddens **one** row: the *reason*. The state row beside it
+                                                          #     stays green, because `exportClip` refuses the same clip
+                                                          #     from the other end and the job comes back failed either
+                                                          #     way. That is the split stated as a measurement - the two
+                                                          #     gates agree about whether the render happens and differ in
+                                                          #     what they say and in what it cost to say it
+node tools/jobs-check.mjs --mutate preflight-snapshot-is-taken-once # ... the worker's `/effects` read memoised, which is
+                                                          #     how it shipped: one fetch before the first claim answering for
+                                                          #     every job the worker went on to take, so an install or a retune
+                                                          #     landing mid-run was invisible for the rest of it. It needs the
+                                                          #     render block, because the arm is two jobs one worker takes in
+                                                          #     sequence with the store forked between them - neither of them
+                                                          #     renders, since both name a capture no take here hashes and so
+                                                          #     fail one step past the line being read. Reddens **one** row,
+                                                          #     measured: the *second* job's version. The first job's is the
+                                                          #     control and stays green, because a worker that read the store
+                                                          #     once is right about the first job by construction
+node tools/jobs-check.mjs --mutate preflight-asks-once    # ... the retry budget on that read cut to one attempt, which is
+                                                          #     how it shipped. The read runs after the claim and before the
+                                                          #     first heartbeat, so one connection reset there failed a
+                                                          #     claimed job through `/finish` into a terminal state - and a
+                                                          #     worker and its server are two processes with a restart, a
+                                                          #     proxy or a moment of `EHOSTUNREACH` between them. Reddens
+                                                          #     **three** rows, measured: the blip arm's take-resolution row
+                                                          #     and its skew line, because the job now comes back naming a
+                                                          #     read instead of getting past the preflight, and the outage
+                                                          #     arm's row asserting the worker asked more than once
+node tools/jobs-check.mjs --mutate preflight-reads-a-failure-as-an-empty-store # ... the status check, the shape check and the
+                                                          #     entry check pulled off that read, leaving `?? []` where they
+                                                          #     were, which is how it shipped. `.json()` parses an error body
+                                                          #     perfectly well and a missing `effects` key read as an empty
+                                                          #     listing, so a 500 - or a 200 from a proxy reporting its own
+                                                          #     failure, which no status check can see - came back as the
+                                                          #     sentence about a worker that has no `rain`, from a machine
+                                                          #     that has rain. Reddens **six** rows, measured, across both
+                                                          #     arms; the pair that discriminates is *which sentence* each
+                                                          #     job came back under, because the state is `failed` on both
+                                                          #     builds. **Two fixtures and two proxy policies**: a 500 served
+                                                          #     once is the blip a retry clears, a 200 carrying an error body
+                                                          #     every time is the outage a status check cannot see. Both
+                                                          #     answer only *referer-less* `GET /effects` - the worker's page
+                                                          #     polls the same address through the same proxy, so a plant
+                                                          #     that could not tell them apart would be spent on a tick of
+                                                          #     that poll as readily as on the read it was staged for
+node tools/module-check.mjs                               # the boundaries in web/: the import graph, what an import names, what crosses it
+node tools/module-check.mjs --mutate cycle-planted        # ... the import web/scene.js's own header says does not exist
+node tools/module-check.mjs --mutate cycle-through-a-second-spelling # ... and the same ring written the way the other page writes its imports
+node tools/module-check.mjs --mutate import-of-a-missing-file # ... a specifier this server answers 404 for, which is a module that never evaluates
+node tools/module-check.mjs --mutate import-names-a-missing-export # ... and a name the other side does not export, which fails before anything evaluates
+node tools/module-check.mjs --mutate one-spelling-for-every-module # ... the fold onto one node, which only two spellings of one file exercise
+node tools/module-check.mjs --mutate exported-mutable-object # ... a state object handed across a boundary with nothing saying why
+node tools/module-check.mjs --mutate state-crosses-as-a-live-let # ... the same object under the one keyword that used to excuse it
+node tools/module-check.mjs --mutate state-crosses-as-a-default # ... and in the export form that used to contribute nothing at all
+node tools/module-check.mjs --mutate export-form-nothing-claims # ... an export spelling nobody thought of, named rather than dropped
+node tools/module-check.mjs --mutate a-barrel-re-export        # ... and the barrel the one-implementation rule already refuses
+node tools/module-check.mjs --mutate imported-object-written-across-the-boundary # ... and the write itself, into a binding this module does not own
+node tools/module-check.mjs --mutate write-through-a-namespace # ... the same write where the far-side name is a property rather than a binding
+node tools/module-check.mjs --mutate write-through-a-rename    # ... and under the rename a name collision is ordinarily resolved with
+node tools/module-check.mjs --mutate write-from-a-page         # ... and from a page's inline module, which is a module like any other
+node tools/module-check.mjs --mutate exemption-outlives-its-export # ... and the exemption table's own rot, which is what a list has instead of a bug
+node tools/module-check.mjs --mutate exemption-covers-nothing  # ... its other half, which is the only thing standing over both rule 3 classifiers
+node tools/module-check.mjs --mutate import-nothing-uses       # ... a name brought across a boundary that no line on this side reads, which is the defect this tool shipped
+node tools/module-check.mjs --mutate import-used-under-its-far-side-name # ... asked of the binding an import makes rather than the name it asks for, which a rename separates
+node tools/module-check.mjs --mutate export-nothing-imports    # ... and the other direction, a name let out that nothing anywhere asks for
+node tools/module-check.mjs --mutate consumer-outside-web-drops-the-name # ... where the only reader is outside web/, and the join is per name rather than per module
+node tools/module-check.mjs --mutate dead-import-is-not-a-consumer # ... and the two halves joined, so a dead import stops holding up the export on the far side of it
+node tools/module-check.mjs --mutate outside-consumer-imports-a-name-it-never-reads # ... the use question asked of the importers outside web/, which used to enter the join unasked
+node tools/module-check.mjs --mutate dead-bare-import          # ... and asked of a package name, the half of that row nothing controlled
+node tools/module-check.mjs --mutate import-used-only-in-a-string # ... a use read at a code position rather than anywhere in the text
+node tools/module-check.mjs --mutate import-used-only-as-an-object-key # ... and not in the one position this file is full of, a property key
+node tools/module-check.mjs --mutate namespace-hides-a-dead-export # ... a namespace import asking for the names it reaches rather than for all of them
+node tools/module-check.mjs --mutate namespace-reach-cannot-be-named # ... and a reach that names none of them, which costs an assertion rather than a blind module
+```
+
+The two below need no server, and `registration-check` needs no sensor either — it runs on a
+corpus of `Registration::apply` inputs dumped by `grabber --dump-corpus`.
+
+```
+node tools/vendor-check.mjs                          # third_party is upstream v0.2.1 + declared edits
+node tools/vendor-check.mjs --mutate oracle-drift    # ... and must FAIL mutated
+node tools/registration-check.mjs                    # our registration == upstream's, bit for bit
+node tools/registration-check.mjs --mutate one-lsb   # ... and must FAIL mutated
+```
+
+The three below are three of CI's four jobs. The fourth is `npm run test:unit`, which lives in
+`test/` rather than `tools/` — it needs no server, no sensor and no browser, but it **does need
+`npm ci`**, and that changed with the module extraction rather than being true all along. Four
+of the modules taken out of `web/main.js` return three.js types they exist to build —
+`world-tilt` a Quaternion, `plan-geometry` a Vector3, `gpu-textures` a DataTexture, `bloom-pass`
+a Pass — so a node test of them cannot resolve `three` out of a tree holding only source.
+Measured on the first push after the extraction: `ERR_MODULE_NOT_FOUND: Cannot find package
+'three'`, 47 tests, 4 failed, on all four CI arms while the same suite ran 68 green locally
+against an installed tree. `test/runner-control.test.mjs` is its control.
+
+**Two of those tests were scaffolding and are gone, which is why the count dropped from 120 to
+113** — it reads 118 now, the five added being one door row for the step grid and the four in
+`test/effect-table.test.mjs`. Both of the deleted ones pinned this build to a revision of its own
+history, and both said so in their own
+headers when they were written. `test/effect-manifests.test.mjs` held every shipped manifest
+field-for-field against the effect table the registry used to declare, materialised out of `git
+show` through a `data:` URL — six tests, deleted whole. `test/shader-assembly.test.mjs` held the
+four assembled programs byte for byte against the two monolithic literals, resolved by content
+marker rather than by hash; that one arm is deleted and the file keeps its other three, which are
+structural and live.
+
+The reason to retire them rather than carry them is that a gate pinned to history breaks on the
+first *intentional* change — a manifest retune, a shader edit — and a gate that must be deleted
+to make a legitimate change is a gate that will be deleted carelessly. What replaces the byte
+equality is not weaker and it is not in `test/`: the ten-look probe renders the shipped looks
+through the real page and hashes the framebuffer, and it came back 150 of 150 equal to one
+recorded baseline at every landing point of the extraction. `docs/performance.md` carries that
+result with its full method. What replaces the manifest equality is the coupling that survives
+intentional change: `registry-check`'s set equality, `boot-check`'s diff, and
+`tableFromPackages`' own both-direction refusals, which `web/main.js` runs at boot on every page
+load.
+
+**What left with them, recorded rather than glossed.** `placeParams` was exported only for the
+deleted gate and is module-local now, so `module-check` stops reporting it as an export nothing
+reads. Its appendix rule — where a parameter no layout order places ends up — is exercised live
+by `effect-check`, which installs a fork carrying a parameter the order has never heard of, but
+only for one package at a time. The ordering *between* two unplaced packages was stated in the
+comment above the function and asserted nowhere; `test/effect-table.test.mjs` holds it now,
+through `tableFromPackages` rather than by re-exporting the module-local function, with two
+synthetic packages named against their placement so the expected answer disagrees with the order
+they are handed over in. Mutation-tested rather than reasoned about: dropping the id sort reddens
+three of its four rows, sorting each package's keys reddens two, and dropping the placed prefix
+reddens one — each on the rows it names, with the baseline green again after every restore. The other loss is subtler and worth the
+sentence: the byte-for-byte arm compared against a string the assembler did not produce, so it
+could see a rule the assembler had stopped applying. Its surviving neighbour, the flip control,
+assembles the tree twice with the same assembler and compares the two, so a dropped rule is
+dropped from both sides. Dropping `stages.sort(byOrder)` leaves the flip control green and
+reddens only the synthetic fixture arm — measured at the retirement, and the reason that fixture
+arm exists.
+
+```
+node tools/syntax-check.mjs                          # every JS file this repo ships parses, and the two
+                                                     #   constants the two languages cannot share agree
+node tools/syntax-check.mjs --mutate spec-drifts     # ... and the .knct decoder specification must FAIL when a constant moves under it
+node tools/syntax-check.mjs --mutate shell-id-renamed # ... and a surface whose shell drives an id the markup stopped declaring
+node tools/syntax-check.mjs --mutate shell-key-undeclared # ... and the other direction, which is the one a merge produces
+node tools/syntax-check.mjs --mutate web-citation-outlives-its-module # ... and a module this repo's own prose names, renamed to something the tree does not hold
+node tools/syntax-check.mjs --mutate line-citation-past-the-end # ... and the line half of that, which rots without the path rotting
+node tools/syntax-check.mjs --mutate citation-outside-the-prose # ... and one written in the C++, which is the half of the tree the walk used to skip
+node tools/syntax-check.mjs --mutate manifest-does-not-parse # ... and a shipped effect package the store would throw on must be named, not counted
+node tools/syntax-check.mjs --mutate anchor-in-dead-fallback # ... and a shader anchor that matches its file exactly once
+                                                     #   while sitting in a slot's fallback, which is a second copy
+                                                     #   of the shipped text that nothing compiles
+node tools/syntax-check.mjs --mutate anchor-duplicated-into-a-second-chunk # ... and the other half of the same
+                                                     #   row: one anchor over two sites in the assembled text,
+                                                     #   where the edit reaches one and the count reads whole
+node tools/syntax-check.mjs --mutate anchor-duplicated-into-a-second-program # ... and the same duplicate placed
+                                                     #   in the *other* program, which is the arm that says the
+                                                     #   count sums over every assembled string rather than
+                                                     #   asking each one on its own
+node tools/release-gate-check.mjs                    # the .npmrc supply-chain gate is actually armed
+node tools/release-gate-check.mjs --mutate wrong-unit # ... and must FAIL (also: no-gate, absent)
+node tools/cpp-check.mjs                             # both C++ files parse and typecheck, in all four
+                                                     #   pipeline configurations they can be built in
+node tools/cpp-check.mjs --mutate grabber-syntax-error # ... and must FAIL mutated
+node tools/cpp-check.mjs --mutate grabber-type-error  # ... a wrong argument type, which is the row that says
+                                                      #   this is a semantic pass and not a tokeniser
+node tools/cpp-check.mjs --mutate opengl-branch-broken # ... a break inside the Pi's `#ifdef` arm, which is the
+                                                      #   control the matrix exists for: a gate parsing one
+                                                      #   configuration reports this green. Reddens 2 of the
+                                                      #   4 grabber rows, not all of them - read the rows
+node tools/cpp-check.mjs --mutate opencl-branch-broken # ... and the arm this machine actually compiles
+node tools/cpp-check.mjs --mutate harness-syntax-error # ... and the second file, asked for on its own
+```
 
 ## Exit codes, and why reading them is a trap
 
@@ -251,7 +1250,7 @@ it was the first, and the second would have hidden it.
 
 `gradeNeeded()` here is true if any of `rgbSplit`, `scanlines`, `grain`, `vignette` or
 `streak` is up. At the pinned rev it knows only the first three, because the vignette was a
-baked `0.55` inside the pass rather than a parameter. Blackwall carries `vignette: 0.55`,
+baked `0.55` inside the pass rather than a parameter. Blackwall carries `vignette.amount: 0.55`,
 and the `OFF` look those arms spread zeroes exactly the three names both builds share — so
 the grade switched **off** over there and stayed **on** here, and the cross-build rows have
 been comparing a graded image against an ungraded one for as long as they have existed. The
@@ -272,7 +1271,7 @@ The repair is `CROSS_BUILD_OFF`, which is `OFF` with the vignette taken out, rea
 the arms that render one look through two builds. **It is deliberately not in `OFF`**: eleven
 within-build rows spread that, and their bands in `RES_TOLERANCE` were measured with the
 grade running. The two `rebase-full` rows spread nothing and were already green — because
-Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both sides, so both builds run the
+Blackwall's own `rgbsplit.amount`/`raster.amount`/`grain.amount` survive on both sides, so both builds run the
 grade — and that table came out that way rather than being fitted, which is the reason to
 believe the diagnosis.
 
@@ -282,6 +1281,16 @@ symptom is a ratio. `RES_ARM` now returns the composer's own pass list, and ever
 row requires the two builds to have run the same chain — printed in the row's message either
 way. `UnrealBloomPass` becoming `BloomPass` is normalised by name rather than skipped, so a
 rename nobody knew about fails loudly instead of passing quietly.
+
+**That last sentence was the exemption in miniature and it has been taken out.** Stripping
+the prefix made the one guard written to notice a swapped pass the guard that could not:
+`124a90b` replaced three's `UnrealBloomPass` with ours and the two do not deliver the same
+light, so from that commit the `rebase-full` pair compared two implementations and reported
+it as a ratio — 0.40978 and 0.40931 against an expected 1, red for fifteen days. Names are
+compared whole now, and the two arms that have to span the swap render with `bloom` at 0
+instead, printing the bloom-up ratio beside the judged one so the excluded term is still a
+number in the run. `docs/instruments.md` has the case file and the isolation, and the row
+titles say **bar the glow** because a label may not claim more than the arm measured.
 
 **"Every cross-build row" was three of five when that paragraph was written, and the two it
 missed are the two the paragraph above explains were green.** The guard went on the arms the
@@ -323,15 +1332,159 @@ against 1.02 and 0.95 for the same rows at HEAD — run-to-run noise — where a
 arm reports 22.19 and 22.14. The normalisation is what makes that comparison possible at all,
 and it is why the sign appears in this tool as well as in `registry-check`.
 
-**`registry-check` is red on one row, `readGhost`, and it predates this branch.** The claim is
-that `readGhost` at 1.0 is bit-identical to the old `mode 2` at `f49c8339…^`. Measured at the
-branch point `6e1be6f` it fails on one frame of six; at HEAD it fails on two, frames 2 and 3.
-So it is not something this branch introduced, and it did get worse here — both halves of that
-sentence matter, and neither was written down anywhere until now, which is how a known-red row
-becomes a row nobody re-derives. A comment in `web/cloud-shader.js` calls it "the pre-existing
-readGhost failure" and that comment arrived in `40ab241`, which is testimony rather than a measurement;
-the two runs above are the measurement. Nothing has dated the one-frame-to-two change, and the
-same bisect harness that dated the `export-check` rows would do it.
+**`registry-check` has no standing red row any more, and this paragraph used to say it had
+one.** For a long time `readGhost` failed section 1b's claim that the reading at 1.0 is
+bit-identical to the old `mode 2` at `f49c8339…^` — one frame of six at the branch point
+`6e1be6f`, two frames at the head of the branch that recorded it. What nobody had measured was
+how much it differed *by*: one byte of 921,600, at a delta of 1. `52b75cc` replaced the
+equality with a two-sided tolerance taken from both ends — the noise at one byte and delta 1
+below, the quietest true positive the row must catch, `ghost-alpha-term-dropped` at 156,247 to
+159,539 bytes of the frame, 17.0 to 17.3% of it, at deltas of 47 to 52, above — and the passing
+line now names what it absorbed rather than reporting a bare `PASS`. Both ends are measured at
+the 640x360 comparison frame the tool renders today, which is where the 921,600 comes from:
+640 by 360 by four channels. Read on this branch it says `6 frames, 1 within tolerance (worst 1
+bytes of 921600, delta 1)`, the identical line on all 13 clean runs recorded here.
+`docs/instruments.md` carries the account, the arithmetic, and the correction that moved these
+figures off the 640x400 stage they were first taken at. The operational consequence is the whole
+point: **a red `readGhost` row is a finding now rather than the weather**, and so is that line's
+byte count climbing.
+
+**It then had six standing red rows again, deliberately, and it does not any more — the middle
+of that story is the part worth keeping.** Widening the zero-alpha discard from characters to the
+whole hard-edged path moves the four non-additive documents, and section 1b compares this build
+against a revision that predates the discard entirely — so for a while all five reading rows and
+the raster row reported `6 of 6 frames differ`, at 460 to 750 bytes of 921,600 per frame with
+worst deltas of 191 to 250, and the clean run read 145 assertions, 139 passed, 6 failed. That was
+the approved look change arriving in the one place in this suite that compares this build against
+a committed one, and re-pinning the arm to whatever the tree drew would have turned a golden arm
+into a mirror.
+
+**What resolved it was handing the arm the change rather than re-pinning it.** The arm already
+patched one intentional divergence into the old source — the unprojection's mirror — and the
+discard is the second entry beside it, anchored exactly once on the old build's fragment output
+line and refused loudly otherwise. The rows kept their claim, which is that everything *but* the
+approved changes is identical, and they went green. **The clean run is 145 assertions, 0 failed**,
+measured repeatedly since and again at the end of the effect extraction against a server on 8503.
+`margins-miss-the-newborn` is what says they still have teeth: it un-discards the births on the
+current side alone and reddens all six plus its own planted row.
+
+**Read a mutation's count as a total now, not as rows beyond a standing set.** While the six
+stood, every list in that tool was written as rows *on top of* them, and two mutations —
+`margins-confined-to-glyphs` and `glyph-margins-occlude` — put the older arithmetic back and so
+reported *fewer* total reds than the clean tree. Neither of those readings survives the re-pin,
+and the counts in `tools/registry-check.mjs` were re-baselined as totals afterwards. The other
+rows to read alongside them are the two two-surface claims, at 19,765 of 75,239 and 365 of
+184,184.
+
+**The baseline on this branch is 0 failed at 131 assertions**, up from 89 with the glyph field's
+planted sections in — 120 before the review round added the two-surface occlusion section,
+the descent row, the ripple arms and the solo-key guards, taken against a server on the default port with the tool's own planted
+fixtures on its 640x360 canvas. Three times after the rebase rather than once, because a single
+green run of a tool with a known
+intermittent in the suite beside it is not a baseline. Paired with `timeline-check` at 75/0, and
+with all 22 mutation runs re-run across the rebase reddening **the same named rows before and
+after** — the names being the claim, since a total can move without a name moving. The load on
+the machine during each of those runs is not recorded, and on this machine another agent's run
+is the normal state; what stands in for that field is the repetition, because contention here
+shows up as extra reddened rows rather than as a quietly wrong number.
+
+**One row changed verdict here and it is a fixture change rather than a fix.** The streak's
+45-degree direction row had been failing its floor at 2.65% of the frame along the angle and now
+passes at 4.48 along, 1.71 across; its two neighbours moved with it, 4.04 to 5.60 and 4.17 to
+6.75. Nothing touched the streak. The scrambled look those rows are measured over raises
+`lattice.amount` to 1 with `additive` on, which used to render a saturated white field, and the glyph
+field's energy compensation divides that pile-up back down so the gradient the rows read is
+there. Do not read it as the streak having been repaired, and do not compare a streak figure
+taken before this branch against one taken after it — they are two fixtures rather than two
+builds. `docs/instruments.md` has the case file, including the margin that row now passes by.
+
+**The fifteen glyph and rain mutations need nothing this tool did not already need**: the same
+`--url` against the same running server, no extra port, no capture of its own. Their sections
+plant looks rather than sweeping parameters, which is the shape
+`duotone-span-against-a-frozen-range` and `vspeed-unnormalised` already have and is forced for
+the same reason — a drop-one sweep leaves every other displacement at zero, which is exactly
+where a character hashed off a moved point draws the bit-identical correct picture.
+`normalisation-floor-restored` goes further and cannot pick up a shipped look at all: the
+alpha floor bites nearer than `pointSize / 48` metres and all ten documents sit at 9 or below,
+so the row plants a large point size and a full lattice before it has anything to see.
+
+**Three of those rows are what now holds the eight-looks-byte-identical claim.**
+`glyph-leaks-at-zero` and `rain-leaks-at-zero` are the two masters asserted to be exactly absent
+at 0, and `compensation-leaks-at-lattice-zero` is the third and the one with no master over it —
+the energy correction rides neither, so neither excuses it. That last one is not a hypothetical
+wrong implementation either: the reachable mistake it plants is the deleted design document's own
+unbounded formula, which is exactly 1 at `lattice.amount` 0 only while the sprite is no bigger than the
+cell, and `pointSize` reaches 64 against a cell that bottoms out at 5mm.
+
+**Where the byte-identity evidence itself came from.** The claim that the eight `lattice.amount`-0
+shipped looks render identically to a clean `origin/main` build is not one the suite asserts; it
+was taken with a probe built on `registry-check`'s own page machinery, driving the editor and
+hashing the framebuffer at 15 pinned program positions per look — 0 to 0.9933s over six source
+frames of `captures/sample.knct` at indices 0, 4, 8, 12, 16 and 20 with three substeps each,
+drawn into a 572x322 buffer inside a 640x360 viewport at device scale 1. Each build's run takes
+three passes and writes nothing unless all three agree — two of them in one page, which catches
+a look leaking into the next, and the third in a fresh browser context, which is the shape a
+comparison run has — so "identical" is the run's own recorded
+verdict rather than something re-derived afterwards, and the two builds' arms are interleaved
+against one fixture whose sha256, frame indices, buffer size, camera matrix, browser build and
+rasteriser string are compared before any hash is. Measured against `825a3dd`: **8 looks x 15
+positions = 120 image hashes, no differences**. The control that says the harness can see a
+change at all is `voxel`, which differs at all 15 positions by design. Run the same comparison
+across the two `main` revisions this branch was rebased over and it reports 0 of 135 — nine
+looks unmoved by `main` itself, which is context for reading the 120 rather than a second
+control, since a null result cannot demonstrate sensitivity.
+
+**`timeline-check` runs 75 assertions, 0 failed, and its two newest mutations share a section
+brought in for them.** `rain-accumulates` integrates the rain frame to frame instead of computing it from program
+time, so a seek arrives carrying whatever the scrub built rather than the frame playback would
+have drawn — which is this tool's whole subject. It could not be hung on any existing arm,
+because the rain defaults to 0 and nothing else in the file raises it, so every other section
+renders the term completely inert and a mutation of an inert term is bit-identical to the truth.
+Section 6 applies a rain-raised look of its own before it seeks, and asserts it did — the first
+row reads the uniform back at 0.8, so a section whose look failed to apply says so rather than
+proving a seek matches an inert term. It reddens 2 of the 71: the seek row goes from a clean
+`max 0/255, 0.000% of pixels differ` to `max 249/255, 24.795%`, against a tolerance of 2/255.
+
+**It had two intermittents and both are fixed**, which is worth knowing before reading a red
+`rain-accumulates` result as flake. Tallied over 19 runs on one day: **2 of 19** died before the
+first assertion with `the stage came out 533x300 and this file's figures are 640x360`, printing
+zero failed assertions on a non-zero exit, and this tool has no crash handler, so nothing in its
+output told that from a catch. **3 of 19** overshot in
+the playback arm's `runTo` and redden section 1's render-count row at `362 of 361`, with 124
+state advances against a good run's 122. The second one was put down to file-write contention and
+is not that — it reproduces at about one in five on an idle machine, and the extra render being
+inside `runTo` makes it a candidate finding about the transport rather than about the check. Both
+are unresolved; `docs/instruments.md` carries the signatures and the measurements.
+
+**The second of those is fixed, and it was never `runTo`** — the sentence above stays because the
+way it was misread is the lesson, and `docs/instruments.md` carries the correction in full. `runTo`
+lands on its target every time; the extra render arrives afterwards, out of `openTake`'s closing
+seek to the head of the take, which is enqueued while three library listings are still in flight
+and lands behind whatever the tool has already started. It goes through `repaintHere` now and
+stands down when something has already drawn the image. Interleaved against the pre-fix build
+served through the same page route, six contending streams: **28 measured runs per arm, 10
+overshoots before, 0 after.**
+
+**And the first is fixed too, by the wait `docs/instruments.md` had already named.** The guard
+was right to exist and what it caught was a race: the furniture was measured between `__kinect`
+publishing and the transport existing, and `#timeline` carries `hidden` until the take opens, so
+a take that opened a beat late left the strip reading zero — `338x190` is `398 − 208`, where 398
+is `360 + 0 + 38`. The other signature, `533x300`, is `508 − 208`: the *initial* `360 +
+TIMELINE_H_GUESS` viewport, so there the resize had not reached the drawing buffer rather than
+the strip being absent. The furniture is measured after the transport wait now, and a bounded
+`waitForFunction` holds for the buffer to reach 640x360 before the assertion is asked — the wait
+is the accommodation and the throw is still the guard, so a run that genuinely cannot reach this
+stage dies loudly naming the size it got. `keyframe-check` had the same race and a worse
+consequence, since it had no assertion at all; its entry below carries that measurement.
+
+**Read the assertion count and the fired-row names off every run of this tool, never the exit
+code or the total.** Both intermittents moved a total without moving the names, and one of them
+has already corrupted a record: `preroll-constant` was carried at 11 reddened rows and its honest
+count is 8, the 11 having been taken from a run the overshoot was inside. The rule survives the
+fixes — a tool with no crash handler still exits non-zero on a throw with nothing asserted.
+
+**Measured after both fixes: 75 assertions, 0 failed, twice**, against a server on 8505 with the
+sample capture, `stage 640x360` on both runs.
 
 **`keyframe-check`** runs its cheapest claim first, on a 60-second budget, and stops the run if
 it fails. That is not ordering by cost: an evaluator that announces its writes schedules a seek
@@ -343,7 +1496,7 @@ that into a sentence.
 `page.click('.kf[aria-label="bloom keyframe"]')` calls need that diamond *visible*, and `bloom`
 lives in the `optical` panel group, which collapses when every parameter in it is at its
 default. They work only because 6e applies the Blackwall look first and that look moves `bloom`,
-`rgbSplit`, `scanlines` and `grain` off their defaults, so the group has derived itself open by
+`rgbsplit.amount`, `raster.amount` and `grain.amount` off their defaults, so the group has derived itself open by
 the time the click lands. Nothing in either file says so, and the two ends can move
 independently: a look re-graded to leave `optical` alone, or a change to the reveal predicate,
 turns those clicks into thirty-second timeouts - which arrive as a crash with **zero failed
@@ -351,20 +1504,52 @@ assertions**, the shape this repo has twice recorded being written down as a bug
 touch either end, run `keyframe-check`; `editor-check` section 13c is the row that grades the
 mechanism itself.
 
-**`jobs-check`** spawns its own server and renders two real jobs through
-`tools/render-worker.mjs`, so it needs a GPU browser and ffprobe. `--no-render` drops both rows
-and says so - the queue rows are seconds, each render is about a minute.
+**It was three rows red on this rig, in section 6b, and it is 139/0 now — the cause was the
+stage and not the drag.** The readings were `dx 0.000 against 1.068, dz 0.000 against -0.712`,
+`during true, after true` and `0 levels`: the drag moved the node nowhere, so the two rows that
+read the consequence went with the one that reads the gesture. `during true` was the tell —
+navigation was never suspended, so the pointer-down was not taken as a grab at all.
+
+**It was never a regression, and that was measured rather than argued.** The same three rows
+failed with byte-identical readings at `9c906c4`, the revision before the install-system commit,
+taken by unpacking that tree with `git archive` into a scratch directory and running *its* copy
+of the tool against *its* own server. Two trees, one rig, identical output.
+
+The class is the one the section's own comment describes: `page.mouse` is viewport-relative and
+the projection is canvas-local, so the drag point is built by adding `#stage`'s rect. That
+correction was right about the *origin* and every figure in the file was wrong about the *size*.
+Two things caused it and they compounded. `#timeline` carries `hidden` until the take opens, and
+the furniture was measured *before* the wait for the transport, so the strip read zero; and the
+strip was the only furniture measured at all, while the application bar sits above the stage and
+takes its own height. Both subtract from the same place, so the stage came out `360 - strip -
+shell` and then letterboxed 16:9 inside it. **Measured on this rig: 270x152, which is 0.42 of
+the size every number in this file is written in.** An earlier reading of 510x287 is the same
+fault with the strip measured and the bar not.
+
+The fix is the wait and the second measurement, plus a bounded wait for the drawing buffer to
+follow the resize — `setViewportSize` returning is not the renderer having resized, which is the
+other way `timeline-check` has been recorded reading a short stage. **And the assertion**, which
+this entry used to say was the fix worth making and which is the guard rather than the repair: a
+tool whose figures are in stage pixels now refuses a stage that is not the one its figures are
+in, so the next thing that moves the furniture is a loud throw rather than three rows describing
+a feature that works as gone. Measured after: `stage 640x360`, **139 assertions, 0 failed**.
+
+**`jobs-check`** spawns its own server and drives real jobs through `tools/render-worker.mjs`,
+so it needs a GPU browser and ffprobe. `--no-render` drops that whole block and says so - the
+queue rows are seconds and each render is about a minute.
 
 **Its mutation runs are no longer all `--no-render`, and reading them as though they were is
-how a control gets recorded as green without running.** Every one but `heartbeat-stops-on-first-error`
-is queue semantics and wants `--no-render`; that one names a line in the worker's beat, is
-reached only by a render, and needs the browser and about two minutes. Take the names from the
-tool's own refusal rather than from a count written here - this sentence used to carry one and
-it was wrong, which is what a count in prose beside a list that grows does to itself, and
-enumerating from the refusal is what `sweep-all` already does for the same reason. That the
-split is by *which* mutation rather than by a number is the same argument arriving one level
-down: a reader who takes "its mutation runs use `--no-render`" as a rule runs the one that
-needs a render without one, and it passes.
+how a control gets recorded as green without running.** The split is by *which* mutation and
+never by a number: anything whose rows live in the render block needs the browser, and
+everything else is queue semantics and wants `--no-render`. Four are in the first group as this
+is written - `heartbeat-stops-on-first-error` and `worker-door-waved-open` name lines in the
+worker that only a claim reaches, and `preflight-snapshot-is-taken-once` is read off two jobs
+one worker takes in sequence, which needs the loop to run at all. Take the names from the tool's
+own refusal rather than from a count written here - this paragraph used to carry one and it was
+wrong, which is what a count in prose beside a list that grows does to itself, and enumerating
+from the refusal is what `sweep-all` already does for the same reason. A reader who takes "its
+mutation runs use `--no-render`" as a rule runs one that needs a render without one, and it
+passes.
 
 **The worker under test is the staged copy, not the repo's.** `jobs-check` copies `server/`,
 `web/` and `tools/render-worker.mjs` into `.jobs-check/root` and spawns from there, because a
@@ -858,8 +2043,8 @@ arrives as a crash carrying no failed assertion rather than as a finding.
 
 **`keyframe-check` depends on this feature without mentioning it.** Its section 6e clicks
 `.kf[aria-label="bloom keyframe"]`, `bloom` is in the `optical` group, and that click needs the
-group open. It works because 6e applies the Blackwall look first, which moves `bloom`, `rgbSplit`,
-`scanlines` and `grain` off their defaults — so the per-write refresh that opens a group is
+group open. It works because 6e applies the Blackwall look first, which moves `bloom`, `rgbsplit.amount`,
+`raster.amount` and `grain.amount` off their defaults — so the per-write refresh that opens a group is
 load-bearing for another tool's actionability and not only for the panel looking right. Run
 `keyframe-check` after touching the predicate.
 
@@ -882,9 +2067,19 @@ arm waits for `uniforms.focal.value.x !== 366`, which is a hello arriving over t
 server whose grabber will not spawn leaves the boot default standing and the wait times out at
 25s. The tool answers `untested` and says "no sensor, no claim" instead of failing, which is the
 right reading and still exits 2. Everything else in the file runs: **section 6 is the only arm
-in the suite pointed at the recorder's panel** — 20 blocks, 54 parameters on both surfaces, the
-nine look groups hidden and then revealed by `extended settings` — so a change to the panel is
-still graded on both surfaces on a sensorless rig, and that section is what to read. One row in
+in the suite pointed at the recorder's panel** — every block and every look parameter graded on
+both surfaces, with the look groups reached through the inspector tabs rather than through a
+toggle — so a change to the panel is still graded on both surfaces on a sensorless rig, and that
+section is what to read. **Two things this sentence used to name had stopped existing**, and
+neither of them failed anything on its way out. It said 54 parameters. The population is derived
+from the registry, so it was never a constant to write down: the run prints 86 of 86 against
+20 of 20 blocks today and it read 78 before the glyph field's eight arrived, so 54 matches
+neither, and nothing here dates when it last did. A count in prose is a snapshot wearing the
+grammar of a fact. And it said the groups
+are revealed by `extended settings`, whose rule and `#extendedRow` button left the markup in
+`988551e` when the panel became tabbed. The groups themselves went from nine to eleven with the
+glyph field, which is a second reason not to carry either number here. Read the counts off the
+run. One row in
 section 3 goes red there for a second environmental reason: it needs **two or more takes** with
 a hello to say that the library cannot tell a computed angle from a constant, and a `captures/`
 holding only `sample.knct` reports `1 takes`.
@@ -939,7 +2134,7 @@ nothing about a stale library looks wrong. It needs no sensor: it runs on a corp
 **`syntax-check`** needs nothing at all, and it refuses to pass on finding no files: the roots
 must exist, each must yield files, and the count is printed beside the verdict so a number that
 has quietly halved is visible rather than implied. It also asserts that every tool in `tools/`
-is named in `CLAUDE.md`, which is why the invocation list lives there rather than here — a tool
+is named in `CLAUDE.md`, which is why the index lives there rather than only here — a tool
 added later is asked by existing, and the falsification control is adding a tool without
 documenting it.
 
@@ -1047,6 +2242,149 @@ positions, so the move stays on the safe side; the mutated build boots both surf
 page errors. Its four exit-2 refusals were each probed by hand: an unknown name, an anchor
 matching zero times, an anchor matching 221 times, and a mutation staged for a module the
 recorder never requests.
+
+**`effect-check`** spawns its own server on **8281** and needs none running: a GPU browser, a
+free port, no capture, no sensor and no ffmpeg. It asks the kernel for the port before it
+stages anything and exits 2 naming the pid that holds it, because a run answered by a stranger
+asserts against whatever fixture that process staged. Its staged tree is `.effect-check/`,
+gitignored, and it copies `server/`, `tools/`, `web/`, `effects-builtin/` and `presets-builtin/`
+into it — the last of those because the page fetches the preset library while it boots and a
+staged tree without the shipped root answers 500, which lands in `pageErrors` and reddens the
+last row with a fault that has nothing to do with effects.
+
+**It is the only tool in the suite that writes packages, so it hands the server both store
+roots by name.** `--effects` and `--builtin-effects` are passed outright rather than left to
+resolve from the staged tree, because the failure that costs something is a run whose user root
+resolved to the checkout: seventeen fixtures, fifteen of them hostile, written into `effects/`.
+
+**Read the exit line rather than the code**, and this tool says more than most: a mutated run
+with failures is reported as caught however it ended, and it says whether it ended early.
+`install-skips-the-uniform-cells` leaves the page half-adopted and takes the driver down with
+it, so seven rows fire and then the run stops — a verdict that put the crash first would report
+DID NOT RUN over a caught mutation, which is the census of exit codes `docs/instruments.md`
+already carries a case for.
+
+Baseline **111 assertions, 0 failed**, over eleven sections: the store's revisions against hashes
+the tool computes off the staged tree, twenty-two hostile packages each refused with the sentence
+for its own rule, the hotload's registry-and-panel coherence including `boot-check`'s own
+control-vs-registry diff on a rebuilt page, the uninstall/reinstall pixel identity, the
+must-not-badge control, an install this page cannot carry the open document onto, everything on
+the panel that is not a parameter row, what a rebuild costs and what it stands down for, a
+package whose GLSL every rule here accepts and no driver will compile, what a crashed install
+leaves behind, and — last, after the browser is closed — what somebody plants in the user root
+and an install interrupted between its two renames.
+
+**Section 2 sweeps the user root after the residue row rather than trusting that nothing
+landed.** On a clean build there is nothing there and the sweep is a no-op; on a build whose door
+has stopped refusing something the finding is already recorded by the two rows above it, and what
+would otherwise be left is a hostile fixture still installed when section 3 opens a page and
+counts its parameters. `door-takes-any-expansion` is the mutation that produces exactly that —
+it reddens the refusal row and the residue row and nothing else, where without the sweep the same
+run would have carried a sixty-file package into every section after it.
+
+**Section 7 is the one whose subject is invisible.** Sections 3 and 4 ask whether the parameters
+arrived and whether their values are right, and a build can get both of those completely right
+while the buttons beside them are dead, the tab that was showing has stopped being applied, the
+collapse headers are painted for elements that no longer exist and the preset subset dialog is a
+statement of the registry from before the install. None of that throws, none of it moves a
+pixel, and each of the four has its own mutation because each is a separate way of rebuilding
+the panel and forgetting something.
+
+**Two arms sit at the end of section 9, and where they sit was measured rather than chosen.**
+Both leave the page in a state a mutation can make unwell, and both wanted section 6's fixture —
+a page holding an install it has refused. Put there they widened what three existing mutations
+already break: `reinstall-leaves-it-parked` went from nine red rows to fourteen, all five of the
+new ones cascades off a document its own defect had already made unloadable. It ends the run
+early either way and always has — measured at `4b63f80`, 52 of 91 with nine red, against 55 of
+111 with nine red here — so what moved was the blast radius rather than the finishing, and the
+early end is a pre-existing gap this page had not recorded. Sections 10
+and 11 are short and the second closes the browser anyway, so the cost of a block that leaves the
+page unwell is smallest here. The refused fixture is re-staged rather than inherited: the fork is
+installed again and driven through `pollNow`, because the block under test is the *poll's* and a
+`reload` an operator asks for goes nowhere near it.
+
+The first counts what the poll does next. A rollback puts the old signature back on purpose, so
+the comparison a tick makes on its way in goes on saying the store has moved, and without a block
+that is the same rebuild attempted every six seconds forever — every package refetched, both
+programs reassembled, the material disposed, the accumulators reset. The row counts package reads
+in a window and requires zero, *and* counts listings in the same window and requires two, because
+a zero on its own is what a page that has stopped polling also produces. A revision the page has
+not refused then has to land, which is what says the block is keyed to the set rather than
+latched on the page.
+
+The second is about the uniform table rather than the registry. A cell is a number for a plain
+binding and a two-component vector for an `axisDeg` one, and which it has to be is a fact about
+the manifest — so a fork exchanging two bindings' shapes writes a number over one cell and then
+throws on `.set()` at the other, mid-walk, with the registry already swapped. That throw is what
+the transaction is for, and until this round it met an adoption that minted only *missing* cells:
+the rollback found both present, skipped them, and died on the number the forward attempt had
+left, so a page came out of a rollback holding a registry no document loads into. The fixture is
+`probeshape`, its own package with its own uniform names, and it adds a parameter as well as
+swapping the shapes — without the addition a build that reshapes both cells adopts the fork
+cleanly, nothing rolls back, and the row would be asserting nothing.
+
+**Section 11 restarts the server and closes the browser first**, which is the only place in this
+tool that does either. The recovery it asks about is a fact about constructing the store, so it
+has to be driven by starting one; the page is closed rather than left running because its own
+poll would report a store that stopped answering, which is correct behaviour and has nothing to
+do with the rows, and because the section stages a package directly in the user root that no
+page has any business adopting.
+
+**Every fixture in that section is written rather than inherited**, and the reason is a mutation
+rather than tidiness: `temporaries-are-visible` leaves the store unable to install anything at
+all, so a row whose fixture was the previous row's output turned that mutation into an `ENOENT`
+crash three sections later instead of into the two red rows it is about. Both blocks now write
+their own package into the user root - the one with a symlink in it and the one staged as a
+crashed install's aside - so what the mutation reddens is what the mutation is about. Its control is the direction the recovery must not run in: `remove` also
+renames a directory aside before deleting it, so a crash there leaves the same shape on disk,
+and a recovery that could not tell the two apart would undo somebody's uninstall on every
+restart. The suffixes are what tell them apart — `.old` for a copy that should come back and
+`.gone` for one on its way out — and the last row of the section is what says so.
+
+**The 6-second poll on the page competes with the driver, and two rows are written around it.**
+`pollNow` is the interval's own body, so a tick that started six seconds ago can be mid-read
+when the driver calls it, and the reentrancy guard correctly sends that call straight back
+having done nothing. Section 6 therefore waits for the note rather than reading it the moment
+`pollNow` resolves — a build that never reports still fails, one interval later. It is worth
+knowing before reading a red row here: an assertion that reads page state immediately after
+`pollNow` is asserting against whichever of the two polls got there first.
+
+**Section 6 is the one that asserts a failure.** It installs a fork of the probe package
+carrying one parameter more while the open document holds that effect parked, which makes the
+document a subset of the new manifest and so a document the loader refuses per effect — the
+refusal is correct and stays a refusal, because filling the added parameter from its default
+would be this build guessing at a look somebody else authored. What the thirteen rows hold is
+where the page is left standing: the server did take the install, the note names `probe.glow`
+and says which set the page is still running, the registry and the signature are the ones it
+had, the pool is untouched, the three pinned positions render the images they rendered before,
+a save still writes every parked key holding the value it arrived with, and the document that save produces is one
+this same page will take back. **It is driven through `pollNow` rather than `reload`**, because
+the note is one of the things asserted and the poll is the only thing in the product that
+writes it.
+
+Its control row is a cross-state comparison rather than section 4's three-distinct-images, and
+the difference is worth keeping: with the effect parked there is nothing keyed left to separate
+the three positions from each other, so 0.6s and 1.2s both show the last of the six pinned
+frames and hash the same. The three images in section 4 differ because `probe.amount` is
+ramping across them. So the control here holds the parked hashes against the ones the same
+positions rendered while the effect was installed and raised — which is the state the rollback
+must not have left the page in.
+
+**`effect-conformance-check`** needs `--url` against a running server and a GPU browser, and no
+port of its own. Every hash is taken inside the run and none is written down: what it compares
+is three images the same process just rendered on the same GPU, so it means the same thing on
+every machine and there is nothing here to re-baseline. It enumerates from `GET /effects`, so a
+seventeenth package is asked its questions by existing.
+
+Baseline **99 assertions, 0 failed** with the shipped sixteen — six or seven rows per package
+depending on whether it carries GLSL of its own. Two of them are the controls: the raise has to
+reach the registry before its picture means anything, and the package's own longest line of GLSL
+has to leave the assembled program while it is hollow and come back after. That second row was
+added after the first version of this tool spent a run reporting eleven effects as unable to
+reach a pixel — `page.unroute` matches its matcher by reference, so a fresh arrow removed
+nothing, every package dropped stayed dropped, and the raise arm was asking hollowed packages to
+move a picture. One handler consulting a variable replaced sixteen routes, and the marker row is
+what would have said so.
 
 **`module-check`** needs nothing at all — no port, no server, no browser, no sensor and no
 install — and that is the point rather than a convenience. Every failure it is about is a
@@ -1302,7 +2640,7 @@ lookahead: the nearest code character before the hit is `{` or `,` and the neare
 it takes no name off the swept set, which is what makes it free in the one file that is full of
 registries and menu tables; `--mutate import-used-only-as-an-object-key` is the arm. What is left
 open is the **method shorthand**, found by a control coming back NOT CAUGHT: `{ name(gl) { … } }`
-has no dot in front of it either, which is what `web/main.js:9860` is and what made an alias of
+has no dot in front of it either, which is what `gpuTimer.poll` in `web/main.js` is and what made an alias of
 `poll` look read. That one will not close with a lookahead, and the measurement says so rather
 than the argument — excluding a hit followed by `:` or by `(` at the head of a line calls twelve
 live imports unused, `writeClipRange`, `tiltQuaternion` and `pollRecordState` among them, because
@@ -1362,6 +2700,32 @@ change landing later in the file cannot reach them. What has *not* been establis
 they are a real regression or this machine under load — three reproductions on one contended
 rig is not the clean control that question wants, and the honest state is that they were red
 before this work and red after it, at the same three rows with the same three readings.
+
+**Re-measured again at the end of the effect extraction: `545 assertions, 3 failed`**, on
+`--take fixture-1g --no-render` against a server on 8503 with a warm index, at load average 8.14,
+with the same three rows and the same three readings — `1 fallbacks`, `3 keys left`, and `dragged
+from 0.3333 to 0.3333, against a neighbour at 0.1667`. Three separate measurements now, 514 then
+530 then 545 in total, with a red set identical in identity *and* reading each time. The clean
+control on an idle machine is still owed.
+
+**That run took two attempts, and the first attempt is the more useful record.** It died at 422
+assertions with a fourth red and then a thirty-second `page.click` timeout on `#crop`, reporting
+`crop {"there":true,"disabled":false,"visible":false}` — the control in the document, enabled,
+and `display: none`. The cause was not a regression in the editor but a repair to one: a
+generated panel group is built with `hidden` unset, and until `buildPanel` learned to re-apply
+the active tab, every generated group was on screen whatever tab was up. `#crop` belongs to the
+`framing` group, so it had been visible on the Record tab because the panel was leaking groups
+across tabs, and the row pressing it had been standing on that leak. Fixing the leak reddened the
+row. The repair is one line in the tool — put the Framing tab up before reading and pressing —
+and the assertion, the reading and the population are otherwise untouched, which is what keeps
+545 comparable with the two runs above.
+
+**The shape is worth more than the instance**, and `web/main.js` had already half-written it:
+the note beside `collapses` records that a *collapsible* framing group would turn this row into a
+thirty-second timeout, because Playwright's click waits for visibility. The hazard was foreseen
+for collapsing and not for tabs, and it arrived through the tab door. A crash carrying a
+thirty-second timeout and no failed assertion is the shape `CLAUDE.md`'s third rule names — read
+the assertion count, not the exit code.
 
 **Re-measured after the Phase C work, and the readings are byte-identical**: `530 assertions,
 3 failed` on `--take fixture-1g --no-render` at load average 9.31, against the same three rows

@@ -205,6 +205,38 @@ const POINT_SIZE_REBASE = 1080 / GRADED_HEIGHT;
 // point-size clamp at a 600 buffer - at 4.0 it draws 0.80px points there, and a
 // comparison partly about the clamp would say nothing about the rebase.
 const REBASE_LOOK = { far: 2.8, near: 0.05 };
+
+/**
+ * The same look with the glow taken out, for the two arms that put the *whole* graded
+ * look through both builds.
+ *
+ * **The two builds have not had the same bloom since `124a90b`.** That commit replaced
+ * three's `UnrealBloomPass` with `BloomPass` in `web/bloom-pass.js` - ten draws against
+ * thirteen, a progressive down-and-up resample against a Gaussian per mip - and the
+ * pinned build these arms play imports three's and always will, because it is a
+ * revision rather than a tree. So a `rebase-full` arm with the glow up is not one look
+ * through two references, it is two different passes, and the number it reports is the
+ * difference between them rather than anything about the rebase.
+ *
+ * Measured on this tree with both builds at the same 960x600 buffer, so that resolution
+ * is out of the comparison entirely: at Blackwall's `bloom` of 0.5 the mean luminance is
+ * 7.1614 here against 17.3797 there - a ratio of 0.41205 and a worst tile of 45.649/255 -
+ * and at `bloom` 0 it is 5.0925 against 5.0581, a ratio of 1.00679 and a worst tile of
+ * 0.337. The whole 2.4x is that one term. Dated by running this file at the two commits
+ * on one machine with one capture: `124a90b^` reads 0.99312 and 0.99403 on the two rows
+ * and `124a90b` reads 0.40978 and 0.40931.
+ *
+ * **What the exclusion costs, and what still holds it.** Bloom's resolution independence
+ * is the `bloom` and `full` rows of the sweep above, which compare 960x600 against
+ * 1920x1200 on this build alone at a 0.03 band, and `bloom-buffer-sized` fails both by
+ * 6.5x and 8.1x - so the reference the chain is frozen at keeps its catcher and never
+ * depended on these two rows. What nothing here can hold is bloom's *absolute*
+ * appearance across the swap, which `docs/performance.md` already records as thin. So the
+ * rows below take the bloom-up ratio as well and print it whether they pass or fail: an
+ * object every observation skips is this file's most expensive habit, and a term left out
+ * of a comparison has to leave a number behind rather than a sentence.
+ */
+const REBASE_FULL_LOOK = { ...REBASE_LOOK, bloom: 0 };
 const EXPORT_FRAMES = 8;
 const EXPORT_FPS = 30;
 
@@ -281,7 +313,7 @@ const MUTATIONS = {
     "    ext: 'pngseq',\n    frameExt: null,",
   ]] },
   // The dominant screen-space term goes back to framebuffer pixels.
-  'pointsize-absolute': { file: 'web/cloud-shader.js', edits: [[
+  'pointsize-absolute': { file: 'effects-builtin/glyph/size.vert.glsl', edits: [[
     'gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);',
     'gl_PointSize = clamp(pointSize * (1.0 / max(0.15, -mv.z)), 1.0, 64.0);',
   ]] },
@@ -294,7 +326,7 @@ const MUTATIONS = {
     'vSize = gl_PointSize;',
   ]] },
   // Grain and scanlines go back to being sized in framebuffer pixels.
-  'grade-absolute': { file: 'web/post-chain.js', edits: [[
+  'grade-absolute': { file: 'web/grade-shader.js', edits: [[
     `      float k = resolution.y / 1080.0;
       vec2 ref = resolution / k;`,
     `      float k = 1.0;
@@ -353,8 +385,65 @@ const MUTATIONS = {
   // matters found the tolerances moving by nothing at all under a divergent chain, which
   // is the reading that says these rows have one guard rather than two.
   //
+  // **The export door on a clip whose look this build cannot draw whole.** The refusal
+  // goes and everything else stays, so the parking, the badge and the record are all
+  // still correct - what is left is a render that writes a file with a layer of the look
+  // absent and nothing in the file saying so, which is the artifact this whole band
+  // exists to refuse. It must redden the refusal row and the still-refused-for-the-other
+  // row, and leave the suppress-proceeds, the record and the complete-document rows
+  // green: a mutation that reddened those too would be breaking the export rather than
+  // the door.
+  'export-ignores-missing-effects': { file: 'web/main.js', edits: [[
+    '  const blocking = missing.filter((m) => !suppress.has(m.id));',
+    '  const blocking = [];',
+  ]] },
+  // And the same door answering a per-effect question globally, which is the reachable
+  // wrong implementation rather than an invented one: suppress reads naturally as a
+  // switch, and written as one it lets the *second* missing effect through on the
+  // strength of a decision somebody made about the first. Invisible with one effect
+  // missing - both implementations refuse nothing - so only the two-effect row can see
+  // it, and that is the row it must redden alone.
+  'suppress-is-global': { file: 'web/main.js', edits: [[
+    '  const blocking = missing.filter((m) => !suppress.has(m.id));',
+    '  const blocking = suppress.size ? [] : missing;',
+  ]] },
+  // The record's own half. The render still refuses and still proceeds in the right
+  // cases, and the file it writes carries no note that a layer was skipped - so the one
+  // artifact that leaves this machine stops being able to say what it is a render of.
+  // One row, the deliverable's record.
+  'deliverable-forgets-suppressed': { file: 'web/main.js', edits: [[
+    '      project: serialiseProjectBody(suppressed.length ? { suppressed } : {}),',
+    '      project: serialiseProjectBody(),',
+  ]] },
+  // The wiring between the badge and the door, which every other row here steps over by
+  // calling `export.run` with a list of its own. The rule is unchanged and the badge is
+  // unchanged; what goes is the click handler handing over what the badge holds, so an
+  // operator can suppress an effect, watch the toggle light, press Export and be refused.
+  //
+  // Must redden two: the row that names it, and the `no page errors` sweep at the foot.
+  // The second is the refusal itself - `showTimelineError` writes every sentence it shows
+  // the operator to `console.error` as well - so it is noise this mutation creates rather
+  // than a second finding, and it exists only on the mutated build: the clean run reports
+  // no page errors at all, so there is nothing here to drain and nothing to exempt.
+  'export-button-drops-the-suppression': { file: 'web/main.js', edits: [[
+    '      suppressEffects: [...suppressedEffects],',
+    '      suppressEffects: [],',
+  ]] },
+  // **The suppression outliving the document it was made about**, which is how it shipped:
+  // `restoreProject` prunes the set to whatever is still parked, and two documents missing
+  // the same effect are indistinguishable to a prune. It is aimed at the *clear*, not at
+  // the prune, and that is the split the rows measure - the prune has to stay, because it
+  // is what lets a suppression survive the undo stack.
+  //
+  // Must redden the leak row and the refusal row beside it, and leave the keep row green.
+  // A mutation that also reddened the keep row would be removing both halves and could not
+  // say which of the two questions this section is asking.
+  'suppression-outlives-its-document': { file: 'web/main.js', edits: [[
+    '  if (suppressedEffects.size) {\n    suppressedEffects.clear();\n    paintMissingEffects();\n  }',
+    '  // the clear this mutation removes',
+  ]] },
   // Only the split reverts, so the claim cannot be carried by the other two.
-  'rgbsplit-absolute': { file: 'web/post-chain.js', edits: [[
+  'rgbsplit-absolute': { file: 'effects-builtin/rgbsplit/split.grade.glsl', edits: [[
     'vec2 off = dir * rgbSplit * texel * 8.0;',
     'vec2 off = dir * rgbSplit * (1.0 / resolution) * 8.0;',
   ]] },
@@ -419,7 +508,7 @@ const MUTATIONS = {
       + '    }',
     ],
   ] },
-  'grain-continuous': { file: 'web/post-chain.js', edits: [[
+  'grain-continuous': { file: 'effects-builtin/grain/grain.grade.glsl', edits: [[
     'float n = hash(floor(vUv * ref) + fract(time) * 137.0);',
     'float n = hash(vUv * ref + fract(time) * 137.0);',
   ]] },
@@ -504,7 +593,7 @@ const MUTATIONS = {
     [
       '      float k = resolution.y / 1080.0;',
       '      float k = resolution.x / 1728.0;',
-      'web/post-chain.js',
+      'web/grade-shader.js',
     ],
   ] },
   // The failure path reaches back to the output it did not write. This is the
@@ -584,10 +673,31 @@ function mutatedSource(name) {
  * against a page.
  */
 function servedAt(file) {
+  if (file.startsWith('effects-builtin/')) {
+    // The effects' own GLSL, which the page fetches out of `/effects/:id/file/:name` and
+    // `assembleShaders` splices into the cloud's material or the grade pass's shader - so a
+    // mutation that edits a chunk is delivered at the fetch rather than at a module, which
+    // from Playwright's side is the same interception. The route is the same for both
+    // programs, because a chunk names the joint it joins rather than the program it feeds.
+    const parts = file.split('/');
+    if (parts.length !== 3) {
+      throw new Error(`${file} is not an effect package file - a chunk is <id>/<name> under effects-builtin/`);
+    }
+    return `/effects/${parts[1]}/file/${parts[2]}`;
+  }
   if (!file.startsWith('web/')) {
     throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
   }
   return `/${file.slice('web/'.length)}`;
+}
+
+/**
+ * What the server answers a file with, restated here because the interception has to
+ * answer the same way: a chunk is `text/plain` in `server/index.js`, on the argument that
+ * what the tools anchor and the client compiles is the file's own bytes.
+ */
+function contentTypeFor(file) {
+  return file.endsWith('.glsl') ? 'text/plain; charset=utf-8' : 'text/javascript; charset=utf-8';
 }
 
 // ------------------------------------------------------------------- playwright
@@ -958,7 +1068,7 @@ const RES_ARM = `async ({ label, look, at, resLook, camera }) => {
   // a worst tile of 48.7/255, which reads as the rebase having broken and was a mask
   // still fading the cloud. Zero is the default for all four, so this changes nothing
   // for any row that was here before.
-  const REGION_BASE = { noise: 0, regionPush: 0, regionNoise: 0, regionMask: 0 };
+  const REGION_BASE = { 'noise.amount': 0, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0 };
   const merged = { ...REGION_BASE, ...resLook, ...look };
   const dropped = Object.keys(merged).filter((n) => !known.has(n));
   k.params.apply(Object.fromEntries(Object.entries(merged).filter(([n]) => known.has(n))));
@@ -1016,7 +1126,13 @@ const mutation = MUTATE ? mutatedSource(MUTATE) : null;
 // parameter for: a cross-build arm passes its own older `main.js` and must not be handed
 // this run's mutated one, while every other staged module is a file that arm's build never
 // imports, so it can be routed on every page unconditionally.
-const pageMutants = (mutation ?? []).filter((m) => m.file.startsWith('web/'));
+// **Reachable in a browser is no longer `web/` alone.** An effect package's chunk is
+// fetched out of `/effects/:id/file/:name` and assembled into the cloud's material, so a
+// mutation editing one is a page mutation in every sense that matters here - and a filter
+// that still read `web/` would drop it silently into the server-mutation bucket, where
+// nothing serves it and nothing counts it.
+const inBrowser = (file) => file.startsWith('web/') || file.startsWith('effects-builtin/');
+const pageMutants = (mutation ?? []).filter((m) => inBrowser(m.file));
 const mutatedBody = pageMutants.find((m) => m.file === 'web/main.js')?.body ?? null;
 const otherMutants = pageMutants.filter((m) => m.file !== 'web/main.js');
 // The path this mutation would arrive at if a browser asked for it, read off the
@@ -1109,7 +1225,7 @@ async function openPage(viewport, source = mutatedBody, html = null) {
     await page.route((url) => url.pathname === path, (route) => {
       mutantServed++;
       mutantServedBy.set(mutant.file, mutantServedBy.get(mutant.file) + 1);
-      route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: mutant.body });
+      route.fulfill({ contentType: contentTypeFor(mutant.file), body: mutant.body });
     });
   }
   if (source) {
@@ -1374,7 +1490,7 @@ const NEAR_CAMERA = { position: [0, 0.1, -0.2], quaternion: [0, 0, 0, 1], fov: 5
 // result that reads exactly like the look having stopped holding across output size, and
 // was entirely the tool's own state. Zeroing them here costs nothing, because zero is
 // what they already default to.
-const REGION_OFF = { noise: 0, regionPush: 0, regionNoise: 0, regionMask: 0 };
+const REGION_OFF = { 'noise.amount': 0, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0 };
 // The crop planes wide open, and they are in `OFF` for the reason the region's
 // effects are: **an arm applies its look over whatever the previous one left.** The
 // sweep runs every pipeline at the small size and then every pipeline at the big one,
@@ -1385,7 +1501,9 @@ const REGION_OFF = { noise: 0, regionPush: 0, regionNoise: 0, regionMask: 0 };
 // against an uncropped small one. Asserted against the registry's own defaults below,
 // so "wide open" cannot drift from what the sliders mean by it.
 const CROP_OPEN = { left: -7, right: 7, bottom: -7, top: 7 };
-const OFF = { bloom: 0, trails: 0, rgbSplit: 0, scanlines: 0, grain: 0, ...REGION_OFF, ...CROP_OPEN };
+const OFF = {
+  bloom: 0, trails: 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, ...REGION_OFF, ...CROP_OPEN,
+};
 
 /**
  * `OFF` with the vignette taken out too, for the arms that render the same look
@@ -1418,16 +1536,37 @@ const OFF = { bloom: 0, trails: 0, rgbSplit: 0, scanlines: 0, grain: 0, ...REGIO
  * **It is deliberately not in `OFF`.** Eleven within-build rows spread `OFF`, and their
  * coarse-mean bands in `RES_TOLERANCE` were all measured with the grade running; putting
  * the zero there would silently re-baseline every one of them while looking like a fix
- * to three others. The two `rebase-full` rows do not spread `OFF` at all and are left
- * exactly as they are - they are the two cross-build rows that already pass, and they
- * pass because Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both sides, so
- * both builds run the grade. That table came out that way rather than being fitted, and
- * it is the reason to believe this.
+ * to three others. The two `rebase-full` rows do not spread `OFF` at all - they are
+ * Blackwall entire, and Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both
+ * sides, so both builds run the grade. That table came out that way rather than being
+ * fitted, and it is the reason to believe this.
+ *
+ * **This paragraph called them the two cross-build rows that already pass, and they were
+ * not** - they had been red since `124a90b` for a reason nothing here reaches, which
+ * `REBASE_FULL_LOOK` carries. What that constant takes off those two arms is `bloom` and
+ * nothing else, so the grade this paragraph is about still runs on both sides of them.
  *
  * `asOldBuild` needs nothing: the old module has never heard of `vignette`, so
  * `RES_ARM`'s drop-unknown filter takes it off that arm by itself.
+ *
+ * **`rgbSplit`, `scanlines` and `grain` are named twice, on purpose, and this is not
+ * leftover from the rename.** `OFF` carries them dotted, because the eleven
+ * within-build rows spread `OFF` straight into `main.page` and the sweep above
+ * asserts `dropped` is empty there - a flat name would be an unknown parameter on
+ * this build and redden that row for no reason about the pixels. But this constant
+ * also feeds the pinned old build, through `asOldBuild`, and that build's registry
+ * has never heard of a dotted name - it is the same "unknown parameter" gap
+ * `vignette` opened above, one rename earlier. Unlike `vignette` there is something
+ * on that side worth zeroing: `setMode(4)` on the old build sets these three exactly
+ * as `BLACKWALL_LOOK` does on this one, so a spread that only carries the dotted
+ * name would leave the old build's grade running while this build's grade is off,
+ * which is the same silent chain divergence the `vignette` finding above already
+ * paid for once. Carrying both spellings costs nothing on either side: whichever
+ * name a build's registry does not have is dropped by the same filter that already
+ * tolerates `vignette`, and `dropped` is only asserted empty for the eleven rows
+ * that never reach this constant.
  */
-const CROSS_BUILD_OFF = { ...OFF, vignette: 0 };
+const CROSS_BUILD_OFF = { ...OFF, 'vignette.amount': 0, rgbSplit: 0, scanlines: 0, grain: 0 };
 
 /**
  * The same look with the crop planes taken out, for the arms that run against the
@@ -1465,11 +1604,19 @@ const asOldBuild = (look) => {
  * so a count would catch that instance and miss a build that swapped one enabled pass for
  * another, which is the same defect wearing different names.
  *
- * The one difference that is *not* a finding is `UnrealBloomPass` becoming `BloomPass`;
- * that rename is in the range these arms span and the pass is the same pass. It is
- * normalised away by name rather than skipped, so a rename nobody knew about does not
- * pass quietly - it fails, with both chains printed in the row's own message, which is
- * an instrument asking a question rather than assuming an answer.
+ * **`UnrealBloomPass` is not `BloomPass`, and normalising the prefix away is what let the
+ * two `rebase-full` rows sit red for a fortnight with nothing able to name why.** This
+ * predicate used to strip a leading `Unreal`, on the reasoning that the change was a
+ * rename inside the range these arms span and the pass was the same pass. It was a rename
+ * in the source and a replacement in the picture: `124a90b` put our chain where three's
+ * had been, and at Blackwall's `bloom` of 0.5 the two deliver light in a ratio of 0.412 at
+ * one buffer. The single guard that existed to say "these are two different passes" was
+ * the guard taught to call them one, and the rows it was guarding could then only report
+ * the size of the difference - the exact failure this predicate was written after. So the
+ * prefix is compared like every other part of the name now, and the arms that have to span
+ * the swap take bloom out of the look instead; `REBASE_FULL_LOOK` carries the measurement.
+ * No cross-build comparison in this file runs bloom on either side any more, so no correct
+ * run meets this term; one that does gets a failure naming both passes.
  *
  * **An empty chain is a failed readback, not a match.** `chainOf` reads `arm.passes ?? []`
  * and joins, so an arm off a page that stopped publishing its composer answers `''` - and
@@ -1496,7 +1643,7 @@ const asOldBuild = (look) => {
  */
 const chainOf = (arm) => (arm.passes ?? [])
   .filter((p) => p.endsWith(':on'))
-  .map((p) => p.split(':')[0].replace(/^Unreal/, ''))
+  .map((p) => p.split(':')[0])
   .join('+');
 const sameChain = (a, b) => chainOf(a) !== '' && chainOf(a) === chainOf(b);
 
@@ -1537,13 +1684,13 @@ const PIPELINES = [
   // point blends the same way.
   ['splat', { look: { ...OFF, additive: true, pointSize: 7 }, camera: NEAR_CAMERA }],
   ['trails', { look: { ...OFF, trails: 0.5 } }],
-  ['rgbsplit', { look: { ...OFF, rgbSplit: 1.6 } }],
+  ['rgbsplit', { look: { ...OFF, 'rgbsplit.amount': 1.6 } }],
   // Both at full rather than at the preset's 0.35 and 0.22. At preset strength the
   // grain is about one part in 255 and reverting it to framebuffer pixels moved
   // every number here by 4%, which is a probe standing where the answer is the
   // same either way. At full strength the same revert is unmissable.
-  ['scanlines', { look: { ...OFF, scanlines: 1 } }],
-  ['grain', { look: { ...OFF, grain: 1 } }],
+  ['scanlines', { look: { ...OFF, 'raster.amount': 1 } }],
+  ['grain', { look: { ...OFF, 'grain.amount': 1 } }],
   // Bloom was the one term the design said needed nothing, on the grounds that it
   // already runs at half the drawing buffer. Half the buffer makes its cost
   // proportional and its appearance anything but - a fixed tap count per mip
@@ -1572,9 +1719,9 @@ const PIPELINES = [
   // sample capture's cloud runs z [-4.50, -0.50] with its median point at
   // (0.021, 0.019, -1.893), so this sits on the subject with its surface passing
   // through the cloud instead of enclosing it or missing it.
-  ['noise', { look: { ...OFF, ...REGION_OFF, noise: 0.06, noiseScale: 4, noiseSpeed: 0 } }],
-  ['regionpush', { look: { ...OFF, ...REGION_AT_SUBJECT, regionPush: 0.35 } }],
-  ['regionmask', { look: { ...OFF, ...REGION_AT_SUBJECT, regionMask: 0.5 } }],
+  ['noise', { look: { ...OFF, ...REGION_OFF, 'noise.amount': 0.06, 'noise.scale': 4, 'noise.speed': 0 } }],
+  ['regionpush', { look: { ...OFF, ...REGION_AT_SUBJECT, 'push.amount': 0.35 } }],
+  ['regionmask', { look: { ...OFF, ...REGION_AT_SUBJECT, 'mask.amount': 0.5 } }],
   // The four lateral crop faces, and they belong in this family for the same reason
   // the region does: they are metres in the sensor frame, so the same four numbers
   // have to cut the same box out of the room at 600 and at 1200. `crop-in-pixels` is
@@ -1626,6 +1773,15 @@ const PIPELINES = [
 // division of labour the point-size rows and the cross-build arm already have. Closing it
 // here instead would want a coarse band re-baselined against a measured residual rather
 // than a threshold tightened until this one row goes red.
+//
+// **Half of that paragraph has since stopped being true and the conclusion has not.** The
+// two `whole look rebases` rows carry no bloom any more - `REBASE_FULL_LOOK` has why - so
+// the mutation cannot reach their judged numbers at all rather than reaching them and
+// falling short. It still moves the glow ratio those rows print beside the judged one,
+// 0.40978 to 0.40043 and 45.923 to 42.065 on the worst of forty tile means, which is the
+// same direction and the same nowhere-near. Re-measured on this tree: 51 of 51 and 0
+// failed under the mutation, so it is uncaught here for a second reason and caught by
+// `test/bloom-chain.test.mjs` for the same one.
 //
 // What the widening cost, since a threshold change that only reports what it bought
 // is half a measurement. Two mutations lose an assertion to it, and both lose the
@@ -1905,12 +2061,25 @@ await main.page.evaluate(`globalThis.__kinect.params.apply(${JSON.stringify(CROP
 // isolates whether the chain is frozen in the right place, the 1200 one whether the
 // scaling exists. Dropping either would leave a mutation uncaught, and this was found
 // by running one rather than by reading the code.
+//
+// **Bloom is out of the look these two arms compare, and the glow arm beside each one is
+// how that exclusion stays visible.** `REBASE_FULL_LOOK` has the mechanism and the
+// numbers: the pinned build's glow is three's pass and this one's is ours, so the term
+// cannot be part of a claim about references. The `rebase-glow-*` arms render the same
+// scene with it up and are judged by nothing - their ratio goes into the row's own
+// message, so the quantity that was taken out is reported on every run.
 const rebaseFullBig = await armAt(main.page, {
-  label: 'rebase-full-big', look: {}, resLook: REBASE_LOOK,
+  label: 'rebase-full-big', look: {}, resLook: REBASE_FULL_LOOK,
+});
+const rebaseGlowBig = await armAt(main.page, {
+  label: 'rebase-glow-big', look: {}, resLook: REBASE_LOOK,
 });
 await setStage(main.page, REF);
 const rebaseFullRef = await armAt(main.page, {
-  label: 'rebase-full-ref', look: {}, resLook: REBASE_LOOK,
+  label: 'rebase-full-ref', look: {}, resLook: REBASE_FULL_LOOK,
+});
+const rebaseGlowRef = await armAt(main.page, {
+  label: 'rebase-glow-ref', look: {}, resLook: REBASE_LOOK,
 });
 
 // The precondition, measured rather than argued: with a clamp active the comparison
@@ -1958,6 +2127,7 @@ for (const [name, tol] of Object.entries(RES_TOLERANCE)) {
 // against itself.
 let rebaseOld = null;
 let rebaseFullOld = null;
+let rebaseGlowOld = null;
 let rebaseHdOld = null;
 let rebaseNon169Old = null;
 {
@@ -2013,7 +2183,13 @@ let rebaseNon169Old = null;
   // can: the graded look at the buffer it was graded at, against this build's look
   // at twice that, which is where the whole rebase either holds or does not.
   rebaseFullOld = await armAt(before.page, {
-    label: 'rebase-full-old', look: {}, resLook: REBASE_LOOK,
+    label: 'rebase-full-old', look: {}, resLook: REBASE_FULL_LOOK,
+  });
+  // The other end of the glow pair. Taken here rather than derived, because the whole
+  // point of the number is that nobody can predict what three's pass does from what
+  // ours does - that is the fact the rows above stopped being able to state.
+  rebaseGlowOld = await armAt(before.page, {
+    label: 'rebase-glow-old', look: {}, resLook: REBASE_LOOK,
   });
   // The other half of the 16:9 arm, and the reason it is taken here rather than
   // computed: this build has no reference of any kind, so 22 is 22 drawn pixels at
@@ -2057,7 +2233,10 @@ let rebaseNon169Old = null;
 // 1080p while measuring 1200 is a label claiming coverage the instrument does not
 // have - which is the shape of the JSON.stringify case this repo already has a rule
 // about.
-for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFullBig]]) {
+for (const [label, arm, glow] of [
+  ['1728x1080', rebaseFullRef, rebaseGlowRef],
+  ['1920x1200', rebaseFullBig, rebaseGlowBig],
+]) {
   // The clamp precondition again, on both cross-build arms, because the old build
   // draws its own preset's point size rather than the sweep's.
   const clear = [rebaseFullOld, arm].every((a) => a.sizes.smallest >= 1 && a.sizes.largest <= 64);
@@ -2082,10 +2261,19 @@ for (const [label, arm] of [['1728x1080', rebaseFullRef], ['1920x1200', rebaseFu
   // costs the most, since nothing draws attention to it until the build it was wrong about
   // arrives.
   const chains = sameChain(arm, rebaseFullOld);
+  // The excluded term, reported beside the judged one on every run rather than left in
+  // a comment for somebody to go and read. It is not in the predicate on purpose: what
+  // it measures is the distance between two implementations of a pass, which is a fact
+  // about the pinned revision and not a property this build can be asked to hold.
+  const worstGlow = Math.max(...glow.tiles.map((v, i) => Math.abs(v - rebaseGlowOld.tiles[i])));
+  const ratioGlow = glow.lum.mean / rebaseGlowOld.lum.mean;
   check(clear && chains && Math.abs(ratioFull - 1) <= 0.02 && worstFull <= 2.0,
-    `and the whole look rebases, not just the points: Blackwall at ${label} is Blackwall at 960x600`,
+    `and the whole look bar the glow rebases, not just the points: Blackwall at ${label} is Blackwall at 960x600`,
     `${ends}; luminance ratio ${fixed(ratioFull, 5)}, worst of 40 tile means ${fixed(worstFull)}/255; `
-    + `chain ${chainOf(arm)} against ${chainOf(rebaseFullOld)}`);
+    + `chain ${chainOf(arm)} against ${chainOf(rebaseFullOld)}; bloom is left out because the `
+    + `pinned build's glow is three's pass and this one's is ours - with it up the same pair reads `
+    + `${fixed(ratioGlow, 5)} and ${fixed(worstGlow)}/255 through ${chainOf(glow)} against `
+    + `${chainOf(rebaseGlowOld)}`);
 }
 
 {
@@ -2851,6 +3039,344 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
     await server.close();
     await noEncoder.close();
     rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+// ------------------------ 7. a clip needing an effect this build has not got
+
+console.log('\n[8] an export is refused while the clip needs an effect this build lacks, and a suppression is per effect');
+
+// **The missing effect is staged rather than uninstalled, and it has to be.** There is
+// no uninstall in this build - that arrives later - so the shape under test is reached
+// the way a document from another machine reaches it: a look name whose dotted prefix is
+// a perfectly valid effect id that nothing here has ever shipped. `sparkle` and
+// `drizzle` are those, and the first row of this section is that they really are absent,
+// because the day somebody ships a package under either name every row below stops
+// asking anything while still printing a pass.
+//
+// Two of them rather than one, because the claim that separates a per-effect suppression
+// from a global one cannot be made with a single missing effect: suppressing the only
+// one there is looks identical under both implementations.
+const MISSING_A = { id: 'sparkle', version: '1.0.0' };
+const MISSING_B = { id: 'drizzle', version: '2.1.0' };
+
+/**
+ * The document under test, built out of the page's own serialiser rather than typed
+ * here.
+ *
+ * A hand-written project is a fixture that stops being what `restoreProject` accepts the
+ * first time the loader gains a rule - `jobs-check` has that lesson written into its own
+ * fixture twice over - so this takes whatever the open clip currently is and adds the one
+ * thing under test: four values and two keyed tracks under an effect that is not here,
+ * with the `requires` entry the writer would have derived for them.
+ */
+const PARKED_ARM = `((opts) => {
+  const k = globalThis.__kinect;
+  const base = k.library.serialiseProjectBody();
+  const doc = JSON.parse(JSON.stringify(base));
+  for (const m of opts.missing) {
+    doc.look.params[m.id + '.amount'] = 0.6;
+    doc.look.params[m.id + '.size'] = 3.25;
+    doc.look.params[m.id + '.hue'] = 210;
+    doc.look.params[m.id + '.jitter'] = 0.125;
+    doc.look.tracks[m.id + '.amount'] = [
+      { t: 0, value: 0, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+      { t: 2, value: 0.9, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+    ];
+    doc.look.tracks[m.id + '.hue'] = [{ t: 0.5, value: 10, easeOut: [[0.1, 0.2]], easeIn: [[0.3, 0.4]] }];
+    doc.requires = [...(doc.requires ?? []), { id: m.id, version: m.version }];
+  }
+  return { base, doc };
+})`;
+
+const parkedRun = await onFreshPage('the missing-effect export run', async (page) => {
+  const attempt = async (project, options) => page.evaluate(`(async (a) => {
+    globalThis.__kinect.library.restoreProject(a.project);
+    await globalThis.__kinect.timeline.settled();
+    try {
+      const done = await globalThis.__kinect.export.run(a.options);
+      return { ok: true, output: done.output, frames: done.frames, frameHashes: done.frameHashes };
+    } catch (err) {
+      return { ok: false, error: String(err.message ?? err) };
+    }
+  })(${JSON.stringify({ project: project, options: options })})`);
+
+  // The effect ids this build actually declares, read off the registry the way the page
+  // itself decides what is installed - so the precondition row below is asking the same
+  // question the parking asks rather than a second reading of it.
+  const declared = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    return [...new Set(k.params.names('look').filter((n) => n.includes('.')).map((n) => n.slice(0, n.indexOf('.'))))];
+  })()`);
+  const one = await page.evaluate(`${PARKED_ARM}(${JSON.stringify({ missing: [MISSING_A] })})`);
+  const two = await page.evaluate(`${PARKED_ARM}(${JSON.stringify({ missing: [MISSING_A, MISSING_B] })})`);
+
+  const shot = { width: STAGE.width, height: STAGE.height, fps: EXPORT_FPS, from: 0, to: 2, codec: 'lossless' };
+  return {
+    declared,
+    // The complete document first, so the pictures the rows below compare against were
+    // taken on the same page with the same camera and the same playhead.
+    complete: { ...await attempt(one.base, { ...shot, name: 'check-missing-none' }), doc: one.base },
+    refused: await attempt(one.doc, { ...shot, name: 'check-missing-refused' }),
+    suppressed: await attempt(one.doc, { ...shot, name: 'check-missing-suppressed', suppressEffects: [MISSING_A.id] }),
+    partial: await attempt(two.doc, { ...shot, name: 'check-missing-partial', suppressEffects: [MISSING_A.id] }),
+    badge: await page.evaluate(`(() => [...document.querySelectorAll('#tMissing .missingfx')]
+      .map((e) => ({ effect: e.dataset.effect, text: e.querySelector('b').textContent })))()`),
+    // **The one seam every row above steps over: what the export *button* hands the
+    // rule.** `exportClip` takes the suppression as an argument so that the page and the
+    // render worker can each supply their own, and the page's answer is read at the click
+    // - so a build whose handler forgot to pass the badge's set would satisfy every row
+    // that calls `export.run` directly and refuse every export a person could ask for.
+    // Driven through the two controls a hand uses, in the order the surface allows.
+    throughTheUi: await (async () => {
+      await page.evaluate(`(() => {
+        globalThis.__kinect.library.restoreProject(${JSON.stringify(one.doc)});
+      })()`);
+      await page.evaluate('globalThis.__kinect.timeline.settled()');
+      await page.click('#tMissing button[data-suppress="sparkle"]');
+      const pressed = await page.evaluate(
+        `document.querySelector('#tMissing button[data-suppress="sparkle"]').getAttribute('aria-pressed')`,
+      );
+      await page.locator('#outputMenuButton').click();
+      await page.locator('#menuExport').click();
+      await page.fill('#tExportName', 'check-missing-ui');
+      await page.locator('#tExport').click();
+      // The note is where the export reports itself, refusal and success alike, so it is
+      // the one place a driver can read which of the two happened without asking the
+      // function it just pressed a button to reach.
+      await page.waitForFunction(
+        `!/starting|frame /.test(document.getElementById('tExportNote').textContent)`,
+        null, { timeout: 180000 },
+      );
+      return { pressed, note: await page.evaluate("document.getElementById('tExportNote').textContent") };
+    })(),
+    // **A suppression is a decision about one document, and nothing was ending it.**
+    // `restoreProject` prunes the set to whatever is still parked, which is right for the
+    // three callers that are the *same* clip - an undo, a hotload, a rollback - and wrong
+    // for the one that is a different file. Two projects both missing `sparkle` therefore
+    // shared one authorisation: suppress it while A is open, open B, and B exports without
+    // it having been permitted by anybody. Worse than a stale toggle, because the thing it
+    // silently permits is a video leaving the machine short of a layer of its look.
+    //
+    // **Driven through the button and not through `export.run`**, which is the whole reason
+    // this row is here rather than beside the hook rows. `exportClip` takes the suppress set
+    // as an argument, so a call passing `[]` is refused on every build there is and would
+    // prove nothing; the set the leak was made of is the page's own, and the export button
+    // is the only thing that reads it.
+    leak: await (async () => {
+      // **The export dialog the block above left open, closed through its own control
+      // before anything here presses a thing behind it.** `#exportDialog` is modal, so the
+      // browser refuses pointer events to everything under it - the badge's suppress button
+      // included - and Playwright's click waits rather than failing: the first attempt at
+      // this block spent thirty seconds retrying against `<dialog open>` and ended the run
+      // with `page.click: Timeout 30000ms exceeded` and no failed assertion, which is the
+      // crash-wearing-the-shape-of-a-catch this suite has recorded three times. Driven
+      // through `#exportClose` rather than by calling `close()`, because a modal a person
+      // can open is a modal a person closes and that is the path this file drives.
+      await page.locator('#exportClose').click();
+      const pressedFor = (id) => page.evaluate(
+        `document.querySelector('#tMissing button[data-suppress="${id}"]')?.getAttribute('aria-pressed') ?? 'absent'`,
+      );
+      const restore = (doc) => page.evaluate(`(async (d) => {
+        globalThis.__kinect.library.restoreProject(d);
+        await globalThis.__kinect.timeline.settled();
+      })(${JSON.stringify(doc)})`);
+      // The complete document first, so this block starts from a page with nothing parked
+      // and therefore nothing suppressed - the prune empties the set on its way past. A
+      // block inheriting `throughTheUi`'s press would be asserting about a latch it did not
+      // set, which is a fixture rather than a claim.
+      await restore(one.base);
+      await restore(one.doc);
+      await page.click('#tMissing button[data-suppress="sparkle"]');
+      const inA = await pressedFor('sparkle');
+      // B is a *different document* that happens to miss the same effect, which is exactly
+      // the pair the leak needs: if the set were keyed on the effect rather than on the
+      // document, both look identical to it. Handed over rather than fetched, through the
+      // same `offered` parameter the resume chip uses, so this writes nothing into the
+      // store it is running against.
+      await page.evaluate(`globalThis.__kinect.library.loadProject('check-missing-leak', ${JSON.stringify(two.doc)})`);
+      await page.evaluate('globalThis.__kinect.timeline.settled()');
+      const inB = await pressedFor('sparkle');
+      // Where this block's own console noise starts. Marked before the press rather than
+      // matched by content afterwards, because `throughTheUi` above can produce the
+      // identical sentence on a mutated build - `export-button-drops-the-suppression`
+      // refuses the export it drives - and a drain matching on text alone would take that
+      // line out of the sweep too. That is not a tidier filter, it is this block silently
+      // exempting a *different* control's finding, which is the standing-exemption failure
+      // the drain exists to avoid rather than an instance of it.
+      const errorsBefore = pageErrors.length;
+      await page.locator('#outputMenuButton').click();
+      await page.locator('#menuExport').click();
+      await page.fill('#tExportName', 'check-missing-leak');
+      await page.locator('#tExport').click();
+      await page.waitForFunction(
+        `!/starting|frame /.test(document.getElementById('tExportNote').textContent)`,
+        null, { timeout: 180000 },
+      );
+      const note = await page.evaluate("document.getElementById('tExportNote').textContent");
+      // Closed again before the second half of the block presses anything, for the reason
+      // it was closed at the top: an export refused leaves the dialog standing, and a modal
+      // takes every later click in this file with it.
+      await page.locator('#exportClose').click();
+      // **And the sentence this block just provoked, taken out of the sweep by draining
+      // exactly one entry rather than by filtering it.** The refusal is the point of the
+      // rows above, and `showTimelineError` writes every sentence it shows the operator to
+      // `console.error` as well - so the `no page errors` row at the foot of this file
+      // collects it. A filter there would be standing rather than local: it would go on
+      // covering whatever the page said next that matched, and a build that stopped
+      // refusing would take the exemption with it in silence. Draining turns the noise into
+      // a claim - a build that does not refuse drains nothing and reddens the row below.
+      //
+      // Matched on the *shape* of the sentence rather than on `sparkle`, and that is not a
+      // widening for convenience. Under `suppression-outlives-its-document` the leaked
+      // suppression covers sparkle, so the refusal this export produces names drizzle
+      // instead - one line either way, and a drain keyed to the id would leave it in the
+      // sweep and add a red row about console noise to a control that is already saying
+      // what it has to say. The claim the count carries is unchanged: this block's export
+      // is refused, once.
+      // Removed by index from the tail, never by value: two identical sentences are two
+      // entries, and `indexOf` would take the earlier one - which is the same
+      // somebody-else's-line mistake as matching on text, arriving through the splice.
+      const drained = [];
+      for (let i = pageErrors.length - 1; i >= errorsBefore; i--) {
+        if (/this clip requires .* not installed here/.test(pageErrors[i])) {
+          drained.push(pageErrors.splice(i, 1)[0]);
+        }
+      }
+      // And the other half of one rule: within one document the prune is what makes undo
+      // survivable, so a restore of the same body has to leave the latch down. Without this
+      // row the fix could be "clear on every restore", which would spend the decision on
+      // every keystroke that enters the undo stack.
+      await restore(one.doc);
+      // **Pressed only if the latch is down**, which is the same discipline `editor-check`'s
+      // panel section keeps for the same reason: this is a toggle, so a blind press on a
+      // build where the state is already set turns it *off* and the row below then reads a
+      // fixture nobody built. That is not hypothetical - under
+      // `suppression-outlives-its-document` the leak half's suppression is still standing
+      // here, and a blind press made this row red about a claim the mutated build actually
+      // keeps, which is a control reddening a row it has nothing to do with.
+      if (await pressedFor('sparkle') !== 'true') {
+        await page.click('#tMissing button[data-suppress="sparkle"]');
+      }
+      const beforeUndo = await pressedFor('sparkle');
+      await restore(one.doc);
+      return { inA, inB, note, drained: drained.length, beforeUndo, afterUndo: await pressedFor('sparkle') };
+    })(),
+  };
+});
+
+if (!parkedRun.ok) {
+  check(false, 'the missing-effect run completed', parkedRun.error);
+} else {
+  const r = parkedRun.value;
+  // The precondition, and it is a row rather than an assumption for the reason
+  // `docs/instruments.md` gives about a fixture that cannot hold the property: an arm
+  // whose "missing" effect turned out to be installed would pass every refusal row by
+  // never producing one.
+  const clash = [MISSING_A.id, MISSING_B.id].filter((id) => r.declared.includes(id));
+  check(clash.length === 0,
+    'the two effects these rows are about really are absent from this build',
+    `${r.declared.length} installed: ${r.declared.join(', ')}${clash.length ? ` - and ${clash.join(', ')} is among them` : ''}`);
+
+  check(r.refused.ok === false
+    && String(r.refused.error).includes(`${MISSING_A.id} ${MISSING_A.version}`),
+  'a clip whose requires name a missing effect refuses to export, naming the id and the version',
+  r.refused.ok ? 'the export ran' : r.refused.error);
+
+  // And the badge said so on the surface, with the version out of the document's own
+  // requires entry - the same fact the refusal quotes, read where a person would.
+  const said = r.badge.find((e) => e.effect === MISSING_B.id);
+  check(r.badge.length === 2 && said?.text.includes(`${MISSING_B.id} ${MISSING_B.version}`),
+    'and the badge names each of them with the version the document asked for',
+    r.badge.map((e) => e.text).join(' | ') || 'no badge entries');
+
+  check(r.suppressed.ok === true,
+    'and with that effect suppressed the export proceeds and writes a file',
+    r.suppressed.ok ? `${r.suppressed.frames} frames to ${r.suppressed.output}` : r.suppressed.error);
+
+  if (r.suppressed.ok) {
+    const record = JSON.parse(readFileSync(`${r.suppressed.output}.job.json`, 'utf8'));
+    const got = record.project?.suppressed;
+    check(Array.isArray(got) && got.length === 1
+      && got[0].id === MISSING_A.id && got[0].version === MISSING_A.version,
+    'and the deliverable\'s own document records what that render went without',
+    JSON.stringify(got ?? null));
+    // The parked values are still in the record, which is the half a reader of the file
+    // needs: `suppressed` says what was left out of the *render*, and the document is
+    // still the document. A record that had shed them would say the clip never wanted
+    // the effect at all.
+    const kept = Object.keys(record.project?.look?.params ?? {}).filter((n) => n.startsWith(`${MISSING_A.id}.`));
+    check(kept.length === 4,
+      'and it still carries the parked values, so the record says what was skipped rather than rewriting the clip',
+      `${kept.length} parked keys in the deliverable's document: ${kept.join(', ')}`);
+  }
+
+  // **The installed part of the look really rendered**, asserted as an equality against
+  // the same document without the parked keys. Bit-identical rather than close: the
+  // parked values never reach the registry, so the two documents leave it in exactly the
+  // same state and any difference at all would mean one of them had touched something.
+  if (r.suppressed.ok && r.complete.ok) {
+    const a = r.complete.frameHashes ?? [];
+    const b = r.suppressed.frameHashes ?? [];
+    const same = a.length > 0 && a.length === b.length && a.every((h, i) => h === b[i]);
+    check(same, 'and what it drew is the same picture the document without those keys draws',
+      `${a.filter((h, i) => h === b[i]).length}/${a.length} frames identical`);
+  }
+
+  check(r.partial.ok === false
+    && String(r.partial.error).includes(`${MISSING_B.id} ${MISSING_B.version}`)
+    && !String(r.partial.error).includes(`${MISSING_A.id} `),
+  'suppressing one missing effect leaves the export refused for the other, and names only the other',
+  r.partial.ok ? 'the export ran' : r.partial.error);
+
+  // The falsification control for every row above: a build that simply refused to export
+  // would satisfy all three refusals, and one that recorded a suppression unconditionally
+  // would satisfy the record row. A complete document has to go straight through and has
+  // to leave no `suppressed` key behind it.
+  // And the same suppression made through the surface a person has, spent by the button
+  // a person presses. The note is the whole assertion: a build whose handler dropped the
+  // badge's set prints the refusal here instead of a filename, with every row above it
+  // still green.
+  check(r.throughTheUi?.pressed === 'true'
+    && /check-missing-ui/.test(r.throughTheUi?.note ?? '')
+    && !/refused|failed/.test(r.throughTheUi?.note ?? ''),
+  'and a suppression pressed in the badge is the one the export button spends, driven through both controls',
+  `aria-pressed ${r.throughTheUi?.pressed}, note ${JSON.stringify(r.throughTheUi?.note ?? null)}`);
+
+  // **The leak, and the row that says the fix did not go too far.** Two documents both
+  // missing `sparkle` used to share one authorisation, because the loader prunes the
+  // suppression set rather than clearing it - right for the undo and the rollback that
+  // arrive through the same door, wrong for a file somebody opened. Both halves are
+  // asserted from the latch itself and the leak half again from the export, because the
+  // latch is what the fix moves and the refusal is what it is for: a build that cleared the
+  // set and forgot to repaint would pass the second and fail the first.
+  check(r.leak?.inA === 'true' && r.leak?.inB === 'false',
+    'a suppression made on one document is not carried into the next document opened, even one missing the same effect',
+    `pressed in A: ${r.leak?.inA}, then in B: ${r.leak?.inB}`);
+  // `export failed` is the note's own word for a refusal and `refused` is not, which cost a
+  // round: the first spelling of this row asked for `/refus/i`, the build refused exactly as
+  // it should, and the row went red on the message rather than on the outcome. The mirror of
+  // the successful-export row above, which asks for a filename and the absence of this.
+  check(/sparkle/.test(r.leak?.note ?? '') && /export failed/.test(r.leak?.note ?? ''),
+    'and the export the second document asks for is refused again, naming the effect nobody authorised it to go without',
+    JSON.stringify(r.leak?.note ?? null));
+  // The drain asserted rather than performed silently, which is what keeps the sweep at the
+  // foot of this file honest: a build that stopped refusing writes nothing to the console,
+  // drains nothing, and reddens here - so the exemption cannot outlive the thing it exempts.
+  check(r.leak?.drained === 1,
+    'and that refusal is the one console line this block adds, taken back out of the sweep by name rather than filtered out of it',
+    `${r.leak?.drained} drained`);
+  check(r.leak?.beforeUndo === 'true' && r.leak?.afterUndo === 'true',
+    'while a restore of the same document keeps it, which is what makes the decision survive an undo',
+    `before ${r.leak?.beforeUndo}, after ${r.leak?.afterUndo}`);
+
+  check(r.complete.ok === true, 'a complete document exports with no refusal at all',
+    r.complete.ok ? `${r.complete.frames} frames to ${r.complete.output}` : r.complete.error);
+  if (r.complete.ok) {
+    const record = JSON.parse(readFileSync(`${r.complete.output}.job.json`, 'utf8'));
+    check(!Object.hasOwn(record.project ?? {}, 'suppressed'),
+      'and its deliverable records no suppression, because there was nothing to suppress',
+      `suppressed ${JSON.stringify(record.project?.suppressed ?? null)}`);
   }
 }
 

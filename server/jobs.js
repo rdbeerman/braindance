@@ -18,6 +18,11 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { validateExport } from './export.js';
 import { listJsonNames } from './library.js';
+// The one statement of what the dot in a look name means. The page derives a document's
+// `requires` from these namespaces on the way out and `enqueue` derives a job's envelope
+// from the same names on the way in, so a second spelling here would be two machines
+// disagreeing about which effect `sparkle.amount` belongs to.
+import { effectIdsIn, requiresEntryRefusal, requiresListRefusal } from '../web/format.js';
 
 export const JOB_VERSION = 1;
 
@@ -163,7 +168,7 @@ export class JobStore {
    * the original" is a claim about identified footage, and a job naming a take by
    * id would reproduce whatever is at that id today.
    */
-  async enqueue({ project, deliverable = null, capture, renderer = null, output, width, height, fps, codec = 'h264' }) {
+  async enqueue({ project, deliverable = null, capture, renderer = null, output, width, height, fps, codec = 'h264', suppressEffects = [] }) {
     // The project is the document *body* - what `serialiseProject()` returns and
     // what `restoreProject` takes - not the `{ name, rev, body }` envelope the
     // document store hands back. One shape, checked here, because accepting both
@@ -190,6 +195,120 @@ export class JobStore {
         + `got ${JSON.stringify(renderer)} - and a pin nothing can equal is a job nothing can claim`,
       );
     }
+    // **The effects the job's look is built from, lifted out of the document at the
+    // door.** A worker has to answer "can this machine render this at all" before it
+    // opens a page, and a job whose answer lives inside a document body is a job the
+    // queue cannot reason about - it could not report a blocked job, and a claim could
+    // not be routed by what a machine has installed the way it is already routed by the
+    // rasteriser it has.
+    //
+    // **It is derived from the look's own namespaces and never copied**, and the
+    // distinction is the whole of this rule. `enqueue` takes no `requires` argument, so
+    // for a long time the comment here read "never accepted from the caller" and the line
+    // under it copied `project.requires` - which *is* caller data, because the caller
+    // hands over the whole body. A job posted with a document naming `sparkle.amount` and
+    // an empty `requires` therefore recorded an empty list, the worker's door read that
+    // list, found nothing missing, resolved a take, launched a browser and spent a minute
+    // of GPU before `restoreProject` refused the document from the other end. That is the
+    // failure the door was built to move, and it was reachable through the one field
+    // nobody was deriving.
+    //
+    // What is derived here is the id **set**, which is all the server can know: the dot
+    // in a look name is the effect it belongs to and `effectIdsIn` is the one statement of
+    // that split, shared with the page rather than spelled again. Versions cannot be
+    // derived - the machine that queued the job is the one that knew which build of the
+    // effect the look was authored against - so the entries are taken from the document
+    // whole, and a document whose list does not name the set its own values name is
+    // refused rather than corrected. Refused, because the two readings disagreeing means
+    // the body is hand-edited or damaged, and a queue that quietly rewrote the claim would
+    // be the second implementation of `refuseRequires`, one machine away from the loader
+    // that has to agree with it.
+    const look = project.look && typeof project.look === 'object' && !Array.isArray(project.look)
+      ? project.look : {};
+    const shape = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o) : []);
+    const used = effectIdsIn([...shape(look.params), ...shape(look.tracks)]);
+    // **The list's own shape, asked here rather than left to the machine that opens the
+    // document.** This read used to be `Array.isArray(project.requires) ? … : []`, which is
+    // a shape rule with no refusal in it: a `requires` that was an object read as claiming
+    // nothing, and an entry that was `{}`, or carried no version, or named something that
+    // could never be a package id, or carried a stray key beside the two that belong, read
+    // as claiming nothing about any id. The two comparisons below then agreed with it,
+    // because they are about which ids are claimed and an unreadable claim names none - so
+    // the job was queued with an envelope built out of a list nobody could read, the
+    // worker's own door found nothing missing in it, and the refusal arrived from
+    // `restoreProject` a take resolve, a browser and a minute of GPU later. That is the
+    // journey this door exists to shorten, reached through the one field it was not
+    // reading.
+    //
+    // The rule is the loader's own rather than a second statement of it: `refuseRequires`
+    // in `web/main.js` asks `requiresEntryRefusal` these same questions of these same
+    // entries, and two spellings of one shape at two doors is what `web/format.js` exists
+    // to refuse. What is *not* shared is the repeat rule below, because the two ends say
+    // different things about it - the loader is talking about a document that cannot
+    // describe one look, and this is talking about a version a render would land on by
+    // position.
+    //
+    // Asked before the comparisons rather than after, on the door's own ordering: shape
+    // before vocabulary, so a malformed list is reported as a malformed list instead of as
+    // a document that disagrees with itself.
+    if (project.requires !== undefined) {
+      const listShape = requiresListRefusal('a job\'s project', project.requires);
+      if (listShape) throw new Error(listShape);
+      for (const entry of project.requires) {
+        const bad = requiresEntryRefusal('a job\'s project', entry);
+        if (bad) throw new Error(bad);
+      }
+    }
+    // Absent stays allowed and is the only thing left to allow for, because everything
+    // else has just been refused by name. A second `Array.isArray` here would be a guard
+    // standing behind a door that has already answered.
+    const carried = project.requires ?? [];
+    const claimed = carried.map((e) => (e && typeof e === 'object' ? e.id : undefined));
+    // **One id, one entry, and the two comparisons below cannot ask it.** `unlisted` reads
+    // membership and `unclaimed` reads a set, so a list carrying `sparkle` twice satisfies
+    // both of them exactly as well as a list carrying it once - and the envelope built at the
+    // bottom of this door then resolves each used id with `find`, which takes the first entry
+    // and drops the rest. Two entries claiming different *versions* of one effect is the
+    // shape that costs something: the queue records one of them by position, the worker's door
+    // reads the recorded one, and whichever the document meant is a coin toss nobody spelled.
+    // The loader refuses this document too, on the machine that opens it - which is a minute
+    // of GPU and a render later, and is the failure this whole door exists to move.
+    const duplicated = [...new Set(
+      claimed.filter((id, at) => typeof id === 'string' && claimed.indexOf(id) !== at),
+    )];
+    if (duplicated.length) {
+      throw new Error(
+        `a job's project claims ${duplicated.join(', ')} more than once in its requires list, so there is no `
+        + 'one answer to which version of ' + (duplicated.length === 1 ? 'that effect' : 'those effects')
+        + ' this render needs - the list is derived from the values on save, one entry per effect, and a '
+        + 'repeat is a hand edit to finish before the job is queued',
+      );
+    }
+    const unlisted = used.filter((id) => !claimed.includes(id));
+    const unclaimed = [...new Set(claimed)].filter((id) => typeof id === 'string' && !used.includes(id));
+    if (unlisted.length || unclaimed.length) {
+      throw new Error(
+        'a job\'s project disagrees with its own requires list, so the queue cannot say what this '
+        + `render needs: ${[
+          unlisted.length ? `it names ${unlisted.join(', ')} values that the list does not claim` : null,
+          unclaimed.length ? `the list claims ${unclaimed.join(', ')} and no value is named under ${unclaimed.length === 1 ? 'it' : 'them'}` : null,
+        ].filter(Boolean).join(', and ')} - the list is derived from the values on save, so a gap `
+        + 'between them is a hand edit to finish before the job is queued',
+      );
+    }
+    const requires = used.map((id) => ({ ...carried.find((e) => e?.id === id) }));
+    // And what this job is allowed to render without. Unlike `requires` this *is* the
+    // caller's, because it is a decision rather than a fact: somebody has said this
+    // render may go ahead on a machine missing that effect. Held to the id shape the
+    // packages use, because a name that could not be an effect id can never match one
+    // and would be a suppression that silently covers nothing.
+    if (!Array.isArray(suppressEffects)
+      || !suppressEffects.every((id) => typeof id === 'string' && /^[a-z][a-z0-9]*$/.test(id))) {
+      throw new Error(
+        `a job's suppressEffects is a list of effect ids, got ${JSON.stringify(suppressEffects)} - `
+        + 'an id is lowercase letters and digits, the prefix an effect\'s parameters carry',
+      );
+    }
     // All the export rules run at enqueue, so the queue refuses work it already
     // knows cannot run. The worker and the export socket must not be the place a
     // bad width, an odd h264 dimension, or an unknown codec is first discovered.
@@ -211,6 +330,8 @@ export class JobStore {
         version: JOB_VERSION,
         project,
         deliverable,
+        requires,
+        suppressEffects: [...suppressEffects],
         capture,
         renderer: renderer ?? null,
         output: String(output),

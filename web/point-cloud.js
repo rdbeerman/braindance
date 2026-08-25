@@ -27,7 +27,6 @@
 import * as THREE from 'three';
 import { DEPTH_H, DEPTH_W, POINTS } from './format.js';
 import { scene } from './scene.js';
-import { vertexShader, fragmentShader } from './cloud-shader.js';
 import { statePrev } from './surface-memory.js';
 
 // The depth pair's defaults, named once because three separate things have to agree
@@ -74,8 +73,20 @@ export let cloud = null;
  * Called after the surface memory as well as after the textures, because `stateTex` is
  * seeded with the ghost target that exists by then - and that seed is not dead, it is what
  * the first frame samples before the first step of the memory has run.
+ *
+ * `program` is the assembled `{ vertexShader, fragmentShader }` pair, and it is passed in
+ * for the same reason the cells are: the packages it was assembled from were fetched by
+ * `web/main.js`, so this module compiles a shader without ever knowing there is a server -
+ * which is what lets the gate run the same assembler under bare node with the packages read
+ * off disk instead.
+ *
+ * **The assembly itself moved up to that boot rather than happening here**, and the reason
+ * is the second spine. `web/shader-assembly.js` takes every spine in one call so that a
+ * joint name means one place across the whole build and a chunk naming a joint nothing holds
+ * is refused by name; assembling the cloud on its own would have had to answer for the grade
+ * pass's chunks somehow, and both available answers are wrong.
  */
-export function buildPointCloud(sourceCells) {
+export function buildPointCloud(sourceCells, program) {
   // Two vertices per depth pixel: one for the live point, one for the ghost it
   // leaves behind. Shedding needs both on screen at once. The ghost half is left
   // out of the draw range entirely when nothing can be shed, so it costs nothing.
@@ -133,6 +144,14 @@ export function buildPointCloud(sourceCells) {
     // Written by `resize` in `web/main.js` and by nothing else, so the one place the
     // buffer can change is also the one place this can.
     bufferHeight: { value: 1080 },
+    // What this hardware will rasterise a point sprite at, which is the ceiling the glyph
+    // field's grown sprite is clamped to instead of the literal 64 the old path keeps.
+    // Written once at boot in `web/main.js` out of ALIASED_POINT_SIZE_RANGE, and not a
+    // registry parameter: it is a bound on the machine rather than a value anybody chose,
+    // it has nothing to keyframe into, and a preset naming it would carry one GPU's limit
+    // to another. The 64 here is the literal it stands in for, so a frame reached before
+    // that write draws what the shipped clamp always drew.
+    pointCeiling: { value: 64 },
     pointSize: { value: 9 },
     opacity: { value: 1 },
     exposure: { value: 1.15 },
@@ -178,6 +197,35 @@ export function buildPointCloud(sourceCells) {
     noiseSpeed: { value: 0.7 },
     lattice: { value: 0 },
     latticeCell: { value: 0.05 },
+    // The glyph field, which draws a character where the lattice above put a point - and
+    // it rides that lattice rather than carrying a grid of its own, because two
+    // independent world-cell quantisers in one shader is the second path this design keeps
+    // refusing. The master blends the mark from the round splat toward the character and
+    // grows the sprite into the cell as it goes, so at a lattice of 1 and a glyph of 0 the
+    // picture is the voxel look that ships today.
+    //
+    // The three keys sum into one index and wrap, which is what lets each of them mean how
+    // far it moves the character while a weight at zero contributes exactly nothing.
+    // `glyphHash` defaults to 1 rather than to 0, following the ceilings under the glitch
+    // master: it is a setting under a master and its default is the identity the probe
+    // shipped, which is the character belonging to the cell and to nothing else. The other
+    // three default to 0, `glyph` because it is the master and gates the whole thing.
+    glyph: { value: 0 },
+    glyphTone: { value: 0 },
+    glyphHash: { value: 1 },
+    glyphRain: { value: 0 },
+    // The falling wave. One scalar per point out of world height and program time, driving
+    // brightness in the fragment stage - and the glyph field's rain key reads the same
+    // scalar to scramble the character, which is the arrangement the duotone already has:
+    // one source, two consumers. The three lengths under the master are metres and metres
+    // per second of the room, so none of them owes the 1080p reference the screen-space
+    // terms do, and each defaults to the value the probe's clips were shot at rather than
+    // to zero - a span of zero is a degenerate divisor protected only by the master, which
+    // is the shape every other family here avoids.
+    rain: { value: 0 },
+    rainSpeed: { value: 0.55 },
+    rainSpan: { value: 1.3 },
+    rainTrail: { value: 0.45 },
     // One region, three uses. Centre, half-extents, corner radius and falloff width are
     // metres in the sensor frame; the three effects below are what read it.
     regionCentre: { value: new THREE.Vector3(0, 0, -2) },
@@ -214,6 +262,15 @@ export function buildPointCloud(sourceCells) {
     // keyframes it can be stopped and started.
     glitchRate: { value: 7 },
     time: { value: 0 },
+    // Program time again, in a cell of its own, and the duplication is what makes one
+    // falsification control possible rather than being an oversight. The rain has to be a
+    // pure function of program time or a seek lands where playback never would, and the
+    // mutation that holds that claim - `timeline-check --mutate rain-accumulates` - has to
+    // integrate exactly one line. Pointed at `time` it would redden the ripple, the glitch
+    // and the raster along with the rain, and a control that fails everything cannot say
+    // which claim is load-bearing. Written beside `time` in the same statement pair, so the
+    // two cannot come apart.
+    rainPhase: { value: 0 },
     // The five readings of the take, as weights rather than as a mode. Each one is a
     // complete answer to "what colour is this point", and the fragment stage mixes
     // whichever are non-zero - so colour and range compose instead of excluding one
@@ -320,15 +377,24 @@ export function buildPointCloud(sourceCells) {
     sinceFrameSec: { value: 0 },
   };
 
-  // The two programs those uniforms feed are in `web/cloud-shader.js`, imported at the top
-  // of this file. Nine hundred lines of GLSL sitting between the table above and the
-  // hundred places in `web/main.js` that write it put the two ends of one parameter out of
-  // sight of each other, which is the whole of why they moved. What did not move is the
-  // obligation between them: every uniform declared there needs a key here, nothing checks
-  // it in either direction, and a uniform with no key is a silent zero rather than an
-  // error. Five of those keys hold cells `web/gpu-textures.js` owns rather than cells this
-  // table made, which leaves the obligation exactly where it was and moves who may write
-  // them.
+  // The two programs those uniforms feed, assembled at the boot in `web/main.js` rather
+  // than imported whole. The spine in `web/cloud-shader.js` carries the text every point in
+  // the frame is drawn by and the joints the installed effects splice into. Nine hundred
+  // lines of GLSL sitting between the table above and the hundred places in `web/main.js`
+  // that write it put the two ends of one parameter out of sight of each other, which is
+  // why the text moved out at all, and an effect's own GLSL travelling with its parameters
+  // is the same argument one file further.
+  //
+  // What did not move is the obligation between the two: every uniform the assembled pair
+  // declares needs a key here, nothing checks it in either direction, and a uniform with no
+  // key is a silent zero rather than an error. Nine of those declarations are in the glyph
+  // and rain packages rather than in the spine, which widens where the obligation is written
+  // down without changing what it is - `test/cloud-shader.test.mjs` asks it of the assembled
+  // program rather than of any file, so a term arriving in a package is inside the question
+  // and one sitting in a slot's fallback, which nothing compiles, is correctly outside it.
+  // Five of the keys hold cells `web/gpu-textures.js` owns rather than cells this table
+  // made, which leaves the obligation exactly where it was and moves only who may write them.
+  const { vertexShader, fragmentShader } = program;
   material = new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
     uniforms,
@@ -353,6 +419,54 @@ export function buildPointCloud(sourceCells) {
  * its own pipeline object - which is why `warmPrograms` in `web/main.js` presses this both
  * ways at boot rather than trusting one variant to cover the other.
  */
+/**
+ * The two shader programs this material draws with, replaced.
+ *
+ * **The material is mutated rather than rebuilt, and the identity is what the caller is
+ * buying.** `cloud` is a `THREE.Points` built on this material and already in the scene,
+ * `setAdditive` flips its blend, and `web/main.js` holds neither by any route but the
+ * imported bindings - so constructing a new `ShaderMaterial` here would leave the drawn
+ * cloud on the program before last with nothing anywhere saying so. `needsUpdate` is what
+ * makes three.js recompile, which is the same flag and the same reason as the blend switch
+ * below.
+ *
+ * It lives here rather than at the call site because the call site imports this material
+ * and may not write into it: an imported object anybody can reach into is the channel
+ * `tools/module-check.mjs` refuses in general, on the grounds that the module holding the
+ * state cannot see the write. `uniforms` is the one exemption and it is a table of cells
+ * the GPU reads; a shader program is the module's own construction, so the write belongs
+ * to the module.
+ *
+ * The uniform table is deliberately untouched. A swapped program declares a different set
+ * of uniforms, and three.js resolves a material's uniforms against whatever the compiled
+ * program actually holds - so a key with no uniform behind it costs nothing and a uniform
+ * with no key reads zero, which is the same standing obligation the header above states
+ * and which `web/main.js` meets by minting the cells a new package's bindings need.
+ *
+ * **The old program is released, and `needsUpdate` alone does not release it.** Read
+ * `deallocateMaterial` in three.js 0.185.1: a program's reference count is dropped only by
+ * `releaseMaterialProgramReferences`, and the only thing that calls it is the `dispose`
+ * event on a material. `needsUpdate` compiles a new program and adds it to the same
+ * material's `programs` set beside the old one, which stays linked, stays in the renderer's
+ * cache and keeps its GPU memory - so every install that changed a byte of GLSL left a
+ * whole compiled program behind, in a page designed to be installed into over and over
+ * without being reloaded. Disposing the material fires exactly that event; the material
+ * itself goes on working, because the next render finds no cached properties for it and
+ * initialises them again, which is the same path `needsUpdate` was asking for anyway.
+ *
+ * Only where the text actually moved, which is what keeps boot free: `web/main.js` adopts
+ * at boot with the programs the material was constructed on, and disposing there would
+ * throw away the one program this page has just compiled.
+ */
+export function setCloudProgram(program) {
+  if (material.vertexShader === program.vertexShader
+    && material.fragmentShader === program.fragmentShader) return;
+  material.dispose();
+  material.vertexShader = program.vertexShader;
+  material.fragmentShader = program.fragmentShader;
+  material.needsUpdate = true;
+}
+
 export function setAdditive(on) {
   material.blending = on ? THREE.AdditiveBlending : THREE.NormalBlending;
   material.depthWrite = !on;

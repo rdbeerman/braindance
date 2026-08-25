@@ -208,8 +208,8 @@ const MUTATIONS = {
   // the exit code was concerned. The claim is unchanged: the snapshot is document state,
   // so widening it to the whole registry has to be caught.
   'undo-includes-view': { file: 'web/main.js', edits: [[
-    "      params: params.values(params.names('look')),",
-    '      params: params.values(params.names()),',
+    '  const lookParams = params.values(lookNames);',
+    '  const lookParams = params.values(params.names());',
   ]] },
   // Undo pushes on every input event rather than on the end of the interaction, so
   // one slider drag is two hundred levels.
@@ -889,20 +889,51 @@ if (MUTATE && mutantServed === 0) {
 // framing `restoreProject` refuses, and every undo in this file restores a document written
 // out of that framing.
 await page.evaluate(`globalThis.__kinect.setOutputSize?.("${STAGE.width}x${STAGE.height}")`);
-// The viewport is then sized to whatever the strip actually is, measured off the
-// page. `CHROME_H_GUESS` is a first guess and nothing more: it was 104 while the bar was
-// one row, the bar became two, and the stage quietly came out 570x356 while every
+// The transport first, and the furniture after it - which is the fix for a wrong stage
+// this file measured in for as long as it has existed, not a reordering for tidiness.
+//
+// **Two things were wrong and they compounded.** `#timeline` carries `hidden` until the
+// take opens, so a strip measured before this wait reads zero; and the strip was the only
+// furniture measured at all, while the application bar sits above the stage and takes its
+// own height. Both subtract from the same place, so the stage came out `360 - strip -
+// shell` and then letterboxed 16:9 inside it: measured on this rig at **270x152**, which
+// is 0.42 of the size every figure in this file is written in. Nothing failed, because
+// every image here is compared against another image from the same run - what failed was
+// section 6b, whose drag is aimed at the top-down inset by arithmetic in stage pixels, and
+// it failed reporting a feature that works as gone.
+await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
+// The viewport is then sized to whatever furniture actually surrounds the stage, measured
+// off the page. `CHROME_H_GUESS` is a first guess and nothing more: it was 104 while the
+// bar was one row, the bar became two, and the stage quietly came out 570x356 while every
 // number in this file - including the `insetPct` denominator near the end - went on
 // being computed against 640x400. Nothing failed, which is the point: the figures
 // were simply about a smaller picture than the one they named.
 {
-  const strip = await page.evaluate(`(() => {
-    const el = document.getElementById('timeline');
-    return el && !el.hidden ? Math.round(el.getBoundingClientRect().height) : 0;
+  const furniture = await page.evaluate(`(() => {
+    const strip = document.getElementById('timeline');
+    const appBar = document.getElementById('appBar');
+    return {
+      strip: strip && !strip.hidden ? Math.round(strip.getBoundingClientRect().height) : 0,
+      shell: appBar && !appBar.hidden ? Math.round(appBar.getBoundingClientRect().height) : 0,
+    };
   })()`);
-  await page.setViewportSize({ width: STAGE.width, height: STAGE.height + strip });
+  await page.setViewportSize({
+    width: STAGE.width,
+    height: STAGE.height + furniture.strip + furniture.shell,
+  });
+  // **And then wait for the drawing buffer to follow**, because `setViewportSize`
+  // returning is not the renderer having resized - which is the second way `timeline-check`
+  // has been recorded reading a short stage. The wait is the accommodation and the refusal
+  // below is the guard, so a timeout falls through to it rather than replacing it.
+  //
+  // The predicate answers *false* on a page with no renderer rather than throwing, because
+  // a throw inside `waitForFunction` is not caught by it and the timeout is then never
+  // spent: the failure arrives instantly and reads as a finding.
+  await page.waitForFunction((want) => {
+    const gl = globalThis.__kinect?.renderer?.getContext?.();
+    return !!gl && gl.drawingBufferWidth === want.w && gl.drawingBufferHeight === want.h;
+  }, { w: STAGE.width, h: STAGE.height }, { timeout: 15000 }).catch(() => {});
 }
-await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
 await page.evaluate(INSTALL);
 
 const gpu = await page.evaluate(() => {
@@ -918,6 +949,25 @@ if (/swiftshader|software|llvmpipe/i.test(gpu.renderer)) {
   throw new Error(`software rasteriser (${gpu.renderer}) - the result would prove nothing`);
 }
 if (!gpu.colorBufferFloat) throw new Error('no EXT_color_buffer_float: the surface memory is not running at float');
+// **And the stage is the stage this file's figures are in, asserted rather than assumed.**
+// Every geometric number here is in stage pixels - the plan's px/m scale, the inset's
+// fractions, the drag offsets section 6b builds - and a stage of another size makes each of
+// them a measurement of somewhere else. That is not a hypothetical: this tool spent its
+// whole life measuring on a 270x152 stage and section 6b spent it dragging outside the
+// inset, reporting the top-down as broken on a build with nothing wrong with it, because
+// nothing here refused a stage it had not got. `timeline-check` has carried this guard from
+// the start and it is what surfaced the same race there.
+//
+// A throw rather than a failed assertion, for the reason every refusal in this suite is
+// one: a red row on a mutation run reads as a catch, and a tool measuring in the wrong
+// units has not tested anything it can report on.
+if (gpu.buffer[0] !== STAGE.width || gpu.buffer[1] !== STAGE.height) {
+  throw new Error(
+    `the stage came out ${gpu.buffer.join('x')} and this file's figures are ${STAGE.width}x${STAGE.height}: `
+    + 'the strip height, the application bar or the letterbox moved, and every number below '
+    + 'would be measured somewhere else',
+  );
+}
 
 console.log(`[keyframe] ${gpu.renderer}`);
 console.log(`[keyframe] stage ${gpu.buffer.join('x')}, take ${TAKE}: ${TIMES.length} frames, `
@@ -987,6 +1037,72 @@ const setTracks = (spec) => page.evaluate(`globalThis.__kinect.keyframes.setTrac
 const setRetime = (curve) => page.evaluate(`globalThis.__kinect.keyframes.setRetime(${src(curve)})`);
 const specOf = (name) => page.evaluate(`globalThis.__kinect.params.spec(${src(name)})`);
 
+/**
+ * Where to press to reach one key or one ease handle, asked of the document rather
+ * than computed from a rectangle - and null when the answer is that nothing on it can
+ * be reached.
+ *
+ * **`page.mouse` presses a coordinate, and a coordinate belongs to whatever is stacked
+ * on it.** The centre of an element's box is only its own while nothing else is drawn
+ * there, and this strip draws plenty. Playwright's own actionability is no rescue
+ * either: `locator.click()` hit-tests the same way, waits thirty seconds to receive
+ * pointer events and then throws, which is a crash where a row belongs.
+ *
+ * **The case this was written for was a product defect and has been fixed, and the
+ * measurement is kept rather than deleted.** `#tIn` is a one-pixel line whose grab zone
+ * reaches sixteen pixels *inward* at `z-index: 4`, and it spans the whole column from
+ * the ruler to the bottom of the last lane - so the zone lay over the lanes and not
+ * only over the ruler. Measured at this file's 640-wide viewport on the 243s
+ * `fixture-1g`: the bed runs 525 pixels from x 115, the bloom key at 4s draws centred
+ * on x 123.6, `#tIn`'s zone covers 114.5 to 126.5, and `elementFromPoint` there answered
+ * `#tIn` - so `ui.beds`' `pointerdown` ran `closest('.tkey, .thandle')`, got null, and
+ * returned, while the marker's own handler trimmed the clip in to 00:03.986. Nothing was
+ * selected, no handle was drawn, and section 6e's first row reddened about a press that
+ * had landed on something else. `.tkey` and `.thandle` are `z-index: 5` now, above that
+ * zone, so the same key answers for its own centre and this helper reports an offset of
+ * zero there.
+ *
+ * It still walks, because the other overlap it was written against has not gone
+ * anywhere - see the identity test below.
+ *
+ * The predicate here is the page's own, deliberately: a point counts when
+ * `elementFromPoint(x, y).closest('.tkey, .thandle')` is *this* element, which is the
+ * line `pointerdown` runs. Identity and not class, because adjacent keys overlap - the
+ * three in `EASED` sit eight to eleven pixels apart on that bed while a diamond's
+ * transparent reach carries thirteen pixels out from its centre, so a scan that took
+ * any key would select the wrong one and the rows below would sample a segment the
+ * drag never bent.
+ *
+ * The scan starts at the centre and walks outward, so an element with nothing over it
+ * returns exactly the centre it always did. A zero-sized box is refused before the scan
+ * rather than pressed: a hidden key or handle measures 0x0 - `repositionLanes` hides one
+ * whose time is outside the window - and pressing its "centre" presses the viewport
+ * origin, which is the same silent non-gesture the header describes for a key dragged
+ * off the ruler.
+ */
+const lanePressPoint = (owner, which, index) => page.evaluate(`(() => {
+  const lane = [...document.querySelectorAll('#tBeds .tlane')].find((l) => l.dataset.owner === ${src(owner)});
+  const el = lane && lane.querySelectorAll(${src(which)})[${src(index)}];
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  if (!(r.width > 0 && r.height > 0)) return null;
+  const cx = r.left + r.width / 2;
+  const cy = r.top + r.height / 2;
+  // Out to the far corner of the box plus the transparent reach the CSS adds around
+  // both shapes, so the walk covers everywhere a hand could land on this element and
+  // nowhere it could not.
+  const far = Math.ceil(Math.max(r.width, r.height) / 2) + 6;
+  for (let d = 0; d <= far; d++) {
+    for (const [dx, dy] of [[d, 0], [-d, 0], [0, d], [0, -d], [d, d], [-d, -d], [d, -d], [-d, d]]) {
+      const x = cx + dx;
+      const y = cy + dy;
+      const hit = document.elementFromPoint(x, y);
+      if (hit && hit.closest('.tkey, .thandle') === el) return { x, y, cx, cy, offset: Math.hypot(dx, dy) };
+    }
+  }
+  return null;
+})()`);
+
 // Applying one of the shipped looks, which every section below that needs persistence
 // switched on used to do by clicking `#modes button[data-mode="4"]`.
 //
@@ -1000,11 +1116,12 @@ const specOf = (name) => page.evaluate(`globalThis.__kinect.params.spec(${src(na
 // in it. The looks are read out of the documents that ship them for the same reason
 // they were clicked rather than typed: so no look value is invented here.
 const applyLook = (look) => page.evaluate(`globalThis.__kinect.applyPreset(${src(look)})`);
-const shippedLook = (name) => JSON.parse(
+const shippedDoc = (name) => JSON.parse(
   readFileSync(new URL(`../presets-builtin/${name}.json`, import.meta.url), 'utf8'),
-).values;
-const BLACKWALL_LOOK = shippedLook('blackwall');
-const RGB_LOOK = shippedLook('rgb');
+);
+const BLACKWALL_DOC = shippedDoc('blackwall');
+const BLACKWALL_LOOK = BLACKWALL_DOC.values;
+const RGB_LOOK = shippedDoc('rgb').values;
 
 // ============================ 0. the evaluator asks for nothing, probed first
 //
@@ -1828,7 +1945,7 @@ console.log('\n== 4b. a hold freezes source time, and the image with it ==');
   // is not a claim about a renderer that had stopped working. The other side of
   // that - that the program-time terms *do* keep moving - is the second half below.
   await applyLook(BLACKWALL_LOOK);
-  const TIME_FREE = { scan: 0, grain: 0, scanlines: 0, rgbSplit: 0, glitch: 0, noise: 0, trails: 0 };
+  const TIME_FREE = { scan: 0, 'grain.amount': 0, 'raster.amount': 0, 'rgbsplit.amount': 0, 'glitch.amount': 0, 'noise.amount': 0, trails: 0 };
   await page.evaluate(`globalThis.__kinect.params.apply(${src(TIME_FREE)})`);
   await settle();
 
@@ -1889,7 +2006,7 @@ console.log('\n== 4b. a hold freezes source time, and the image with it ==');
     const k = globalThis.__kinect;
     const kf = globalThis.__kf;
     const t = k.timeline.transport();
-    k.params.apply({ scan: 0.35, grain: 0.22, scanlines: 0.35 });
+    k.params.apply({ scan: 0.35, 'grain.amount': 0.22, 'raster.amount': 0.35 });
     await k.timeline.settled();
     for (const [i, p] of ${src(inside)}.entries()) {
       await t.seek(p);
@@ -2493,7 +2610,9 @@ console.log('\n== 5. undo restores the document and never the view ==');
     const read = () => Object.fromEntries(watched.map((n) => [n, k.params.get(n)]));
     k.keyframes.undo.begin();
     const before = read();
-    k.library.applyStoredPreset({ name: 'keyframe-check', rev: 'sha256:0', body: { version: k.library.PROJECT_VERSION, values: LOOK } });
+    // The document's own body, whole, because the door validates the requires list
+    // against the values and a body assembled here would be a second statement of it.
+    k.library.applyStoredPreset({ name: 'keyframe-check', rev: 'sha256:0', body: ${JSON.stringify(BLACKWALL_DOC)} });
     await k.timeline.settled();
     const after = read();
     const pushed = k.keyframes.undo.depth();
@@ -2790,59 +2909,89 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
     `${unkeyed} tracks`);
 
   // (c) an ease handle, dragged with the pointer.
+  //
+  // Both presses go through `lanePressPoint` rather than through the middle of a
+  // rectangle, for the reason written above it: the middle of the key at 4s belonged to
+  // `#tIn`'s grab zone at this viewport until the keys were stacked above it, and the
+  // three keys here still overlap each other by more than a diamond's reach.
+  //
+  // One press and no retry, which is not thrift. A second press on the same key inside
+  // `DOUBLE_CLICK_MS` is the gesture that *deletes* it, so a loop that clicked again
+  // when the selection had not taken would remove the key the rest of this section is
+  // about and then measure whatever was left.
   await setTracks({ bloom: EASED });
   await settle();
-  const handle = await page.evaluate(`(() => {
-    const el = [...document.querySelectorAll('#tBeds .tlane')].find((l) => l.dataset.owner === 'bloom');
-    const key = el.querySelectorAll('.tkey')[1];
-    const r = key.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  })()`);
-  await page.mouse.click(handle.x, handle.y);
+  const keyAt = await lanePressPoint('bloom', '.tkey', 1);
+  if (keyAt) await page.mouse.click(keyAt.x, keyAt.y);
   await settle();
-  const at = await page.evaluate(`(() => {
-    const el = [...document.querySelectorAll('#tBeds .tlane')].find((l) => l.dataset.owner === 'bloom');
-    const h = el.querySelector('.thandle');
-    if (!h) return null;
-    const r = h.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  })()`);
-  check(at !== null, 'selecting a key shows its ease handles', at ? '' : 'no handle drawn');
-  const curveBefore = await page.evaluate(
-    '[5.0, 6.5].map((t) => globalThis.__kinect.keyframes.valueAt("bloom", t))',
-  );
-  const handleBefore = await page.evaluate(
-    'JSON.stringify(globalThis.__kinect.keyframes.project().look.tracks.bloom[1])',
-  );
-  await page.mouse.move(at.x, at.y);
-  await page.mouse.down();
-  await page.mouse.move(at.x - 30, at.y + 8, { steps: 5 });
-  await page.mouse.up();
-  await settle();
-  const handleAfter = await page.evaluate(
-    'JSON.stringify(globalThis.__kinect.keyframes.project().look.tracks.bloom[1])',
-  );
-  const curveAfter = await page.evaluate(
-    '[5.0, 6.5].map((t) => globalThis.__kinect.keyframes.valueAt("bloom", t))',
-  );
-  const moved = worst(curveAfter.map((v, i) => Math.abs(v - curveBefore[i])));
-  console.log(`  handle dragged 30px left and 8px down: `
-    + `${JSON.stringify(JSON.parse(handleBefore).easeOut)} -> `
-    + `${JSON.stringify(JSON.parse(handleAfter).easeOut)}`);
-  // Sampled inside the segment the dragged handle actually shapes. The first handle
-  // drawn belongs to the selected key's *outgoing* side, so it bends the segment
-  // after it and not the one before - sampling the wrong side reads zero change and
-  // reports a working handle as broken.
-  console.log(`  and the curve it shapes, between 4s and 9s, moved ${moved.toFixed(3)}`);
-  check(handleBefore !== handleAfter, 'dragging an ease handle rewrites it');
-  check(moved > 0.01, 'and the curve between the keys follows it, which is what a handle is for',
-    `${moved.toFixed(4)} of change`);
-  const keysHeld = await page.evaluate(
-    'globalThis.__kinect.keyframes.project().look.tracks.bloom.map((k) => k.value)',
-  );
-  check(String(keysHeld) === String(EASED.map((k) => k.value)),
+  const at = keyAt ? await lanePressPoint('bloom', '.thandle', 0) : null;
+  // Counted only when there is nothing to press, so the red row can say which of the
+  // two things went wrong: a lane that drew no handle at all, or one that drew a
+  // handle nobody can reach. The old read took `querySelector('.thandle')` as proof of
+  // the first and measured whatever it found - and a handle that is present but hidden
+  // measures 0x0, so the drag pressed the viewport origin and the row passed.
+  const drawn = keyAt && at === null
+    ? await page.evaluate(`(() => {
+      const lane = [...document.querySelectorAll('#tBeds .tlane')].find((l) => l.dataset.owner === 'bloom');
+      return lane ? lane.querySelectorAll('.thandle').length : 0;
+    })()`)
+    : 0;
+  check(at !== null, 'selecting a key shows its ease handles',
+    !keyAt ? 'the key at 4s is unreachable: no point on it hit-tests back to it'
+      : at ? `pressed ${keyAt.offset.toFixed(1)}px off centre`
+        : drawn === 0 ? 'no handle drawn'
+          : `${drawn} drawn and none of them reachable`);
+  // The three claims below are about a drag, and with no handle to press there was no
+  // drag for them to be about. They are filed red rather than skipped, because a
+  // section that quietly drops rows reports a smaller count for a broken build than for
+  // a working one - and this suite reads names and counts off a run to decide what
+  // happened. Their labels live in one place so the two paths cannot drift apart.
+  const DRAG_ROWS = [
+    'dragging an ease handle rewrites it',
+    'and the curve between the keys follows it, which is what a handle is for',
     'while every key value stays exactly where it was, because an ease bends timing and not values',
-    String(keysHeld));
+  ];
+  if (at === null) {
+    // A missed selection is a row, never a crash. This read `at.x` unguarded, so the
+    // run died one line after the FAIL above with "Cannot read properties of null" -
+    // which takes the page down and leaves every section after this one unrun, and a
+    // crash carrying no verdict is the shape this repo has twice recorded being
+    // written down as a finding.
+    for (const row of DRAG_ROWS) check(false, row, 'did not run: there was no handle to drag');
+  } else {
+    const curveBefore = await page.evaluate(
+      '[5.0, 6.5].map((t) => globalThis.__kinect.keyframes.valueAt("bloom", t))',
+    );
+    const handleBefore = await page.evaluate(
+      'JSON.stringify(globalThis.__kinect.keyframes.project().look.tracks.bloom[1])',
+    );
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down();
+    await page.mouse.move(at.x - 30, at.y + 8, { steps: 5 });
+    await page.mouse.up();
+    await settle();
+    const handleAfter = await page.evaluate(
+      'JSON.stringify(globalThis.__kinect.keyframes.project().look.tracks.bloom[1])',
+    );
+    const curveAfter = await page.evaluate(
+      '[5.0, 6.5].map((t) => globalThis.__kinect.keyframes.valueAt("bloom", t))',
+    );
+    const moved = worst(curveAfter.map((v, i) => Math.abs(v - curveBefore[i])));
+    console.log(`  handle dragged 30px left and 8px down: `
+      + `${JSON.stringify(JSON.parse(handleBefore).easeOut)} -> `
+      + `${JSON.stringify(JSON.parse(handleAfter).easeOut)}`);
+    // Sampled inside the segment the dragged handle actually shapes. The first handle
+    // drawn belongs to the selected key's *outgoing* side, so it bends the segment
+    // after it and not the one before - sampling the wrong side reads zero change and
+    // reports a working handle as broken.
+    console.log(`  and the curve it shapes, between 4s and 9s, moved ${moved.toFixed(3)}`);
+    check(handleBefore !== handleAfter, DRAG_ROWS[0]);
+    check(moved > 0.01, DRAG_ROWS[1], `${moved.toFixed(4)} of change`);
+    const keysHeld = await page.evaluate(
+      'globalThis.__kinect.keyframes.project().look.tracks.bloom.map((k) => k.value)',
+    );
+    check(String(keysHeld) === String(EASED.map((k) => k.value)), DRAG_ROWS[2], String(keysHeld));
+  }
   await setTracks({});
 }
 

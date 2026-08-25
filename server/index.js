@@ -16,6 +16,15 @@ import {
   downloadsInFlight, hashFile, markWriteCount, readMarkLog, readMarks, reconcile, remaining,
   removeTake, renameTake, resolveMarks, revealSupport, revealTake, scanTakes,
 } from './library.js';
+import { EffectStore } from './effect-store.js';
+// The install door and the two spines it assembles a candidate against. Source text and
+// pure functions over it - nothing here touches a GPU, which is what lets the door run in
+// this process at all: it answers whether the page *would* boot with this package
+// installed, and the only way to ask that honestly is with the same assembler the page
+// runs.
+import { doorRefusal, forkRefusal } from './effect-door.js';
+import { cloudSpine } from '../web/cloud-shader.js';
+import { gradeSpine } from '../web/grade-shader.js';
 import { Recorder } from './recorder.js';
 import { JobStore } from './jobs.js';
 import { Webcam } from './webcam.js';
@@ -215,6 +224,27 @@ const PRESETS = new DocumentStore(
   'preset',
   PROJECT_VERSION,
   resolve(flag('--builtin-presets', join(ROOT, 'presets-builtin'))),
+);
+// The effect packages, on the preset store's two-root rule: shipped beside user,
+// the user's copy shadowing by id. A package is a directory of files rather than one
+// JSON body - a manifest beside the shader chunks the client assembles from - which
+// is why this is its own store class. The flags exist for the reason the preset
+// flags do: a check points the search path somewhere it controls.
+// The two spines every program on the page is assembled from, named once because two
+// doors read them: the install door below, and the store's own boot gate, which re-asks
+// that door of every package already on disk. Two spellings of this pair would be the two
+// gates disagreeing about which joints exist, which is exactly the disagreement the boot
+// gate is there to catch.
+const SPINES = { cloud: cloudSpine, grade: gradeSpine };
+// Constructed here and *settled* down in `listen`'s callback, which is one arrangement
+// rather than two steps: building the store reads, and `claimUserRoot` writes. Two servers
+// pointed at one effects root is two servers on one port, so the process that loses the bind
+// exits before it has renamed anything of the winner's - which is what it used to do, from
+// here, on its way to `EADDRINUSE`. See `EffectStore.claimUserRoot`.
+const EFFECTS = new EffectStore(
+  resolve(flag('--effects', join(ROOT, 'effects'))),
+  resolve(flag('--builtin-effects', join(ROOT, 'effects-builtin'))),
+  SPINES,
 );
 // Version 2 dropped `outputFps`. The output rate is a property of the edit rather than of
 // one output of it - `programTime = k / outputFps` makes it the edit's own coordinate, and
@@ -1076,6 +1106,53 @@ async function readDocument(res, store, name) {
   }
 }
 
+/**
+ * An effect package installed or removed, which is the one write in this program that
+ * changes what the *page* is rather than what a page is looking at.
+ *
+ * **The refusal comes before the filesystem, always.** `doorRefusal` is a pure function of
+ * the envelope and the packages that would sit beside it, so a package this build cannot
+ * assemble, cannot bind or cannot compile is answered with the sentence saying which of
+ * those it is and never reaches a directory. That ordering is the whole design: a package
+ * that lands and then breaks the next boot is a machine whose editor no longer opens, with
+ * the evidence in a browser console nobody has open.
+ *
+ * The envelope is `{ manifest, chunks }` and the id comes off the path, which is why the
+ * door holds the two to each other - a manifest declaring a different id is one of them
+ * being wrong and there is no way to know which.
+ */
+async function serveEffectWrite(req, res, [id]) {
+  if (req.method === 'DELETE') {
+    const answer = EFFECTS.remove(id);
+    if (answer.error) return sendJson(res, { error: answer.error }, answer.status);
+    return sendJson(res, answer);
+  }
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (err) {
+    return sendJson(res, { error: err.message }, 400);
+  }
+  const candidate = { id, manifest: body.manifest, chunks: body.chunks ?? {} };
+  // Held against the shipped package rather than against the whole store, because this is
+  // the one rule that is about forking specifically - see `forkRefusal`.
+  const shadowed = candidate.manifest && typeof candidate.manifest === 'object' ? EFFECTS.builtin(id) : null;
+  const refusal = doorRefusal(candidate, {
+    beside: EFFECTS.loaded(id),
+    spines: SPINES,
+  }) ?? (shadowed ? forkRefusal(candidate, shadowed) : null);
+  if (refusal) return sendJson(res, { error: refusal }, 409);
+  try {
+    return sendJson(res, EFFECTS.install(id, candidate.manifest, candidate.chunks));
+  } catch (err) {
+    // The door has already passed, so anything thrown here is the filesystem rather than
+    // the package - a full disk, a permission, a root that vanished. Reported as a 500
+    // with its own message rather than as a refusal, because the caller's package was
+    // fine and retrying it is the right next move.
+    return sendJson(res, { error: `effect ${id} could not be written: ${err.message}` }, 500);
+  }
+}
+
 async function writeDocument(req, res, store, name) {
   if (req.method === 'DELETE') {
     try {
@@ -1645,6 +1722,41 @@ const ROUTES = [
   // ---- documents
   { path: '/projects', pattern: /^\/projects\/?$/, read: (req, res) => listDocuments(res, PROJECTS) },
   { path: '/presets', pattern: /^\/presets\/?$/, read: (req, res) => listDocuments(res, PRESETS) },
+  // The effect packages: the list a client assembles from, one package's manifest and
+  // file index, one file's raw bytes, and the two writes that install and remove one.
+  // The chunk route serves text/plain because what the tools anchor and the client
+  // compiles is the file's own bytes - a content type that invited transformation
+  // would be the wrong promise.
+  //
+  // **The write is registered on the same entry as the read**, which is what puts it
+  // behind `requireMutation` by existing rather than by anybody remembering: an install
+  // changes what every page of this build compiles, which is the largest consequence any
+  // route here has. `PUT` writes into the user root and `DELETE` removes from it, so the
+  // shipped packages are unreachable from the network in both directions.
+  // `generation` beside the list, because the list alone cannot answer the question a client
+  // reading a set across several dozen requests has to ask. See `EffectStore`'s constructor
+  // for what a revision is silent about and why a counter is what says it.
+  { path: '/effects', pattern: /^\/effects\/?$/, read: (req, res) => sendJson(res, { effects: EFFECTS.list(), generation: EFFECTS.generation }) },
+  {
+    path: '/effects/:id',
+    pattern: /^\/effects\/([^/]+)$/,
+    read: (req, res, args) => {
+      const pkg = EFFECTS.read(args[0]);
+      if (!pkg) return sendJson(res, { error: `no effect ${args[0]} here - GET /effects lists what is installed` }, 404);
+      return sendJson(res, pkg);
+    },
+    write: { methods: ['PUT', 'DELETE'], run: serveEffectWrite },
+  },
+  {
+    path: '/effects/:id/file/:name',
+    pattern: /^\/effects\/([^/]+)\/file\/([^/]+)$/,
+    read: (req, res, args) => {
+      const bytes = EFFECTS.file(args[0], args[1]);
+      if (!bytes) return sendJson(res, { error: `effect ${args[0]} has no file ${args[1]} - GET /effects/${args[0]} lists its files` }, 404);
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': bytes.length });
+      return res.end(bytes);
+    },
+  },
   {
     path: '/projects/:name',
     pattern: /^\/projects\/([^/]+)$/,
@@ -2928,6 +3040,13 @@ try {
 }
 
 httpServer.listen(PORT, HOST, () => {
+  // **First thing inside the bind and before the line announcing it.** The recovery and the
+  // boot gate rename directories under the effects root, and the port is what says this
+  // process is the one entitled to: a second server on the same root loses the bind, never
+  // reaches here, and quarantines nothing of the live one's. Ahead of the log line so a
+  // reader - and `effect-check`, which asserts on this stream - meets the gate's sentences
+  // before the address, rather than in whichever order two writes happen to land in.
+  EFFECTS.claimUserRoot();
   console.log(`[server] viewer on http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   if (HOST !== LOOPBACK) {
     console.log(`[server] reachable from the network on ${HOST} - anyone who can route here can drive the recorder`);

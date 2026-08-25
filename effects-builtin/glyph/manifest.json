@@ -1,0 +1,135 @@
+{
+  "format": 1,
+  "id": "glyph",
+  "version": "1.0.0",
+  "title": "Glyph field",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "glyph",
+      "panel": {
+        "group": "glyph",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "glyph"
+      },
+      "role": "master"
+    },
+    "tone": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "tone key",
+      "panel": {
+        "group": "glyph",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "glyphTone"
+      },
+      "under": "amount"
+    },
+    "hash": {
+      "def": 1,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "hash key",
+      "panel": {
+        "group": "glyph",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "glyphHash"
+      },
+      "under": "amount"
+    },
+    "rain": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "rain key",
+      "panel": {
+        "group": "glyph",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "glyphRain"
+      },
+      "under": "amount"
+    }
+  },
+  "panelGroups": [
+    {
+      "key": "glyph",
+      "label": "Glyph",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "points",
+      "order": 100
+    }
+  ],
+  "varyings": [
+    {
+      "name": "vCellSeed",
+      "type": "float",
+      "init": "0.0",
+      "order": 100
+    }
+  ],
+  "consumes": [
+    {
+      "service": "cell",
+      "when": "glyph > 0.0",
+      "gateOrder": 100
+    }
+  ],
+  "chunks": [
+    {
+      "stage": "v.decl",
+      "order": 100,
+      "file": "decl.vert.glsl"
+    },
+    {
+      "stage": "cell",
+      "file": "cell.vert.glsl"
+    },
+    {
+      "slot": "v.pointSize",
+      "file": "size.vert.glsl"
+    },
+    {
+      "stage": "f.decl",
+      "order": 100,
+      "file": "decl.frag.glsl"
+    },
+    {
+      "stage": "f.helpers",
+      "order": 100,
+      "file": "helpers.frag.glsl"
+    },
+    {
+      "slot": "f.mark",
+      "file": "mark.frag.glsl"
+    },
+    {
+      "slot": "f.glyph",
+      "file": "index.frag.glsl"
+    }
+  ]
+}

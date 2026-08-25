@@ -1,5 +1,17 @@
 import * as THREE from 'three';
-import { DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, versionRefusal, captureFormatRefusal } from './format.js';
+// `effectOf` and `snapScalar` were declared in this file and are imported now, and both
+// moves are worth the sentence. `effectOf` was written a thousand lines above the registry
+// on purpose, because the assertion under `PARAMS` asks it which half of the registry each
+// name came from and a `const` declared seven thousand lines further down is read in its own
+// dead zone - the fault this file has shipped twice. An import binding is initialised before
+// this module's body runs at all, so that hazard is gone rather than relocated. `snapScalar`
+// left because the install door has to ask the same question of a manifest it has never
+// seen, and two spellings of where a value lands is the drift `web/format.js` exists to
+// refuse.
+import {
+  DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, effectIdsIn, effectOf, snapScalar,
+  versionRefusal, captureFormatRefusal, requiresEntryRefusal, requiresListRefusal,
+} from './format.js';
 import { pollRecordState } from './record-poll.js';
 // The renderer and everything built directly on it. Imported before any other module of
 // this page because its body appends the canvas and constructs the cameras, and the
@@ -40,12 +52,20 @@ import {
 } from './plan-geometry.js';
 import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
+// The forty-nine effect parameters as data: which uniform each one writes, on which of the
+// two tables, and what conversion it takes on the way. It belongs to the block above rather
+// than to the render core below because it is the purest thing in that block - it imports
+// nothing at all, which is what lets a check pull an older revision of it out of `git show`
+// and evaluate that text under bare node with no page standing around it. What turns a row
+// of it into the closure the registry stores is `effectApply`, beside `PARAMS`.
+import { EFFECT_BIND_TRANSFORMS, tableFromPackages, withEffectGroups } from './effect-manifests.js';
 // One number out of the halo, and nothing else. `bloom-pass.js` holds the pass and
 // `post-chain.js` is what constructs it; what this file still needs is the reference the
 // chain is frozen at, because `resize` sizes that chain and `resize` lives here. The two
-// GLSL programs went the same way - `point-cloud.js` imports them from `cloud-shader.js`
-// directly, and both modules stay reachable through the ones that use them rather than
-// through a name carried here.
+// GLSL programs went the same way - `point-cloud.js` reaches the spine in
+// `cloud-shader.js` and the assembler in `shader-assembly.js` directly, and all three
+// modules stay reachable through the ones that use them rather than through a name
+// carried here.
 //
 // **A name imported and not used is worse than no import**, which is why this line is one
 // binding rather than the three it was. It reads as a dependency to anyone tracing the
@@ -75,7 +95,7 @@ import {
 // banner below, so the moment a composer takes a pair of full-size render targets off the
 // GPU is a line in this file rather than a position in this list.
 import {
-  composer, renderPass, afterimage, bloom, grade, buildPostChain,
+  composer, renderPass, afterimage, bloom, grade, buildPostChain, setGradeProgram,
 } from './post-chain.js';
 // What a point is made of and how it is addressed: the geometry, the uniform table both
 // shaders are driven through, the material and the cloud itself. Last of the render core
@@ -90,9 +110,307 @@ import {
 // is not state leaking across a boundary - it is the only way three.js can be told
 // anything, and a setter per term would be the registry below spelled a second time.
 import {
-  geometry, uniforms, material, cloud, buildPointCloud, setAdditive,
+  geometry, uniforms, material, cloud, buildPointCloud, setAdditive, setCloudProgram,
   CLIP_NEAR_DEFAULT, CLIP_FAR_DEFAULT, CROP_LIMIT, cropReach, croppedOut,
 } from './point-cloud.js';
+// The text those two builders compile, and the concatenator that makes it. Source text and
+// a pure function over it - nothing here touches a GPU, which is why the same three imports
+// serve the gate under bare node.
+import { cloudSpine } from './cloud-shader.js';
+import { gradeSpine } from './grade-shader.js';
+import { assembleShaders } from './shader-assembly.js';
+
+// ------------------------------------------------ the installed effects, fetched
+//
+// The registry assembles from the effect packages the server holds, and so do the cloud's
+// two shader programs, so the packages come first and the module waits for them: a
+// top-level await, because everything below - the material the point cloud is compiled
+// into, the panel spine, the parameter table, the boot-time reset - is built from what
+// arrives here, and a page that raced its own registry would be the panel and the
+// parameters disagreeing about what exists. A fetch rather than an import, deliberately:
+// `module-check` walks the static graph and data crossing it as modules would join that
+// graph as code, when what crosses here is JSON a server answered. A package that cannot
+// be fetched fails the boot loudly - `__kinect` never publishes and every tool reports
+// DID NOT RUN - which is the honest shape until the missing-effect surface exists to say
+// something better.
+//
+// **It sits at the top of the module rather than beside the registry it feeds, and what
+// moved it up here is the shaders.** `buildPointCloud` compiles the material at its banner
+// below, which is seven hundred lines above where this block used to be - so the fetch had
+// to come up rather than the cloud go down: the cloud is built after the textures and the
+// surface memory because it composes cells those two own, and that order is a property of
+// the GPU rather than of the packages. Everything after this line stays synchronous, which
+// is the half worth keeping - one await site, at the top of the module, and no second one
+// anybody has to reason about.
+//
+// The chunk files arrive with their manifest rather than in a second pass, because
+// `assembleShaders` refuses a package whose text is missing: fetching the two apart would
+// open a window in which a package exists and cannot be assembled, and the boot this await
+// exists to close is the one place that window could be entered.
+/**
+ * What the store looked like at one moment, as one comparable string.
+ *
+ * The package rev is a hash over the sorted `name hash` lines of the package's own files,
+ * so an id and its rev together say everything a client needs to know about whether it is
+ * holding the current package - and a change of any byte of any file moves it. Joined into
+ * one string because the question is "has anything moved", and comparing one string is the
+ * cheapest honest way to ask it.
+ *
+ * **Declared at the top of the module rather than beside the poll that reads it**, which is
+ * the third time this file has had to write that sentence and the second time it was found
+ * by a boot rather than by a reading. Both the poll and the coherent read below want it,
+ * and the coherent read runs inside the top-level await two dozen lines down - so a `const`
+ * five hundred lines further on is in its temporal dead zone at that moment: `Cannot access
+ * 'revSignature' before initialization`, no `__kinect` published at all, and every tool in
+ * the suite reporting DID NOT RUN. Measured exactly once, immediately, which is the only
+ * reason it is a paragraph rather than a commit.
+ */
+const revSignature = (effects) => effects.map((e) => `${e.id} ${e.rev}`).join('\n');
+
+/**
+ * A read that met the store mid-change, marked so the read above it can tell that from a
+ * fetch that simply failed.
+ *
+ * The difference decides what happens next and nothing else in the error can carry it: a
+ * store being written to while it is read is answered by asking again, where a 404 or a body
+ * this build cannot parse is answered by leaving the page on the set it has. A property
+ * rather than a subclass because the only reader is one `if`, and **declared up here beside
+ * `revSignature` for the reason that note carries** - the coherent read runs inside the
+ * module's top-level await, and a declaration below it is in its temporal dead zone at that
+ * moment, which is a page that publishes no `__kinect` at all.
+ */
+const tornRead = (why) => Object.assign(new Error(why), { tornRead: true });
+
+/**
+ * A rebuild that failed because this build *refuses* the set, marked so the poll can tell
+ * that from a rebuild that failed because it could not read one.
+ *
+ * **The poll remembers the signature it failed on and stops asking about it, and it used
+ * to remember it for every failure there is.** That block is right for a refusal: the set
+ * on the server is one this build cannot assemble, cannot bind or cannot carry the open
+ * document onto, so the next tick would refetch every package, reassemble both programs,
+ * dispose the material the page is drawing with, reset the accumulators and arrive at the
+ * identical sentence, ten times a minute for as long as the store holds it. It is wrong for
+ * a read: a server restarting between the listing and one package fetch, a dropped
+ * connection, a proxy hiccup - each of those failed a perfectly good revision *once*, and
+ * the block then stood over that revision until something else moved the store. On a
+ * machine where nobody installs anything twice a day, that is a page drawing the build
+ * before last until somebody reloads it, with one console line six seconds after a network
+ * blip to say why.
+ *
+ * So the two are separated where the difference is known, which is at the throw. A read
+ * error carries no mark and the next tick tries again; a refusal carries this one and is
+ * asked once.
+ *
+ * **The line between them is whether asking again could answer differently, and it does not
+ * run along "the fetch worked".** A read is where both kinds live. A dropped socket, a 500,
+ * a server restarting mid-set: the revision on the other side may be perfectly good and only
+ * another attempt can say, so those stay unmarked. A 200 whose body is not a list of
+ * packages, a manifest that is not an object, a `chunks` that arrived as a string - those are
+ * what this store is *serving*, and it serves the same thing on the next tick and the tick
+ * after that. Refetching every package six seconds apart to be told the same thing is what
+ * the block exists to stop, whether the sentence came from the assembler or from a shape rule
+ * one request earlier. So the mark is minted at those throw sites too, and every frame it
+ * passes through carries it rather than deciding it again.
+ *
+ * **A property and not a subclass, and not a substring of the message**, for
+ * the reason `tornRead` above is one and one more besides: the sentences these errors carry
+ * are written for a person to read on a chip, so a classification that matched words in
+ * them would be re-decided by every edit to the prose. Declared up here beside `tornRead`
+ * for the temporal-dead-zone reason that note carries.
+ */
+const effectRefusal = (why) => Object.assign(new Error(why), { effectRefusal: true });
+
+/**
+ * `GET /effects`, with the shape of the answer held to what every reader of it assumes.
+ *
+ * **A 200 carrying a body this build cannot read used to escape every guard there was.**
+ * The poll wrapped its fetch in a `try` and then computed the signature outside it, so a
+ * body with no `effects` array - a proxy's error page, a half-written response, a server
+ * from another program on the port - threw out of the interval callback, rejected its
+ * promise with nothing awaiting it, and did so again every six seconds for the life of the
+ * page. What the reader wants is a list of ids and revs, so that is what is checked, once,
+ * in the one place both callers go through: a body that is not that is a named refusal the
+ * caller decides about, and the set the page already holds is what it goes on drawing.
+ */
+async function listEffects() {
+  const res = await fetch('/effects');
+  if (!res.ok) throw new Error(`GET /effects answered ${res.status} - the registry cannot assemble without its packages`);
+  const body = await res.json();
+  if (!body || !Array.isArray(body.effects) || !Number.isFinite(body.generation)) {
+    // **Marked, because the answer is what is *being served* rather than a fetch that did
+    // not work.** A body of the wrong shape comes back the same way on the next tick and
+    // on every tick after it, so an unmarked throw here is a full refetch every six seconds
+    // for the life of the page against a store that has already given its answer. See
+    // `effectRefusal`, and see `!res.ok` above for the direction that is genuinely worth
+    // asking again.
+    throw effectRefusal('GET /effects answered a body that is not a list of installed packages and a generation - '
+      + 'this page reads both of those there, and something else at that address is not a store this build can converge on');
+  }
+  for (const entry of body.effects) {
+    if (!entry || typeof entry.id !== 'string' || typeof entry.rev !== 'string') {
+      throw effectRefusal(`GET /effects listed the entry ${JSON.stringify(entry)} - every entry is an id and the `
+        + 'revision of the package behind it, and the comparison that decides whether this page is up to date is over exactly those two');
+    }
+  }
+  // Both, because they answer different questions and only one of them is about this page
+  // being up to date. `effects` is what the page is assembled from and what the signature
+  // compares; `generation` is how many times the store has changed, which is what the read
+  // below needs and what a revision cannot say - see `EffectStore`'s constructor.
+  return { effects: body.effects, generation: body.generation };
+}
+
+// A function rather than the expression it was, because there are two callers now and
+// they must be one: boot reads the store here, and a rebuild after an install reads it
+// again. A second fetch written at the install site would be the copy that stops
+// following a chunk into a second file, or stops de-duplicating, or stops refusing a
+// package that half-arrived - and the failure it produced would be a program with a
+// block missing, on a page that had been fine a second earlier.
+async function readEffectPackages(effects) {
+  return Promise.all(effects.map(async ({ id, rev }) => {
+    const res = await fetch(`/effects/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`GET /effects/${id} answered ${res.status} - the registry cannot assemble without its packages`);
+    const pkg = await res.json();
+    // **The package that came back has to be the one the list named**, which is the half of a
+    // coherent read the two listings either side of it cannot cover. A revision installed and
+    // removed again between the opening list and this request leaves both listings agreeing
+    // and hands this page the *other* package's manifest and file index - a set the closing
+    // comparison then blesses, because by the time it runs the store is back where it was.
+    // The rev is a hash over the package's whole file index, so holding it to the one the
+    // list declared pins the manifest and the names it carries to a single revision.
+    if (pkg?.rev !== rev) {
+      throw tornRead(`effect ${id} was listed at revision ${rev} and answered for at ${pkg?.rev} - `
+        + 'the store changed between the list this read opened with and the package it then asked for');
+    }
+    // **The manifest held to the shape the three lines under it walk, and marked as a
+    // refusal when it is not that shape.** A body with no manifest object reached
+    // `pkg.manifest.chunks` and threw a `TypeError`, and a `chunks` that arrived as a
+    // string or an object threw on `.map` - both of them out of a function the poll reads
+    // the *class* of the failure off, and both unmarked, so a store serving a malformed
+    // package was refetched whole every six seconds forever. It is served content and it is
+    // deterministic, which is the definition the mark carries: see `effectRefusal`. A file
+    // name that is not a string belongs here too, because the next line builds a URL out of
+    // it and `/effects/rain/file/undefined` is a 404 that reads as a transport failure.
+    if (!pkg.manifest || typeof pkg.manifest !== 'object' || Array.isArray(pkg.manifest)) {
+      throw effectRefusal(`GET /effects/${id} answered with no manifest object - a package is a manifest and `
+        + 'its chunks, and this page assembles both shader programs out of what the manifest names');
+    }
+    if (pkg.manifest.chunks !== undefined && !Array.isArray(pkg.manifest.chunks)) {
+      throw effectRefusal(`effect ${id} was served with its chunks as ${JSON.stringify(pkg.manifest.chunks)} - `
+        + 'a manifest\'s chunks are the list this page walks to fetch the text it splices, and a package '
+        + 'that has none of them leaves the key out rather than putting something else there');
+    }
+    for (const c of pkg.manifest.chunks ?? []) {
+      if (!c || typeof c.file !== 'string') {
+        throw effectRefusal(`effect ${id} declares the chunk entry ${JSON.stringify(c)}, which names no file - `
+          + 'the file name is what the next request is built out of, so an entry without one asks this page for a URL nobody wrote');
+      }
+    }
+    // Named once and fetched once. A manifest may point two joints at one file, and a
+    // second request for the same bytes would be a second answer to a question with one.
+    const names = [...new Set((pkg.manifest.chunks ?? []).map((c) => c.file))];
+    const texts = await Promise.all(names.map(async (name) => {
+      const chunk = await fetch(`/effects/${encodeURIComponent(id)}/file/${encodeURIComponent(name)}`);
+      if (!chunk.ok) throw new Error(`GET /effects/${id}/file/${name} answered ${chunk.status} - the cloud's shaders cannot be assembled without it`);
+      return chunk.text();
+    }));
+    pkg.chunks = Object.fromEntries(names.map((name, i) => [name, texts[i]]));
+    return pkg;
+  }));
+}
+
+/**
+ * Every installed package, read as one moment rather than as a few dozen requests.
+ *
+ * **A package set is one answer and this is several dozen questions**, which is a
+ * distinction with nothing between it and a wrong program. The list is fetched, then each
+ * manifest, then each chunk - and an install landing anywhere in that sequence is served
+ * partly from before it and partly from after: the glyph field's declaration chunk from
+ * the old package and its body from the new one, spliced into one program that compiles
+ * and draws something nobody wrote. Nothing downstream can see it, because every byte
+ * arrived with a 200 and the assembled text is perfectly well-formed.
+ *
+ * So the list is asked again at the end and the store has to be where the read started
+ * from. One retry, because the shape this closes is a single install racing a single read
+ * and a second attempt clears it; two failures in a row is a store being written to faster
+ * than it can be read, and the honest answer there is to say so and leave the page holding
+ * the set it has rather than to spin.
+ *
+ * **The two listings are compared on their generation as well as on their contents, and the
+ * contents alone were not enough.** A revision is a hash of bytes, so a change that is undone
+ * hashes back to what it was: install a fork and delete it again - which restores the shipped
+ * package rather than removing anything - and the opening list, the closing list and every
+ * revision in both of them are identical across a window in which the store answered as
+ * something else. A read straddling that pair passes a contents comparison by construction,
+ * adopts a set assembled out of two revisions, and records the signature it opened with, so
+ * no later poll ever finds anything to disagree with. The generation is the store's own count
+ * of how many times it has changed, which is the axis that pair moves along and the contents
+ * do not.
+ *
+ * **What is deliberately not here is the page hashing the bytes it fetched.** Verifying each
+ * chunk against the revision its file index declares is the tighter rule and this build
+ * cannot have it: `crypto.subtle` is undefined outside a secure context, `--host 0.0.0.0`
+ * with a browser at an address literal is this program's documented two-machine shape, and
+ * this function runs inside the module's top-level await - so a page reached over the network
+ * the design is built around would fail to evaluate at all, publish no `__kinect`, and take
+ * every proof tool in the suite with it. Measured rather than assumed, on this build:
+ * `http://127.0.0.1:8506/record` reads `isSecureContext true` with `crypto.subtle` an object,
+ * and `http://10.31.158.148:8506/record` reads `false` and `undefined`.
+ */
+async function fetchEffectPackages() {
+  // What the last attempt disagreed about, so the sentence below names the package and the
+  // revisions rather than only the class of failure. A run that succeeds never reads it.
+  let disagreement = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const opened = await listEffects();
+    let packages;
+    try {
+      packages = await readEffectPackages(opened.effects);
+    } catch (err) {
+      // A package that answered for a revision the list did not name is this same failure one
+      // request in, so it is a retry rather than a throw - and anything else is a fetch that
+      // did not work, which no second attempt improves.
+      if (!err.tornRead) throw err;
+      disagreement = err.message;
+      continue;
+    }
+    const closed = await listEffects();
+    if (closed.generation === opened.generation && revSignature(closed.effects) === revSignature(opened.effects)) return packages;
+    disagreement = `the store was at generation ${opened.generation} when this read opened and ${closed.generation} when it closed`;
+  }
+  throw new Error('the installed effects moved while this page was reading them, twice - a set read across '
+    + 'an install is one package from before it beside another from after, which assembles into a program '
+    + `nobody wrote, so this page keeps the set it has and asks again (${disagreement})`);
+}
+
+// **`let` and not `const`, which is the whole of what an install changes about this
+// module.** What is installed is no longer decided once at boot: `PUT /effects/:id` and
+// `DELETE /effects/:id` change the answer while the page is up, and everything assembled
+// out of these two bindings - both shader programs, the parameter table, the panel - is
+// rebuilt from them by `adoptEffectPackages` below. Nothing outside that function
+// reassigns either, which is what keeps "the packages" one answer rather than a set of
+// consumers each holding whatever it was handed.
+let effectPackages = await fetchEffectPackages();
+
+// Every program this page compiles, in one call, before either builder runs.
+//
+// **One call and not one per spine**, which is the property the refusals rest on. A chunk
+// names the joint it joins and never the program it belongs to, so `assembleShaders` has to
+// see every spine at once to know that a name it does not recognise is nobody's - and a
+// build that assembled the cloud on its own would meet the grade pass's chunks with only two
+// answers available, throwing on text that is perfectly well placed elsewhere or skipping
+// it. The second is what a program-name tag on each chunk would have bought: a tag nobody
+// spelled right lands its text in no program at all, the page boots, the shader compiles,
+// and the effect is simply gone.
+//
+// It sits beside the fetch that feeds it rather than inside either builder, because the two
+// builders run seven hundred lines apart and the packages are one answer to one question.
+//
+// The spine map is named rather than written out at the call, because a rebuild assembles
+// against exactly the same map and two literals would be the way a build ends up
+// assembling two different sets of spines depending on when it was asked.
+const SPINES = { cloud: cloudSpine, grade: gradeSpine };
+let shaderPrograms = assembleShaders(SPINES, effectPackages);
 
 // Which of the two surfaces this page is, decided by the path. One document still
 // serves both, because there is one renderer and one image pipeline and splitting
@@ -192,7 +510,45 @@ buildSurfaceMemory();
 // program's boot rather than about the cloud - and the cells from the textures above,
 // handed over rather than reached for, so the one place the two are wired together is this
 // line.
-buildPointCloud(sourceCells);
+//
+// The assembled program goes the same way and for the same reason. The material is compiled
+// out of the spine and whatever effects are installed, so the cloud needs the text - and
+// assembling it above rather than having `point-cloud.js` fetch its own packages keeps the
+// module free of the network, which is what lets the same assembler run under bare node in
+// the gate. It also leaves one assembly site for the two programs, which is what the grade
+// pass's spine needed: a chunk is placed by the joint it names, and only a call that sees
+// every spine can tell a joint nobody holds from one another spine does.
+buildPointCloud(sourceCells, shaderPrograms.cloud);
+
+// And the one cell in that table the hardware fills rather than the registry or the
+// transport. `ALIASED_POINT_SIZE_RANGE` is what this GPU will actually rasterise a point
+// sprite at - [1, 511] on the machine this was written on - and the glyph field's grown
+// sprite is clamped to its top rather than to the literal 64 the old path keeps, because a
+// cell-sized sprite reaches 64 pixels at a metre and that is where a person stands.
+//
+// **Written here rather than in `resize()`, which is where the other hardware-shaped
+// uniform is written.** The range is a property of the context and does not change when
+// the drawing buffer does, so a write per resize would be a second answer to a question
+// with one, and it would sit on the line `export-check` anchors its `scale-by-width`
+// control on. Read through the raw context because three's `capabilities` does not carry
+// it, the way `web/surface-memory.js` reaches for its float-buffer extension.
+//
+// The fallback is the table's own default and not a second literal: a context that answers
+// nothing here leaves the 64 that has always been the clamp, which is the value this
+// replaces rather than a guess about what a silent driver meant.
+{
+  const gl = renderer.getContext();
+  const pointRange = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE);
+  // **One rather than zero, because the clamp underneath this has a floor of its own.** The
+  // shader asks for `clamp(size, 1.0, pointCeiling)`, and a clamp whose ceiling is below its
+  // floor is undefined in GLSL rather than an error - so a context answering a positive
+  // maximum under one pixel would not be caught by a test against zero and would hand every
+  // sprite in the cloud to whatever the driver felt like returning. A maximum of exactly 1
+  // is legal and means a renderer that can only draw single-pixel points, which this build
+  // can honour; anything under it is a range this shader cannot express, and the 64 the
+  // fallback keeps is the value that has always been the clamp.
+  if (pointRange && pointRange[1] >= 1) uniforms.pointCeiling.value = pointRange[1];
+}
 
 // ------------------------------------------------------------ levelling the world
 
@@ -253,12 +609,14 @@ function applyWorldTilt() {
 // ---------------------------------------------------------------- post chain
 //
 // Moved to `post-chain.js`. The composer, the trails, the bloom instance and the grade
-// shader are there, and so is the order the image is put through them in, which is that
-// file's whole opinion. What is here is the moment the chain is built, which is a decision
-// about this program's boot rather than about the passes: the render pass is handed the
-// scene it draws, so it is built after the cloud above, and it is built by a call rather
-// than by an import, so the moment reads in the order it happens in.
-buildPostChain();
+// pass's uniform table are there, and so is the order the image is put through them in,
+// which is that file's whole opinion; the grade's own GLSL is in `grade-shader.js` beside
+// the cloud's, because a spine has to evaluate under bare node and `post-chain.js` imports
+// three.js. What is here is the moment the chain is built, which is a decision about this
+// program's boot rather than about the passes: the render pass is handed the scene it draws,
+// so it is built after the cloud above, and it is built by a call rather than by an import,
+// so the moment reads in the order it happens in.
+buildPostChain(shaderPrograms.grade);
 
 let renderScale = 1;
 
@@ -804,12 +1162,41 @@ function updateDrawRange() {
   geometry.setDrawRange(0, shedding ? POINTS * 2 : POINTS);
 }
 
+/**
+ * The grade terms whose being up is what makes the pass worth running, read off the
+ * packages rather than listed here.
+ *
+ * A binding declares `gates` when a non-zero value has to switch the pass on, and five of
+ * the shipped effects do. That used to be five lines of `grade.uniforms.X.value > 0` in the
+ * function below, which was true of the shipped set and true by transcription: a package
+ * installed next year would have written its term into the pass and left the pass shut, so
+ * its slider would have moved a uniform nothing ran and the effect would have been silently
+ * absent - the shape this repo keeps case files about. Derived, a package is counted by
+ * existing.
+ *
+ * **What is not derived is `crush`.** It shares the pass and deliberately does not gate it,
+ * because it defaults to 0.018 rather than to 0 and so is up in every document there has
+ * ever been - gating it would run a full-screen read and write for the four shipped presets
+ * that ask for no grade at all. It is a core parameter with no package, so it is outside
+ * this list by construction rather than by being left out of it, and `registry-check`'s gate
+ * matrix asserts that negative rather than leaving it as an omission.
+ *
+ * **Derived on every adoption and not once at boot**, which is the second half of the same
+ * argument. Computed at module scope it was a function of the packages that happened to be
+ * installed while this file evaluated, so a grade effect installed afterwards wrote its term
+ * into a pass that stayed shut - its slider moved, its uniform took the value, and the
+ * effect was silently absent, which is the exact failure deriving the list was meant to
+ * end. The mirror case is worse in the other direction: uninstall the last gating effect
+ * and the pass stayed open forever on a term nothing could reach any more. It is the same
+ * walk over the same packages, one line inside `adoptEffectPackages`.
+ */
+let GRADE_GATES;
+const gradeGatesOf = (packages) => packages.flatMap((pkg) => Object.values(pkg.manifest.params ?? {})
+  .filter((p) => p.bind?.on === 'grade' && p.bind.gates)
+  .map((p) => p.bind.uniform));
+
 function gradeNeeded() {
-  return grade.uniforms.rgbSplit.value > 0
-    || grade.uniforms.scanlines.value > 0
-    || grade.uniforms.grain.value > 0
-    || grade.uniforms.vignette.value > 0
-    || grade.uniforms.streak.value > 0;
+  return GRADE_GATES.some((name) => grade.uniforms[name].value > 0);
 }
 
 // ------------------------------------------------- fitting the box to the footage
@@ -902,7 +1289,52 @@ async function fitCropToTake(id, near, far) {
 // clicks, and Playwright's click waits for visibility - so a collapsible `framing` would
 // turn that row into a thirty-second timeout, which is a crash carrying no failed
 // assertion rather than a finding.
+
+// Where each effect parameter lands in the registry's declaration order. This is
+// the client's layout fact, not the packages': the order is load-bearing (the
+// scramble table couples to it, the panel's row order inside a group falls out of
+// it), it interleaves below effect granularity - `noise.region` sits in the region
+// run beside the push and mask it works with, not beside its own master - and
+// nothing in one package can know where the whole build wants each parameter.
+// `tableFromPackages` refuses a name listed here that no package declares, and a
+// declared parameter this list does not place, so the list and the shipped set are
+// held equal both ways at boot rather than trusted.
+const EFFECT_PARAM_ORDER = [
+  'glyph.amount', 'glyph.tone', 'glyph.hash', 'glyph.rain',
+  'noise.amount', 'noise.scale', 'noise.speed', 'lattice.amount',
+  'glitch.amount', 'glitch.density', 'glitch.shove', 'glitch.tint',
+  'glitch.bands', 'glitch.axis', 'glitch.rate', 'push.amount',
+  'noise.region', 'mask.amount', 'ripple.amount', 'ripple.freq',
+  'ripple.speed', 'thermal.amount', 'edges.amount', 'duotone.amount',
+  'duotone.hue', 'duotone.split', 'duotone.span', 'duotone.motion',
+  'rain.amount', 'rain.speed', 'rain.span', 'rain.trail',
+  'rgbsplit.amount', 'raster.amount', 'raster.angle', 'raster.pitch',
+  'raster.hard', 'grain.amount', 'streak.amount', 'streak.angle',
+  'halation.amount', 'halation.radius', 'halation.threshold', 'halation.tint',
+  'stock.amount', 'stock.balance', 'stock.split', 'stock.latitude',
+  'vignette.amount',
+];
+
+// **The list is the placement of the shipped set and never a census of what is
+// installed.** A package the list has never heard of is placed by `placeParams` rather
+// than refused - its parameters land contiguously after everything here, in manifest
+// order - so installing a nineteenth effect changes nothing about where any of the
+// forty-nine above sit. That was a refusal until installs existed, and it had to stop
+// being one: `tableFromPackages` treated a declared name this list did not place as a
+// control the registry would silently skip, which is the right answer for somebody
+// editing a shipped manifest and the only possible answer to an install.
 //
+// Assigned by `adoptEffectPackages` rather than here, with everything else that is a
+// function of which packages are installed.
+let EFFECT_PARAMS;
+
+// The names the list above does not place, which is where a newly installed package's
+// parameters are: `placeParams` puts them after every placed name, so this is the tail
+// of the assembled table and `PARAMS` spreads it in one run at the end of the effects.
+// Empty with the shipped eighteen installed, which is what keeps the registry's
+// declaration order the bytes it was.
+const effectAppendix = () => Object.keys(EFFECT_PARAMS).slice(EFFECT_PARAM_ORDER.length);
+
 // `reveals` is the escape hatch beside it, and exactly one group needs one. A group's
 // default rule is that it is in use when its own parameters are, and `Reading · detail`
 // is *also* governed by another group's values - so the rule lives on the entry with the
@@ -910,7 +1342,23 @@ async function fitCropToTake(id, near, far) {
 // it. A closure widens the default rule and must not replace it: which groups are open
 // is the look's diff against its defaults, and a group that dropped its own parameters
 // out of its rule would be carrying values the panel had stopped accounting for.
-const PANEL_GROUPS = [
+//
+// **The core spine only.** The four groups that exist solely for one effect package -
+// rain, glitch, glyph, raster - travel with their packages now, each carrying its
+// anchor into this spine (`after` a core key) and an order among packages sharing an
+// anchor, and `withEffectGroups` below splices them in. The placement arguments that
+// used to sit on the entries stay here, beside the anchors they argue about, because
+// a manifest is JSON and prose does not survive it: the rain anchors after `style`
+// because it decides what colour a point takes and works over round splats, so its
+// home must not depend on glyphs being on - filing it with the glyph field because
+// the two were designed together is the grouping this panel has refused twice. The
+// glitch anchors after `signal` rather than inside `displacement` or `post`, because
+// being adjacent in the render order is not a reason to be adjacent on a tab. The
+// glyph anchors after `points` at the stage it belongs to - it decides what mark
+// gets drawn. The raster anchors after `post` on the glitch's own precedent: a term
+// that grows sub-controls gets a group rather than crowding its neighbours, and its
+// four controls are one idea where `post`'s five are five.
+const CORE_PANEL_GROUPS = [
   // The five readings of the take, which were five buttons and one integer uniform
   // until they became five look parameters. They mix rather than exclude, so this is
   // sliders and not a segmented control: RGB at 0.6 against depth at 0.4 is a 60/40
@@ -939,7 +1387,7 @@ const PANEL_GROUPS = [
     // sits under - the angle a bracket ended up at belongs to the take, so it rotates
     // the room and not the camera, and the top-down, auto-orbit and the exported frame
     // come level with the picture.
-    before: () => [
+    before: panelOnce(() => [
       panelButtonRow(['camSensor', 'sensor view']),
       // Beside `sensor view` because it is the same kind of thing: a control that
       // changes what the person at the screen can see and writes nothing into the
@@ -959,11 +1407,11 @@ const PANEL_GROUPS = [
       // exists to keep out of the dock.
       ...(EDITING ? [panelButtonRow(['cropFit', 'fit box to take'])] : []),
       panelButtonRow(['camLevelReset', 'reset rotation']),
-    ],
-    after: () => [
+    ]),
+    after: panelOnce(() => [
       panelButtonRow(['cropReset', 'revert all to default']),
       panelNote('recRange', 'preview only'),
-    ],
+    ]),
   },
   // Below here is the grade, and every group is one stage of the pipeline rather than
   // one subject heading. The order is the order the image is built in: what the depth
@@ -975,15 +1423,10 @@ const PANEL_GROUPS = [
   // one rather than a tidy one. Both displace points before projection, so both are the
   // displacement stage - but `displacement` is the turbulence field, and the region's
   // scramble adds into its amplitude and reuses its scale and speed, so those two have
-  // to be readable together or a look gets tuned against half of itself. Glitch shares
-  // no uniform with either of them and reads no region. It sat in `displacement` for
-  // long enough that its slider was somewhere nobody stylising an image would think to
-  // look, which is the whole of what "we cannot control the glitches" turned out to
-  // mean, and being adjacent in the render order is not a reason to be adjacent on a
-  // tab. It is not in `post` either: that group is the full-screen grade and this moves
-  // geometry, so filing it there would be the subject-heading move these groups exist
-  // to refuse.
-  { key: 'glitch', label: 'Glitch', tab: 'look', lookgroup: true, collapses: true },
+  // to be readable together or a look gets tuned against half of itself. The glitch,
+  // which shares no uniform with either and reads no region, anchors its own group
+  // after `signal` from its package - the full argument for that placement sits on
+  // the spine's header above.
   { key: 'displacement', label: 'Displacement', tab: 'region', lookgroup: true, collapses: true },
   // One region in the room, read three ways: it displaces, it scrambles, and it
   // masks. Everything here is metres in the sensor frame, so a look holds at any
@@ -998,13 +1441,6 @@ const PANEL_GROUPS = [
   // while doing one thing, which is how a look gets tuned twice.
   { key: 'motion', label: 'Motion', tab: 'look', lookgroup: true, collapses: true },
   { key: 'post', label: 'Post', tab: 'look', lookgroup: true, collapses: true },
-  // The raster gets a group of its own, following the precedent the glitch rework set: a
-  // term that grows sub-controls gets a group rather than crowding its neighbours. It
-  // sits immediately under `post` because it is the same pass - the grade - and the four
-  // controls in it are one idea, where the five left in `post` are five separate ones.
-  // Splitting on that basis rather than on "these are all post effects" is the same call
-  // the glitch made when it left `displacement`.
-  { key: 'raster', label: 'Raster', tab: 'look', lookgroup: true, collapses: true },
   // The two parameters that are not part of the clip, in the one group that says so.
   // They are tagged `view` in the registry, they get no keyframe control and no
   // preset carries them - and while they sat inside look groups that read as an
@@ -1015,12 +1451,129 @@ const PANEL_GROUPS = [
     tab: 'camera',
     lookgroup: true,
     collapses: true,
-    after: () => [panelNote('viewNote', 'Not saved with the clip and not exported: these '
-      + 'change what you are looking at, not what the frame is.')],
+    after: panelOnce(() => [panelNote('viewNote', 'Not saved with the clip and not exported: these '
+      + 'change what you are looking at, not what the frame is.')]),
   },
 ];
 
-const PARAMS = {
+// The spine plus every group the installed packages declare, spliced at their
+// anchors - the list every consumer below iterates, under the name they have
+// always iterated it by.
+let PANEL_GROUPS;
+
+/**
+ * The write one effect parameter's binding describes, as the closure the registry stores.
+ *
+ * Forty-nine parameters do the same thing - one number into one uniform - and they used to
+ * do it as forty-nine hand-written closures, where the ordinary case could be got subtly
+ * wrong in a way nothing reads back and where a reader had to check every one to find out
+ * which cases there were. the manifests declare them as data now, and this is the
+ * one place that data becomes behaviour.
+ *
+ * **The uniform table is resolved when the write happens and never when the closure is
+ * built.** Both tables are null while this module evaluates - `uniforms` is filled by
+ * `buildPointCloud` and `grade` by `buildPostChain`, each at its own banner far below this
+ * line - so a closure that captured either of them here would capture null and every look
+ * parameter in the program would throw on its first write. That is the intra-module dead
+ * zone `tools/module-check.mjs` says in its own output it cannot see, and it is the fault
+ * this file has already shipped twice, so it is worth the paragraph rather than the trust.
+ *
+ * **The transform vocabulary is two entries and each is written out exactly once.**
+ * `degToRad` belongs to `duotone.hue` alone; `axisDeg` is the raster's angle and the
+ * streak's together, which is why those two entries can say a check holds the axis against
+ * the arithmetic rather than against a second copy of it. An unknown transform throws here
+ * rather than falling through to the plain write, because falling through is precisely the
+ * defect the shipped mutations for both of them describe: a value that arrives in degrees
+ * and lands in a uniform that wanted radians, with every picture still changing and every
+ * slider still moving.
+ *
+ * **The two names are `EFFECT_BIND_TRANSFORMS` and the install door refuses anything
+ * else**, which is what makes the throw below unreachable from a package rather than a
+ * fence somebody could climb. The set is one binding read at both ends: a transform the
+ * door allowed and this function did not know would install cleanly and throw on its
+ * first write, which is a page that boots and then dies under a slider - the worst of the
+ * three places this could fail. The throw stays anyway, because the door is not the only
+ * way a binding reaches here.
+ *
+ * The gate is composed on top rather than spelled into each of the five writes. Each post
+ * pass costs a full-screen read and write whether or not it changes anything, so a term of
+ * the grade at zero has to shut its pass rather than run it as a no-op - and `gradeNeeded`
+ * asks the five uniforms rather than the five parameters, so it goes on being right when a
+ * project writes them in any order.
+ */
+function effectApply(bind) {
+  const table = () => (bind.on === 'grade' ? grade.uniforms : uniforms);
+  let write;
+  if (bind.transform === 'axisDeg') {
+    write = (v) => {
+      const r = THREE.MathUtils.degToRad(v);
+      table()[bind.uniform].value.set(Math.sin(r), Math.cos(r));
+    };
+  } else if (bind.transform === 'degToRad') {
+    write = (v) => { table()[bind.uniform].value = THREE.MathUtils.degToRad(v); };
+  } else if (bind.transform) {
+    throw new Error(
+      `the binding for ${bind.uniform} names the transform ${JSON.stringify(bind.transform)}, `
+      + `which this applier does not know - it implements ${EFFECT_BIND_TRANSFORMS.join(' and ')}, `
+      + 'and an unknown one would land its value unconverted',
+    );
+  } else {
+    write = (v) => { table()[bind.uniform].value = v; };
+  }
+  if (!bind.gates) return write;
+  return (v) => { write(v); grade.enabled = gradeNeeded(); };
+}
+
+/**
+ * One contiguous run of `EFFECT_PARAMS`, as registry entries ready to spread into `PARAMS`.
+ *
+ * The forty-nine are interleaved with the core parameters in seven runs, because the panel
+ * builds a group's rows in registry order and the groups are stages of the pipeline rather
+ * than subject headings. So the registry keeps the positions and the table keeps the
+ * declarations, and a run is named by its two ends rather than by listing its members - one
+ * effect parameter added to a manifest between two ends lands in `PARAMS` at
+ * the right place by existing, which is the whole reason not to restate the names here.
+ *
+ * `tag: 'look'` is constant across all forty-nine and is added here rather than repeated
+ * forty-nine times: an effect parameter that was not part of the clip would not be an effect
+ * parameter. Everything else is the binding's own, in the key order the inline entries held.
+ */
+const effectSlice = (first, last) => {
+  const names = Object.keys(EFFECT_PARAMS);
+  const from = names.indexOf(first);
+  const to = names.indexOf(last);
+  if (from === -1 || to === -1 || to < from) {
+    throw new Error(`${first}..${last} is not a run of the assembled effect table in that order`);
+  }
+  return Object.fromEntries(names.slice(from, to + 1).map((name) => {
+    const bind = EFFECT_PARAMS[name];
+    return [name, {
+      def: bind.def, min: bind.min, max: bind.max, step: bind.step, kind: bind.kind,
+      tag: 'look', group: bind.group, label: bind.label, apply: effectApply(bind),
+    }];
+  }));
+};
+
+/**
+ * The registry, rebuilt. `PARAMS` is a function of which packages are installed, and
+ * installing one is something that happens while the page is up - so this is a function
+ * rather than the object literal it was, and `adoptEffectPackages` is the only caller.
+ *
+ * **Every closure in it captures nothing that a rebuild replaces**, which is what makes
+ * rebuilding safe rather than a second registry sitting beside the first. An `apply`
+ * resolves its uniform table when the write happens, reads module bindings by name and
+ * holds no reference to the table it was declared in - so a control built against the old
+ * `PARAMS` and never rebuilt would still write the right cell, and one built against the
+ * new one writes the same cell. The one thing that would break that is a closure capturing
+ * `PARAMS` itself, and none does.
+ *
+ * An arrow returning the literal rather than a function with a `return` inside it, so the
+ * three hundred lines below keep the indentation they were written at. Every proof tool in
+ * the suite anchors mutations into this file by exact text, and re-indenting a table to
+ * gain a level would go stale on dozens of them at once - which `syntax-check`'s anchor row
+ * would catch, and which would still be a diff nobody could read.
+ */
+const buildParams = () => ({
   // Pixels at 1080p, not pixels. The unit changed exactly once, when the screen-
   // space terms went resolution-relative, and every value here changed with it:
   // this default and both presets are their old values times 1080/600, the 600
@@ -1039,6 +1592,11 @@ const PARAMS = {
     apply: (v) => { uniforms.exposure.value = v; } },
   additive: { def: false, kind: 'step', tag: 'look',
     group: 'points', label: 'additive glow', apply: setAdditive },
+
+  // The glyph field: its master and the three keys under it. Declared in
+  // the effect manifests with the rest of the effect parameters, and spread in here at
+  // the position they have always held - the panel builds its rows in this order.
+  ...effectSlice('glyph.amount', 'glyph.rain'),
 
   // The mount's cant, in degrees. Document state rather than view, because the angle
   // belongs to the take and every project on it wants the same answer - see the long
@@ -1117,129 +1675,22 @@ const PARAMS = {
     group: 'motion', label: 'wake',
     apply: (v) => { uniforms.wakeTime.value = v / 1000; updateDrawRange(); } },
 
-  // The turbulence field, in world units throughout: amplitude in metres, scale in
-  // cycles per metre, speed in metres of drift per program second. Nothing here is a
-  // screen-space length, so unlike `pointSize` and the grade terms none of it is
-  // referred to 1080p - the same values draw the same displacement at every output
-  // size because they describe the room rather than the frame.
-  noise: { def: 0, min: 0, max: 1, step: 0.005, kind: 'scalar', tag: 'look',
-    group: 'displacement', label: 'turbulence',
-    apply: (v) => { uniforms.noise.value = v; } },
-  noiseScale: { def: 3, min: 0.2, max: 12, step: 0.1, kind: 'scalar', tag: 'look',
-    group: 'displacement', label: 'grain m',
-    apply: (v) => { uniforms.noiseScale.value = v; } },
-  noiseSpeed: { def: 0.7, min: 0, max: 3, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'displacement', label: 'speed',
-    apply: (v) => { uniforms.noiseSpeed.value = v; } },
-  // How far the cloud is pulled onto its grid, so the two ends are the measured surface
-  // and a fully reconstructed one, and everything between is the surface arriving. It
-  // snaps in the levelled frame, which means a canted mount does not cut the grid on the
-  // diagonal - the shader block carries that reasoning and the rotation it uses.
-  lattice: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'displacement', label: 'lattice',
-    apply: (v) => { uniforms.lattice.value = v; } },
+  // The turbulence field and the grid the cloud is pulled onto. The cell that grid is cut
+  // at is `cell` below, which stays written out here because it is a core parameter: the
+  // dot is the namespace, and `effectOf` reads a bare name as the core grid rather than as
+  // anything the glyph or lattice effects own.
+  ...effectSlice('noise.amount', 'lattice.amount'),
   // The cell, in metres of the room like every other displacement here and unlike the
   // screen-space terms. A cell is a distance the subject stands in rather than a size on
   // screen, so the same look gives the same grid at any output resolution, and the floor
   // does not re-quantise when you export at a different size.
-  latticeCell: { def: 0.05, min: 0.005, max: 0.5, step: 0.005, kind: 'scalar', tag: 'look',
+  'cell': { def: 0.05, min: 0.005, max: 0.5, step: 0.005, kind: 'scalar', tag: 'look',
     group: 'displacement', label: 'cell m',
     apply: (v) => { uniforms.latticeCell.value = v; } },
 
-  // Datastream corruption: one master and five ceilings, where there used to be one
-  // scalar carrying all six meanings at fixed ratios. The comment beside the uniforms
-  // has the argument for the shape; what belongs here is why the ceilings are ceilings
-  // and not absolute values. An absolute set would need a clip to animate density,
-  // shove and tint on three tracks that all reach zero on the same frame just to fade
-  // corruption out, and one that missed by a frame leaves a tear standing in a clean
-  // plate. The master is the fade, and these say what a full one means.
-  //
-  // **Four of the five defaults are exactly the literals they replaced, and the fifth is
-  // not.** That is the rule the readings' seven constants are held to and it is
-  // load-bearing the same way here, so the exception matters: 0.45, 0.45, 12 and 7 are the
-  // numbers the shader already had, and `glitchTint` is 1.8 where the old line baked 3.0.
-  //
-  // This sentence used to claim all five without naming an exception, with the
-  // enumeration above listing precisely the four that hold - which is the shape of error
-  // `CLAUDE.md` rule 5 describes, an object every observation skips behind a justification
-  // that stops anybody looking twice. So `blackwall.json`, which names `glitch: 0.18` and
-  // no tint, does *not* draw the picture it drew: its tear flares dimmer. The flare's move
-  // out of the Blackwall branch - which is in `web/cloud-shader.js` now, and was a
-  // thousand-odd lines above this even before it left the file - is a deliberate change on
-  // top of that; this one was not deliberate.
-  glitch: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'amount',
-    apply: (v) => { uniforms.glitch.value = v; } },
-  // How much of the frame tears at a full master, as a fraction of the bands. The
-  // shove's other half: this one is how *often* the feed fails and the next is how
-  // badly, and the two were the same number until now.
-  glitchDensity: { def: 0.45, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'density',
-    apply: (v) => { uniforms.glitchDensity.value = v; } },
-  // Metres a band travels at a full master, half of it either way. World units like
-  // the turbulence field and unlike every screen-space term here, because a tear is a
-  // distance in the room: the same look draws the same shear at any output size, and a
-  // shove referred to 1080p would change how far the feed failed when you exported.
-  glitchShove: { def: 0.45, min: 0, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'shove m',
-    apply: (v) => { uniforms.glitchShove.value = v; } },
-  // What a torn band flares, per metre it was shoved. Deliberately per metre rather
-  // than normalised against `glitchShove`, so a bigger tear burns harder on its own -
-  // the alternative decouples them and then wants a second slider to couple them back.
-  // The default is not the 3.0 the literal was, and the arithmetic says what it is
-  // instead. Inside the Blackwall branch the flare was added to `bw` and then scaled by
-  // that reading's `0.55 + 0.75 * lum` on the way out, so the tint reproducing the old
-  // picture is `3.0 * (0.55 + 0.75 * lum)` over the torn pixels: 1.65 where a tear falls
-  // on black, 2.10 at a luminance of 0.2, 3.0 only where it crosses something as bright
-  // as 0.6. Which end of that applies is a fact about the footage rather than about the
-  // shader, and this look is graded for rooms shot dark - `docs/reference.md` says the
-  // sample was shot unlit and that colour "reads a signal the sensor barely produced" -
-  // so the torn bands land near the bottom of the range and 1.8 is the match at a
-  // luminance of about 0.07.
-  //
-  // Stated as arithmetic and not as an A/B of rendered frames, deliberately, because at
-  // the value anything ships with the choice barely resolves: `blackwall.json` asks for
-  // a master of 0.18, where the largest shove is 8.1cm and the whole flare spans 0.13 to
-  // 0.19 across that entire luminance range. It is at a full master that the end of the
-  // range starts to matter, and a full master is a slider anybody setting it is watching.
-  glitchTint: { def: 1.8, min: 0, max: 8, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'flare',
-    apply: (v) => { uniforms.glitchTint.value = v; } },
-  // Depth-image rows per band, so the count of bands is 424 over this - 35 of them at
-  // the default. Rows and not a fraction of the frame, because a band is a run of the
-  // sensor's own scanlines and that is what makes the tear read as the feed failing
-  // rather than as a shape drawn over the picture.
-  glitchBands: { def: 12, min: 1, max: 64, step: 1, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'band rows',
-    apply: (v) => { uniforms.glitchBands.value = v; } },
-  // Which way the bands run, from the sensor's rows at 0 to its columns at 1, and the
-  // interesting looks are the fractions in between where the bands cross the frame on a
-  // diagonal. The axis was baked as `position.y` from the first version of this effect,
-  // which is why the default is 0 and why it has to be exactly 0: a document written
-  // before this control existed names no axis and has to keep tearing along rows.
-  //
-  // A blend of the two image axes rather than an angle in degrees, and that is the honest
-  // spelling rather than a lazy one. The bands are quantised in the *sensor's* frame,
-  // where the two axes are 512 columns against 424 rows and a band is a run of scanlines
-  // rather than a distance - so there is no square in which an angle would mean what an
-  // angle means, and a raster's `scanAngle` two hundred lines down is the term that has
-  // one because it runs in screen space where the pixels are square.
-  //
-  // No shear parameter to go with it. The tear's direction stays sensor-frame x, so
-  // turning the axis rotates which bands are chosen and not which way they slide, and the
-  // pair of controls that would let those disagree buys a look nothing in the references
-  // shows and two more ways to author something incoherent.
-  glitchAxis: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'axis',
-    apply: (v) => { uniforms.glitchAxis.value = v; } },
-  // Hertz: how often the torn set is redrawn, 7 by default, so a state holds for 143ms
-  // or about 4.3 frames at 30fps. The phase is `floor(time * rate)` and stays a pure
-  // function of program time - integrating a rate for a smoother phase would make the
-  // frame depend on how the playhead got there, and seek-equals-playback dies the
-  // moment it does. Keyframing the rate therefore jumps the pattern, which is in genre.
-  glitchRate: { def: 7, min: 0, max: 30, step: 0.5, kind: 'scalar', tag: 'look',
-    group: 'glitch', label: 'rate hz',
-    apply: (v) => { uniforms.glitchRate.value = v; } },
+  // Datastream corruption: the master and its five ceilings, plus the rate they are
+  // redrawn at.
+  ...effectSlice('glitch.amount', 'glitch.rate'),
 
   // One region, authored once and read three ways. Three scalars rather than a new
   // `point` kind, which is the awkward part and is deliberate: the design doc argues
@@ -1278,37 +1729,9 @@ const PARAMS = {
     group: 'region', label: 'falloff',
     apply: (v) => { uniforms.regionSoft.value = v; } },
 
-  // The three effects. Push and mask are signed because both questions have two
-  // answers - bulge or pinch, hide the inside or hide everything else - and a sign is
-  // one slider where a direction toggle would be a second parameter that cannot lerp.
-  regionPush: { def: 0, min: -1, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'push',
-    apply: (v) => { uniforms.regionPush.value = v; } },
-  regionNoise: { def: 0, min: 0, max: 1, step: 0.005, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'scramble',
-    apply: (v) => { uniforms.regionNoise.value = v; } },
-  regionMask: { def: 0, min: -1, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'mask',
-    apply: (v) => { uniforms.regionMask.value = v; } },
-  // The region read a fourth way, after displacing, scrambling and masking: a wave
-  // travelling out along the radius, in metres at a full weight. Non-negative, unlike the
-  // push and the mask beside it, because the phase is what a sign would invert and the
-  // wave already visits both directions every cycle - a negative amplitude would be a
-  // second spelling of a shift the frequency can already reach.
-  ripple: { def: 0, min: 0, max: 0.5, step: 0.005, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'ripple m',
-    apply: (v) => { uniforms.ripple.value = v; } },
-  // Cycles per metre of radius, so the wave's spacing is a distance in the room.
-  rippleFreq: { def: 4, min: 0.2, max: 20, step: 0.1, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'ripple per m',
-    apply: (v) => { uniforms.rippleFreq.value = v; } },
-  // Cycles per second, and it advances in eighths of one rather than smoothly - the block
-  // says why. Zero freezes the wave where it stands instead of switching it off, which is
-  // the state `glitchRate` reaches the same way and for the same reason: a held shape is
-  // a different picture from no shape, and both keyframe.
-  rippleSpeed: { def: 1, min: 0, max: 8, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'region', label: 'ripple hz',
-    apply: (v) => { uniforms.rippleSpeed.value = v; } },
+  // The four ways the region above is read: it displaces, it scrambles, it masks, and a
+  // wave travels out along its radius.
+  ...effectSlice('push.amount', 'ripple.speed'),
   // Still what it always was - orbit the view you are looking at - and still view
   // state rather than an edit: the controls advance it on the program delta the
   // render loop hands them, so the same orbit renders the same way at any output
@@ -1408,209 +1831,34 @@ const PARAMS = {
   rim: { def: 0.55, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'style', label: 'rim',
     apply: (v) => { uniforms.rimAmount.value = v; } },
-  // The same argument the readings above were rebuilt on, made here first.
-  thermal: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'thermal',
-    apply: (v) => { uniforms.thermal.value = v; } },
-  edges: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'edges',
-    apply: (v) => { uniforms.edges.value = v; } },
-  // The duotone: how far the image lands between the two poles, which way they are
-  // turned, and where they meet. Three amounts and no source selector, which is the same
-  // argument `thermal` and the readings above are built on - a shading idea expressed as
-  // a mode is refused during evaluation as a user action and can therefore never move
-  // under the playhead, where three scalars each key like anything else.
-  //
-  // `duotoneDepth` is an amount rather than a switch for the reason every other term here
-  // is one: a clip brings the tonal transform in and out on one track. It is the term the
-  // rest of this look sits on top of, because in the frames this is graded against the
-  // light is emitted by the data rather than reflected off surfaces - so the interiors
-  // have to fall toward black before a raster over the top reads as a reconstruction
-  // instead of as a filter laid over a video.
-  duotoneDepth: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone depth',
-    apply: (v) => { uniforms.duotoneDepth.value = v; } },
-  // Degrees on the slider and radians at the uniform, the way `tilt` and `roll` are, so
-  // the panel reads in the unit a person turns a hue in and the shader gets the unit a
-  // trigonometric function takes. The full turn either way rather than a half, because
-  // the two poles are asymmetric - the near one is nearly black - so +90 and -90 are
-  // genuinely different pictures and a half-range would hide one of them.
-  duotoneHue: { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone hue',
-    apply: (v) => { uniforms.duotoneHue.value = THREE.MathUtils.degToRad(v); } },
-  // Where the poles meet, as a fraction of the near/far clip range. A place in the room
-  // rather than a fraction of the frame, which is what lets a subject keep its silhouette
-  // when the camera moves - and it is the same reasoning `contourBands` is per metre for.
-  duotoneSplit: { def: 0.5, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone split',
-    apply: (v) => { uniforms.duotoneSplit.value = v; } },
-  // And how many metres the crossing between the poles takes, which is the one term here
-  // stated in the room's units rather than as a share of the clip range. The uniform
-  // carries why; what belongs beside the entry is the range.
-  //
-  // The floor is 0.2m rather than zero because zero is a hard edge and the ramp already
-  // has one at 0.2 for anything a sensor this noisy can resolve - the jitter is about 4mm
-  // per sample, so a crossing inside a couple of centimetres is a threshold with speckle
-  // on it rather than a gradient. The ceiling is the full 9.5m the depth sliders reach,
-  // so a ramp can always be opened wider than anything the box can hold, which is what
-  // "the grade does not follow the framing" has to mean at the top end.
-  //
-  // **The default is the default clip range, and it is derived rather than typed.** At
-  // that value `duotoneSpan / (farClip - nearClip)` is 1.0 on an untouched document and
-  // the expression is the one this replaced, term for term - so nine shipped looks and
-  // every saved project render what they rendered. Deriving it means the three defaults
-  // cannot drift apart silently; it does not make the identity exact on its own, which is
-  // why the commit carries hashes rather than this comment carrying an argument.
-  duotoneSpan: { def: CLIP_FAR_DEFAULT - CLIP_NEAR_DEFAULT, min: 0.2, max: 9.5, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone span m',
-    apply: (v) => { uniforms.duotoneSpan.value = v; } },
-  // The fourth of them, and the one that is not a fact about where a point is. It keys
-  // the same two poles on how fast a point is moving along the sensor's axis, so a room
-  // graded by distance gets whatever is moving through it in the hot pole - which is the
-  // one reading the depth key cannot produce, since a subject and the wall behind it are
-  // both exactly where they stand.
-  //
-  // **The speed is measured from the two depth frames the shader already holds and there
-  // is no flow pass.** Optical flow would buy lateral motion as well, and it would buy it
-  // for a full pass over the frame plus a second history to keep, on a renderer whose
-  // whole transport rests on a seek producing the same image playback would - so the pass
-  // would have to be walked forward through a pre-roll like the accumulators are, and a
-  // scrub would arrive carrying whatever the drag had built. What the depth pair gives is
-  // the axial component alone, for one texel fetch that was nearly already there, and
-  // axial is the component this look is about: the sensor measures depth, so a subject
-  // walking toward it is the movement it can actually see.
-  //
-  // An amount rather than an amount and a reference speed, on the precedent the poles
-  // themselves are baked on: what a look parameterises is how much of a ramp it wants.
-  // The shader carries the reference and the measurement behind it.
-  duotoneMotion: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'duotone motion',
-    apply: (v) => { uniforms.duotoneMotion.value = v; } },
+  // The two shading ideas that answered the mode argument before the readings above did,
+  // and the duotone the rest of this look sits on top of.
+  ...effectSlice('thermal.amount', 'duotone.motion'),
+
+  // The rain, which the glyph field above reads a second time as a key.
+  ...effectSlice('rain.amount', 'rain.trail'),
   // Each post pass costs a full-screen read and write whether or not it changes
   // anything, so a zero value switches its pass off rather than running it as a
-  // no-op. The three grade terms share one pass, so they gate it together.
+  // no-op. The seven terms that gate the grade share one pass, so they gate it together -
+  // three when this was written, and the count is checkable in one place now that it is a
+  // `gates` flag rather than a line repeated in each of their applies.
   bloom: { def: 0, min: 0, max: 6, step: 0.05, kind: 'scalar', tag: 'look',
     group: 'post', label: 'bloom',
     apply: (v) => { bloom.strength = v; bloom.enabled = v > 0; } },
   trails: { def: 0, min: 0, max: 0.97, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'motion', label: 'trails',
     apply: (v) => { afterimage.uniforms.damp.value = v; afterimage.enabled = v > 0; } },
-  rgbSplit: { def: 0, min: 0, max: 6, step: 0.05, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'rgb split',
-    apply: (v) => { grade.uniforms.rgbSplit.value = v; grade.enabled = gradeNeeded(); } },
-  // The raster's master, and the only one of the four that gates the pass. It keeps the
-  // name `scanlines`, which now describes one of its settings rather than the whole term:
-  // a rename is the one change `registry-check` cannot make bit-exact against its pinned
-  // commit, and it would break every preset anybody has authored. Accepted rather than
-  // overlooked.
-  scanlines: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'raster', label: 'scanlines',
-    apply: (v) => { grade.uniforms.scanlines.value = v; grade.enabled = gradeNeeded(); } },
-  // The three settings under it, and none of them gates the pass - for `crush`'s reason
-  // in the case of the pitch, whose default is 1.3 and so is true of every document there
-  // is, and for a plainer one in the case of the other two: raising an angle while the
-  // master sits at zero rotates a raster nobody asked for, and switching a full-screen
-  // pass on to draw nothing is exactly the no-op the gate exists to refuse.
-  //
-  // Degrees on the slider and radians at the uniform. The full half-turn either way is
-  // the whole of a raster's range, because a line grille at 180 degrees is the grille at
-  // 0 - what the sign buys is which way a *rotating* raster turns under the playhead.
-  // One parameter, one vec2 uniform, and the trigonometry happens here rather than in
-  // the shader. The comment beside the uniform carries the measurement that forced it;
-  // what belongs here is that the arithmetic is stated once, in this file, so a check can
-  // hold the axis against it rather than against a second copy of the same sum.
-  scanAngle: { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
-    group: 'raster', label: 'angle',
-    apply: (v) => {
-      const r = THREE.MathUtils.degToRad(v);
-      grade.uniforms.scanAxis.value.set(Math.sin(r), Math.cos(r));
-    } },
-  // Cycles per reference pixel along the raster's own axis, and the default is exactly
-  // the literal it replaces.
-  //
-  // **The useful range runs below the default, not above it**, which is the opposite of
-  // what this said when it was written and is worth stating as a correction rather than
-  // quietly replacing. The claim was that 1.3 is a television artifact and 6 is the column
-  // raster a reference frame gets sliced into. The first half is right and the second is
-  // backwards: the wave is expressed against 1080p, so 1.3 is already about 220 cycles
-  // across the picture, 6 is nearer a thousand, and a line thinner than the pixel carrying
-  // it is not a grille but aliasing. The wide bands the references actually cut a picture
-  // into want a pitch under about 0.6. Measured on rendered frames at a fixed pose rather
-  // than reasoned about: at 0.1 the bands are wide enough to read across the room, and by
-  // 1.0 they have closed up into a scanline again.
-  //
-  // The old range of 0.1 to 12 in tenths therefore put every value worth having inside its
-  // bottom four percent, with six positions to choose between, and spent the rest of the
-  // travel past the point where anything is resolvable.
-  //
-  // **The default has to stay reachable to the exact bit**, because the guard in the grade
-  // shader tests this against the literal 1.3 and takes the old code path when it matches.
-  // A range input does its stepping in decimal on its own value string, so a minimum of
-  // 0.05 with a hundredth step still lands the same double `params.reset()` writes, and
-  // every one of the 396 reachable positions round-trips. Checked in a browser rather than
-  // reasoned about, because a default that missed by one bit would take the shipped raster
-  // off its bit-exact path with nothing anywhere turning red to say so.
-  scanPitch: { def: 1.3, min: 0.05, max: 4, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'raster', label: 'pitch',
-    apply: (v) => { grade.uniforms.scanPitch.value = v; } },
-  // How square the wave is, from the sine it has always been to a hard grille with dark
-  // gaps. This is the control that makes the other two reach the look at all - an angle
-  // over a sine is rotated softness, and softness is not what the references show.
-  scanHard: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'raster', label: 'hardness',
-    apply: (v) => { grade.uniforms.scanHard.value = v; } },
-  grain: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'grain',
-    apply: (v) => { grade.uniforms.grain.value = v; grade.enabled = gradeNeeded(); } },
-  // The fifth term that gates the pass, and it gates for the plain reason the other four
-  // do rather than as an exception: its default is zero, so a look that never names it
-  // pays nothing and the pass stays shut. Contrast `crush` further down, whose default is
-  // the literal it replaced and which therefore cannot gate anything without holding the
-  // pass open for every look there has ever been.
-  streak: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'streak',
-    apply: (v) => { grade.uniforms.streak.value = v; grade.enabled = gradeNeeded(); } },
-  // Which way the light runs, and this **reverses a decision the code used to state as
-  // settled**, which is worth saying plainly rather than leaving as a diff. The gather ran
-  // down the column and nothing else, the comment above it said it falls and only falls,
-  // and `docs/reference.md` said a control for the direction would be a control for
-  // getting it wrong. The argument was that gravity has one direction. It is not a bad
-  // argument and it is not the operator's: a smear is a thing a lens and a sensor do, and
-  // a light bleeding sideways off a hot edge is in as many reference frames as one running
-  // down a column. The old sentences are gone rather than left standing next to the slider
-  // that contradicts them.
-  //
-  // Zero has to be exactly straight down, because a look authored before this control
-  // existed names no angle and has to keep the streak it was graded with. The gather's own
-  // comment carries the measurement that says it does, to the bit.
-  //
-  // A full half-turn either way, like the raster's angle and unlike it in what the sign
-  // buys: a grille at 180 degrees is the grille at 0, so there the sign only decides which
-  // way a rotating raster turns, where here 0 and 180 are opposite directions and both are
-  // reachable by two routes. Positive turns the streak clockwise on the glass - 90 puts it
-  // across to the left, -90 across to the right - which is the same sense the raster's
-  // angle turns in, and it is written down here because it was read off rendered frames
-  // rather than derived. One parameter, one vec2 uniform, and the trigonometry happens in
-  // this file so a check can hold the axis against the arithmetic stated once rather than
-  // against a second copy of the same sum.
-  streakAngle: { def: 0, min: -180, max: 180, step: 1, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'streak angle',
-    apply: (v) => {
-      const r = THREE.MathUtils.degToRad(v);
-      grade.uniforms.streakAxis.value.set(Math.sin(r), Math.cos(r));
-    } },
-  // The corner falloff, which was a literal inside the grade shader and so arrived with
-  // whichever of the three above you happened to raise. The uniform beside it carries
-  // why this is the one promoted literal that does not keep its old value; what belongs
-  // here is that it gates the pass like the other three, so the vignette can be had on
-  // its own and a look wanting none of the four still pays for no pass at all.
-  vignette: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'vignette',
-    apply: (v) => { grade.uniforms.vignette.value = v; grade.enabled = gradeNeeded(); } },
+  // Every term of the one combined grade pass except its toe, which is `crush` below and is
+  // the one of the eighteen that must not gate the pass. Seven of these do gate it, and
+  // which seven is a `gates` flag in the manifests rather than a line of wiring repeated
+  // seven times here.
+  ...effectSlice('rgbsplit.amount', 'vignette.amount'),
   // The toe under the grade's Reinhard curve, and **the one term sharing that pass which
-  // deliberately does not gate it** - note the missing `grade.enabled` beside the four
-  // above. That is the whole of its wiring and it is worth the paragraph, because the
-  // symmetry is the thing a reader will reach to restore.
+  // deliberately does not gate it** - the seven that do carry `gates` in
+  // the manifests, and this one is written out here with no such flag anywhere,
+  // because it is a core parameter rather than an effect's. That is the whole of its wiring
+  // and it is worth the paragraph, because the symmetry is the thing a reader will reach to
+  // restore.
   //
   // Its default is the literal it replaces, so gating on it would be gating on
   // `0.018 > 0`: the pass held open for every look there has ever been, the four shipped
@@ -1638,6 +1886,23 @@ const PARAMS = {
     group: 'viewer', label: 'render %',
     apply: (v) => { renderScale = v / 100; resize(); } },
 
+  // Every parameter of every package the declaration order above has never heard of,
+  // which is where an installed effect's controls are.
+  //
+  // **Last, and that is the placement rather than an absence of one.** The seven runs
+  // above interleave the shipped effects with the core parameters because the panel
+  // builds a group's rows in registry order and the shipped groups are stages of the
+  // pipeline - and nothing here can know which stage a package that arrived this morning
+  // belongs to. What it does know is that a package's own parameters are one unit, so they
+  // arrive contiguous and in the order the manifest declares them, and the group they draw
+  // into is spliced at the anchor the package itself names. A new effect's rows are
+  // therefore in the right group and at the end of it, which is a defined place; guessing
+  // at a better one would be this file making a layout decision on a package's behalf.
+  //
+  // Empty for the shipped eighteen, so this line contributes nothing at all to the
+  // registry the presets and the scramble table are written against.
+  ...(effectAppendix().length ? effectSlice(effectAppendix()[0], effectAppendix().at(-1)) : {}),
+
   // The one composition parameter, and the only pose. The camera track reads its
   // kind off this entry rather than off a second table beside the path editor, and
   // the render path writes the evaluated pose through the same door every other
@@ -1655,13 +1920,21 @@ const PARAMS = {
         programCamera.updateProjectionMatrix();
       }
     } },
-};
+});
 
-// The readings, read off the registry rather than written down a second time. Every
-// use of the set - the shader's uniforms, the panel group, the sweep arms a proof
-// tool builds - goes through this, so adding a sixth reading means adding one
-// registry entry and nothing else discovers it late.
-const READINGS = Object.keys(PARAMS).filter((n) => PARAMS[n].reading);
+/**
+ * The registry itself, and the readings read off it rather than written down a second
+ * time. Every use of the reading set - the shader's uniforms, the panel group, the sweep
+ * arms a proof tool builds - goes through it, so adding a sixth reading means adding one
+ * registry entry and nothing else discovers it late.
+ *
+ * Both assigned by `adoptEffectPackages`. `READINGS` is a `let` beside `PARAMS` although
+ * no package can change it - a reading is core and there is no manifest that could declare
+ * one - because it is derived from a table that is rebuilt, and a set derived once from a
+ * table that is replaced is the copy that goes on describing the build before last.
+ */
+let PARAMS;
+let READINGS;
 
 /**
  * Which of the five readings a document does not name, asked at both doors a document
@@ -1694,35 +1967,75 @@ function missingReadings(values) {
   return READINGS.filter((n) => !Object.hasOwn(values, n));
 }
 
-// Each reading needs a uniform of its own name, and the two are now written in different
-// files - the registry here, the shader source in `web/cloud-shader.js` - so nothing about
-// reading one puts the other in front of you. A reading declared in the registry with no
-// uniform behind it would fail as a slider that moves nothing rather than as an
-// error. That is the shape this file keeps rejecting - a control that appears to
-// work - so it is an assertion, on the same reasoning as the age ceiling below.
-for (const name of READINGS) {
-  if (!Object.hasOwn(uniforms, name)) {
-    throw new Error(`the reading ${name} has no uniform: its slider would move nothing`);
+/**
+ * Everything the registry has to be true of, asked of the table that has just been built
+ * rather than of the one this file was written against.
+ *
+ * **They ran at module scope until installs existed, and moving them is the whole reason
+ * to bother saying so.** Each of the four is a claim about the registry and the packages
+ * agreeing, and the moment a package can arrive at runtime, a check that only ever ran
+ * while the module evaluated is a check about the eighteen this build shipped with. The
+ * install that goes wrong is by definition the one that was not there at boot.
+ *
+ * Cheap enough to run per rebuild that the count is not worth thinking about: four walks
+ * of a table of eighty, against an install that has just recompiled two shader programs.
+ */
+function refuseRegistryDisagreement() {
+  // Each reading needs a uniform of its own name, and the two are now written in different
+  // files - the registry here, the shader source in `web/cloud-shader.js` - so nothing about
+  // reading one puts the other in front of you. A reading declared in the registry with no
+  // uniform behind it would fail as a slider that moves nothing rather than as an
+  // error. That is the shape this file keeps rejecting - a control that appears to
+  // work - so it is an assertion, on the same reasoning as the age ceiling below.
+  for (const name of READINGS) {
+    if (!Object.hasOwn(uniforms, name)) {
+      throw new Error(`the reading ${name} has no uniform: its slider would move nothing`);
+    }
   }
-}
 
-// The surface memory's age ceiling has to cover the longest persistence the two
-// sliders can ask for, or a ray that stops swapping pins its age below its own
-// life and sheds forever. The ceiling and the refusal about it are the memory's, so
-// what happens here is the registry handing over the one number only it can compute -
-// and it happens here rather than at the memory's own banner because `PARAMS` is
-// declared above this line and not above that one.
-refuseAgeCeiling((PARAMS.fade.max + PARAMS.wake.max) / 1000);
+  // The table and the registry hold the same names, asked in both directions,
+  // because the two failures are different and neither is loud on its own.
+  //
+  // A run left out of the seven spreads above is nine parameters that silently do not exist:
+  // no slider, no track, and a project naming one refused by `specOf` as an unknown parameter
+  // a long way from the line that dropped it. And a dotted name written out inline again is
+  // the second implementation this file keeps refusing - it would work, which is exactly the
+  // problem, because the copy is what drifts off the table the presets and the applier agree
+  // on. `effectOf` draws the line between the two halves and this asks against that same
+  // line, so an effect parameter added on either side is checked by existing rather than by
+  // somebody remembering to come back here.
+  for (const name of Object.keys(EFFECT_PARAMS)) {
+    if (!Object.hasOwn(PARAMS, name)) {
+      throw new Error(
+        `${name} is declared by an installed effect and reaches no registry entry: it would `
+        + 'be a look term with no slider and no track, and a document naming it would be refused',
+      );
+    }
+  }
+  for (const name of Object.keys(PARAMS)) {
+    if (effectOf(name) !== null && !Object.hasOwn(EFFECT_PARAMS, name)) {
+      throw new Error(
+        `${name} is an effect parameter written out in the registry rather than declared in `
+        + 'a manifest: it is a second copy of a binding, and the copy is what drifts',
+      );
+    }
+  }
+
+  // The surface memory's age ceiling has to cover the longest persistence the two
+  // sliders can ask for, or a ray that stops swapping pins its age below its own
+  // life and sheds forever. The ceiling and the refusal about it are the memory's, so
+  // what happens here is the registry handing over the one number only it can compute.
+  refuseAgeCeiling((PARAMS.fade.max + PARAMS.wake.max) / 1000);
+}
 
 // Range inputs snap to their step grid and clamp to their bounds, and the registry
 // has to do the same arithmetic rather than lean on the DOM for it - otherwise a
 // value set headlessly lands on the uniform unsnapped while the same value set
 // through a slider lands snapped, and two runs of the same project disagree by a
-// hair for reasons nothing records.
-const decimalsOf = (x) => {
-  const dot = String(x).indexOf('.');
-  return dot < 0 ? 0 : String(x).length - dot - 1;
-};
+// hair for reasons nothing records. That arithmetic is `snapScalar` in
+// `web/format.js` and this file is no longer the only thing that performs it: the
+// install door refuses a manifest whose `def` this build would move, and asks by
+// running the same function rather than by describing it.
 
 // Every value is checked for what it is rather than coerced into something. The
 // callers that matter are not the sliders - those hand over exactly what the
@@ -1789,10 +2102,7 @@ function normalise(name, spec, value) {
   if (typeof v !== 'number' || !Number.isFinite(v)) {
     throw new Error(`${name} is a scalar: it takes a finite number, got ${JSON.stringify(value)}`);
   }
-  const clamped = Math.min(spec.max, Math.max(spec.min, v));
-  const snapped = spec.min + Math.round((clamped - spec.min) / spec.step) * spec.step;
-  const decimals = Math.max(decimalsOf(spec.min), decimalsOf(spec.step));
-  return Math.min(spec.max, Math.max(spec.min, Number(snapped.toFixed(decimals))));
+  return snapScalar(spec, v);
 }
 
 const values = new Map();
@@ -1803,6 +2113,54 @@ const panelControls = new Map();
 // `const` read before its own declaration is a TDZ error rather than an empty map, so
 // the map that gets read during boot has to be declared where boot can already see it.
 const resetButtons = new Map();
+
+// Which inspector tab is showing, declared here for the reason above it rather than
+// beside the four buttons that set it. `buildPanel` re-applies the tab to the groups it
+// has just made, and boot's first call to it runs a long way above the tab machinery -
+// so a `let` declared down there would be read in its own dead zone on the way through
+// the first panel this page ever draws.
+//
+// The record surface has no Look tab open by default and the editor has nothing else, so
+// the two surfaces start on different ones.
+let activePanelTab = EDITING ? 'look' : 'record';
+
+// The two maps the preset subset dialog is found again by, up here for the same reason:
+// `buildPresetPicker` runs from the end of `buildPanel`, which boot reaches while this
+// module is still being evaluated.
+const presetPickBoxes = new Map();
+const presetPickGroups = [];
+
+/**
+ * What the panel last painted per group, so a refresh writes only where the answer moved.
+ *
+ * The full argument for it is on `refreshGroups`, which is its only reader. It is declared
+ * here rather than there for the boot-order reason its neighbours are: `buildPanel` clears
+ * it with the maps that find the panel's elements again, because a rebuilt group is
+ * a new element that has never been painted whatever this map remembers - and boot's first
+ * `buildPanel` runs well above the line `refreshGroups` sits on.
+ */
+const groupPainted = new Map();
+const effectRackPainted = new Map();
+
+// What each parameter is worth in a project nobody has touched, computed once per
+// registry.
+//
+// **Through `normalise`, not against `PARAMS[n].def` raw**, and the difference is a
+// class rather than a case. `normalise` clamps, snaps to a grid anchored at `min` and
+// rounds to the decimals `min` and `step` imply, and every scalar default this build
+// declares happens to land on its own grid - so raw equality is correct today and
+// would go on being correct right up until somebody adds a parameter whose default is
+// not on its step. That group would then read as touched from boot, on a fresh page,
+// with nothing anywhere saying why. Doing it once per rebuild is what keeps the
+// arithmetic off the evaluator's path, where this is asked several times a frame - and
+// an installed effect is exactly the way a default that is not on its own step arrives,
+// since nothing about a package author's numbers went through review here.
+//
+// Declared beside the two maps above rather than beside the predicate that reads it,
+// for the reason the note on `resetButtons` gives: `buildPanel` fills it while the
+// module is still evaluating, and a `const` read before its own declaration is a TDZ
+// error rather than an empty map.
+const groupDefaults = new Map();
 
 /**
  * What a reset puts back, asked of the same function that decides what `set` stores.
@@ -2099,6 +2457,7 @@ function makeResetButton(name) {
   button.setAttribute('aria-label', `${name} reset to default`);
   button.append(resetGlyph());
   button.addEventListener('click', () => {
+    retainEffectFor(name);
     params.set(name, resetTarget(name));
     history.commit();
     // The press removes its own control: writing the default makes the row unmodified,
@@ -2165,6 +2524,37 @@ const panelButtonRow = (...buttons) => {
   }
   return row;
 };
+
+/**
+ * A group's hand-written furniture, built once and re-parented on every rebuild.
+ *
+ * **The panel is regenerated whole on every install, and everything that is not a
+ * parameter row was being regenerated with it.** `buildPanel` removes each generated group
+ * and calls the group's `before()` and `after()` again, so `sensor view`, `show crop box`,
+ * `fit box to take`, `reset rotation`, `revert all to default` and the recorder's range
+ * note were fresh elements carrying the right ids and none of the wiring: `ui` still held
+ * the boot-time nodes and every `addEventListener` was on those, so after one install the
+ * six visible buttons did nothing at all and `ui.recRange.textContent` wrote into an
+ * element no longer in the document. Nothing threw and nothing looked wrong.
+ *
+ * **One mechanism, and it is that these nodes are never replaced.** `append` moves an
+ * element rather than copying it, so handing back the same node puts the live one - with
+ * its listeners, its `aria-pressed`, its disabled state and its text - into the rebuilt
+ * group. Re-resolving `ui` after each rebuild would have fixed the references and left the
+ * listeners on the corpses; delegating every listener would have been a second dispatch
+ * path beside the direct ones the rest of the panel uses. Not building them twice is the
+ * one that leaves a single statement of what each control is and does.
+ *
+ * A `function` declaration rather than the `const` arrow its two neighbours are, and the
+ * reason is the same one written on `resetButtons` and on `revSignature`: `CORE_PANEL_GROUPS`
+ * calls this while it is being evaluated, a thousand lines above here, and a `const` would
+ * be in its temporal dead zone at that moment - no `__kinect` published at all, and every
+ * tool in the suite reporting DID NOT RUN. A declaration is hoisted and initialised.
+ */
+function panelOnce(build) {
+  let made = null;
+  return () => (made ??= build());
+}
 
 const panelNote = (id, text) => {
   const note = panelNode('div', null, text);
@@ -2277,6 +2667,8 @@ function panelPlace(group, groupNode) {
 // of one table is exactly the drift this generator exists to remove.
 const panelGroupNodes = new Map();
 const panelGroupParams = new Map();
+const panelGroupElements = new Map();
+const panelEffectRows = new Map();
 
 // One head per group, whether or not the group can be shut, because two shapes of
 // header is two sets of CSS and the one that gets forgotten is the one nobody is
@@ -2318,7 +2710,51 @@ function panelHead(group) {
 }
 
 let panelRowsEmitted = 0;
-for (const group of PANEL_GROUPS) {
+
+/**
+ * The panel, generated out of the registry - all of it, every time.
+ *
+ * **Rebuilt whole rather than patched, and that is the same argument `paintMissingEffects`
+ * makes one scale up.** An install adds a group and its rows, an uninstall takes one away,
+ * and a generator that edited in place would be a second statement of which parameters
+ * exist - the one that has to be taught about every shape of change, where this one is
+ * taught about none. The cost is a few dozen elements built twice a session, against a
+ * page that has just recompiled two shader programs.
+ *
+ * **Everything the last pass left behind is dropped first, and each lookup map is
+ * a name the panel is found again by.** A generated group carries `data-group` and a
+ * hand-written one carries an id, which is what makes the selector below able to remove
+ * exactly what this function made - the distinction was drawn for a different reason
+ * (id collisions) and is what makes a rebuild possible at all. A map left with its old
+ * entries is worse than a stale element: `panelControls` would hand `writeControl` an
+ * input that is no longer in the document, so every write would repaint a row nobody can
+ * see and the row that is there would show the value it had before.
+ */
+function buildPanel() {
+  for (const node of document.querySelectorAll('#panelBody > [data-group]')) node.remove();
+  panelControls.clear();
+  keyButtons.clear();
+  resetButtons.clear();
+  panelGroupNodes.clear();
+  panelGroupParams.clear();
+  panelGroupElements.clear();
+  panelEffectRows.clear();
+  panelTail.clear();
+  groupDefaults.clear();
+  // **The map that says a group has already been painted, cleared with the nodes it is
+  // about.** `refreshGroups` skips a group whose state string has not moved since it last
+  // wrote to it, which is what keeps a `textContent` and two attribute writes per group
+  // out of the render path - and after a rebuild that skip was reading a state string
+  // about elements that had been thrown away. A group whose values happened not to change
+  // across the install came back with no `shut` class, no `aria-expanded` and an empty
+  // mark, showing as open with the panel's own header saying nothing about it, and the
+  // next refresh agreed with itself and left it there. It belongs with the lookup maps
+  // above rather than beside its own reader, because the thing that invalidates it is
+  // exactly what invalidates them: the elements are new.
+  groupPainted.clear();
+  effectRackPainted.clear();
+  panelRowsEmitted = 0;
+  for (const group of PANEL_GROUPS) {
   const groupNode = panelNode('div', group.lookgroup ? 'group lookgroup' : 'group');
   // A data attribute and not an id, because the hand-written groups in the markup
   // are already `#cameraGroup`, `#sensorGroup`, `#monitorGroup`, `#programOutGroup`,
@@ -2326,6 +2762,7 @@ for (const group of PANEL_GROUPS) {
   // registry key away from colliding with one of them silently.
   groupNode.dataset.group = group.key;
   groupNode.dataset.panelTab = group.tab;
+  panelGroupElements.set(group.key, groupNode);
   // Named apart from the keyframe button the row loop below declares, which is a
   // different button in a narrower scope: one `button` meaning two things in one loop
   // is how the wrong element ends up registered.
@@ -2372,6 +2809,7 @@ for (const group of PANEL_GROUPS) {
     // `README.md` describes the ↺ under the recorder's *Look* tab, which is where this
     // was found - the page and the page's own documentation disagreeing about a control,
     // with the condition above naming the reason for the other one.
+    let mountedRow = row;
     if (spec.tag === 'look') {
       const keyButton = EDITING ? makeKeyButton(name) : null;
       // After the keyframe control where there is one, which is the order the design
@@ -2385,6 +2823,7 @@ for (const group of PANEL_GROUPS) {
         const checkrow = panelNode('div', 'checkrow');
         checkrow.append(row, ...beside);
         groupNode.append(checkrow);
+        mountedRow = checkrow;
       } else {
         row.append(...beside);
         groupNode.append(row);
@@ -2394,6 +2833,11 @@ for (const group of PANEL_GROUPS) {
     }
     rows++;
     panelRowsEmitted++;
+    const owner = effectOf(name);
+    if (owner) {
+      if (!panelEffectRows.has(owner)) panelEffectRows.set(owner, []);
+      panelEffectRows.get(owner).push(mountedRow);
+    }
     // The evidence set for this group, recorded here because here is where the row was
     // emitted. A group asks whether anybody has touched it by walking exactly the
     // parameters it put on screen, so the header and the rows under it cannot come to
@@ -2407,20 +2851,19 @@ for (const group of PANEL_GROUPS) {
 
   if (group.after) groupNode.append(...group.after());
   panelPlace(group, groupNode);
-}
+  }
 
-// The count, asserted rather than inferred - and this is what the old boot loop's
-// throw turned into rather than a tidier spelling of it. That loop looked a control
-// up by id and threw when it found none, which stops being able to fail the moment
-// the same pass creates the control it then looks for: a generator that filtered one
-// parameter out would produce a smaller panel that worked perfectly and said nothing.
-//
-// Counted against the registry from the other side, so a row lost anywhere in the
-// loop above - a group key nobody declared, a filter that dropped one, a `continue`
-// that ran once too often - is a refusal to boot with both numbers in it. The stray
-// check above names the parameter where it can; this one catches the cases that have
-// no name to give.
-{
+  // The count, asserted rather than inferred - and this is what the old boot loop's
+  // throw turned into rather than a tidier spelling of it. That loop looked a control
+  // up by id and threw when it found none, which stops being able to fail the moment
+  // the same pass creates the control it then looks for: a generator that filtered one
+  // parameter out would produce a smaller panel that worked perfectly and said nothing.
+  //
+  // Counted against the registry from the other side, so a row lost anywhere in the
+  // loop above - a group key nobody declared, a filter that dropped one, a `continue`
+  // that ran once too often - is a refusal to boot with both numbers in it. The stray
+  // check above names the parameter where it can; this one catches the cases that have
+  // no name to give.
   const owned = params.names().filter((n) => PARAMS[n].tag !== 'composition');
   const stray = owned.filter((n) => !PANEL_GROUPS.some((g) => g.key === PARAMS[n].group));
   if (stray.length) {
@@ -2436,7 +2879,589 @@ for (const group of PANEL_GROUPS) {
     throw new Error(`the panel generator emitted ${panelRowsEmitted} rows for ${owned.length} `
       + 'parameters: a panel that is not the registry is a look nothing can reach');
   }
+
+  // What a fresh project is worth per parameter, taken here because here is where the
+  // rows the question is about were emitted - the same argument the evidence set beside
+  // each group is recorded on.
+  for (const names of panelGroupParams.values()) {
+    for (const name of names) groupDefaults.set(name, params.normalise(name, PARAMS[name].def));
+  }
+
+  // The tab that was up, put back over the groups that have just been made. A generated
+  // group carries `data-panel-tab` and no `hidden`, so without this a rebuild shows every
+  // tab's groups at once - see `hideOffTab`, which is the same rule the tab buttons press.
+  hideOffTab();
+
+  // And the dialog that lets a look leave as a subset of itself, which is a second view of
+  // this same panel and goes stale in the same way - see `buildPresetPicker`.
+  buildPresetPicker();
 }
+
+// ------------------------------------------------- adopting a set of packages
+//
+// Everything downstream of "which effects are installed", in one function, called once at
+// boot and again after every install and every uninstall.
+
+// `revSignature` is declared at the top of the module beside the reads that compose it -
+// the note there carries why. This is the signature of the set this page is assembled
+// from, written by `adoptEffectPackages` and read by the poll.
+let effectSignature;
+
+/**
+ * The store signature this page has already tried and failed to be rebuilt from, or null.
+ *
+ * Read by the poll and written by it, and declared here beside the signature it is a
+ * counterpart to rather than beside the poll, for the reason the note above carries: both of
+ * these are read from inside code that runs while this module is still evaluating, and a
+ * declaration further down the file is in its temporal dead zone at that moment.
+ *
+ * **It is cleared by a rebuild that lands rather than only by the comparison against it.** A
+ * store can return to a signature it has held before - deleting a fork restores the shipped
+ * package, so the bytes and the revisions are the ones they were - and a block left standing
+ * over a signature the page has since adopted by hand would skip a set that is now perfectly
+ * good. So the successful path clears it, wherever the success came from.
+ */
+let refusedEffectSignature = null;
+
+/**
+ * A uniform cell for every binding the registry holds, minted where the tables have none.
+ *
+ * **The one thing a package cannot bring with it.** A manifest declares the GLSL that
+ * reads a uniform and the parameter that writes it, and both of those travel; what does
+ * not is the JavaScript cell three.js copies from - `uniforms` in `web/point-cloud.js` and
+ * the grade pass's table are written out by hand, so a nineteenth effect's first slider
+ * move would be `undefined.value = v` and the page would throw inside the registry's
+ * single write path. That is the failure this function exists for, and it is not
+ * hypothetical: it is what every install did before this line was here.
+ *
+ * Minted rather than refused, because the alternative is that no effect can ever be
+ * installed without editing this build. Seeded at zero rather than at the parameter's
+ * default, since the value walk at the end of the adoption writes every parameter through
+ * `params.set` a moment later and the write is what the cell is for - a seed that tried to
+ * be the default would be a second application of `effectApply`'s conversions, which is
+ * where a unit gets applied twice.
+ *
+ * The `axisDeg` transform is the one shape that cannot be a bare number: it writes
+ * `.value.set(sin, cos)` into a two-component cell, so a cell holding `0` would throw on
+ * the first write with a message about `set` rather than about a uniform.
+ *
+ * **A cell that is already there is reshaped rather than skipped, and skipping it is what
+ * made a rollback able to die.** The shape a cell has to be is a fact about the binding the
+ * *current* manifest declares, and a manifest is a thing an install replaces - so an
+ * adoption that only ever minted what was missing left every cell whose binding had changed
+ * shape holding the shape from the build before. That is reachable in one install: a fork
+ * that turns one `axisDeg` parameter into a plain one and a later parameter from plain into
+ * `axisDeg` writes a number over the first cell's `Vector2` and then throws on `.set()` at
+ * the second, which is the failure the transaction is there to roll back from - except that
+ * the rollback re-adopts through this same function, finds both cells present, skips them,
+ * and dies on the number the forward attempt left behind. The page is then holding a
+ * registry no document can be loaded into and the only sentence left to print is the one
+ * asking for a reload.
+ *
+ * So both directions of the adoption pass through here and a half-mutated table is
+ * re-normalised by either. A cell whose shape already fits is left exactly as it is, which
+ * matters because these tables are what three.js uploads from and the shipped set binds
+ * uniforms the spine's own hand-written tables declare: replacing an object that was already
+ * right would be churn on every install for no reason.
+ */
+const uniformCellFits = (cell, bind) => Boolean(cell)
+  && (cell.value instanceof THREE.Vector2) === (bind.transform === 'axisDeg');
+
+function seedUniformCells() {
+  for (const name of Object.keys(EFFECT_PARAMS)) {
+    const bind = EFFECT_PARAMS[name];
+    const table = bind.on === 'grade' ? grade.uniforms : uniforms;
+    if (uniformCellFits(table[bind.uniform], bind)) continue;
+    table[bind.uniform] = { value: bind.transform === 'axisDeg' ? new THREE.Vector2() : 0 };
+  }
+}
+
+/**
+ * Which uniform every parameter of a registry writes, as one comparable set.
+ *
+ * Keyed on the table as well as the name, because the two uniform tables are separate
+ * namespaces: a `grade` uniform and a `points` uniform can share a spelling and be two
+ * different cells, and treating them as one would have an install on one side answer for the
+ * other.
+ */
+const boundUniforms = (table) => new Map(Object.values(table ?? {})
+  .map((bind) => [`${bind.on} ${bind.uniform}`, bind]));
+
+/**
+ * What each uniform table held before any parameter had ever been written into it.
+ *
+ * Captured once, here, because there is exactly one moment at which it is available: the
+ * first adoption's value walk writes every binding a moment later and there is no way back to
+ * these numbers afterwards. `Vector2`s are cloned going in and cloned coming out, because a
+ * snapshot handing back the object it stored would be handing `axisDeg`'s own `.set()` a live
+ * reference into this map - which would make the pristine value follow the slider and the
+ * whole thing silently useless.
+ */
+const snapshotUniformValues = (table) => new Map(Object.entries(table)
+  .map(([name, cell]) => [name, cell?.value instanceof THREE.Vector2 ? cell.value.clone() : cell?.value]));
+const PRISTINE_UNIFORMS = {
+  points: snapshotUniformValues(uniforms),
+  grade: snapshotUniformValues(grade.uniforms),
+};
+
+/**
+ * Every uniform a parameter used to write and no parameter writes now, put back where it
+ * started.
+ *
+ * **A binding is a manifest field, so an install can move one - and the uniform it moves off
+ * keeps whatever the slider last left in it.** Nothing else ever writes these cells: a
+ * parameter's `apply` is the only writer, so a uniform the registry has stopped binding is a
+ * value frozen at the moment the binding left. The shader does not stop reading it. A fork
+ * that rebinds one parameter onto a different live uniform, with not a byte of its GLSL
+ * changed, therefore leaves the term it used to drive running at whatever it was set to, for
+ * the life of the page, with no control anywhere that can move it and nothing on screen that
+ * says why the picture will not go back.
+ *
+ * The set is exactly the uniforms a parameter *bound*, which is what makes this safe to do at
+ * all: every value in it was written by `effectApply` and is a number or a two-component
+ * vector. A uniform the render loop drives - the rain's phase - is host-driven and binds no
+ * parameter, and the ones the spine writes for itself, `focal` and `center` and the rest, are
+ * bound by nothing either. Neither can be in this set by construction.
+ *
+ * A cell the spine declared goes back to the value the spine declared it with; a cell this
+ * build minted for a binding that has now gone goes back to the inert value it was minted at,
+ * which is what its old transform says that is.
+ */
+function restoreDepartedUniforms(was, now) {
+  for (const [key, bind] of was) {
+    if (now.has(key)) continue;
+    const table = bind.on === 'grade' ? grade.uniforms : uniforms;
+    const cell = table[bind.uniform];
+    if (!cell) continue;
+    const pristine = PRISTINE_UNIFORMS[bind.on]?.get(bind.uniform);
+    if (pristine === undefined) cell.value = bind.transform === 'axisDeg' ? new THREE.Vector2() : 0;
+    else cell.value = pristine instanceof THREE.Vector2 ? pristine.clone() : pristine;
+  }
+}
+
+/**
+ * The programs, the registry, the panel and every value - rebuilt from one set of
+ * packages.
+ *
+ * **This is the boot path, and it is the install path, and there is one of them.** Boot
+ * calls it below with what it fetched; `reloadEffects` calls it with what it fetched
+ * after a `PUT` or a `DELETE`. That matters for one property in particular, which
+ * `boot-check` is the instrument for: the last thing this does is walk every parameter
+ * through `params.set`, so every control on the panel shows the value the registry holds
+ * *by construction* rather than because two code paths were kept in step. A separate boot
+ * assembly would be the second implementation, and the one that drifts is always the one
+ * that runs on somebody else's machine.
+ *
+ * **`held` is what survives, and defaults are what does not.** An install must not move a
+ * slider the operator has set, so the values in flight are handed back in; a parameter the
+ * new set introduces has no held value and takes its default. A parameter the new set
+ * *removed* is simply not walked - it is gone from `PARAMS`, so `specOf` refuses it and
+ * `values` is pruned below, which is what stops the registry answering for a control that
+ * is no longer on screen.
+ *
+ * The order is the order the dependencies run in and each step needs the one above it. The
+ * shaders are swapped before the registry is rebuilt, because `seedUniformCells` mints
+ * cells the swapped programs declare; the panel is built before the value walk, because
+ * `writeControl` paints the row the walk is about.
+ */
+function adoptEffectPackages(packages, programs, held = {}) {
+  // Read before the registry is replaced, because the question below is which uniforms the
+  // build being left behind was writing - and one line down there is no way to ask it.
+  const wasBound = boundUniforms(EFFECT_PARAMS);
+  effectPackages = packages;
+  shaderPrograms = programs;
+  // What the store looked like when these packages were read, so the poll below compares
+  // against the set the page is actually assembled from. Written here rather than beside
+  // the poll because this is the one line that changes which packages the page holds.
+  effectSignature = revSignature(packages);
+
+  // **The materials are mutated rather than replaced, and the identity is the point.**
+  // Everything downstream holds them: the cloud is a `THREE.Points` built on the point
+  // material, `composer` has the grade pass in its chain, `gradeNeeded` gates it, and
+  // `setAdditive` flips its blend. Building a new one would leave every one of those
+  // pointing at the program before last. Both writes are the owning module's own door
+  // rather than a reach into an imported object - see `setCloudProgram` and
+  // `setGradeProgram` for why that boundary is where it is.
+  setCloudProgram(programs.cloud);
+  setGradeProgram(programs.grade);
+
+  EFFECT_PARAMS = tableFromPackages(packages, EFFECT_PARAM_ORDER);
+  PANEL_GROUPS = withEffectGroups(CORE_PANEL_GROUPS, packages);
+  // Which grade terms hold the pass open, re-derived from the set that just arrived. It is
+  // read by `effectApply`'s gate a few lines later in the value walk below, so it has to
+  // move before the registry does - see `GRADE_GATES` for what each direction of a stale
+  // list costs.
+  GRADE_GATES = gradeGatesOf(packages);
+  PARAMS = buildParams();
+  READINGS = Object.keys(PARAMS).filter((n) => PARAMS[n].reading);
+  refuseRegistryDisagreement();
+  seedUniformCells();
+  // And the other end of the same bookkeeping: the value walk below writes every uniform the
+  // new registry binds, and this is what answers for the ones it has stopped binding. It runs
+  // after the seeding rather than before it, because a uniform that departed one parameter and
+  // arrived at another is in neither set and must be left for the walk.
+  restoreDepartedUniforms(wasBound, boundUniforms(EFFECT_PARAMS));
+
+  // Values the registry no longer declares, dropped. `params.get` refuses an unknown
+  // name, so a stale entry is unreachable through the door - but `values` is what
+  // `params.values()` serialises, and an entry that outlived its parameter would be
+  // written into the next project as a look term nothing on this build can apply.
+  // Whatever a document held for the departed effect is in the parked pool by then,
+  // which is where it belongs and where it round-trips.
+  for (const name of [...values.keys()]) {
+    if (!Object.hasOwn(PARAMS, name)) values.delete(name);
+  }
+
+  buildPanel();
+
+  // **The walk that makes the invariant hold by construction.** Every parameter, through
+  // the one write path, in registry order - so `apply` reaches its uniform, `writeControl`
+  // paints the row that was just built, and `refreshReset` decides whether the row offers
+  // a revert. A rebuild that painted the panel and left the values where they were would
+  // be a set of controls showing the build before last, which is exactly what `boot-check`
+  // exists to refuse.
+  for (const name of Object.keys(PARAMS)) {
+    params.set(name, Object.hasOwn(held, name) ? held[name] : PARAMS[name].def);
+  }
+
+  // And the grade pass asked once more, because the walk above cannot answer for the case
+  // that matters. A gated parameter's own write re-asks `gradeNeeded` as it lands, so any
+  // set with one installed settles itself - but uninstall the last of them and there is no
+  // gated write left to make, and the pass would stay open on a term the registry no
+  // longer has, running a full-screen read and write per frame for nothing. Asked here it
+  // is one call against a list that has just been re-derived.
+  grade.enabled = gradeNeeded();
+}
+
+// Boot's own call, and the first run of the path above. Everything from here down reads a
+// registry and a panel that exist because this line ran.
+adoptEffectPackages(effectPackages, shaderPrograms);
+
+/**
+ * The store read again, and everything on this page rebuilt from what it says.
+ *
+ * **The document goes out through the serialiser and comes back through the loader, and
+ * that is the whole of the parking half.** An install has to unpark what the arriving
+ * effect owns and an uninstall has to park what the departing one owned, and both of
+ * those are the three-way split `restoreProject` already performs against whatever
+ * registry it happens to be looking at - a bare name is a typo and is refused, a dotted
+ * name whose effect is installed is validated and applied, a dotted name whose effect is
+ * absent is parked. So the pair of writes below is the pair of reads that already exists:
+ * `serialiseProjectBody` hands over the open document with the parked pool merged back
+ * value for value, the registry is replaced underneath it, and the loader re-splits the same
+ * document against the new one. An effect that has just arrived finds its parked values
+ * in `look.params` and applies them; an effect that has just left finds its values
+ * unrecognised and parks them, with the `requires` entry the serialiser wrote on the way
+ * out - which is where the version the badge quotes comes from, at the moment the package
+ * was still here to be asked.
+ *
+ * Writing that as two loops over the pool would have been the second implementation of
+ * the split, and it would have had to re-derive the entry, re-validate the keys, re-prune
+ * the suppressions and repaint the badge - four things this loader does and the loop
+ * would have had to be taught.
+ *
+ * **Nothing is written until the new set assembles.** The fetch and the assembly happen
+ * before the first assignment, so a store that answers a package this build cannot
+ * assemble leaves the page exactly as it was and the caller gets the assembler's own
+ * sentence. That is the last line of defence behind the install door rather than a
+ * duplicate of it: the door refuses the package on the machine it was installed on, and
+ * this refuses a set that arrived some other way.
+ *
+ * **And nothing stays written unless every step lands, which is the half of it the
+ * assembly guard above could not reach.** The adoption is not the last thing that can
+ * throw: `restoreProject` runs after it and refuses a document for seventeen reasons, and
+ * one of them is reachable by exactly the gesture this function exists to serve. Install a
+ * fork that *adds* a parameter while a document holds that effect - parked or open - and
+ * the document then names a subset of the new manifest, which the per-effect completeness
+ * rule refuses. The page that came out of that was new registry, new panel, new programs,
+ * and a parked pool still describing the build before last: a state no document was ever
+ * saved from and none can be saved into, because the pool and the registry disagree about
+ * which names are live.
+ *
+ * So everything needed to come back is captured before the first mutation and the whole
+ * thing rolls back on any throw after it. The rollback is a second call to the same
+ * adoption with the packages and the programs this page was already running, followed by
+ * the same document going back through the same loader - **no fetch and no re-assembly**,
+ * because the moment there is nothing left to fall back to is the wrong moment to need the
+ * network, and because staying synchronous is what keeps the half-swapped state
+ * unobservable: from any other task the page is either the old set or the old set, never
+ * the pair mid-swap.
+ *
+ * **The completeness refusal stays a refusal**, and that is the decision this rollback is
+ * built around rather than a limitation of it. Filling the parameter the fork added from
+ * its default would be this build guessing at a look somebody else authored, which is the
+ * adaptation every other door here refuses; the honest answer is that the page cannot
+ * carry *this* document onto that package, said out loud, with the page still drawing what
+ * it drew.
+ *
+ * **It answers null when it stands down**, which is the one outcome that is neither a
+ * rebuild nor a failure - see `effectRebuildBlocked` for the conditions and for why they
+ * have to be asked twice.
+ */
+async function reloadEffects() {
+  // Captured before anything moves, and read from the live bindings rather than re-derived:
+  // these two are the objects the renderer is holding right now, so putting them back is a
+  // return rather than a reconstruction.
+  const heldPackages = effectPackages;
+  const heldPrograms = shaderPrograms;
+  // Every value in flight, view state included, so an install does not move a slider - and
+  // so the rollback restores the same values the forward attempt was handed.
+  const held = params.values(params.names());
+  let fetched;
+  let programs;
+  let open;
+  // **Two catches over what used to be one, and the split is the whole of what the poll
+  // reads afterwards.** Nothing has been written by either of them, so neither has anything
+  // to undo - what differs is whether asking again could ever answer differently. A fetch
+  // that did not work is a server restarting, a dropped socket, a proxy between two
+  // machines: the revision on the other side may be perfectly good and the next tick is
+  // what finds out. A set that does not assemble, or a document this page cannot serialise
+  // to carry across, is this build refusing what the store holds, and every tick after it
+  // refuses the same thing at the cost of a full refetch. See `effectRefusal`.
+  try {
+    fetched = await fetchEffectPackages();
+  } catch (err) {
+    // **The mark travels through this frame rather than being decided in it.** A read is
+    // where both kinds of failure live: a dropped socket is a fetch that did not work and
+    // the next tick is what finds out, and a body the shape rules refuse is content this
+    // store is serving and will go on serving. The classification is made at each throw
+    // site down there, where the difference is known, so this re-frames the sentence for
+    // the chip and carries whatever the throw decided - a plain `new Error` here erased the
+    // mark on every refusal a read can make, and put a deterministic malformed package back
+    // on the six-second loop the property exists to take it off.
+    const framed = `the installed effects changed and this page could not read them: ${err.message}`;
+    throw err.effectRefusal ? effectRefusal(framed) : new Error(framed);
+  }
+  try {
+    programs = assembleShaders(SPINES, fetched);
+    open = serialiseProjectBody();
+  } catch (err) {
+    // The assembler's own message says what did not assemble and says nothing about why
+    // this page was asking, and the chip it lands on holds one line. The framing is the
+    // sentence this function has always composed here, kept identical across both branches
+    // because it is what a person reads - the classification travels on the property.
+    throw effectRefusal(`the installed effects changed and this page could not read them: ${err.message}`);
+  }
+
+  // **Asked again here, after the last await and before the first write.** The poll asks
+  // the same question on its way in, and between the two there are several dozen requests -
+  // which is long enough for an export to start, and an export is precisely what must not
+  // have the look replaced underneath it. A rebuild landing there changes two shader
+  // programs and every value between one frame of the file and the next, and the file is
+  // the one artefact of this program nobody can watch being made. The other two are the
+  // same shape one gesture down. Nothing has been written yet, so standing down is a
+  // return: the signature is untouched, and the next tick asks again in six seconds.
+  const blocked = effectRebuildBlocked();
+  if (blocked) return null;
+
+  // **Whether the programs actually moved, decided before anything is swapped.** A package
+  // that changed only its parameters - a retuned bound, a new label, a fork that adds a key
+  // with no GLSL - assembles into the identical two programs, and warming them costs an
+  // additive toggle, two composed frames and `resetAccumulators`, which clears the surface
+  // memory pair and both afterimage buffers and puts `lastProgramTime` back to zero. On a
+  // page mid-playback that is the trails and the afterimage disappearing for a reason
+  // nobody can connect to anything, on an install that changed no pixel of the shader.
+  // Compared as text because text is what a program is here and what the driver would be
+  // handed: identical text is a program already compiled and already warm.
+  const sameProgram = programs.cloud.vertexShader === heldPrograms.cloud.vertexShader
+    && programs.cloud.fragmentShader === heldPrograms.cloud.fragmentShader
+    && programs.grade.vertexShader === heldPrograms.grade.vertexShader
+    && programs.grade.fragmentShader === heldPrograms.grade.fragmentShader;
+
+  let failure = null;
+  try {
+    // **Inside the try with everything else, and it was outside it.** The adoption is not
+    // only the thing the rollback protects against a later failure - it can throw itself,
+    // and by then it has already replaced the registry: `buildPanel` refuses a parameter
+    // naming no panel group and refuses a row count that does not match the registry, both
+    // of which are reachable from a package the door has now been taught to refuse but
+    // which nothing stops arriving from a store written to some other way. Left outside,
+    // that throw walked past the rollback into the poll's catch, and the page was the
+    // half-migrated state this whole transaction exists to make unreachable.
+    adoptEffectPackages(fetched, programs, held);
+    // The swapped programs and the additive variant, compiled here rather than on the frame
+    // that first reaches them - which is the same 83ms stall `warmPrograms` was written for,
+    // arriving at a moment nobody would connect to an install. Skipped where the text did
+    // not move, because there is nothing to compile and the reset it ends with is not free.
+    if (!sameProgram) warmPrograms();
+    restoreProject(open);
+  } catch (err) {
+    failure = err;
+    try {
+      adoptEffectPackages(heldPackages, heldPrograms, held);
+      restoreProject(open);
+    } catch (stuck) {
+      // **The corner where there is no repair, reported rather than papered over.** The
+      // document that could not be loaded onto the new registry could not be loaded back
+      // onto the old one either, which means the failure is in the document rather than in
+      // the pairing - and this page is now holding a registry it cannot restore anything
+      // into. Nothing is repainted on the way out, because a panel repainted over a state
+      // no document describes is a page that looks well and is not.
+      //
+      // A refusal, so the poll asks once: the document and the set are both exactly what
+      // they were, and a retry is the same two failures at the cost of a second refetch on
+      // a page whose next honest instruction is to reload.
+      throw effectRefusal(
+        'the installed effects changed, this page could not carry the open document across to them, '
+        + `and it could not put itself back either - reload the page: ${stuck.message}`,
+      );
+    }
+  }
+  refreshGroups();
+  requestRepaint();
+  // Thrown after the repaint rather than before it, so the page the operator is looking at
+  // is the rolled-back one by the time the sentence describing it arrives.
+  if (failure) {
+    // A refusal for the reason the adoption's own failures are: the rollback landed, so the
+    // page is whole and the set on the server is still the one it cannot use. Asking again
+    // in six seconds refetches every package to reach this same sentence.
+    throw effectRefusal(
+      'the server installed the effects it was asked for, but this page could not carry the open '
+      + `document across to them, so it is still running the effects it had: ${failure.message}`,
+    );
+  }
+  // A set this page has carried a document onto is a set it is not blocked on, whichever door
+  // asked for the rebuild - see `refusedEffectSignature` for why the comparison alone would
+  // leave a stale block standing over a store that came back to where it was.
+  refusedEffectSignature = null;
+  return fetched.map((p) => ({ id: p.id, version: p.manifest.version, rev: p.rev }));
+}
+
+/**
+ * Every client converges, because one of them installing does not tell the others.
+ *
+ * A slow poll rather than a socket message, and the interval is deliberately unhurried:
+ * an install is a thing a person does a handful of times, the cost of noticing it a few
+ * seconds late is that a second browser draws the old look for a few seconds, and the
+ * cost of a socket message would be a second channel carrying state that the store
+ * already answers for. `GET /effects` reads eighteen directories and hashes their files,
+ * which is the whole of what a tick costs when nothing has changed.
+ *
+ * **A tick stands down rather than queues while anything is mid-gesture.** A rebuild
+ * replaces both shader programs and rewrites every value, so one landing inside an export
+ * would change the look between two frames of one file, one landing inside a preset
+ * gesture would fight the bulk write that gesture is making, and one landing inside track
+ * evaluation would be refused by `params.apply`'s own guard with a throw nobody asked
+ * for. Standing down costs one interval, and the signature is still whatever it was, so
+ * the next tick asks again.
+ */
+const EFFECT_POLL_MS = 6000;
+let effectReloading = false;
+
+/**
+ * Why a rebuild may not happen right now, by name, or null.
+ *
+ * A declaration and not a `const`, so `reloadEffects` above can ask it: the poll asks on
+ * its way in and the rebuild asks again after its last fetch, and the two have to be one
+ * question or the second is a looser copy of the first that stops covering a case the
+ * first still names.
+ */
+function effectRebuildBlocked() {
+  if (exporting) return 'an export is running';
+  if (presetGesture) return 'a preset gesture is open';
+  if (evaluating) return 'a track is being evaluated';
+  return null;
+}
+
+// The last thing this poll complained about, so a store answering the same nonsense every
+// six seconds says it once rather than a hundred times an hour. It is the message and not
+// a flag, because a *different* fault is worth hearing about even while the first is still
+// there.
+let lastPollComplaint = null;
+
+async function pollEffects() {
+  // **The guard goes up at the top of the tick and it used to go up after the list came
+  // back.** Two ticks overlapped in that window - the interval does not wait for the last
+  // one - and each read the store, each rebuilt, and whichever finished second won. With
+  // an install landing between them the loser was the newer set, so the page settled on
+  // the packages it had read *first* while its signature claimed the ones it had read
+  // second, and the comparison that would have noticed agreed with itself forever after.
+  if (effectReloading || effectRebuildBlocked()) return;
+  effectReloading = true;
+  try {
+    let listed;
+    try {
+      listed = await listEffects();
+    } catch (err) {
+      // A server that is restarting is not a reason to say anything, and a body this build
+      // cannot read is a reason to say it once. Either way the page goes on drawing the set
+      // it has: the signature is untouched, so a store that comes back is picked up by the
+      // same comparison with no special case. What must not happen is the throw escaping
+      // into the interval, which is what a signature computed outside this catch used to
+      // do - once every six seconds, for the life of the page, with nothing awaiting the
+      // rejected promise.
+      if (err.message !== lastPollComplaint) {
+        lastPollComplaint = err.message;
+        console.warn('could not read the installed effects:', err.message);
+      }
+      return;
+    }
+    lastPollComplaint = null;
+    const listedSignature = revSignature(listed.effects);
+    if (listedSignature === effectSignature) return;
+    // **The set this page has already failed to adopt, asked once rather than every six
+    // seconds.** A rollback puts the old signature back, deliberately, so the comparison a
+    // line above goes on saying the store has moved - which is true and is not a reason to
+    // try the same rebuild again. What that cost was a page that fetched every package,
+    // reassembled two programs, disposed the material it had, reset the accumulators, failed
+    // in the same place and printed the same sentence, ten times a minute for as long as the
+    // store held a package this build cannot use.
+    //
+    // Keyed on the server's signature rather than on a flag, so the block lifts by itself the
+    // moment anything about the store changes - a fix installed, the offending package
+    // removed, anything. What it does not lift for is a change on *this* page: an operator
+    // who has opened a different document and thinks the install would land now asks for it
+    // with `__kinect.effects.reload()`, which goes nowhere near this.
+    if (listedSignature === refusedEffectSignature) return;
+    await pollRebuild(listedSignature);
+  } finally {
+    effectReloading = false;
+  }
+}
+
+async function pollRebuild(listedSignature) {
+  try {
+    // Null is the rebuild standing down rather than failing - an export started while it
+    // was reading, most likely - and it has written nothing and moved no signature, so the
+    // next tick asks the same question again. Silent on purpose: a chip announcing that
+    // nothing happened is a chip that has to be read to find that out.
+    if (await reloadEffects() === null) return;
+    say('the installed effects changed - this page has been rebuilt from them');
+  } catch (err) {
+    // **Reported once and then not asked again until the store moves.** The set on the
+    // server is the one this page could not adopt, so a retry is the same failure with the
+    // same sentence - and it is not free: every attempt refetches every package, reassembles
+    // both programs, disposes the material the page is drawing with and resets the
+    // accumulators, all of it to arrive at the same refusal. Remembering the signature that
+    // failed is what turns "the page cannot use this install" from a loop into an event.
+    //
+    // The signature the page is *assembled* from is still left alone, which is what keeps a
+    // rollback and an assembly failure converging on one behaviour: neither moves it, so the
+    // comparison a tick makes on its way in goes on saying the store has moved, and the block
+    // below is what decides whether that is worth acting on.
+    //
+    // **The sentence is the one the reload composed, printed rather than framed again.**
+    // Every way out of `reloadEffects` now carries a whole sentence naming what failed and
+    // what state that leaves this page in, and a prefix added here would say a third time
+    // what the message already says twice - on a chip that ellipsises, where the width the
+    // prefix takes is the width the refusal loses.
+    //
+    // **And the block goes up only for a refusal, which is the half this used to get
+    // wrong.** It went up for every failure there is, so one server restart between the
+    // listing and a package fetch, or one dropped connection on a page reached over the
+    // LAN, blocked a revision that was never anything but good - until something else moved
+    // the store, which on a machine where an install is a thing somebody does a few times a
+    // year is until the page is reloaded. A read that did not work says nothing about
+    // whether this build can use what is on the other side of it, so the next tick asks
+    // again; a refusal is this build saying it cannot, and asking again costs a full
+    // refetch to be told so a second time. See `effectRefusal` for why the difference
+    // travels on a property rather than on the words.
+    if (err.effectRefusal) refusedEffectSignature = listedSignature;
+    console.warn('could not rebuild from the installed effects:', err.message);
+    say(err.message);
+  }
+}
+setInterval(pollEffects, EFFECT_POLL_MS);
 
 // The four Pencil inspectors are views over the one registry-built panel. Groups are
 // tagged where they are declared above, so adding a parameter to a group inherits its
@@ -2444,8 +3469,27 @@ for (const group of PANEL_GROUPS) {
 // document: the registry and proof sweeps still see the complete surface.
 const panelTabsEl = document.getElementById('panelTabs');
 const panelTabButtons = [...panelTabsEl.querySelectorAll('.paneltab')];
-// Default to 'record' on the record surface, 'look' on the editor.
-let activePanelTab = EDITING ? 'look' : 'record';
+// `activePanelTab` is declared beside the panel's other boot-order casualties, up with
+// `panelControls` - see the note there.
+
+/**
+ * Every group on screen shown or hidden by whether it belongs to the tab that is up.
+ *
+ * **A function rather than a loop inside `setPanelTab`, because the panel generator needs
+ * the same rule and there may only be one of it.** A generated group is a brand new
+ * element with `hidden` unset, so a rebuild put every group on screen at once: one install
+ * and the inspector showed Look, Camera, Framing and Region stacked on top of each other
+ * until somebody pressed a tab. Written twice, the copy in the generator is the one that
+ * would stop agreeing about which groups a tab holds.
+ *
+ * A declaration, so `buildPanel` a few hundred lines above can call it.
+ */
+function hideOffTab() {
+  const tab = activePanelTab;
+  for (const group of document.querySelectorAll('#panelBody > [data-panel-tab]')) {
+    group.hidden = group.dataset.panelTab !== tab;
+  }
+}
 
 function setPanelTab(tab) {
   if (!['record', 'camera', 'framing', 'look', 'region'].includes(tab)) return false;
@@ -2453,9 +3497,7 @@ function setPanelTab(tab) {
   for (const button of panelTabButtons) {
     button.setAttribute('aria-selected', String(button.dataset.panelTab === tab));
   }
-  for (const group of document.querySelectorAll('#panelBody > [data-panel-tab]')) {
-    group.hidden = group.dataset.panelTab !== tab;
-  }
+  hideOffTab();
   document.getElementById('panelBody').scrollTop = 0;
   return true;
 }
@@ -2471,8 +3513,6 @@ function showInspector() {
 
 // On the record surface, initialize the tabs immediately since they're always visible.
 if (!EDITING) setPanelTab(activePanelTab);
-
-params.reset();
 
 // ------------------------------------------------------------------- presets
 
@@ -2903,20 +3943,199 @@ function storeGroupOverride() {
   }
 }
 
-// What each parameter is worth in a project nobody has touched, computed once.
-//
-// **Through `normalise`, not against `PARAMS[n].def` raw**, and the difference is a
-// class rather than a case. `normalise` clamps, snaps to a grid anchored at `min` and
-// rounds to the decimals `min` and `step` imply, and every scalar default this build
-// declares happens to land on its own grid - so raw equality is correct today and
-// would go on being correct right up until somebody adds a parameter whose default is
-// not on its step. That group would then read as touched from boot, on a fresh page,
-// with nothing anywhere saying why. Doing it once at module scope is what keeps the
-// arithmetic off the evaluator's path, where this is asked several times a frame.
-const groupDefaults = new Map();
-for (const names of panelGroupParams.values()) {
-  for (const name of names) groupDefaults.set(name, params.normalise(name, PARAMS[name].def));
+// Which installed effects a person has chosen to keep in the inspector. This is panel
+// state, not project state: values and tracks still decide what the document contains,
+// while this set only keeps an otherwise idle effect within reach. A touched effect is
+// always present whether or not it is named here, so local storage can never hide work.
+const EFFECT_RACKED = 'kinect.rackedEffects';
+const rackedEffects = new Set();
+try {
+  const saved = localStorage.getItem(EFFECT_RACKED);
+  if (saved !== null && saved.trim() !== '') {
+    const parsed = JSON.parse(saved);
+    if (Array.isArray(parsed)) {
+      for (const id of parsed) if (typeof id === 'string' && id) rackedEffects.add(id);
+    }
+  }
+} catch {
+  // The values and tracks remain authoritative when storage is unavailable or damaged.
 }
+
+function storeRackedEffects() {
+  try {
+    localStorage.setItem(EFFECT_RACKED, JSON.stringify([...rackedEffects].sort()));
+  } catch {
+    // The rack still works for this page; only the preference is lost on reload.
+  }
+}
+
+function retainEffectFor(name) {
+  const id = effectOf(name);
+  if (!id || rackedEffects.has(id)) return;
+  rackedEffects.add(id);
+  storeRackedEffects();
+}
+
+function effectTouched(id) {
+  return effectParamNames(id).some(paramTouched);
+}
+
+function effectPresent(id) {
+  return rackedEffects.has(id) || effectTouched(id);
+}
+
+function effectGroups(id) {
+  const keys = new Set(effectParamNames(id).map((name) => PARAMS[name].group));
+  return PANEL_GROUPS.filter((group) => keys.has(group.key));
+}
+
+function refreshEffectRack() {
+  let moved = false;
+  const installed = new Set(effectIds());
+  for (const id of [...effectRackPainted.keys()]) {
+    if (!installed.has(id)) effectRackPainted.delete(id);
+  }
+  for (const id of installed) {
+    const present = effectPresent(id);
+    if (effectRackPainted.get(id) === present) continue;
+    effectRackPainted.set(id, present);
+    for (const row of panelEffectRows.get(id) ?? []) row.hidden = !present;
+    moved = true;
+  }
+  if (!moved) return;
+
+  // A package-owned group leaves with its last visible effect row. Mixed groups remain
+  // because their core rows are basic clip controls and do not belong to the rack.
+  for (const [key, node] of panelGroupElements) {
+    const visible = (panelGroupParams.get(key) ?? []).some((name) => {
+      const id = effectOf(name);
+      return id === null || effectPresent(id);
+    });
+    node.classList.toggle('rackempty', !visible);
+  }
+}
+
+function effectRackEntry(id) {
+  const names = effectParamNames(id);
+  const moved = names.filter((name) => params.get(name) !== groupDefaults.get(name));
+  const keys = names.reduce((count, name) => count + (tracks.get(name)?.keys.length ?? 0), 0);
+  return { names, moved, keys };
+}
+
+let effectRackConfirming = null;
+
+function addEffectToRack(id) {
+  if (!effectInstalled(id)) return false;
+  rackedEffects.add(id);
+  storeRackedEffects();
+  for (const group of effectGroups(id)) {
+    if (!group.collapses) continue;
+    groupOverride.set(group.key, true);
+    groupOverrideDirty = true;
+  }
+  refreshPanel();
+
+  const first = effectParamNames(id)[0];
+  const group = PANEL_GROUPS.find((entry) => entry.key === PARAMS[first]?.group);
+  const dialog = document.getElementById('effectRackDialog');
+  if (dialog.open) dialog.close();
+  if (group) setPanelTab(group.tab);
+  requestAnimationFrame(() => {
+    const control = panelControls.get(first);
+    control?.scrollIntoView({ block: 'center' });
+    control?.focus({ preventScroll: true });
+  });
+  return true;
+}
+
+function removeEffectFromRack(id) {
+  if (!effectInstalled(id)) return false;
+  const { names } = effectRackEntry(id);
+  effectRackConfirming = null;
+  rackedEffects.delete(id);
+  storeRackedEffects();
+
+  // Values and tracks leave as one document edit. The rack choice itself stays outside
+  // undo, so undo restores the work and its touched state makes the effect appear again.
+  withoutRepaint(() => {
+    for (const name of names) params.set(name, resetTarget(name));
+  });
+  for (const name of names) tracks.delete(name);
+  if (selection && names.includes(selection.owner)) selection = null;
+  lanesChanged();
+  requestRepaint();
+  history.commit();
+  paintEffectRackDialog();
+  return true;
+}
+
+function paintEffectRackDialog() {
+  const list = document.getElementById('effectRackList');
+  const search = document.getElementById('effectRackSearch');
+  if (!list || !search) return;
+  const query = search.value.trim().toLocaleLowerCase();
+  const packages = effectPackages
+    .map((entry) => ({ id: entry.id, title: entry.manifest.title || entry.id }))
+    .filter(({ id, title }) => !query
+      || id.toLocaleLowerCase().includes(query)
+      || title.toLocaleLowerCase().includes(query))
+    .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+
+  list.replaceChildren();
+  if (packages.length === 0) {
+    list.append(panelNode('div', 'effect-rack-empty', 'No installed effects match.'));
+    return;
+  }
+
+  for (const { id, title } of packages) {
+    const entry = effectRackEntry(id);
+    const row = panelNode('div', 'effect-rack-row');
+    row.dataset.effectRack = id;
+    const name = panelNode('div', 'effect-rack-name');
+    const detail = [];
+    if (entry.moved.length) detail.push(`${entry.moved.length} changed`);
+    if (entry.keys) detail.push(`${entry.keys} ${entry.keys === 1 ? 'key' : 'keys'}`);
+    if (!detail.length) detail.push(`${entry.names.length} ${entry.names.length === 1 ? 'control' : 'controls'}`);
+    name.append(panelNode('b', null, title), panelNode('small', null, `${id} · ${detail.join(' · ')}`));
+
+    const actions = panelNode('div', 'effect-rack-actions');
+    if (!effectPresent(id)) {
+      const add = panelNode('button', 'dialog-secondary', 'add');
+      add.type = 'button';
+      add.dataset.effectAdd = id;
+      add.setAttribute('aria-label', `add ${title} to the sidebar`);
+      add.addEventListener('click', () => addEffectToRack(id));
+      actions.append(add);
+    } else if (effectRackConfirming === id) {
+      const cancel = panelNode('button', 'dialog-secondary', 'cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => { effectRackConfirming = null; paintEffectRackDialog(); });
+      const remove = panelNode('button', 'dialog-secondary', 'reset & remove');
+      remove.type = 'button';
+      remove.dataset.effectConfirmRemove = id;
+      remove.setAttribute('aria-label', `reset and remove ${title}`);
+      remove.addEventListener('click', () => removeEffectFromRack(id));
+      actions.append(cancel, remove);
+    } else {
+      const remove = panelNode('button', 'dialog-secondary', 'remove');
+      remove.type = 'button';
+      remove.dataset.effectRemove = id;
+      remove.setAttribute('aria-label', `remove ${title} from the sidebar`);
+      remove.addEventListener('click', () => {
+        if (entry.moved.length || entry.keys) {
+          effectRackConfirming = id;
+          paintEffectRackDialog();
+        } else {
+          removeEffectFromRack(id);
+        }
+      });
+      actions.append(remove);
+    }
+    row.append(name, actions);
+    list.append(row);
+  }
+}
+
 
 /**
  * Whether one parameter carries evidence that somebody has been here: a keyframe track
@@ -3003,7 +4222,8 @@ function groupTouchedCount(key) {
  * write would put a `textContent` assignment and an attribute write per group into the
  * render path to say what the panel already said.
  */
-const groupPainted = new Map();
+// `groupPainted` is declared beside `panelControls`, with the other maps `buildPanel`
+// clears - see the note there for why boot order decides where it sits.
 // How often the panel has been re-derived, for the one question a tool cannot answer
 // from outside: whether a bulk write costs one pass or one per value in it. A count the
 // page keeps rather than a duration a driver times, because a rate taken around a
@@ -3146,8 +4366,13 @@ function toggleGroup(key) {
 // The no-op declared beside `paramWritten` becomes the real thing here, where both of
 // the stores the predicate reads exist, and the panel is painted once for the state the
 // page booted into.
-groupRevealChanged = refreshGroups;
-refreshGroups();
+function refreshPanel() {
+  refreshEffectRack();
+  refreshGroups();
+}
+
+groupRevealChanged = refreshPanel;
+refreshPanel();
 
 // Every track written through the one door, at one program position. This is the
 // evaluator the note on `evaluating` asked for: it runs inside
@@ -3213,6 +4438,7 @@ const keyTolerance = () => 0.5 / (timeline ? timeline.outputFps : 30);
  * spring back on its own.
  */
 function writeFromControl(name, value) {
+  retainEffectFor(name);
   const applied = params.set(name, value);
   const track = tracks.get(name);
   if (track && track.keys.length > 0) {
@@ -3226,6 +4452,7 @@ function writeFromControl(name, value) {
 
 /** Adds a key at the playhead, or removes the one already there. */
 function toggleKey(name) {
+  retainEffectFor(name);
   const track = trackFor(name);
   const existing = track.keyAt(playheadSec(), keyTolerance());
   if (existing) {
@@ -3243,6 +4470,122 @@ function toggleKey(name) {
 }
 
 // ------------------------------------------------------------------- the project
+
+/**
+ * The values and tracks of effects this build does not have, held exactly as the
+ * document wrote them.
+ *
+ * **A document naming an effect that is not installed is not a broken document, and
+ * this pool is what says so.** The three answers a look name can get are decided by
+ * one line - `isParkedName` - and only the third comes here: a bare name the registry
+ * does not know is a typo and is refused, a dotted name whose effect *is* installed
+ * but whose key is not is refused too, because a package cannot half-exist, and a
+ * dotted name whose effect is simply absent is parked. The viewer then loads, the
+ * installed part renders, and what belongs to the missing effect is never evaluated
+ * and never destroyed.
+ *
+ * **Never evaluated is why nothing here is validated.** A key's shape is checked
+ * against the parameter's own spec - kind, bounds, step - and there is no spec for a
+ * parameter this build has never declared. So a parked value is carried rather than
+ * inspected, which is the only honest thing to do with a number whose meaning lives
+ * in a package that is not here; `serialiseProjectBody` writes every key back holding
+ * exactly the value it arrived with, and a build that has the effect is the first reader
+ * that can say anything about it.
+ *
+ * **Per key, and not per byte.** The guarantee is that nothing under a parked prefix is
+ * renormalised, rebuilt, dropped or added to - what it is not is a promise about the file.
+ * The parked keys are appended after the installed ones, so a document that interleaved
+ * them comes back re-ordered, and every number goes through `JSON.parse`, which reads
+ * `1e0` and writes `1`. A load and save on a machine missing an effect therefore moves the
+ * document's revision, which is accepted: the work is intact and the bytes are not the
+ * claim. `tools/library-check.mjs`'s parked section is what holds the property that is
+ * actually promised.
+ *
+ * `requires` holds the document's own entries for the missing effects rather than
+ * ids, because an entry carries the version - and the badge quotes it, so the person
+ * reading it learns which build of the effect the clip was authored against rather
+ * than only that something is absent. An entry may also carry a `rev`, which is why
+ * the entry is kept whole instead of being rebuilt from an id.
+ *
+ * Replaced whole by `restoreProject` and by nothing else, so the pool is always the
+ * open document's rather than an accumulation across the documents a session opened.
+ */
+let parkedLook = { params: {}, tracks: {}, requires: [] };
+
+/**
+ * The effects the open document was authored against at a version this build does not
+ * have installed - one entry per effect, saying which is which.
+ *
+ * **A skew is surfaced and never refused, and that is a decision rather than an
+ * oversight.** A version is a string a package author writes; nothing in it says which
+ * direction is compatible, and refusing a document because 2.0.0 is installed where
+ * 1.0.0 was authored would make every retune of an effect a wall in front of every clip
+ * on the machine. Parking is for an effect that is *absent*, where there is genuinely
+ * nothing to render; here the effect is present and renders, and the only honest thing
+ * missing is that nobody said so. So the document loads, the installed version draws it,
+ * and the badge says which pair it is - which is the one fact that lets somebody decide
+ * whether the difference matters, since only they know what changed between the two.
+ *
+ * **The notice does not survive the next commit, and that is the design working.**
+ * `requires` is derived from the installed set on every save, so the first
+ * `history.commit()` after this rewrites the entry to the version that is actually here
+ * and the skew is gone. That is what a derived field is: the document records what it
+ * was last built from, and this machine has now built it. A build that preserved the old
+ * entry would be carrying a claim about a package it does not have and cannot check, and
+ * `refuseRequires` would then be reading a list that no longer describes the values
+ * beside it.
+ *
+ * Replaced whole by `restoreProject` for the reason `parkedLook` is: it is a property of
+ * the open document, not an accumulation across the ones a session has seen.
+ */
+let effectVersionSkew = [];
+
+/**
+ * The effects the operator has said to render without, which is session state and
+ * deliberately not in the document.
+ *
+ * An export whose project requires an effect this build lacks is refused, and this is
+ * the answer to that refusal: a decision about *this render on this machine*, which is
+ * the same kind of thing the deliverable is and not the same kind of thing the clip is.
+ * A suppression written into the project would travel to the machine that has the
+ * effect and quietly render there without it, which is the failure the refusal exists
+ * to prevent arriving through the document.
+ *
+ * Pruned rather than cleared when a document loads, because every undo goes through
+ * `restoreProject` and clearing would spend the operator's decision on each one.
+ */
+let suppressedEffects = new Set();
+
+/**
+ * The parked pool as it may be written out - which is the pool less anything the registry
+ * has since started answering for.
+ *
+ * **Defence in depth against one shape of bug, and it is worth saying which.** The pool
+ * and the registry are disjoint by construction: `restoreProject` partitions the document
+ * once, on `isParkedName`, and assigns both halves in the same breath. Every way the
+ * registry moves goes back through that loader, so a name cannot be in the pool and in
+ * `PARAMS` at the same time - unless something swapped the registry and then failed to
+ * re-split the document, which is precisely the half-migrated page `reloadEffects` now
+ * rolls back rather than leaves behind.
+ *
+ * If that ever happens again, the write is where it would cost work rather than pixels. A
+ * stale parked copy of a name the build now has would be merged over the value the
+ * registry is rendering, so the file on disk would claim a look nobody is looking at, and
+ * the installed effect's own value - the one on screen, the one somebody just set - would
+ * be the copy that lost. Filtering here is the cheap half of that; `reloadEffects` is the
+ * half that stops the state existing.
+ *
+ * `requires` is filtered on the same fact, and it has to be filtered together with the
+ * keys rather than left alone: an entry for an effect whose parked keys have just been
+ * dropped is either a duplicate of the one `requiresFor` derives, or a claim on an effect
+ * the look no longer names - and `refuseRequires` refuses both, so a pool half-filtered
+ * would write a document this build's own loader would not take back.
+ */
+const writableParked = () => ({
+  params: Object.fromEntries(Object.entries(parkedLook.params).filter(([n]) => isParkedName(n))),
+  tracks: Object.fromEntries(Object.entries(parkedLook.tracks).filter(([n]) => isParkedName(n))),
+  requires: parkedLook.requires.filter((entry) => !effectInstalled(entry.id)),
+});
 
 // Everything an edit *is*, as one plain object. A project file, an undo snapshot
 // and step 6's export job all start here, which is why this is one function rather
@@ -3263,19 +4606,80 @@ function toggleKey(name) {
 // ordinary look parameters now, so `params.values(params.names('look'))` carries them
 // and there is no second list to forget.
 
-function serialiseProjectBody() {
+/**
+ * `suppressed` is the one option, and it is for the export path alone: a deliverable
+ * rendered without an effect this build lacks records which ones it went without, so
+ * the file's own record says what it is a render *of* rather than leaving somebody to
+ * compare its look against a document that claims more than the render contains.
+ *
+ * It is not a project field. `history.snapshot` and every save call this with nothing,
+ * so no document on disk ever grows the key, and a suppression stays what it is - a
+ * decision about one render on one machine.
+ */
+function serialiseProjectBody({ suppressed = null } = {}) {
+  const lookNames = params.names('look');
+  const lookParams = params.values(lookNames);
+  // The save rule, the same one `presetFromCurrentLook` applies and for the same
+  // reason: an effect the edit holds at defaults with nothing keyed is not part of
+  // this clip, and writing it out anyway would make `requires` claim the clip needs
+  // it. `restoreProject` resets the look tag before applying, so the shed effect
+  // restores to exactly the defaults that were shed - the two documents are one
+  // state. A track with keys keeps its effect whole even at default values, because
+  // the keys are the edit.
+  for (const id of effectIds()) {
+    const mine = effectParamNames(id);
+    const keyed = mine.some((n) => tracks.get(n)?.keys.length);
+    const moved = mine.some((n) => lookParams[n] !== PARAMS[n].def);
+    if (keyed || moved) continue;
+    for (const n of mine) delete lookParams[n];
+  }
+  const kept = Object.keys(lookParams);
+  // The pool, filtered down to the names this build genuinely cannot answer for - see
+  // `writableParked` for the state that filter is defence against.
+  const parked = writableParked();
+  // **The parked effects' entries, whole, and appended rather than interleaved.** The
+  // list is one entry per effect and `refuseRequires` reads it as a set, so position
+  // carries nothing - what has to survive is the version, and the `rev` where a
+  // document pins one, which is why the document's own entry is carried instead of an
+  // id being handed back to `requiresFor`. A parked effect keeps its entry because its
+  // values are still in the document: the list stays derived from what the look names,
+  // which is the property both directions of `refuseRequires` rest on.
+  const requires = [...requiresFor(kept), ...parked.requires];
   return {
     version: PROJECT_VERSION,
+    ...(requires.length ? { requires } : {}),
+    ...(suppressed ? { suppressed } : {}),
     look: {
       // Look parameters only; the registry separates look from view and from the
       // camera, so an undo snapshot or a render job does not carry render scale or
       // the free camera's orbit.
-      params: params.values(params.names('look')),
-      tracks: Object.fromEntries(
-        params.names('look')
-          .filter((n) => tracks.has(n))
-          .map((n) => [n, tracks.get(n).serialise()]),
-      ),
+      //
+      // **And the parked pool merged back, value for value.** A build without an effect
+      // has to be able to open a document, save it, and leave the parts it cannot read
+      // holding exactly what they held - the pool is spread rather than walked, so nothing
+      // here inspects or rebuilds a value on the way past. The keys land after the
+      // installed ones and the numbers go through `JSON.parse`, so the *file* is not the
+      // one it was and the revision moves; the values are, which is the promise. Anything
+      // less makes opening a clip on the wrong machine a
+      // destructive act, and it destroys precisely the work nobody on that machine can
+      // redo.
+      //
+      // **The installed reading wins, and the filter above is what makes that true rather
+      // than the spread order.** The two sets are disjoint by construction and the spread
+      // is the cheap way to join them; what the spread cannot do is decide a collision, and
+      // it decides one the wrong way round - a parked copy landing second overwrites the
+      // value the registry is rendering. `writableParked` drops the collision instead of
+      // ordering it, so the sentence this comment has always made is enforced by the line
+      // above rather than asserted by this one.
+      params: { ...lookParams, ...parked.params },
+      tracks: {
+        ...Object.fromEntries(
+          kept
+            .filter((n) => tracks.has(n))
+            .map((n) => [n, tracks.get(n).serialise()]),
+        ),
+        ...parked.tracks,
+      },
     },
     composition: {
       // Retime is the source-to-program mapping, and the camera track is the one
@@ -3559,6 +4963,84 @@ function restoreProject(project) {
   if (!project.look.tracks || typeof project.look.tracks !== 'object') {
     throw new Error('a project look carries a tracks object, empty if nothing is keyed');
   }
+  // The effect list against what the document touches - values and tracks both,
+  // because a track is a use of the effect whether or not a static value moved.
+  refuseRequires('this project', project.requires, [
+    ...Object.keys(project.look.params),
+    ...Object.keys(project.look.tracks),
+  ]);
+  // **Where the missing-effect split happens, and it is one predicate rather than a
+  // load-time special case.** Everything below asks `isParkedName`, which answers on
+  // the one fact that decides: the dotted prefix names an effect this build has not
+  // installed. A bare name the registry does not know is a typo and still throws at
+  // `params.spec`; a dotted name whose effect *is* here but whose key is not throws
+  // there too, because a package cannot half-exist and half a package is a build that
+  // is wrong rather than a build that is short. Only the third case parks, and it parks
+  // through this set so that uninstalling an effect later - which is the same condition
+  // arriving from the other direction - reaches the same code by being the same
+  // question.
+  const parkedNames = new Set(
+    [...Object.keys(project.look.params), ...Object.keys(project.look.tracks)].filter(isParkedName),
+  );
+  const parkedIds = [...new Set([...parkedNames].map(effectOf))];
+  // The entries the document itself wrote for those effects. `refuseRequires` above has
+  // already held the list and the values to each other in both directions, so an id that
+  // is parked has an entry here by construction and finding none would be that refusal
+  // having stopped working rather than a document to accommodate.
+  const parkedRequires = parkedIds.map((id) => (project.requires ?? []).find((e) => e.id === id));
+  // **And the entries for the effects that *are* here, compared against what is here.**
+  // `refuseRequires` holds the list and the values to each other and says nothing about
+  // versions, so a clip authored against `glyph` 1.0.0 opens perfectly on a machine
+  // carrying 2.0.0 and renders 2.0.0 without a word. That is the right behaviour - see
+  // the declaration of `effectVersionSkew` for why a refusal here would be worse - and it
+  // is the *silence* that is not, because the picture is then a look nobody authored with
+  // no way to find out. Collected here, in the phase that changes nothing, and assigned
+  // with the other writes below.
+  const versionSkew = (project.requires ?? [])
+    .filter((e) => typeof e?.id === 'string' && effectInstalled(e.id))
+    .map((e) => ({ id: e.id, wanted: e.version, installed: versionOf(e.id) }))
+    .filter((e) => e.wanted !== e.installed);
+  // And each effect it touches, whole - the readings rule one namespace over. The
+  // reset below hands an omitted parameter its default, so half a glyph field would
+  // load as a blend of the document and the defaults that nothing on screen says is
+  // a blend. The writer saves whole effects, so the reader demands what the writer
+  // meets.
+  //
+  // **Asked of the installed effects only, and the exclusion is a fact rather than a
+  // convenience.** `effectParamNames` filters the registry, so for an effect that is not
+  // here it answers the empty list and this loop would pass an effect vacuously - which
+  // is the shape `docs/instruments.md` calls a hole with a justification on it. Written
+  // out, the honest statement is that nothing in this build knows how many parameters a
+  // missing effect has, so there is no completeness to demand: the machine that has the
+  // package is the first reader that can ask.
+  //
+  // **Which effects a document *uses* is its values and its tracks, and asking the values
+  // alone left a whole shape outside the rule.** A document carrying a `glyph.tone` track,
+  // a `requires` entry for glyph and no glyph values at all named no glyph key in
+  // `look.params`, so this loop never reached the id and the completeness demand was
+  // simply not made. It loaded: the track's name is one the registry knows and its tag is
+  // `look`, so nothing below refused it either, and every glyph parameter came back at its
+  // default under a curve the document did author. The save then wrote them all out - the
+  // rule in `serialiseProjectBody` keeps an effect whose track has keys - so the file on
+  // disk gained four values nobody set, silently, on a machine that was only ever asked to
+  // open it. That is the same "an edit silently lost" the track refusals below are about,
+  // arriving through the one door that was asking about the wrong half of the document.
+  //
+  // The demand itself is unchanged and is still about the *values*: a track is a use of
+  // the effect and never a substitute for its value, since the evaluator writes through
+  // `params.set` and a parameter with no static value would restore to its default and be
+  // overwritten by the curve at every frame but the ones between keys.
+  const touched = effectIdsIn([...Object.keys(project.look.params), ...Object.keys(project.look.tracks)]);
+  for (const id of touched.filter((n) => !parkedIds.includes(n))) {
+    const short = effectParamNames(id).filter((n) => !Object.hasOwn(project.look.params, n));
+    if (short.length) {
+      throw new Error(
+        `this project names part of ${id} but not ${short.join(', ')}: a document carries every `
+        + 'parameter of an effect it uses, and the ones it leaves out would come back as defaults '
+        + 'rather than as the look it was saved with',
+      );
+    }
+  }
   if (!project.composition.retime || !Array.isArray(project.composition.retime.keys) || !Number.isFinite(project.composition.retime.rate) || project.composition.retime.rate <= 0) {
     throw new Error('a project composition carries a retime with a positive rate and an array of keys');
   }
@@ -3573,8 +5055,20 @@ function restoreProject(project) {
   // since this step - a quaternion that is not of unit length. Routing keys through
   // it is the whole of why a hand-edited camera track cannot reach `poseAt`.
   const restoredLook = [];
+  const parkedTracks = {};
   for (const [name, keys] of Object.entries(project.look.tracks)) {
     if (!Array.isArray(keys)) throw new Error(`look track ${name} is not an array of keys`);
+    // **A track under a missing effect is parked before it is asked anything.** The
+    // shape checks below - the kind, the bounds, the ease handles, the fold - are all
+    // asked of `params.spec(name)`, and there is no spec for a parameter this build has
+    // never declared. So the keys are carried rather than inspected: this build cannot
+    // evaluate them and cannot judge them either, and the one thing it can do without
+    // guessing is hand them back unchanged. The array is not copied, and that is the
+    // point - `serialiseProjectBody` writes exactly the object it was given.
+    if (parkedNames.has(name)) {
+      parkedTracks[name] = keys;
+      continue;
+    }
     // Names the registry does not know are refused rather than dropped. A track
     // silently discarded is an edit silently lost, and the file is more likely to
     // be from a build this one cannot read than to be harmlessly extra.
@@ -3638,7 +5132,23 @@ function restoreProject(project) {
   // and `apply` cannot, because it is itself one of the writes. A project carrying a
   // parameter this build has since removed has to be refused with nothing touched, and
   // that is earlier than the registry can see.
-  for (const name of Object.keys(project.look.params)) params.spec(name);
+  //
+  // **The parked half is split out here rather than filtered at the write**, because
+  // this loop is the refusal and the write below is the consequence: a name that skips
+  // the refusal has to skip the write too, and one partition taken once is what stops
+  // those two lists being able to disagree. `applied` is what reaches the registry;
+  // `parkedValues` is what nothing in this build will look at again until it is written
+  // back out.
+  const applied = {};
+  const parkedValues = {};
+  for (const [name, value] of Object.entries(project.look.params)) {
+    if (parkedNames.has(name)) {
+      parkedValues[name] = value;
+      continue;
+    }
+    params.spec(name);
+    applied[name] = value;
+  }
 
   const restoredCamera = project.composition.camera.map((k) => {
     const key = restoreKey('track camera', k, params.spec('camera').kind);
@@ -3669,6 +5179,28 @@ function restoreProject(project) {
   const stamp = project.appliedPreset ?? null;
   if (stamp !== null && (typeof stamp.name !== 'string' || typeof stamp.rev !== 'string')) {
     throw new Error(`appliedPreset is ${JSON.stringify(stamp)}: it is null, or a name and a rev`);
+  }
+
+  // **A deliverable's embedded document carries what its render went without, and this
+  // reader checks it and then leaves it alone.** `suppressed` is a record about a file
+  // rather than a statement about the clip: adopting it here would mean opening a render
+  // record and silently inheriting somebody else's decision to go without an effect,
+  // which is the export refusal being answered by a document instead of by a person. So
+  // the shape is refused when it is wrong - a malformed record is a document this build
+  // cannot place, exactly as a malformed `requires` is - and a well-formed one changes
+  // nothing, which is why there is no branch below reading it.
+  if (project.suppressed !== undefined) {
+    const ok = Array.isArray(project.suppressed) && project.suppressed.every((e) => e
+      && typeof e === 'object' && !Array.isArray(e)
+      && typeof e.id === 'string' && /^[a-z][a-z0-9]*$/.test(e.id)
+      && typeof e.version === 'string' && e.version.length > 0);
+    if (!ok) {
+      throw new Error(
+        `this project carries ${JSON.stringify(project.suppressed)} where its suppressed list belongs: `
+        + 'it is a list of { id, version } entries naming the effects a render was allowed to go '
+        + 'without, and it is a record of that render rather than anything this editor adopts',
+      );
+    }
   }
 
   // A saved project may carry its undo history. Undo snapshots and render jobs do
@@ -3741,8 +5273,30 @@ function restoreProject(project) {
   }
 
   params.reset(params.names('look'));
-  params.apply(project.look.params);
+  params.apply(applied);
   appliedPreset = stamp;
+  // **The pool is replaced whole, here, with the rest of the writes.** Nothing above
+  // this line has changed anything, so a document refused for any of the seventeen
+  // reasons up there leaves the editor holding the clip it already had - including
+  // whatever that clip had parked. Assigned rather than merged for the same reason
+  // `params.reset` precedes `params.apply`: what is parked is a property of the open
+  // document, and a pool that accumulated across documents would be carrying values
+  // from a clip nobody has open into the next file somebody saves.
+  parkedLook = {
+    params: parkedValues,
+    tracks: parkedTracks,
+    requires: parkedRequires,
+  };
+  // Beside the pool and for the same reason: it describes this document and nothing else,
+  // so a refused load leaves the previous document's notice standing rather than half of
+  // one document's and half of another's.
+  effectVersionSkew = versionSkew;
+  // Pruned rather than cleared, because undo arrives here too - see the declaration. What
+  // *opens* a different document is `loadProjectNamed`, and that is where the clearing
+  // lives: this function is the door for a load, an undo, a hotload and a rollback alike,
+  // and three of those four are the same clip.
+  suppressedEffects = new Set([...suppressedEffects].filter((id) => parkedIds.includes(id)));
+  paintMissingEffects();
 
   tracks.clear();
   for (const [name, keys] of restoredLook) trackFor(name).keys = keys;
@@ -5045,6 +6599,14 @@ function renderProgramFrame(t) {
     uniforms.spanSec.value = frame.spanSec;
     uniforms.time.value = t;
     grade.uniforms.time.value = t;
+    // The rain's clock, which is the same program time and a second cell holding it. The
+    // duplication is what makes one falsification control possible: the rain has to be a
+    // pure function of program time or a seek lands where playback never would, and
+    // `timeline-check --mutate rain-accumulates` has to be able to integrate exactly this
+    // line. Aimed at `uniforms.time` instead it would redden the ripple, the glitch and the
+    // raster along with the rain, and a control that fails everything cannot say which
+    // claim is load-bearing. Written here so the two cannot come apart.
+    uniforms.rainPhase.value = t;
 
     // Every track, look and camera alike, written through the registry rather than
     // onto the uniforms and the camera object. That is what makes the camera a
@@ -5601,6 +7163,9 @@ class TimelineTransport {
     // The tail of the operation chain, and whether one is running right now.
     this.queue = null;
     this.working = false;
+    // How many exclusive operations have thrown. Read only by `repaintHere`, which
+    // must not stand down across one - see the note in `exclusive`.
+    this.faults = 0;
   }
 
   get programSec() { return this.frame / this.outputFps; }
@@ -5652,6 +7217,15 @@ class TimelineTransport {
       this.working = true;
       try {
         return await work();
+      } catch (err) {
+        // Counted because `repaintHere` has to be able to tell a render that finished
+        // from one that did not. An operation that throws part-way through a pre-roll
+        // has moved the render counter and left a frame on screen that is nobody's
+        // image - and a repaint reading only the counter would take that for service
+        // and stand down, leaving the half-drawn frame standing where today it heals
+        // it. The throw is re-raised: this counts, it does not handle.
+        this.faults++;
+        throw err;
       } finally {
         this.working = false;
       }
@@ -5776,6 +7350,56 @@ class TimelineTransport {
    */
   seekHere(options = {}) {
     return this.exclusive(() => this.seekNow(this.programSec, options));
+  }
+
+  /**
+   * A repaint: `seekHere` plus the one question a repaint has to ask and a seek does
+   * not - whether anything still needs drawing by the time the queue gets here.
+   *
+   * A seek is a move somebody asked for, so it runs whatever else has happened in the
+   * meantime. A repaint is not a move at all: it means "something changed, the image
+   * is stale, rebuild it", and any accurate render that ran *after* the request has
+   * already rebuilt it - the registry is read at render time, so a frame drawn after
+   * the write carries the write. Running one anyway costs two things rather than one,
+   * and the wasted frame is the smaller of them. `pumpRepaint` reads the playhead when
+   * it pumps and hands that number to work that runs whenever the queue reaches it, so
+   * a repaint raised while the playhead is parked at zero - a slider written, a look
+   * applied, a resize landing late - queues behind a `runTo` that walks the whole edit,
+   * arrives at the far end, and seeks *back* to zero. The playhead is dragged off the
+   * position the run landed on with nothing on screen saying why, which is the shape
+   * `seekHere` above records, arriving through the one caller nobody converted.
+   *
+   * Measured on `captures/sample.knct`: a run to output frame 360 with a single slider
+   * written back to the value it already held, immediately after the run's opening
+   * seek, renders 362 output frames against 361 and advances the surface memory 124
+   * times against 122, ending with the playhead at frame 0 and the rain clock reading
+   * 0.000s rather than 12.000s. Three of three forced, and about one natural run in a
+   * hundred and nineteen on an idle machine - which is the signature
+   * `docs/instruments.md` carries for the intermittent that had been read as `runTo`
+   * overshooting its target by one frame. It never did: it lands on its target every
+   * time, and this is what arrives afterwards.
+   *
+   * **The draft and the fault are why a render count alone is not the question.** A
+   * draft renders, so it moves the counter, and it is deliberately not the true image -
+   * so a repaint a draft overtook still has all of its work to do. An operation that
+   * threw part-way through a pre-roll moved the counter too, and what it left on screen
+   * is nobody's image; `exclusive` counts those, and standing down across one would
+   * turn the repaint that heals a failed seek today into the thing that abandons it.
+   *
+   * **Not folded into `seekHere`, and the reason is a caller rather than a preference.**
+   * The only other caller is `pumpParkedDraft`'s release branch, which runs
+   * `finishOrbitDrift` and *then* seeks, precisely to close the gap between the last
+   * redraw and the last damping step - the camera moved after the render, so the image
+   * is stale in a way no render counter can see, and a `seekHere` that stood down when
+   * the counter had moved would drop the seek that measurement exists for. Two doors
+   * because there are two questions, not two ways of asking one.
+   */
+  repaintHere(askedAtRenders = counters.renders, askedAtFaults = this.faults) {
+    return this.exclusive(() => {
+      const overtaken = counters.renders !== askedAtRenders && this.faults === askedAtFaults;
+      if (overtaken && !this.drafted) return null;
+      return this.seekNow(this.programSec);
+    });
   }
 
   /**
@@ -6390,6 +8014,45 @@ function parseSize(text) {
 async function exportClip(options = {}) {
   if (!timeline) throw new Error('there is no clip open to export');
   if (exporting) throw new Error('an export is already running');
+  // **A clip whose look this build cannot render whole is refused before anything is
+  // encoded, and the file is the reason.** The editor can carry a missing effect: the
+  // parked values sit there, nothing evaluates them, and the person at the screen has a
+  // badge saying so. A deliverable carries none of that. It is a video, it leaves this
+  // machine, and nothing in it says a layer of the look was absent when it was made - so
+  // an export that quietly went ahead would produce exactly the artifact that cannot be
+  // told from a correct one, which is the failure this program refuses everywhere else it
+  // appears.
+  //
+  // **Suppress is the answer to it and it is per effect, deliberately.** The decision a
+  // person is actually making is "this render may go without *that*", and a global
+  // override would answer a question nobody asked - it would carry past the next missing
+  // effect, which by then might be the one that matters. So the list is intersected with
+  // what is missing rather than consulted as a flag, and an effect that is still missing
+  // and still unsuppressed refuses the export naming itself.
+  //
+  // The list arrives as an argument rather than being read off `suppressedEffects` here,
+  // because two callers each own their own answer: the export button hands over what the
+  // badge holds, and `tools/render-worker.mjs` hands over what the job carries. One rule,
+  // two callers, and neither of them is a second implementation of the rule.
+  const suppress = new Set(options.suppressEffects ?? []);
+  const missing = missingEffects();
+  const blocking = missing.filter((m) => !suppress.has(m.id));
+  if (blocking.length) {
+    throw new Error(
+      `this clip requires ${blocking.map((m) => `${m.id} ${m.version}`).join(', ')}, which `
+      + `${blocking.length === 1 ? 'is' : 'are'} not installed here: its values are parked and `
+      + 'nothing is drawing them, so a render would be a file missing part of the look with '
+      + `nothing in it to say so. Install ${blocking.length === 1 ? 'it' : 'them'}, or suppress `
+      + `${blocking.length === 1 ? 'it' : 'each of them'} in the badge to render without.`,
+    );
+  }
+  // What this render is going without, recorded in the document the deliverable embeds.
+  // Only the effects that were actually missing here: a suppression naming an effect this
+  // build has is a decision about nothing, and writing it down would make the record claim
+  // a hole the file does not have.
+  const suppressed = missing
+    .filter((m) => suppress.has(m.id))
+    .map(({ id, version }) => ({ id, version }));
   ensureActiveDeliverable();
   const d = activeDeliverable;
   // **The one place the two halves of the split are checked against each other.** The
@@ -6498,7 +8161,7 @@ async function exportClip(options = {}) {
       // worker restoring it renders the file that was asked for rather than the one the
       // project would produce today. It also means `trails`, whose length is counted in
       // output frames, decays over the same span on the replay as it did here.
-      project: serialiseProjectBody(),
+      project: serialiseProjectBody(suppressed.length ? { suppressed } : {}),
       capture: timeline.source.index.hash,
       renderer: rendererClass(),
     });
@@ -6617,6 +8280,7 @@ const ui = {
   resume: document.getElementById('tResume'),
   resumeWhen: document.getElementById('tResumeWhen'),
   resumeOpen: document.getElementById('tResumeOpen'),
+  missing: document.getElementById('tMissing'),
   recGo: document.getElementById('recGo'),
   recMark: document.getElementById('recMark'),
   recNote: document.getElementById('recNote'),
@@ -6627,6 +8291,106 @@ const ui = {
 // The rates, built from `OUTPUT_RATES` rather than written into the markup, so the list
 // the validator refuses against and the list the control offers are one object.
 for (const rate of OUTPUT_RATES) ui.fps?.appendChild(new Option(String(rate), String(rate)));
+
+/**
+ * The badge that says which effects this document names and this build has not got, and
+ * the one control beside each of them.
+ *
+ * **A person looking at the picture has no other way to know.** The clip renders, and
+ * what renders is the installed part of it - so without this the surface is a document
+ * quietly missing a layer, which is the failure the whole parking design exists to
+ * replace with a sentence. The line quotes the version out of the document's own
+ * `requires` entry rather than saying only that something is absent, because the useful
+ * next step is installing a particular build of a particular effect.
+ *
+ * **The counts come from the pool and are the point of the line**, not decoration: they
+ * are what says the values were kept. A build that dropped them on the way in would draw
+ * the identical picture and print `0 values, 0 tracks parked` here, which is the one
+ * place the difference is visible before somebody saves the file and loses the work.
+ *
+ * The toggle is `aria-pressed` with a constant label, which is `camView`'s shape and the
+ * app's ordinary voice for a switch. What it buys is stated in the `title` rather than in
+ * a second line of text: an export is refused while an effect the clip needs is missing,
+ * and pressing this is the person saying that this render may go without that one. Per
+ * effect and never global - suppressing one while another is still missing leaves the
+ * export refused, naming the other, which is the whole reason the state is a set of ids
+ * rather than a flag.
+ *
+ * Rebuilt rather than patched, because the set it draws changes only when a document is
+ * loaded or a toggle is pressed, and a painter that edited in place would be a second
+ * statement of which effects are missing.
+ *
+ * **One entry per missing effect, laid along the bar rather than stacked, and the reason
+ * is the bar's height.** Each effect gets its own `.missingfx` element carrying its own
+ * sentence and its own control, which is what "one line per effect" is for - nothing is
+ * concatenated and no version or count belongs to two effects at once. What it is not is
+ * a column: this chip lives in the application bar's status slot, which is one ellipsised
+ * row, and a chip that grew downward would take the bar's height with it. That moves
+ * every fixed overlay on the page, which `docs/instruments.md` records costing four proof
+ * tools a round each when the letterbox did it. Two missing effects at once is the rare
+ * case and it ellipsises; the badge's job is to say that something is parked, and the
+ * hook beside it is what anything needing the whole list should read.
+ */
+function paintMissingEffects() {
+  if (!ui.missing) return;
+  const missing = missingEffects();
+  const skew = effectVersionSkew;
+  ui.missing.hidden = missing.length === 0 && skew.length === 0;
+  // **The version notices share the chip and carry no control, and both halves of that
+  // are deliberate.** They share it because they are the same sentence to the same reader
+  // - what the clip asked for and what this machine has - and a second slot in the bar
+  // would be a second thing that can grow its height, which is the class this chip's own
+  // comment is about. They carry no control because there is nothing to decide: an export
+  // is not refused for a skew, so a button here would be a switch over a door that is
+  // already open. That also keeps them outside `editor-check`'s control sweep, which
+  // demands a driver for every input, select, button and anchor the editor renders - a
+  // notice with a button on it would owe one and would be claiming a gesture nobody has.
+  const notices = skew.map((s) => {
+    const entry = document.createElement('span');
+    entry.className = 'missingfx';
+    entry.dataset.skew = s.id;
+    const line = document.createElement('b');
+    line.textContent = `document requires ${s.id} ${s.wanted}, installed is ${s.installed}`;
+    entry.append(line);
+    return entry;
+  });
+  ui.missing.replaceChildren(...notices, ...missing.map((m) => {
+    const entry = document.createElement('span');
+    entry.className = 'missingfx';
+    entry.dataset.effect = m.id;
+    const line = document.createElement('b');
+    const values = `${m.values} value${m.values === 1 ? '' : 's'}`;
+    const parked = `${m.tracks} track${m.tracks === 1 ? '' : 's'} parked`;
+    line.textContent = `missing: ${m.id} ${m.version} — ${values}, ${parked}`;
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.dataset.suppress = m.id;
+    go.textContent = 'suppress';
+    go.setAttribute('aria-pressed', String(m.suppressed));
+    go.title = m.suppressed
+      ? `Exports may render without ${m.id}. Press again to require it.`
+      : `Export is refused while ${m.id} is missing. Press to let a render go without it.`;
+    entry.append(line, go);
+    return entry;
+  }));
+}
+
+// One listener on the chip rather than one per button, because the buttons are rebuilt
+// by the painter above every time this fires - a handler bound to the element would be
+// binding to the element it is about to replace.
+ui.missing?.addEventListener('click', (event) => {
+  const id = event.target?.dataset?.suppress;
+  if (!id) return;
+  if (suppressedEffects.has(id)) suppressedEffects.delete(id);
+  else suppressedEffects.add(id);
+  paintMissingEffects();
+  // Said on the note beside it, because the consequence of this press is at the export
+  // and the export is a menu away: a switch whose effect is only visible when you next
+  // press something else is a switch nobody trusts.
+  say(suppressedEffects.has(id)
+    ? `${id} suppressed: an export will render without it`
+    : `${id} required again: an export is refused while it is missing`);
+});
 
 aspectButtons = buildAspectSegments(ui.projectAspects);
 
@@ -6999,13 +8763,22 @@ async function pumpDraft() {
 let repaintWanted = false;
 let repaintBusy = false;
 let repaintScheduled = false;
+// What `counters.renders` read when the pending request was made, which is how
+// `repaintHere` finds out whether anything drew the image while the request sat in the
+// queue. Recorded at the ask rather than at the pump because "since it was asked for"
+// is the claim being made, and the two are the same number only when nothing is
+// running - which is exactly the case this is not about.
+let repaintAskedAt = 0;
+let repaintAskedAtFaults = 0;
 
 async function pumpRepaint() {
   if (repaintBusy || !repaintWanted || !timeline) return;
   repaintBusy = true;
   repaintWanted = false;
+  const askedAt = repaintAskedAt;
+  const askedAtFaults = repaintAskedAtFaults;
   try {
-    await timeline.seek(timeline.programSec);
+    await timeline.repaintHere(askedAt, askedAtFaults);
   } catch (err) {
     showTimelineError(err);
   } finally {
@@ -7023,6 +8796,13 @@ function requestRepaint() {
   // would reset them under it. It repaints once at the end for the editor's sake.
   if (!timeline || timeline.playing || scrubbing || orbiting || exporting) return;
   repaintWanted = true;
+  // Where the image stood when *this* write happened, and the newest ask overwrites the
+  // older one, which is what makes the coalescing below safe to keep. A write landing
+  // while a repaint is already in flight is judged by the re-pump against the frames
+  // drawn after itself rather than after the earlier request - so it is served when
+  // that repaint's own renders came after it, and repainted again when they did not.
+  repaintAskedAt = counters.renders;
+  repaintAskedAtFaults = timeline.faults;
   if (repaintScheduled) return;
   repaintScheduled = true;
   // Deferred to the end of the task so a bulk write asks for one image rather
@@ -9151,7 +10931,37 @@ let appliedPreset = null;
  * door to pick between: one subset in, one subset out.
  */
 function presetFromCurrentLook(names) {
-  return { version: PROJECT_VERSION, values: params.values(names ?? params.names('look')) };
+  // **The parked pool is not in here, and it is absent by construction rather than by a
+  // filter.** `params.values` walks registry names, and a parked value never reached the
+  // registry - so there is nothing to exclude and no list that could fall out of step.
+  // The reason it must stay absent is worth stating anyway, because the merge two hundred
+  // lines up does the opposite for a project. A project is *this clip*, and a clip that
+  // opened on a machine without an effect is still a clip that uses it, so carrying the
+  // values back out is what keeps the file whole. A preset is *a look somebody chose to
+  // reuse*, authored out of what is on screen - and what is on screen has none of this in
+  // it. Writing them into a preset would ship a document whose `requires` names an effect
+  // nobody here can render, applied to clips nobody can check it against, out of values
+  // this build never bound-checked because it has no spec to check them with.
+  const values = params.values(names ?? params.names('look'));
+  // The save rule: a whole look sheds every effect it holds at defaults. Lossless by
+  // construction rather than by argument - an effect's master defaults inert, and the
+  // whole-look apply resets what a whole-look document leaves unnamed, so the document
+  // with the effect written out at defaults and the document without it restore the
+  // same registry. What the shorter one buys is a `requires` that tells the truth:
+  // a look that never raises the rain does not require the rain effect, and a machine
+  // without it can apply that look whole. **A subset save sheds nothing**, because a
+  // picked value at its default is still a write the author chose - dropping it would
+  // change what applying the subset does to a clip wearing something else.
+  if (wholeLookTag(values)) {
+    for (const id of effectIdsIn(Object.keys(values))) {
+      const mine = effectParamNames(id);
+      if (mine.every((n) => values[n] === PARAMS[n].def)) {
+        for (const n of mine) delete values[n];
+      }
+    }
+  }
+  const requires = requiresFor(Object.keys(values));
+  return { version: PROJECT_VERSION, ...(requires.length ? { requires } : {}), values };
 }
 
 /**
@@ -9175,7 +10985,83 @@ function presetFromCurrentLook(names) {
  * nine values measured in metres. A silent drift would be the reason not to; a loud one
  * is the reason this is derived rather than restated.
  */
-const completeLookNames = () => params.names('look').filter((n) => PARAMS[n].group !== 'framing');
+
+/** Every look parameter of one effect, in declaration order. */
+function effectParamNames(id) {
+  return params.names('look').filter((n) => effectOf(n) === id);
+}
+
+/** The ids of every effect the registry currently declares. */
+function effectIds() {
+  return effectIdsIn(params.names('look'));
+}
+
+/**
+ * Whether an effect id names a package this build actually has.
+ *
+ * Read off the registry rather than off the `/effects` listing the page fetched, and
+ * the difference is what a document cares about: a value has to reach `PARAMS` to do
+ * anything at all, so a package that was served and whose parameters did not land is
+ * not installed as far as any document is concerned. One reading, so the thing that
+ * parks a value and the thing that refuses one cannot disagree about what is here.
+ */
+const effectInstalled = (id) => effectIds().includes(id);
+
+/**
+ * Whether a look name belongs to an effect this build does not have - the one line the
+ * three-way split turns on.
+ *
+ * `effectOf` answers null for a bare name, which is why a typo can never reach here: a
+ * core parameter the registry does not know is refused at `params.spec` as it always
+ * was. What this separates is the two dotted cases, and the separation is the whole
+ * design - a prefix that is installed with a suffix that is not is a half-existing
+ * package and stays a refusal, and a prefix that is simply absent is a document from a
+ * machine carrying something this one lacks.
+ */
+const isParkedName = (name) => {
+  const id = effectOf(name);
+  return id !== null && !effectInstalled(id);
+};
+
+/**
+ * What the open document needs and this build has not got, as the badge reads it: the
+ * document's own `requires` entry per missing effect, with what is parked under it
+ * counted.
+ *
+ * Counted off the pool rather than off the document, because the pool *is* what was
+ * parked - a count taken from the file would be a second reading of the same question
+ * and would go on printing four when the parking had dropped one.
+ */
+const missingEffects = () => parkedLook.requires.map((entry) => ({
+  id: entry.id,
+  version: entry.version,
+  values: Object.keys(parkedLook.params).filter((n) => effectOf(n) === entry.id).length,
+  tracks: Object.keys(parkedLook.tracks).filter((n) => effectOf(n) === entry.id).length,
+  suppressed: suppressedEffects.has(entry.id),
+}));
+
+/**
+ * The core half of a whole look: the look tag less its framing and less every
+ * effect's parameters. What is left is grading that is always installed - the
+ * readings, the points base, the region geometry, the grid, the post core - so it
+ * is the part every whole-look document owes regardless of which effects it uses.
+ */
+const coreLookNames = () => params.names('look')
+  .filter((n) => PARAMS[n].group !== 'framing' && effectOf(n) === null);
+
+/**
+ * The values *this* document has to name to be describing a whole look: all of the
+ * core, plus every parameter of every effect the document itself touches. The set is
+ * a function of the document rather than of the build, because a look that never
+ * raises the glyph field owes nothing about it - the whole-look apply resets an
+ * unnamed effect to its inert defaults, so leaving one out and writing its defaults
+ * are the same look, and the shorter document is the one whose `requires` tells the
+ * truth about what it needs.
+ */
+const wholeLookNames = (values) => [
+  ...coreLookNames(),
+  ...effectIdsIn(Object.keys(values)).flatMap((id) => effectParamNames(id)),
+];
 
 /**
  * Whether a document says what the whole look is, rather than adjusting part of one.
@@ -9191,36 +11077,96 @@ const completeLookNames = () => params.names('look').filter((n) => PARAMS[n].gro
  * picking `voxel` reported "applied 35 of 77 values" and left the clip stamped with
  * whatever it had been wearing, for the sake of nine values a look has no business
  * setting. A subset of the grading is still a subset and still cannot stamp.
+ *
+ * **And it asks per effect, not of every effect.** A document naming any parameter of
+ * an effect owes all of that effect's parameters - half a glyph field is the reading
+ * rule's mistake again, one namespace over - but an effect it never mentions is not a
+ * hole in it, because the whole-look apply resets what a whole-look document leaves
+ * unnamed.
  */
-const wholeLookTag = (values) => completeLookNames().every((n) => Object.hasOwn(values, n));
-
-// ------------------------------------------- which look values a preset carries
+const wholeLookTag = (values) => wholeLookNames(values).every((n) => Object.hasOwn(values, n));
 
 /**
- * The subset picker, built once at boot and shown by both doors a look leaves by.
+ * The `requires` list, checked against what the document actually touches - both
+ * directions, because the list is derived on the way out and a hand edit can break
+ * the derivation either way. An effect used but not listed is a document that would
+ * load on a machine missing that effect and render a look it does not claim; an
+ * effect listed but never used is a claim about the look that the look does not
+ * make, and the likelier story is a values key someone deleted without its entry.
  *
- * `presetFromCurrentLook` has taken a subset of names since it was written and both
- * of its callers passed nothing, so every preset this program could author was the
- * whole look tag - the capability sat one layer down with no way to reach it. What
- * that cost was not expressiveness: "just my grain and bloom" had to be a hand-edited
- * file, and a hand-edited file is the one door into this program that nothing
- * upstream validates.
- *
- * **The groups come from `PANEL_GROUPS` and `PARAMS[n].group`, never from a list
- * here.** A second statement of which parameter belongs under which heading is a
- * statement that drifts, and it would drift silently, because a parameter missing
- * from this dialog is not an error anywhere - it is a value you can no longer choose
- * to leave out. Derived, a parameter added next year appears by existing, under the
- * heading the panel already gives it.
- *
- * **Built at boot rather than on the first press**, which is the same call
- * `library.js` makes for the gallery's menus and for the same reason: `editor-check`
- * enumerates what the document contains and demands a driver for every control in it,
- * so a dialog that populated itself on open would show the sweep an empty box and the
- * user fifty-odd checkboxes. A control no sweep can see is a control nothing proves.
+ * The writers derive this list, so like every envelope rule the reader makes a
+ * demand the writer already meets - the refusals here are for the hand-edited file,
+ * and each one names the key to fix.
  */
-const presetPickBoxes = new Map();
-const presetPickGroups = [];
+function refuseRequires(what, requires, names) {
+  const used = effectIdsIn(names);
+  if (requires === undefined) {
+    if (used.length) {
+      throw new Error(
+        `${what} names ${used.join(', ')} values but carries no requires list: a document says `
+        + 'which effects its look is built from, so a reader on a machine without one of them '
+        + 'can name what is missing instead of rendering something else under this name',
+      );
+    }
+    return;
+  }
+  const listShape = requiresListRefusal(what, requires);
+  if (listShape) throw new Error(listShape);
+  const seen = new Set();
+  for (const entry of requires) {
+    // **The shape rules moved to `web/format.js` and the repeat rule did not**, which is
+    // the split between what one entry is and what a *list* of them may hold. The queue
+    // reads the first half of that on the way in - `server/jobs.js` asks it of the
+    // document a job carries, at the door, so a claim nobody can read is refused before a
+    // browser is launched to find out - and it cannot read this half, because it counts
+    // repeats with its own sentence about the version a render would end up on. Asked
+    // inside the loop rather than after it so the order the refusals arrive in is the
+    // order they were in when this was one block: a malformed entry beside a repeated one
+    // still reports the malformed entry.
+    const bad = requiresEntryRefusal(what, entry);
+    if (bad) throw new Error(bad);
+    if (seen.has(entry.id)) {
+      throw new Error(`${what} requires ${entry.id} twice: one entry per effect, because two versions of one effect cannot both be what the look was built from`);
+    }
+    seen.add(entry.id);
+  }
+  const unlisted = used.filter((id) => !seen.has(id));
+  if (unlisted.length) {
+    throw new Error(
+      `${what} names ${unlisted.join(', ')} values but its requires list does not claim ${unlisted.length === 1 ? 'it' : 'them'}: `
+      + 'the list is derived from the values on save, so a gap between them is a hand edit to finish',
+    );
+  }
+  const unused = [...seen].filter((id) => !used.includes(id));
+  if (unused.length) {
+    throw new Error(
+      `${what} requires ${unused.join(', ')} but names no value under ${unused.length === 1 ? 'it' : 'them'}: `
+      + 'an effect the look never touches is not required by it, so either its values were deleted by hand or the entry was added by one',
+    );
+  }
+}
+
+/**
+ * What version of an effect this build has, off the package that answered for it.
+ *
+ * This was the constant `1.0.0` with a comment saying it would move into the manifests
+ * when the manifests arrived. They have arrived, and the constant had become a lie
+ * waiting for its first fork: `PUT /effects/rain` can install a package declaring 2.0.0,
+ * and every document saved afterwards would have gone on claiming to need 1.0.0 - which
+ * is the one field the badge on a machine without the package prints, so the person told
+ * to install it would be told the wrong thing. Every shipped package declares 1.0.0, so
+ * this changes no document any build has written.
+ *
+ * An id with no package is `unknown` rather than a throw, because the caller is a
+ * serialiser: refusing to save a document over a version it cannot look up would lose
+ * work over a field nothing renders.
+ */
+const versionOf = (id) => effectPackages.find((p) => p.id === id)?.manifest.version ?? 'unknown';
+
+/** The requires list a set of value names derives, one entry per effect touched. */
+const requiresFor = (names) => effectIdsIn(names).map((id) => ({ id, version: versionOf(id) }));
+
+// ------------------------------------------- which look values a preset carries
 
 /**
  * One box written, and the four that may have to move with it.
@@ -9265,60 +11211,106 @@ function presetPickSync() {
 
 const presetPickNames = () => [...presetPickBoxes.keys()].filter((n) => presetPickBoxes.get(n).checked);
 
-for (const group of PANEL_GROUPS) {
-  const members = params.names('look').filter((n) => PARAMS[n].group === group.key);
-  // Skipped where the panel generator refuses, and the opposite call is right for the
-  // opposite reason: an empty panel group is a group key misspelled on one side, where
-  // an empty group here is the Viewer heading, which holds render scale and auto-orbit
-  // and both of them are `view`. View state is not in any preset, so a heading with
-  // nothing under it would be the panel's shape leaking into a question about the
-  // document.
-  if (!members.length) continue;
-  const groupNode = document.createElement('div');
-  groupNode.className = 'ppgroup';
-  const head = document.createElement('label');
-  head.className = 'check pphead';
-  const all = document.createElement('input');
-  all.type = 'checkbox';
-  all.id = `ppg-${group.key}`;
-  head.append(all, ` ${group.label}`);
-  groupNode.append(head);
-  all.addEventListener('change', () => {
-    for (const name of members) presetPickSet(name, all.checked);
-    presetPickSync();
-  });
+/**
+ * The subset picker, rebuilt whenever the panel is, and shown by both doors a look
+ * leaves by.
+ *
+ * `presetFromCurrentLook` has taken a subset of names since it was written and both
+ * of its callers passed nothing, so every preset this program could author was the
+ * whole look tag - the capability sat one layer down with no way to reach it. What
+ * that cost was not expressiveness: "just my grain and bloom" had to be a hand-edited
+ * file, and a hand-edited file is the one door into this program that nothing
+ * upstream validates.
+ *
+ * **The groups come from `PANEL_GROUPS` and `PARAMS[n].group`, never from a list
+ * here.** A second statement of which parameter belongs under which heading is a
+ * statement that drifts, and it would drift silently, because a parameter missing
+ * from this dialog is not an error anywhere - it is a value you can no longer choose
+ * to leave out. Derived, a parameter added next year appears by existing, under the
+ * heading the panel already gives it.
+ *
+ * **Built with the panel rather than once at boot, which is what an install made of
+ * it.** This was a top-level loop over the registry as it stood while the module
+ * evaluated, and both directions of a hotload went wrong afterwards: an installed
+ * effect got no checkbox, so its values were in every preset with no way to leave them
+ * out, and an uninstalled one left checkboxes behind whose `change` handler
+ * dereferences `PARAMS[name]` for a name the registry no longer has - a throw out of a
+ * tick - while a confirm assembled a preset naming values nothing on this build can
+ * apply. Rebuilding it is `buildPanel`'s last act, so there is one moment at which the
+ * panel and this dialog are both a statement of the same registry.
+ *
+ * **Rebuilt rather than on the first press**, which is the same call `library.js` makes
+ * for the gallery's menus and for the same reason: `editor-check` enumerates what the
+ * document contains and demands a driver for every control in it, so a dialog that
+ * populated itself on open would show the sweep an empty box and the user fifty-odd
+ * checkboxes. A control no sweep can see is a control nothing proves.
+ *
+ * The host is asked for by id rather than read off `ui`, and that is boot order rather
+ * than taste: `ui` is a `const` five thousand lines below here and boot's first
+ * `buildPanel` runs above it, so reading it would be a dead-zone throw on the first
+ * panel this page ever draws.
+ */
+function buildPresetPicker() {
+  const host = document.getElementById('ppGroups');
+  host.replaceChildren();
+  presetPickBoxes.clear();
+  presetPickGroups.length = 0;
+  for (const group of PANEL_GROUPS) {
+    const members = params.names('look').filter((n) => PARAMS[n].group === group.key);
+    // Skipped where the panel generator refuses, and the opposite call is right for the
+    // opposite reason: an empty panel group is a group key misspelled on one side, where
+    // an empty group here is the Viewer heading, which holds render scale and auto-orbit
+    // and both of them are `view`. View state is not in any preset, so a heading with
+    // nothing under it would be the panel's shape leaking into a question about the
+    // document.
+    if (!members.length) continue;
+    const groupNode = document.createElement('div');
+    groupNode.className = 'ppgroup';
+    const head = document.createElement('label');
+    head.className = 'check pphead';
+    const all = document.createElement('input');
+    all.type = 'checkbox';
+    all.id = `ppg-${group.key}`;
+    head.append(all, ` ${group.label}`);
+    groupNode.append(head);
+    all.addEventListener('change', () => {
+      for (const name of members) presetPickSet(name, all.checked);
+      presetPickSync();
+    });
 
-  for (const name of members) {
-    const row = document.createElement('label');
-    row.className = 'check';
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    // Prefixed, because the panel's own control for this parameter is already `id`
-    // = the parameter's name. Two nodes under one id is a document where
-    // `getElementById` answers whichever came first, and `editor-check` builds the
-    // set it diffs against the registry out of exactly these ids - so a bare name
-    // here would let a panel that had dropped a row pass the row that exists to
-    // catch it, on the strength of a checkbox in a dialog.
-    input.id = `pp-${name}`;
-    input.checked = true;
-    row.append(input, ` ${PARAMS[name].label}`);
-    groupNode.append(row);
-    presetPickBoxes.set(name, input);
-    input.addEventListener('change', () => { presetPickSet(name, input.checked); presetPickSync(); });
+    for (const name of members) {
+      const row = document.createElement('label');
+      row.className = 'check';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      // Prefixed, because the panel's own control for this parameter is already `id`
+      // = the parameter's name. Two nodes under one id is a document where
+      // `getElementById` answers whichever came first, and `editor-check` builds the
+      // set it diffs against the registry out of exactly these ids - so a bare name
+      // here would let a panel that had dropped a row pass the row that exists to
+      // catch it, on the strength of a checkbox in a dialog.
+      input.id = `pp-${name}`;
+      input.checked = true;
+      row.append(input, ` ${PARAMS[name].label}`);
+      groupNode.append(row);
+      presetPickBoxes.set(name, input);
+      input.addEventListener('change', () => { presetPickSet(name, input.checked); presetPickSync(); });
+    }
+    host.append(groupNode);
+    presetPickGroups.push({ box: all, members });
   }
-  ui.pickGroups.append(groupNode);
-  presetPickGroups.push({ box: all, members });
-}
 
-// Every reading needs a box, on the same reasoning as the uniform assertion beside
-// `READINGS` itself: `presetPickSet` reaches for all five whenever one of them is
-// ticked, so a reading the loop above did not build - one tagged something other than
-// `look`, which is the only way it could be skipped - would not be a missing checkbox.
-// It would be a dialog that throws on the first tick of any reading, which is a control
-// that appears to work until somebody uses it.
-for (const name of READINGS) {
-  if (!presetPickBoxes.has(name)) {
-    throw new Error(`the reading ${name} has no box in the preset subset dialog: ticking any of the five would throw`);
+  // Every reading needs a box, on the same reasoning as the uniform assertion beside
+  // `READINGS` itself: `presetPickSet` reaches for all five whenever one of them is
+  // ticked, so a reading the loop above did not build - one tagged something other than
+  // `look`, which is the only way it could be skipped - would not be a missing checkbox.
+  // It would be a dialog that throws on the first tick of any reading, which is a control
+  // that appears to work until somebody uses it. Asked on every rebuild rather than once,
+  // because the registry it is about is rebuilt too.
+  for (const name of READINGS) {
+    if (!presetPickBoxes.has(name)) {
+      throw new Error(`the reading ${name} has no box in the preset subset dialog: ticking any of the five would throw`);
+    }
   }
 }
 
@@ -9418,14 +11410,17 @@ function refusePresetBody(name, body) {
   // own key, so a file smuggling one is refused here as well - earlier than the values
   // walk that already refuses it, and for the more accurate reason.
   //
-  // `presetFromCurrentLook` emits these two and the five shipped looks carry these two,
-  // so this is the shape the program authors rather than a shape asserted about it.
-  const PRESET_KEYS = ['version', 'values'];
+  // `presetFromCurrentLook` emits these three and the shipped looks carry them, so
+  // this is the shape the program authors rather than a shape asserted about it.
+  // `requires` is optional because a document naming only core values needs no
+  // effects, and deriving an empty list into every file would be a key that says
+  // nothing.
+  const PRESET_KEYS = ['version', 'requires', 'values'];
   const stray = Object.keys(body).filter((k) => !PRESET_KEYS.includes(k));
   if (stray.length) {
     throw new Error(
       `preset ${name} carries ${stray.join(', ')}, which a version ${PROJECT_VERSION} preset has no `
-      + `place for: a preset is ${PRESET_KEYS.join(' and ')} and nothing else, so a key beside them is `
+      + `place for: a preset is ${PRESET_KEYS.join(', ')} and nothing else, so a key beside them is `
       + 'either a field an older version had or a typo, and both would be read as neither',
     );
   }
@@ -9489,6 +11484,11 @@ function refusePresetBody(name, body) {
     }
     params.normalise(key, value);
   }
+
+  // The effect list against the effect values, both directions - after the values
+  // walk, so a misspelt key gets the specific answer before the list gets the
+  // structural one.
+  refuseRequires(`preset ${name}`, body.requires, Object.keys(body.values));
 
   // **And the readings are all or none**, which is the version 4 rule stated as a
   // scope rather than as a census, because the file's own keys are what it claims to
@@ -9558,11 +11558,28 @@ function applyStoredPreset(doc) {
   refusePresetBody(doc.name, doc.body);
   const values = doc.body.values ?? {};
   const stamped = wholeLookTag(values);
-  params.apply(values);
+  // A whole look says what all of it is, so the effects it never mentions are part
+  // of what it says: their inert defaults. Written explicitly rather than assumed,
+  // because the document was saved on some install set and is being applied over
+  // some other clip's leftovers - a raised glyph field surviving a look that never
+  // mentions glyphs would be the ordered-pair contamination the suite sweeps for,
+  // reintroduced by the shorter document format. A partial apply writes what it
+  // names and nothing else, exactly as before.
+  if (stamped) {
+    const named = new Set(effectIdsIn(Object.keys(values)));
+    const resets = {};
+    for (const id of effectIds()) {
+      if (named.has(id)) continue;
+      for (const n of effectParamNames(id)) resets[n] = PARAMS[n].def;
+    }
+    params.apply({ ...resets, ...values });
+  } else {
+    params.apply(values);
+  }
   if (stamped) appliedPreset = { name: doc.name, rev: doc.rev };
   requestRepaint();
   history.commit();
-  return { stamped, written: Object.keys(values).length, look: completeLookNames().length };
+  return { stamped, written: Object.keys(values).length, look: wholeLookNames(values).length };
 }
 
 /**
@@ -10339,6 +12356,7 @@ function deleteSelectedKey() {
     selection = null;
     timingChanged();
   } else {
+    retainEffectFor(owner);
     tracks.get(owner).removeKey(key);
     // A track with no keys left is not a track. The parameter keeps the value it is
     // holding right now rather than snapping anywhere: `dropTrackIfEmpty` only stops
@@ -12293,6 +14311,11 @@ ui.exportGo.addEventListener('click', async () => {
   sayExport(`export ${outputSize ?? '1920x1080'} starting`);
   try {
     const done = await exportClip({
+      // What the badge holds, at the moment of the press. The set is session state and
+      // the press is the gesture that spends it, so it is read here rather than reached
+      // for inside `exportClip` - which is what leaves the worker free to hand over the
+      // job's own list through the same parameter.
+      suppressEffects: [...suppressedEffects],
       onProgress: (n, total) => {
         sayExport(`export ${Math.round((n / total) * 100)}% · frame ${n}/${total}`);
       },
@@ -12768,6 +14791,11 @@ const shell = shellElements({
   lookImport: 'menuLookImport',
   lookExport: 'menuLookExport',
   state: 'menuState',
+  effectRackOpen: 'effectRackOpen',
+  effectRackDialog: 'effectRackDialog',
+  effectRackClose: 'effectRackClose',
+  effectRackSearch: 'effectRackSearch',
+  effectRackList: 'effectRackList',
   exportClose: 'exportClose',
   projectDialog: 'projectDialog',
   projectClose: 'projectClose',
@@ -12864,6 +14892,17 @@ function openDialog(dialog) {
 // is already current - it would cost nothing today and would hide the day one of those
 // writers stops, which is the wrong direction for something only ever seen inside a modal.
 shell.projectSettings.addEventListener('click', () => openDialog(shell.projectDialog));
+shell.effectRackOpen.addEventListener('click', () => {
+  effectRackConfirming = null;
+  shell.effectRackSearch.value = '';
+  paintEffectRackDialog();
+  openDialog(shell.effectRackDialog);
+  shell.effectRackSearch.focus();
+});
+shell.effectRackSearch.addEventListener('input', () => {
+  effectRackConfirming = null;
+  paintEffectRackDialog();
+});
 // One command for the deliverable, where there were two. `Render` opened this dialog and
 // `Export` jumped past it into `saveExportCopy` when there was something to hand over,
 // which meant one menu item did two unrelated things according to state nothing in the menu
@@ -13159,6 +15198,8 @@ shell.state.addEventListener('click', () => {
 });
 
 shell.exportClose.addEventListener('click', () => ui.exportDialog.close());
+shell.effectRackClose.addEventListener('click', () => shell.effectRackDialog.close());
+shell.effectRackDialog.addEventListener('close', () => { effectRackConfirming = null; });
 shell.projectClose.addEventListener('click', () => shell.projectDialog.close());
 shell.projectDone.addEventListener('click', () => shell.projectDialog.close());
 shell.obsClose.addEventListener('click', () => shell.obsDialog.close());
@@ -13249,6 +15290,24 @@ async function loadProjectNamed(name, offered = null) {
   const resume = timeline ? timeline.playing : false;
   if (resume) timeline.pause();
   restoreProject(doc.body);
+  // **Opening a document is what spends a suppression, and this line is the whole of that
+  // rule.** A suppression is the operator saying *this* render of *this* clip may go
+  // without an effect this machine lacks. `restoreProject` prunes rather than clears,
+  // correctly, because it is also the door an undo and a hotload rollback come through and
+  // those are the same clip - but it cannot tell those apart from a different file
+  // arriving, so the prune kept a decision made about project A alive over project B. Both
+  // documents are missing `sparkle`, B was never authorised by anybody, and B exported
+  // silently without it.
+  //
+  // Here rather than inside the loader because this is the only caller for which the
+  // document is a *different* one, and after the restore rather than before it because the
+  // loader refuses seventeen shapes: clearing first would spend the decision on a document
+  // that never opened, which is the one thing every refusal in there is arranged not to do.
+  // Repainted because the badge draws the latch state and the clear moved it.
+  if (suppressedEffects.size) {
+    suppressedEffects.clear();
+    paintMissingEffects();
+  }
   // The stack is restored from the file when it was saved; otherwise it restarts
   // from the loaded document. Undoing across a project load would walk back into an
   // edit of something else, which is the shape of undo people learn not to trust.
@@ -13579,7 +15638,37 @@ async function openTake(id) {
   // directory. That document is deliberately absent from the project picker, so
   // withholding this button is withholding the only road back to the operator's work.
   if (listed.projects) offerWorkingDocument(listed.projects);
-  await timeline.seek(0);
+  // The take's first accurate frame, and it is a repaint rather than a move because by
+  // the time it runs the playhead may not be this function's to place any more.
+  //
+  // **This line is where the transport's oldest intermittent actually lived.** It used
+  // to read `await timeline.seek(0)`, and everything above it is awaited - three library
+  // listings over the network, the deliverable, the undo baseline - while the editor has
+  // been on screen and drivable since `ui.root.hidden = false` several hundred lines up,
+  // and `__kinect.timeline.transport()` has answered since the transport was built. So a
+  // person who scrubbed during that stretch, or a proof tool that waited for the
+  // transport and started driving it, had this seek arrive *afterwards*, queue behind
+  // whatever they had asked for, and land last - putting the playhead back on frame 0
+  // and drawing one frame of program time zero over the position they had chosen.
+  //
+  // Measured on `captures/sample.knct` with six probe streams contending for the
+  // machine: 13 of 29 runs of a `seek(0)` then `runTo(360)` rendered 362 output frames
+  // instead of 361 and advanced the surface memory 124 times instead of 122, ending with
+  // the playhead at frame 0 and the rain clock reading 0.000s. The op log names this
+  // call every time - enqueued 57ms into the run, queued for 1761ms behind it, one
+  // render at target 0. That is the signature `docs/instruments.md` carries as `runTo`
+  // overshooting its target by one frame; `runTo` lands on its target every time.
+  //
+  // `repaintHere` and not `seekHere`, and the difference is the whole repair rather than
+  // a nicety. `seekHere` would render the true image at wherever the playhead had got
+  // to, which is correct and costs a whole pre-roll - 22 renders here instead of one, so
+  // the row that caught this would still be red and the work would still be wasted.
+  // Nothing needs drawing at all when somebody else has already drawn it, which is
+  // exactly what a repaint means and exactly what this is: the take is open and
+  // configured, so make the image true unless it already is. A scrub is the case that
+  // keeps it honest - a draft is deliberately not the true image, so this still runs
+  // after one, and it runs at the position the person scrubbed to rather than at zero.
+  await timeline.repaintHere();
   // Two things per frame, and the second is not an afterthought: with the playhead
   // parked `tick` returns immediately, so this is the only clock a paused editor has.
   // A drag that continued itself off its own renders instead is what this loop was
@@ -13662,6 +15751,30 @@ let pinnedPairs = null;
 function warmPrograms() {
   const was = { after: afterimage.enabled, bloom: bloom.enabled, grade: grade.enabled };
   const wasAdditive = uniforms.softEdge.value === 1;
+  // **A shader that will not compile is not an exception anywhere, and that is the whole
+  // of why this hook is here.** WebGL reports a link failure through `getProgramInfoLog`
+  // and three.js reports it onward through `renderer.debug.onShaderError` or, with no hook
+  // set, a `console.error` - and then carries on. So a package whose GLSL is malformed
+  // rather than merely unfamiliar drew nothing at all while every step of the install
+  // reported success: the door cannot compile, so identifier-valid text that is
+  // syntactically broken reaches the driver; the swap succeeds, `restoreProject` succeeds,
+  // and the poll announces that the page has been rebuilt from the new effects while the
+  // cloud renders an empty frame. There is nothing on screen and nothing in the chip.
+  //
+  // Collected here rather than reported, and thrown below rather than warned, because a
+  // throw out of this function is what `reloadEffects` rolls back on - so the page goes
+  // back to the programs it was drawing with and says which shader failed and why. At boot
+  // it takes the module down instead, which is the honest answer to a build whose own
+  // shipped shaders do not compile: there is no earlier set to fall back to.
+  const linkFailures = [];
+  const priorHook = renderer.debug.onShaderError;
+  renderer.debug.onShaderError = (gl, program, vertexShader, fragmentShader) => {
+    const log = gl.getProgramInfoLog(program)?.trim() ?? '';
+    const stage = gl.getShaderInfoLog(vertexShader)?.trim()
+      ? `vertex: ${gl.getShaderInfoLog(vertexShader).trim()}`
+      : `fragment: ${gl.getShaderInfoLog(fragmentShader)?.trim() ?? ''}`;
+    linkFailures.push(`${log || 'the program did not link'} (${stage})`);
+  };
   try {
     afterimage.enabled = true;
     bloom.enabled = true;
@@ -13677,13 +15790,20 @@ function warmPrograms() {
   } catch (err) {
     // A page that cannot warm is a page that still works, one hitch at a time. It is
     // reported rather than swallowed because a warm that silently stopped happening
-    // would read exactly like the stalls coming back for some other reason.
+    // would read exactly like the stalls coming back for some other reason. A shader that
+    // did not link does not arrive here - see the hook above for where it does.
     console.warn('could not warm the shader programs:', err.message);
   } finally {
+    renderer.debug.onShaderError = priorHook;
     afterimage.enabled = was.after;
     bloom.enabled = was.bloom;
     grade.enabled = was.grade;
     resetAccumulators();
+  }
+  // After the restore rather than inside the try, so the enabled flags and the
+  // accumulators are back where they belong before the caller starts unwinding.
+  if (linkFailures.length) {
+    throw new Error(`this build's shaders did not compile after the effects changed - ${linkFailures[0]}`);
   }
 }
 warmPrograms();
@@ -13817,6 +15937,31 @@ globalThis.__kinect = {
   // is exactly what `level-check --mutate tilt-ignored` does.
   worldTilt: () => cloud.quaternion.toArray(),
   resetWorldRotation,
+
+  /**
+   * The installed effects, and the rebuild an install triggers.
+   *
+   * **`reload` is the product's own path and not a driver's shortcut**, which is the
+   * whole reason it is exposed rather than left to the poll. A check installing a package
+   * has two ways to see the page adopt it: wait out an interval that is deliberately slow,
+   * or call the thing the interval calls. The first makes every row in the tool six
+   * seconds longer and turns a rebuild that threw into a timeout with nothing to read; the
+   * second is the same function, so a row that passes here is a row about the shipped
+   * rebuild. `pollNow` is the interval's own body, for the one claim that is about the
+   * poll rather than about the rebuild: that a page nobody touched converges on its own.
+   *
+   * `packages` answers with the manifests as the page holds them, which is what lets a
+   * row ask whether the page is assembled from the package the server is serving rather
+   * than from the one it booted on.
+   */
+  effects: {
+    reload: reloadEffects,
+    pollNow: pollEffects,
+    packages: () => effectPackages.map((p) => ({ id: p.id, version: p.manifest.version, rev: p.rev })),
+    signature: () => effectSignature,
+    /** The assembled source both programs were compiled from, for a row about the text. */
+    programs: () => JSON.parse(JSON.stringify(shaderPrograms)),
+  },
 
   // The live cloud's draw-rate cap, in hertz, readable and settable so the rate can be
   // swept on the node it was chosen for. A getter and a setter over the one binding the
@@ -13973,7 +16118,17 @@ globalThis.__kinect = {
   // and redden; grow it and they come up short and redden. Its two mutations are the
   // control at each end: one drops a value from a document, the other drops a group from
   // here.
-  completeLookNames,
+  //
+  // `wholeLookNames` is a function of the document now rather than of the build - the
+  // core plus every parameter of every effect the document itself touches - so the
+  // completeness a tool asserts is per document: `coreLookNames()` plus the effect
+  // expansion of the document's own `requires`. The effect helpers are published with
+  // it so no tool re-derives the namespace split for itself.
+  coreLookNames,
+  wholeLookNames,
+  effectOf,
+  effectIds,
+  effectParamNames,
 
   // How often the panel has re-derived which groups are open, since boot. Published
   // because the claim it carries is about *how many times* a bulk write asks that
@@ -14266,6 +16421,28 @@ globalThis.__kinect = {
      * finding. Measured exactly once, on `editor-check` at 238 of 274.
      */
     presetGestureRunning: () => presetGesture,
+    /**
+     * What the open document names that this build has not got, as the badge reads it -
+     * id, version, and how much is parked under each.
+     *
+     * Published because a check has no other way to ask the question at its own scale.
+     * The badge's text is the same facts rendered, so a row reading only the badge is a
+     * row about the painter; a row reading only this is a row about the pool. Both are
+     * worth having and they fail differently, which is why this is a hook rather than a
+     * suggestion to parse the chip.
+     */
+    missingEffects,
+    /**
+     * The effects the open document was authored against at a version other than the one
+     * installed here - `{ id, wanted, installed }` per effect.
+     *
+     * A neighbour of `missingEffects` rather than a field on it, because the two are
+     * different states of the same question and a check that conflated them would go green
+     * on either. An effect can be missing, or present at another version, and never both.
+     */
+    effectVersionSkew: () => effectVersionSkew.map((s) => ({ ...s })),
+    /** The parked pool itself, so a round-trip row can compare what went in and out. */
+    parkedLook: () => JSON.parse(JSON.stringify(parkedLook)),
     marks: () => takeMarks.map((m) => ({ ...m })),
     markHere,
     takeId: () => openTakeId,

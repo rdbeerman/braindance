@@ -13,6 +13,12 @@ captures
 exports
 projects
 presets
+# The effect store's user root, which is the same kind of runtime document store as the
+# two above: `PUT /effects/:id` lands a package here and `DELETE` takes it away, and
+# `effects-builtin/` beside it is the shipped half that this program never writes into.
+# Named before the first install rather than after, because an installed package is GLSL
+# and JSON that `syntax-check` would otherwise walk as though this repo shipped it.
+effects
 # Deliverables are the same kind of runtime document store as the two above and were
 # simply missed. `editor-check` writes two into it now, so the omission would have put an
 # untracked directory in everybody's `git status` the first time the suite ran.
@@ -21,6 +27,10 @@ deliverables
 # The staged tree monitor-check builds and deletes. It only survives a run that
 # threw, which is exactly when it is worth looking at and never worth committing.
 .monitor-check
+# And effect-check's, for the same reason plus one of its own: it is the only staged
+# tree in the suite that gets packages written into it, so a run that threw leaves
+# fifteen hostile fixtures and a probe effect on disk.
+.effect-check
 
 # Render-queue records. The queue is state a machine accumulates, not source.
 jobs

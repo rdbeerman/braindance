@@ -1,0 +1,73 @@
+{
+  "format": 1,
+  "id": "ripple",
+  "version": "1.0.0",
+  "title": "Ripple",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 0.5,
+      "step": 0.005,
+      "kind": "scalar",
+      "label": "ripple m",
+      "panel": {
+        "group": "region",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "ripple"
+      },
+      "role": "master"
+    },
+    "freq": {
+      "def": 4,
+      "min": 0.2,
+      "max": 20,
+      "step": 0.1,
+      "kind": "scalar",
+      "label": "ripple per m",
+      "panel": {
+        "group": "region",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "rippleFreq"
+      },
+      "under": "amount"
+    },
+    "speed": {
+      "def": 1,
+      "min": 0,
+      "max": 8,
+      "step": 0.05,
+      "kind": "scalar",
+      "label": "ripple hz",
+      "panel": {
+        "group": "region",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "rippleSpeed"
+      },
+      "under": "amount"
+    }
+  },
+  "consumes": [
+    {
+      "service": "region",
+      "when": "ripple > 0.0",
+      "gateOrder": 400
+    }
+  ],
+  "chunks": [
+    {
+      "stage": "v.regionDisplace",
+      "order": 300,
+      "file": "wave.vert.glsl"
+    }
+  ]
+}

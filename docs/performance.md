@@ -124,7 +124,7 @@ quote at anybody asking whether a look is smooth.
 
 ### The shipped looks are two populations, not a range
 
-Nobody drags `streak`; they pick a look. Whole documents against the parameter defaults,
+Nobody drags `streak.amount`; they pick a look. Whole documents against the parameter defaults,
 same paired design, 17 rounds of 50 renders:
 
 | look | 0.851 Mpx | 1.915 Mpx |
@@ -142,8 +142,8 @@ same paired design, 17 rounds of 50 renders:
 Four bare readings cost about nothing and five graded looks cost double, and **the gap
 widens with resolution** because the graded half's cost sits in the post chain. The five
 expensive ones are expensive for the same reason as each other: every one of them turns on
-`additive`, `wake`, `bloom`, `trails`, `rgbSplit`, `scanlines`, `grain` and a vignette
-together, and four of them add `streak` and a hard raster on top. So "what do the effects
+`additive`, `wake`, `bloom`, `trails`, `rgbsplit.amount`, `raster.amount`, `grain.amount` and a vignette
+together, and four of them add `streak.amount` and a hard raster on top. So "what do the effects
 cost" has no single answer, and which of the two populations a tester happened to pick
 decides their number before any individual slider does.
 
@@ -223,6 +223,109 @@ tree before this and therefore, in the words of the commit that dated them, catc
 nothing. A progressive chain resamples rather than point-sampling a frozen chain, which
 is the likely reason, and the honest alternative is that a differently-shaped halo simply
 differs less between two sizes. Both readings are open.
+
+**Those two paragraphs are the wrong way round, and the correction is left beside them
+rather than replacing them.** Re-measured on 2026-08-24 by running this file's own
+`export-check` at the two commits, one machine, one capture (`sample`), consecutive
+revisions and minutes apart: at `124a90b^` the pair reads luminance ratios of **0.99312
+and 0.99403** with worst tiles of 1.545 and 1.433 of 255, and passes; at `124a90b` it
+reads **0.40978 and 0.40931** with worst tiles of 45.923 and 45.962, and fails. So the
+replacement is what turned those two rows red, not what turned them green. The same
+numbers come back unchanged to five figures at `ad7c806`, `6ad2433` and at the tip, which
+is what says the flip is that one commit and not the fifteen days after it.
+
+The reason is that those rows are cross-build and the build they are pinned against is a
+revision, `f14b4be^`, which imports three's `UnrealBloomPass` and always will. From
+`124a90b` they compare our chain against three's and report the distance between two
+implementations as a rebase failure. Isolated at one 960x600 buffer, so that resolution is
+out of it entirely: at Blackwall's `bloom` of 0.5 the mean luminance is **7.1614 here
+against 17.3797 there**, a ratio of 0.41205 and a worst tile of 45.649; at `bloom` 0 it is
+5.0925 against 5.0581, a ratio of 1.00679 and a worst tile of 0.337. The whole 2.4x is that
+one term and none of it is the rebase. `export-check` now takes bloom out of those two rows
+and prints the bloom-up ratio beside the judged one on every run; `docs/instruments.md` has
+the case file.
+
+**What that leaves open is a picture question rather than an instrument one, and it is not
+settled here.** The same reading says the shipped graded looks got about 2.4x dimmer at
+`124a90b` - the same build, the same look, one commit apart - and this page prices the
+replacement's cost without pricing its picture. Whether that is a regrade somebody accepted
+or a gain this chain is missing wants a decision rather than another measurement, and until
+one is taken the section above should be read as a cost result only.
+
+### The decision, and the three terms it turned out to be
+
+**Taken on 2026-08-24: the graded brightness is restored.** Nine of the ten shipped looks
+were graded on 08-02 and 08-08, before the swap, so the brighter output is what their
+authors intended; `cascade` is the one authored inside the dim regime and its `bloom` moves
+in the same change to hold it. The paragraph above stands as the state before the decision
+rather than being replaced by it.
+
+**It was three dropped terms and not a gain, which is worth more than the decision.** The
+comparison this time is against `124a90b^` itself - a worktree at `fb03887`, its own server,
+the same `sample` capture by hash, both stages driven to 960x600 where the two builds' chains
+come out the same five sizes, every arm repeated across two browser launches with zero spread
+and the first bloom-bearing arm of each page discarded, because a frame that engages the pass
+pays its compile and reads 1.5114 where every repeat reads 7.1614. On that rig `fb03887` reads
+17.4846 to `f14b4be^`'s 17.3797, and Blackwall with `bloom` 0 comes back **identical to four
+decimals and 0.000/255 on the worst of forty tiles**, which is what says the rest of the
+difference is the pass.
+
+1. **`renderer.autoClear` was never dropped, so the accumulating chain did not accumulate.**
+   Read off the pass's own targets in half float: as it shipped all five levels carry a mean
+   of 9.67e-3, and with the flag held down they carry 9.68e-3, 1.94e-2, 2.90e-2, 3.87e-2 and
+   4.84e-2 - one, two, three, four and five octaves, which is what the pass's comment always
+   claimed. Four fifths of the halo was being wiped by the renderer between draws.
+2. **The composite's `3.0`**, which `UnrealBloomPass` carries as "backwards compatibility
+   with previous alpha-based intensity" and which had no counterpart here.
+3. **The per-mip `bloomFactors` and the radius that mirrors them**, which is one term and
+   the reason `radius` meant two different things across the swap - a weight mirror in
+   `[0, 1]` there, a tent tap spacing in texels here, and `0.7` carried over verbatim. The
+   old composite's arithmetic checks out to four figures against its own targets:
+   `3.0 * 0.5 * sum(w * mip)` predicts 3.2913e-2 where the target reads **3.2902e-2**.
+
+**What the restoration lands on, and what it does not.** Blackwall at one 960x600 buffer,
+`bloom` 0.5, against `fb03887`: **14.4805 against 17.4846, a ratio of 0.82818**, with the
+worst of forty tile means down from 45.828/255 to 21.360. At 0.45 it reads 0.85627 and at 0.8
+it reads 0.70718, so the residual is not a constant - it grows with the glow. **The residual
+is the halo's width and it is not a droppable term.** `UnrealBloomPass` blurs each mip with a
+baked Gaussian, and at the coarse end those kernels span the frame - 22 taps across a
+15x10 mip - where a down/up chain gets its width from one tent per octave. Measured by
+widening that tent while the energy stays put at ~4.3e-2: 0.828 at the shipped 0.7, 0.870 at
+1.0, 0.945 at 1.5, 1.012 at 2.0 and 1.093 at 3.0, with the worst tile still improving at 3.0
+and coverage still 35% against the old halo's 78%. Mean and tile disagree about where the
+optimum is, so there is no measured value to take and the tent is held at 0.7 - **picking 2.0
+because the mean lands on 1.0 would be the fudge factor this whole exercise is about.**
+
+**Only Blackwall is comparable across the swap, which is a result about the other four.**
+Every other look carrying bloom also carries a duotone, and `bcfdb98` gave the duotone a ramp
+width in metres after `fb03887` - so `ember` and `tearline` already differ by 5.17% and 5.16%
+with the glow *off*, and their glow-up ratios of 1.25236 and 1.35194 are two changes read as
+one. `voxel` carries the glyph field's exposure regrade on top of that. A cross-build reading
+of any of them is not a reading of this pass.
+
+**`cascade` cannot be held, and the reason is the parameter rather than the pass.** Fifteen
+pinned program positions of `captures/sample.knct` over 0 to 0.9933s at a 640x360 buffer,
+device scale 1, minimising mean absolute deviation per RGB channel against frames captured on
+the pre-fix tree - the shape `docs/instruments.md` records for `voxel`. The search wants
+**0.015 to 0.0167 at a MAD of 2.19**, which is the 0.15/9 the restored gain predicts. It
+cannot have it: `bloom` is declared with a `step` of 0.05 and `normalise` snaps every write to
+that grid, so the reachable values are 0 and 0.05. Against a reference of mean channel 35.171
+and 32.22% lit, they read:
+
+| `bloom` | MAD | worst channel | mean channel | lit |
+| --- | --- | --- | --- | --- |
+| 0.15, unchanged | 24.9910 | 210/255 | 60.163 | 48.28% |
+| 0.05, **shipped** | 7.3004 | 161/255 | 42.441 | 35.88% |
+| 0 | 4.7586 | 138/255 | 30.413 | 21.63% |
+| 0.0167, unreachable | 2.1926 | 96/255 | - | - |
+
+**0 wins the MAD and was not taken.** At 0 the pass does not run, so the criterion is reached
+by deleting the thing it measures, and the frame loses a third of its lit coverage - 21.63%
+against the reference's 32.22%, where 0.05 sits at 35.88%. That is CLAUDE.md's rule about an
+object every observation skips, arriving as a number. The same table at 960x600, a size the
+search did not tune at, keeps the same ordering: 27.8610, 8.5002, 4.8568. **A `step` of 0.01
+on `bloom` would let 0.015 hold `cascade` at a MAD of 2.19**, and that is a registry change
+somebody should decide on rather than one this change made.
 
 **`bloom-reference-1080` is now inert for a new reason, and that is a hole to close
 rather than a result to bank.** It was already uncaught before this change, blinded by
@@ -306,7 +409,7 @@ Sixteen taps per pixel in the grade pass, and it needed **two numbers rather tha
 because what a guarded block costs the looks that enable it and what it costs the looks that
 do not are different questions and only one of them answers to a parameter toggle.
 
-**Both numbers below predate `streakAngle` and neither has been re-taken.** The tap offset
+**Both numbers below predate `streak.angle` and neither has been re-taken.** The tap offset
 was a scalar step down the column when they were measured and is a vec2 multiply against the
 streak's axis now, so each tap gained arithmetic the figures do not include. It is left
 stated rather than guessed at: the gather is sixteen texture fetches and two more multiplies
@@ -341,6 +444,129 @@ transport still sitting at 0 with only the opening frames resident, and would ha
 whatever frame it happened to be on. Every seek here is checked against the position it asked
 for and retried, and the count of stand-downs comes back with the numbers - one per run at
 these loads.
+
+### The glyph field is unmeasured, and this is what that means
+
+**There is no frame rate for the glyph field anywhere, and nothing on this page prices it.**
+It is written down as a hole rather than left to be inferred from the silence, because a term
+absent from the cost table above reads as a term that came in under the floor, and this one is
+absent for the opposite reason. `wake` is the page's other unmeasured term and says so in its
+own paragraph; this is the second.
+
+The arithmetic that says it will not be cheap is arithmetic and not a measurement. At full
+`glyph.amount` the sprite grows from `pointSize` to the size of a lattice cell on screen, which is
+`latticeCell * projectionMatrix[1][1] * 540.0 / dist` reference pixels — for `cascade`'s 5.5cm
+cell under the default 50-degree camera, **63.7 pixels at one metre against the 8.1 that same
+document names for `pointSize`**, so about 62 times the fill per point at that distance. That is
+over 217,088 rays, and over 434,176 drawn slots whenever `fade` is up, per the draw-range figure
+above. On
+top of the fill each fragment inside a grown sprite computes a wrapped index out of three keys
+and looks a bit out of a 64-entry table of `uvec2`. The field of view keyframes, so 63.7 is the
+default camera's number rather than a constant.
+
+**The deleted design document said twenty-two times, and there are two errors under that
+number**, which is worth recording because the figure was quoted onward. It stated the cell as
+`63.7 / z` reference pixels in two places and "about 42 pixels" in a third, and the cost
+paragraph was built on the third: `(42 / 9)²` is 21.8 where `(63.7 / 9)²` is 50.1. The second
+error is the 9, which is the registry's default `pointSize` and not the one this look ships —
+`cascade` names 8.1, and `(63.7 / 8.1)²` is the 61.8 the paragraph above rounds to 62. Neither
+of the document's numbers is `cascade`'s, and a ratio quoted for a shipped look has to be taken
+at the value that look names. The shipped shader's comment beside the clamp carries 64, and the
+projection expression above is what the code actually evaluates.
+
+**The nearest measured thing on this page is a neighbour rather than a bound.** The
+`pointSize` 9 to 48 arm is 28x the fill where a cell-sized sprite at a metre is about 62x —
+each against its own point size, the arm's 9 and `cascade`'s 8.1 — and
+it costs +0.230 ms batch at 0.851 Mpx, +0.583 at 1.915, and +0.841 on the paced clock. It is a
+neighbour in one term only: the glyph branch adds per-fragment index arithmetic and a table
+lookup the point-size arm has none of, and it changes what fraction of the sprite survives the
+discard, so the two are not the same experiment at two sizes.
+
+**What is measured is that it draws, and that is a correctness result rather than a cost one.**
+Driven in a real browser on `/edit` and `/record` with zero console errors, over `fixture-1g` on
+a 1280x800 page with a planted look — `lattice.amount` 1 on the 5.5cm cell, `glyph.amount` 1, a depth reading
+clipped to 0.4 and 4.5 metres — characters render at cell size in the near room and crossfade
+back to round splats at range, and the rain's pattern moves between program times 12.000 and
+13.000. None of those runs counted a frame. Those observations predate the crossfade reading
+the drawn buffer, and every buffer in them was shorter than 1080 — so their far fields sit on
+the fallback, not the look. A character-coverage figure for the shipped look has to come from a
+buffer at least 1080 tall; the 1920x1080 render taken after the change is the first one that
+qualifies.
+
+**One thing that run looked like it proved, it does not, and the correction belongs here rather
+than in a commit message.** Taking the hash key to zero collapses every cell to the same mark,
+and this paragraph read that as saying the character is chosen per cell rather than per point.
+It says nothing of the kind. A zero coefficient deletes its own seed whichever thing the seed
+was keyed on, so a build hashing the *point* collapses to one mark under it just as tidily —
+the observation is satisfied by both implementations, which makes it no discriminator at all.
+What separates them is `registry-check`'s `one cell, one character` section: thinning a planted
+wall to a quarter of its points leaves the two frames bit-identical, hash for hash, because a
+mark that belongs to the cell cannot depend on how many points landed in that cell, where a
+build reading the point's own texel draws whichever of its four hundred occupants arrived first
+and thinning changes which one that is. Its control is the same thinning at `glyph.amount` 0, where the
+splat's falloff is a gradient rather than a bit, so the point count reaches the pixels and the
+two frames have to differ — which is what says the equality above it is not a fixture nothing
+can reach. The digests themselves stay in the run rather than on this page: they are identifiers
+for one build's output, they move on any shader edit, and what the row claims is that two of
+them match rather than which two. **A screenshot that agrees with the intended implementation is
+not evidence against the other one**, and that is the whole of the error being corrected.
+
+**Closing this is two measurements rather than one, and the design document collapsed them
+into one.** It said the cost could not be answered offline and wanted `grabber --profile` on
+the sensor, which is right about half of it. The render cost is answerable here and by the
+instrument this section already runs: `cascade` against the same document at `glyph.amount` 0, paced,
+paired, on the GPU's own timer query, with the arm order flipped every round. Nothing stops
+that but nobody having run it. What the editor genuinely cannot answer is whether a grown
+sprite costs the *recorder* anything, because the recorder's number is delivered fps and a
+burst of renders on that surface starves the socket the sensor delivers on — the shape the
+crop-box measurement above had to move to the editor to escape. That half is
+`grabber --profile` on the sensor with `prof-summary` reading the contention, and it is
+deferred. Until both are run the honest statement is the one at the top of this subsection.
+
+## The effect extraction cost nothing in pixels, and that is a measurement
+
+Moving every effect's GLSL out of two shader files and into sixteen packages is a refactor
+exactly as long as the text reaching the driver does not change, and the ways it can change
+quietly are not exotic — a chunk boundary off by one line, a blank line kept on both sides of a
+joint, an indent normalised on the way through. None of those breaks a compile and none shows in
+a picture anybody would look twice at. So the claim is held in pixels, against one recorded
+baseline, and it was re-asked at every landing point of the work rather than once at the end.
+
+**The rail: 150 framebuffer hashes, equal at every step.** Ten shipped looks — `blackwall`,
+`cascade`, `contour`, `depth`, `ember`, `ghost`, `grille`, `rgb`, `tearline`, `voxel` — each
+rendered at 15 pinned program positions and hashed with SHA-256 over `readPixels`. The final
+run, on the tree that retired the migration gates, came back **150 of 150 equal** to the
+baseline recorded at `0da90174`.
+
+The method, because a hash comparison is only worth what its preconditions are:
+
+- **Fixture.** `captures/sample.knct`, frames 0, 4, 8, 12, 16 and 20 at stride 4, replayed with
+  3 substeps and the colour dropped. The rebuilt fixture is 2,605,152 bytes and its SHA-256 is
+  checked against the one the baseline recorded **before any look is rendered** — a comparison
+  against a different take would agree with itself perfectly and mean nothing.
+- **Buffer.** A 572x322 drawing buffer inside a 640x360 viewport at `deviceScaleFactor` 1, with
+  the output size set to `640x360`. Asserted rather than assumed, for the same reason.
+- **Rasteriser.** ANGLE's Metal renderer on an Apple M2 Max, through Playwright's bundled
+  Chromium. The unmasked renderer string is compared against the baseline's and the run refuses
+  to continue if it differs, because two GPUs round a fragment differently and their hashes are
+  not comparable.
+- **Intrinsics.** The WebSocket is intercepted and answered with nothing, so the page falls back
+  to the pinned focal length; a run where real intrinsics arrived is refused on reading
+  `focal.x !== 366`. The camera is pinned at `(0, 0.1, 1.6)` looking at `(0, 0, -2.2)`.
+- **The baseline's own shape.** It was recorded over three passes — two in one page, which is
+  what catches a look leaking into the next, and a third in a fresh browser context, which is the
+  shape a comparison run has. All three were identical.
+
+**Two re-pins are recorded rather than hidden.** The baseline moved twice, both times for an
+approved picture change rather than for a refactor: the zero-alpha discard that keeps a
+transparent fragment out of the depth buffer, and the three restored bloom terms. The second
+re-pin was measured at the time — the four core looks differed at 12 of 15 positions and the six
+bloom-bearing looks at 15 of 15, 138 of 150 hashes in all — and everything since has been equal
+at 150. A baseline re-pinned to whatever the tree does today would prove nothing, so each re-pin
+carries what moved and why.
+
+**What this does not say** is that the shaders are correct; it says they did not change.
+`registry-check` is what says each term reaches pixels, and it runs 145 rows on the same tree.
 
 ## What did not work, measured rather than assumed
 

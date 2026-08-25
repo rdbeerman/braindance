@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "id": "grain",
+  "version": "1.0.0",
+  "title": "Grain",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "grain",
+      "panel": {
+        "group": "post",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "grade",
+        "uniform": "grain",
+        "gates": true
+      },
+      "role": "master"
+    }
+  },
+  "chunks": [
+    {
+      "stage": "g.body",
+      "order": 300,
+      "file": "grain.grade.glsl"
+    }
+  ]
+}

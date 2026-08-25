@@ -42,7 +42,7 @@
 // than rounded to "30fps" - a check that quietly assumed an even 33ms would be
 // measuring a take nobody recorded.
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
@@ -93,6 +93,42 @@ const TIMELINE_H_GUESS = 148;
 const SAME_MAX = 2;
 const CONTROL_MIN = 16;
 const CONTROL_MIN_PCT = 1.0;
+
+// Section 6's own pair, taken on section 6's own look rather than inherited from
+// Blackwall's. Measured on three consecutive runs of an idle machine, identical to the
+// digit each time: a correct seek lands **0/255** from the playback, and a seek with the
+// pre-roll suppressed lands **170/255** away over 1.108% of pixels.
+//
+// The same band stays at 2 and the reason is that it is not a property of the look at all -
+// it is headroom against float scheduling on the GPU, which is the renderer's, and the
+// reading it covers here is exactly zero. The control band is `cascade`'s own: 64 sits 2.7
+// times inside the 170 that was measured and thirty-two times above the same band, so the
+// two verdicts cannot be confused for one another.
+//
+// **The percentage is deliberately not asserted here where section 1 asserts it.** Blackwall
+// misses 17.885% of the frame without its pre-roll and `cascade` misses 1.108%, because
+// `cascade` carries a fifth of Blackwall's trails and there is that much less accumulator
+// to have skipped - so section 1's floor of 1.0% would sit a tenth of a percent under this
+// look's reading, which is a band with no margin in it. What carries the separation here is
+// the max and the eight-fold gap below it.
+const RAIN_SAME_MAX = 2;
+const RAIN_CONTROL_MIN = 64;
+// **And the control is three numbers rather than one, because a maximum is satisfiable by a
+// pixel.** `apart.max >= 64` says some single fragment somewhere landed 64 apart, which a
+// frame that is otherwise identical satisfies - so the row asserting "the control lands
+// somewhere else" could have been held up by one hot pixel while the two pictures were the
+// same picture. The count and the mean are what make it a picture rather than a pixel.
+//
+// The two floors are this section's fixture's own and are deliberately not section 1's,
+// which is 1.0% against a Blackwall that misses 17.885% of its frame without a pre-roll.
+// Measured on the look below, on an idle machine: **122/255 at a mean of 0.2256 over 2.174%
+// of pixels.** The floors sit between two and three times under each of those, which is far
+// enough below the reading to survive a contended run and far enough above zero to refuse a
+// frame that did not move. The note above the look says what the fixture is and what each of
+// its two terms is worth, and those numbers are the ones to re-derive these against if it
+// ever changes again.
+const RAIN_CONTROL_MIN_PCT = 0.8;
+const RAIN_CONTROL_MIN_MEAN = 0.08;
 
 // ------------------------------------------------------------------- mutations
 //
@@ -188,6 +224,59 @@ const MUTATIONS = {
     '    paramWritten(name, spec.tag);',
     '    if (!PARAMS[name].reading) paramWritten(name, spec.tag);',
   ]] },
+  // The rain integrated frame to frame instead of read off the program time, so where the
+  // wave stands becomes a function of how many frames were drawn on the way rather than of
+  // where the playhead is. That is the one claim in this whole feature that belongs to this
+  // file: everything else about the rain is a look value `registry-check` can hold, and
+  // "a seek lands where playback would have" is what a transport is for.
+  //
+  // **It has a line of its own to anchor on, and that is why the line exists.** The rain's
+  // clock is `uniforms.rainPhase`, written beside `uniforms.time` out of the same `t` -
+  // duplication that buys exactly this. Aimed at `uniforms.time` instead the mutation would
+  // redden the ripple, the glitch and the raster along with the rain, and a control that
+  // fails everything cannot say which claim is load-bearing.
+  //
+  // A thirtieth of a second per render rather than the real delta, because the defect is
+  // "the phase is a count of frames" and a wrong-by-a-constant integration is the honest
+  // shape of it: at 30fps out it accumulates real time exactly, so playback arrives at the
+  // right phase and only a seek - which renders a pre-roll and not a whole edit - does not.
+  //
+  // **Three rows, and the first of them is the one that says this was caught for its own
+  // reason.** Section 6 reads the phase at both ends of every arm and requires each arm to
+  // finish on the program time it was asked for, so the mutated run names the numbers -
+  // which is a different thing from the picture comparison underneath it going red, and it
+  // is the difference between "the rain accumulated" and "two frames disagree". The
+  // equality row and the separation row follow it, as they should.
+  'rain-accumulates': { file: 'web/main.js', edits: [[
+    '    uniforms.rainPhase.value = t;',
+    '    uniforms.rainPhase.value += 1 / 30;',
+  ]] },
+  // The clock written correctly and read by nothing, which is the state section 6's arms
+  // could not tell from a working build until they were asked to. Both arms agree
+  // perfectly on a rain that does not move - they agree on every frozen thing there is -
+  // and the uniform still holds the program time it was handed, so the per-arm clock row
+  // is satisfied as well. What goes is the one row that stands between those two: the
+  // picture moving when the clock alone is moved.
+  //
+  // Aimed at the shader rather than at the write, because the write is what
+  // `rain-accumulates` is about and two controls falsifying the same line would be two
+  // ways of saying one thing. Inert everywhere else in this file: sections 1 to 5 run
+  // looks carrying no rain and no characters, where the block this edits does not execute.
+  //
+  // **One row, and this comment said three.** The one it is for is the clock-reaches-pixels
+  // guard, which comes back `max 0/255, mean 0.0000, 0.000% of pixels differ` - the picture
+  // does not move when the clock alone is moved, which is exactly the claim. The two rows
+  // predicted beside it were the no-pre-roll control and the separation row under it, on the
+  // reading that most of what the accumulators hold over `cascade` is the wave moving through
+  // them, so a wave that does not move leaves a pre-roll with nothing to warm. Measured, both
+  // stay green: the pre-roll has plenty else to warm on this fixture, so that reading was
+  // wrong about the fixture rather than about the mechanism. It is corrected here rather than
+  // deleted, because a prediction that failed is the more useful half - a reader who counts
+  // three and finds one goes looking for two faults that were never there.
+  'rain-phase-unread': { file: 'effects-builtin/rain/cell.vert.glsl', edits: [[
+    '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
+    '    vRain = (0.0 * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
+  ]] },
 };
 
 // **The spec names the file it edits, and the interception is derived from that name.**
@@ -225,10 +314,30 @@ function mutatedSource() {
  * anything failing.
  */
 function servedAt(file) {
+  if (file.startsWith('effects-builtin/')) {
+    // The effects' own GLSL, which the page fetches out of `/effects/:id/file/:name` and
+    // `assembleShaders` splices into the cloud's material - so a mutation that edits a
+    // chunk is delivered at the fetch rather than at a module, which from Playwright's
+    // side is the same interception.
+    const parts = file.split('/');
+    if (parts.length !== 3) {
+      throw new Error(`${file} is not an effect package file - a chunk is <id>/<name> under effects-builtin/`);
+    }
+    return `/effects/${parts[1]}/file/${parts[2]}`;
+  }
   if (!file.startsWith('web/')) {
     throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
   }
   return `/${file.slice('web/'.length)}`;
+}
+
+/**
+ * What the server answers a file with, restated here because the interception has to
+ * answer the same way: a chunk is `text/plain` in `server/index.js`, on the argument that
+ * what the tools anchor and the client compiles is the file's own bytes.
+ */
+function contentTypeFor(file) {
+  return file.endsWith('.glsl') ? 'text/plain; charset=utf-8' : 'text/javascript; charset=utf-8';
 }
 
 // ------------------------------------------------------------------- playwright
@@ -404,6 +513,7 @@ const ARM = `async (opts) => {
   await tl.configure(opts);
 
   const before = tl.counters();
+  const rainPhaseBefore = k.uniforms.rainPhase.value;
   let seek = null;
   if (opts.kind === 'playback') {
     // From the head of the edit, every output frame in order.
@@ -418,6 +528,14 @@ const ARM = `async (opts) => {
     delta: tl.since(before),
     camera: tl.camera(),
     seek,
+    // The rain's clock, read at both ends of the arm rather than once at the end of the
+    // section. Read once, it is a fact about whatever ran last: the phase is a uniform that
+    // persists across arms, so a build integrating it per render arrives at the target
+    // carrying everything every earlier arm drew, and a section that reads it after three
+    // arms cannot say which of them put it there. Read per arm, the claim is per arm - this
+    // one reached this program time and the phase says so, whatever it inherited.
+    rainPhaseBefore,
+    rainPhaseAfter: k.uniforms.rainPhase.value,
     state: k.timeline.read(),
   };
 }`;
@@ -452,7 +570,7 @@ if (MUTATE) {
   mutantPath = servedAt(file);
   await page.route((url) => url.pathname === mutantPath, (route) => {
     mutantServed++;
-    route.fulfill({ contentType: 'text/javascript; charset=utf-8', body });
+    route.fulfill({ contentType: contentTypeFor(file), body });
   });
   console.log(`[timeline] MUTATED BUILD: ${MUTATE} in ${file} at ${mutantPath} - this run is expected to FAIL`);
 }
@@ -481,6 +599,20 @@ if (MUTATE && mutantServed === 0) {
 // drawing buffer - but 640x360 is 16:9, the menu's own default, so there is no
 // letterbox and no offset to carry: the buffer comes out exactly 640x360.
 await page.evaluate('globalThis.__kinect.setOutputSize?.("640x360")');
+// The transport first, and the furniture after it - which is the fix for an intermittent
+// this file used to die on rather than a reordering for tidiness.
+//
+// **The strip is hidden until the take opens.** `#timeline` carries `hidden` until the
+// transport exists, so furniture measured before this wait reads a strip of zero on any
+// run where the take opens a beat late, the viewport comes out `360 + 0 + shell`, and the
+// stage is short by exactly the strip. Recorded twice, with the arithmetic both times: a
+// run reading `338x190` is `398 - 208`, where 398 is `360 + 0 + 38` and 208 is the
+// furniture the run then actually had; a run reading `533x300` is `508 - 208`, where 508
+// is the *initial* `360 + TIMELINE_H_GUESS` viewport, so there the resize had not reached
+// the drawing buffer rather than the strip being absent. One guard, two ways for the
+// measurement and the take to race, and both of them are answered by waiting for the thing
+// that makes the strip appear before asking how tall it is.
+await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
 // And the viewport is sized to whatever fixed furniture actually surrounds the stage,
 // measured rather than assumed. `TIMELINE_H` was a constant that went stale the moment
 // the bar became two rows, and the Pencil shell adds the same risk at the top: every
@@ -501,8 +633,22 @@ await page.evaluate('globalThis.__kinect.setOutputSize?.("640x360")');
     width: STAGE.width,
     height: STAGE.height + furniture.strip + furniture.shell,
   });
+  // **And then wait for the drawing buffer to follow, because `setViewportSize` returning
+  // is not the renderer having resized.** That is the second signature above: the viewport
+  // was right and the buffer had not caught up when it was read. The wait is an
+  // accommodation and the throw below is the guard, so a timeout here falls through to it
+  // rather than replacing it - a run that genuinely cannot reach this stage still dies
+  // loudly, naming the size it got.
+  //
+  // The predicate answers *false* on a page with no renderer rather than throwing, because
+  // a throw inside `waitForFunction` is not caught by it: the twenty seconds a wait is
+  // given are never spent, and the failure arrives instantly wearing the shape of a
+  // finding. `docs/instruments.md` records that costing a round on its own.
+  await page.waitForFunction((want) => {
+    const gl = globalThis.__kinect?.renderer?.getContext?.();
+    return !!gl && gl.drawingBufferWidth === want.w && gl.drawingBufferHeight === want.h;
+  }, { w: STAGE.width, h: STAGE.height }, { timeout: 15000 }).catch(() => {});
 }
-await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
 await page.evaluate(INSTALL);
 
 const gpu = await page.evaluate(() => {
@@ -548,6 +694,64 @@ const RGB_LOOK = JSON.parse(
   readFileSync(new URL('../presets-builtin/rgb.json', import.meta.url), 'utf8'),
 ).values;
 const BLACKWALL = { look: BLACKWALL_LOOK };
+
+// The one look in this file with the rain switched on, and it has to exist rather than
+// being folded into an arm above. **Every other arm here renders the rain completely
+// inert**: `blackwall.json`, `depth.json` and `rgb.json` do not carry the rain effect at
+// all - a version 6 document sheds an effect wholly at its defaults, and the whole-look
+// apply resets what a document leaves unnamed - and a term behind a master at zero is not
+// a term a comparison can see. Run against any of them the rain
+// mutation below reddens nothing, the run exits 0, and this file has no NOT CAUGHT branch
+// to say so - a miss that reads as a clean pass, which is the worse of the two shapes.
+//
+// Read off the document that ships it when there is one, so no look value is invented here,
+// the way Blackwall is read above. The fallback is the same four numbers written down: it
+// is the tuning the probe arrived at, and it lives in the preset rather than here as soon as
+// the preset exists.
+const CASCADE_PATH = new URL('../presets-builtin/cascade.json', import.meta.url);
+const CASCADE_SHIPPED = existsSync(CASCADE_PATH)
+  ? JSON.parse(readFileSync(CASCADE_PATH, 'utf8')).values
+  : { ...BLACKWALL_LOOK, 'rain.amount': 0.8, 'rain.speed': 0.55, 'rain.span': 1.3, 'rain.trail': 0.45 };
+
+// **Two values are moved off that document, and the rain is not one of them.** What this
+// section claims is about the rain and what its control claims is about the pre-roll, and the
+// pre-roll costs nothing to skip unless fade, wake and trails are carrying something. That is
+// the reason section 1 renders Blackwall rather than anything prettier, and this is the same
+// reason arriving one section later.
+//
+// It only became necessary when the legibility crossfade moved into framebuffer pixels, and
+// the cause is a fact about this stage rather than about the look. Every other screen-space
+// term in this renderer is expressed against 1080p and scales with the buffer; the crossfade
+// deliberately does not, because it asks whether an 8x8 bitmask has enough texels under it to
+// resolve, and texels are what the framebuffer has. This stage is 360 tall, so `cascade`'s
+// 0.055m cell rasterises into about 7 pixels where the shipped grade gives it 22, and the mark
+// correctly falls back to the round splat it is supposed to fall back to. A splat sits still
+// frame to frame where a character's index scrambles as drops pass it, so `max(new, damp*old)`
+// returns the new frame and the accumulators stop holding anything a missing pre-roll could be
+// missing.
+//
+// Measured on this stage, all four in one sitting, because a repair with two terms in it
+// wants each of them priced:
+//
+//     shipped cascade                       6/255   mean 0.0001   0.001% of pixels
+//     + trails at Blackwall's 0.5          72/255   mean 0.0023   0.008%
+//     + the cell tripled                   63/255   mean 0.0246   0.145%
+//     + both                              122/255   mean 0.2256   2.174%
+//
+// against the 170/255 over 1.108% this section read while the crossfade was in reference
+// pixels. Neither term is enough on its own and the obvious one is the weaker: the trails buy
+// a peak and almost no area, the cell buys area and takes eight ninths of the marks away with
+// it, and together they read further apart than the reading they replace. The cell is tripled
+// rather than chosen, because the drawn sprite is the cell times the buffer height over 1080 -
+// a third of the height and three times the cell is the same number of pixels the shipped
+// grade gets, which is the only value here that reproduces rather than invents. The room is
+// coarser than the shipped look's and this section does not care: the rain rides these columns
+// whatever size they are.
+const CASCADE_LOOK = {
+  ...CASCADE_SHIPPED,
+  trails: BLACKWALL_LOOK.trails,
+  cell: (CASCADE_SHIPPED.cell ?? 0.055) * 3,
+};
 
 const arm = (opts) => page.evaluate(`(${ARM})(${JSON.stringify(opts)})`);
 const diff = (a, b) => page.evaluate(`globalThis.__tl.diff(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
@@ -676,18 +880,18 @@ console.log('\n== 1c. the image at a program position is the frame the index nam
   // leave whatever the previous section selected - and the section before this one runs
   // in Blackwall, whose scan plane sweeps with program time. Every "nothing left that
   // can move the image" claim below would then be measuring a moving image.
-  // `vignette` is named here for the same reason every other grade term is, and it is the
-  // one that says why this list cannot be shortened: FLAT spreads over a look that has the
+  // `vignette.amount` is named here for the same reason every other grade term is, and it is
+  // the one that says why this list cannot be shortened: FLAT spreads over a look that has the
   // grade up, so a term it does not zero arrives from underneath. When the vignette stopped
   // being a literal applied whenever the pass ran and became a parameter Blackwall names,
   // this list went on zeroing the three it knew about and the fourth came through - a flat
   // look with a corner falloff on it, which is 100% of pixels differing from the bytes.
-  // `duotoneDepth` joins that list ahead of needing to. It is not time-varying, so seek
+  // `duotone.amount` joins that list ahead of needing to. It is not time-varying, so seek
   // still equals playback with it up - but it is a tonal transform after the blend, and
   // this arm compares the rendered image against the frame bytes themselves, so the moment
   // the shipped Blackwall look names a duotone it would arrive from underneath exactly the
   // way the vignette did. The list is cheaper to extend than the failure is to diagnose.
-  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, glitch: 0, scan: 0, noise: 0, rgbSplit: 0, scanlines: 0, grain: 0, vignette: 0, duotoneDepth: 0 };
+  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, scan: 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
   const look = { ...FLAT, interpolate: false };
   // A source time sitting just inside a bracket, so which pair it names is not a
   // rounding question. Which *half* of that pair the image comes from is the part
@@ -1231,18 +1435,18 @@ console.log('\n== 4b. 60 fps out of a capture whose median gap is 64ms ==');
   // leave whatever the previous section selected - and the section before this one runs
   // in Blackwall, whose scan plane sweeps with program time. Every "nothing left that
   // can move the image" claim below would then be measuring a moving image.
-  // `vignette` is named here for the same reason every other grade term is, and it is the
-  // one that says why this list cannot be shortened: FLAT spreads over a look that has the
+  // `vignette.amount` is named here for the same reason every other grade term is, and it is
+  // the one that says why this list cannot be shortened: FLAT spreads over a look that has the
   // grade up, so a term it does not zero arrives from underneath. When the vignette stopped
   // being a literal applied whenever the pass ran and became a parameter Blackwall names,
   // this list went on zeroing the three it knew about and the fourth came through - a flat
   // look with a corner falloff on it, which is 100% of pixels differing from the bytes.
-  // `duotoneDepth` joins that list ahead of needing to. It is not time-varying, so seek
+  // `duotone.amount` joins that list ahead of needing to. It is not time-varying, so seek
   // still equals playback with it up - but it is a tonal transform after the blend, and
   // this arm compares the rendered image against the frame bytes themselves, so the moment
   // the shipped Blackwall look names a duotone it would arrive from underneath exactly the
   // way the vignette did. The list is cheaper to extend than the failure is to diagnose.
-  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, glitch: 0, scan: 0, noise: 0, rgbSplit: 0, scanlines: 0, grain: 0, vignette: 0, duotoneDepth: 0 };
+  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, scan: 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
   const walk = `(async (o) => {
     const k = globalThis.__kinect;
     const tl = globalThis.__tl;
@@ -1460,6 +1664,142 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
   check(wakePlan.frames > blackwallPlan.frames,
     'and the estimate follows it up',
     `${blackwallPlan.frames} frames to ${wakePlan.frames}`);
+}
+
+// ================================ 6. and a wave that falls with the program clock
+
+// Section 1 with the rain up, and it is a section rather than a fourth arm of that one
+// because the two need different bands and a band copied across looks is a band nobody
+// measured. What it holds is the one sentence in the glyph field's design that is this
+// file's rather than `registry-check`'s: the rain is a pure function of program time and
+// world position, with no accumulated state anywhere in it, so a seek lands on exactly the
+// frame playback would have drawn there.
+//
+// The two arms reach 12.0s the two ways and have to agree. A rain integrated per render
+// cannot: playback renders every output frame from the head of the edit and a seek renders
+// a pre-roll and the target, so the two arrive at the same program time having drawn
+// wildly different numbers of frames - measured below, about three hundred and sixty
+// against about twenty - and a phase counted in frames is three hundred and forty frames
+// apart between them.
+console.log('\n== 6. the rain falls with the program clock, not with the frames drawn ==');
+{
+  const config = { look: CASCADE_LOOK, rate: 1, fps: 30, targetSec: TARGET_SEC, frames: null };
+  const played = await arm({ ...config, kind: 'playback', label: 'rainPlayed' });
+  const seeked = await arm({ ...config, kind: 'seek', label: 'rainSeeked' });
+  const control = await arm({ ...config, kind: 'seek', frames: 0, label: 'rainControl' });
+
+  const plan = seeked.seek.plan;
+  console.log(`  method: ${existsSync(CASCADE_PATH) ? 'cascade.json' : 'Blackwall with the rain raised'}`
+    + `, rate 1.00x, 30 fps out, target ${TARGET_SEC}s. Playback rendered ${played.delta.renders} `
+    + `output frames, the seek ${seeked.delta.renders} (a ${plan.frames}-frame pre-roll), the `
+    + `control ${control.delta.renders}.`);
+
+  // The rain has to be on the screen, or the three arms below are Blackwall with extra
+  // steps and the section is a second copy of section 1. Asserted through the registry
+  // rather than by reading the document, because what matters is the value that reached the
+  // uniform: a look applied through a build that had dropped the parameter would leave it
+  // at its default and every row here would go on passing.
+  const raining = await page.evaluate('globalThis.__kinect.uniforms.rain.value');
+  check(raining > 0.1, 'the look under this section actually has rain in it',
+    `rain reads ${raining} at the uniform`);
+
+  // **A uniform holding a value is not a term reaching a pixel, and the row above is only
+  // the first of those.** Both arms could agree perfectly on a build whose rain never
+  // touched a fragment - two identical Blackwalls agree beautifully - so the equality below
+  // needs two things established first: that the clock the arms are about is the program
+  // time they were asked for, and that moving that clock moves this picture. The first is
+  // read per arm above; this is the second, and it is deliberately taken here, on the frame
+  // the equality is about, rather than argued from the look document.
+  //
+  // Rendered straight rather than through `renderProgramFrame`, because that function
+  // rewrites the phase off program time on its way past and would undo the nudge before
+  // drawing it. The seek afterwards puts the page back where the section found it, so the
+  // rows below are measured on the state they were measured on before this block existed.
+  const reaches = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const tl = globalThis.__tl;
+    const held = k.uniforms.rainPhase.value;
+    k.uniforms.rainPhase.value = held + 0.37;
+    k.renderer.render(k.scene, k.viewCamera());
+    tl.grab('rainNudged');
+    k.uniforms.rainPhase.value = held;
+    k.renderer.render(k.scene, k.viewCamera());
+    tl.grab('rainHeld');
+    return { held, nudged: held + 0.37 };
+  })()`);
+  const nudge = await diff('rainHeld', 'rainNudged');
+  console.log(`  the clock alone, moved ${(reaches.nudged - reaches.held).toFixed(2)}s under a `
+    + `still frame: ${show(nudge)}`);
+  check(nudge.max >= RAIN_CONTROL_MIN && nudge.pct >= 1.0,
+    'moving the rain clock and nothing else moves this picture, so the equality below is '
+    + 'about a term that reaches pixels rather than about two identical frames', show(nudge));
+
+  // **The clock the two arms agree about is the program time they were asked for.** This is
+  // the other half of the row above and the two are not the same claim: that one says the
+  // phase reaches pixels, this one says the phase is the transport's reading of where the
+  // playhead is rather than a count of what has been drawn. A build integrating per render
+  // satisfies the first perfectly.
+  //
+  // Read per arm and asserted per arm, because the phase persists between them: the
+  // playback arm renders about 360 frames and the seek about 20, so on an integrating build
+  // the two arms end on wildly different numbers and neither is the target - and a single
+  // reading taken after all three would only be able to name the last one.
+  const clocks = [['playback', played], ['seek', seeked], ['no pre-roll', control]];
+  const off = clocks.filter(([, a]) => Math.abs(a.rainPhaseAfter - TARGET_SEC) > 1e-6);
+  console.log(`  rain clock per arm: ${clocks.map(([n, a]) => `${n} ${a.rainPhaseBefore.toFixed(3)}`
+    + ` -> ${a.rainPhaseAfter.toFixed(3)}`).join(', ')}`);
+  check(off.length === 0,
+    `every arm ends with the rain clock reading the program time it was asked for, ${TARGET_SEC}s, `
+    + 'whatever it inherited from the arm before it',
+    off.length ? off.map(([n, a]) => `${n} ended at ${a.rainPhaseAfter.toFixed(4)}`).join(', ')
+      : `all three at ${TARGET_SEC.toFixed(3)}`);
+
+  // The arms did different work, or "identical" is a statement about one arm run twice.
+  check(played.delta.renders > seeked.delta.renders * 4,
+    'the two arms did substantially different amounts of work',
+    `${played.delta.renders} renders against ${seeked.delta.renders}`);
+  // **Section 1's exact render count, which this section did not have.** The loose ratio
+  // above says the arms differ; it does not say the playback arm drew every output frame of
+  // the edit, and that matters here for a reason peculiar to this machine rather than to
+  // this claim: an intermittent used to land one extra render inside this arm about one run
+  // in five on a contended machine, and `docs/instruments.md` carries the measurement.
+  // Without this row that arrives as the rain equality failing, which reads exactly like a
+  // phase that accumulated - a finding about the feature, produced by the transport. With
+  // it, the run says which of the two happened in its own words.
+  //
+  // The row is kept now that the intermittent is fixed, and the reason is the correction
+  // rather than the fix. It was read as `runTo` overshooting its target, and it never was:
+  // `openTake`'s closing seek to the head of the take was arriving after this arm had
+  // started and landing behind it. This row is what made the difference visible at all, so
+  // it stays as the arm that would see the next one.
+  check(played.delta.renders === seeked.seek.target + 1,
+    'playback rendered every output frame from the start of the edit and no more',
+    `${played.delta.renders} of ${seeked.seek.target + 1}`);
+  check(seeked.delta.renders === plan.frames + 1,
+    'and the seek rendered the pre-roll and the target and nothing else',
+    `${seeked.delta.renders} of ${plan.frames + 1}`);
+  check(played.camera === seeked.camera && played.camera === control.camera,
+    'the camera is identical across all three arms');
+
+  const same = await diff('rainPlayed', 'rainSeeked');
+  const apart = await diff('rainPlayed', 'rainControl');
+  console.log(`\n  playback vs seek        ${show(same)}${same.max === 0 ? '  (byte-identical)' : ''}`);
+  console.log(`  playback vs no pre-roll ${show(apart)}`);
+
+  // The bands are this look's own, measured on it rather than inherited from Blackwall's.
+  // A rain-raised frame is brighter and busier than a Blackwall one, so both the residual a
+  // correct pre-roll leaves and the distance a missing one opens up are different numbers -
+  // and a band carried across from another look is the failure `docs/instruments.md` records
+  // for the gallery's decimation ratio, where a threshold calibrated at one pixel ratio ran
+  // one hundredth of a margin from missing its own mutation.
+  check(same.max <= RAIN_SAME_MAX,
+    `a seek lands within ${RAIN_SAME_MAX}/255 of the playback with the rain falling`, show(same));
+  check(apart.max >= RAIN_CONTROL_MIN && apart.pct >= RAIN_CONTROL_MIN_PCT
+    && apart.mean >= RAIN_CONTROL_MIN_MEAN,
+    'the control lands somewhere else across the frame rather than at one pixel, so the '
+    + 'equality above is about something', show(apart));
+  check(apart.max > same.max * 8 + 8, 'the two verdicts are separated rather than adjacent',
+    `control max ${apart.max} against ${same.max}`);
 }
 
 // ------------------------------------------------------------------- screenshots

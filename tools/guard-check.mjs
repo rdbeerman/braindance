@@ -119,7 +119,11 @@ if (MUTATE && !MUTATIONS[MUTATE]) {
 rmSync(WORK, { recursive: true, force: true });
 mkdirSync(WORK, { recursive: true });
 cpSync(join(REPO, 'server'), join(WORK, 'server'), { recursive: true });
-for (const name of ['web', 'node_modules', 'vendor', 'captures']) {
+// `effects-builtin` is in the list because the effect store refuses to BOOT without
+// its shipped root - deliberately, so a broken install cannot read as
+// nothing-installed - which means a staged tree without it is a server this tool
+// cannot start at all. The preset store tolerates absence; the effect store does not.
+for (const name of ['web', 'node_modules', 'vendor', 'captures', 'effects-builtin']) {
   const from = join(REPO, name);
   if (existsSync(from)) symlinkSync(from, join(WORK, name));
 }

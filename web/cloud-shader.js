@@ -1,25 +1,57 @@
-// The two programs a depth sample is drawn by, as source text and nothing else.
+// The core of the two programs a depth sample is drawn by, and the joints the installed
+// effects are spliced into.
 //
-// There is no arithmetic here, nothing is constructed and nothing is imported: this file
-// is what the point cloud's material is compiled from, lifted whole out of `main.js` so
-// that nine hundred lines of GLSL stop sitting between the uniforms that feed them and
-// the hundred places that write those uniforms. Neither program interpolates anything -
-// there is no `${}` in either literal - so the text below is exactly what the driver is
-// handed, and it stays that way: a shader that needs a value from JavaScript takes it as
-// a uniform, which is the boundary the uniform block is for and the reason this could
-// move at all.
+// There is no arithmetic here, nothing is constructed and nothing is imported: what this
+// file exports is source text, in ordered segments, and `web/shader-assembly.js` joins
+// those segments to whatever the effect packages bring to produce the two strings three.js
+// is handed. Neither program interpolates anything - there is no `${}` in any segment -
+// so the text below is exactly what the driver is handed, and it stays that way: a shader
+// that needs a value from JavaScript takes it as a uniform, which is the boundary the
+// uniform block is for and the reason any of this could move at all.
 //
-// **What the move costs is the pairing, and it is worth naming here rather than being
-// discovered.** Every `uniform` declared below has to have a key in the `uniforms` object
-// in `main.js`, and nothing enforces that in either direction. A uniform with no key is
-// silent: three.js simply never writes it, the shader reads zero, and the look is subtly
-// wrong with nothing on the console. A key with no uniform is dead weight that costs a
-// slider's write on every frame it is animated. Measured across the split: 76 declared
-// here, 76 keys there, and the two sets are equal both ways. That equality is a fact
-// about today rather than something this file can hold, so a term added to one side
-// belongs in the same commit as the other.
+// **The text did not change when the joints arrived, and that was measured rather than
+// intended.** While the extraction was landing, `test/shader-assembly.test.mjs` assembled
+// this spine against the shipped packages and asserted the two strings equal the two
+// literals this file used to hold, taken out of the last revision carrying them. That arm
+// is gone - it pinned the packages to a revision, so the first intentional retune would
+// have broken it - and what carries the claim now is the ten-look probe in
+// `docs/performance.md`, which came back equal to one recorded baseline at every landing
+// point of the split and says it in pixels rather than in bytes. What stays in the test is
+// the structural half: a byte flipped in any chunk file has to move the program its name
+// promises and no other.
+//
+// **A joint is one of four kinds, and `web/shader-assembly.js` carries what each is for.**
+// A `stage` takes any number of chunks in declared order, a `slot` takes one and carries
+// the text to use when nothing claims it, a `service` is a value this file computes under a
+// gate its consumers generate - filling it is `cell`'s arrangement and not `region`'s - and a
+// `varyings` entry is generated from the packages' own declarations.
+// The comments below say why each joint is where it is, because a cut through a shader is
+// a claim about what belongs to an effect and what belongs to every point in the frame -
+// and the second class is the one that goes wrong quietly.
+//
+// **What the split costs is the pairing, and it is worth naming here rather than being
+// discovered.** Every `uniform` in the assembled programs has to have a key in the
+// `uniforms` object in `web/point-cloud.js`, and nothing enforces that in either
+// direction. A uniform with no key is silent: three.js simply never writes it, the shader
+// reads zero, and the look is subtly wrong with nothing on the console. A key with no
+// uniform is dead weight that costs a slider's write on every frame it is animated.
+// Measured across the split: 86 distinct uniforms in the assembled pair, 86 keys there,
+// and the two sets are equal both ways - 77 of them declared in the segments below and 9
+// in the glyph and rain packages' own declaration chunks. That equality is a fact about
+// today rather than something this file can hold, so a term added to one side belongs in
+// the same commit as the other, and `test/cloud-shader.test.mjs` asks it of the assembled
+// text rather than of this file, which is what keeps a uniform arriving in a package
+// inside the question.
 
-export const vertexShader = /* glsl */ `
+// Each entry frozen as well as the list, because the spine is read by two callers that
+// share one object - the page's material and the gate - and a segment somebody trimmed in
+// place would move the look of one and the verdict of the other in the same breath.
+const frozen = (entries) => Object.freeze(entries.map((e) => Object.freeze(e)));
+
+export const cloudSpine = Object.freeze({
+  vertex: frozen([
+    { text: /* glsl */ `\
+
 precision highp float;
 precision highp usampler2D;
 
@@ -27,10 +59,27 @@ uniform usampler2D depthPrev, depthCurr;
 uniform sampler2D stateTex;
 uniform vec2 focal, center, resolution;
 uniform float bufferHeight;
+// What this hardware will actually rasterise a point sprite at, which is a bound rather
+// than a look value and so is not a registry parameter: it has no default anybody chose,
+// it cannot be keyframed into anything, and a preset naming it would be a document
+// carrying one machine's limit to another. Written once at boot out of
+// ALIASED_POINT_SIZE_RANGE in web/main.js, beside the point cloud it is built with,
+// rather than in resize() where bufferHeight is written - the range is a property of
+// the context and does not change when the window does. The table's own default is the
+// old literal 64, so a build that somehow reached a frame before that write draws what
+// the shipped clamp always drew.
+uniform float pointCeiling;
 uniform float pointSize, nearClip, farClip, time, edgeTol;
 uniform float cropL, cropR, cropB, cropT, cropOn, cropOutside;
 uniform float noise, noiseScale, noiseSpeed;
 uniform float lattice, latticeCell;
+` },
+    // The uniforms an effect declares for this stage, above the region's block because
+    // that is where the two that use it were written. A package adds its own `uniform`
+    // lines here and nothing else: a term that needs a value from the registry needs a
+    // cell to read it out of, and this is where the cell is named.
+    { stage: 'v.decl' },
+    { text: /* glsl */ `\
 uniform vec3 regionCentre, regionHalf;
 uniform float regionRound, regionSoft, regionPush, regionNoise, regionMask;
 uniform float ripple, rippleFreq, rippleSpeed;
@@ -46,10 +95,22 @@ out float vDepth;
 out float vEdge;
 out float vGlitch;
 out float vSize;
+out float vLegiblePx;
 out float vGhost;
 out float vFade;
 out float vMask;
 out float vSpeed;
+` },
+    // The channels an effect carries to the fragment stage, declared from the packages'
+    // `varyings` rather than written out, so this `out` and the `in` far below cannot
+    // come apart. `vCellNorm` is deliberately not one of them: the fragment stage multiplies
+    // every additive splat's alpha by it whatever is installed, so the declaration and the
+    // inert 1.0 belong to every point in the frame. Only the write is an effect's, and it
+    // arrives through the `v.cellNorm` slot below rather than through a varying of its own -
+    // a package declaring it here would emit a second `out` beside the one this line covers.
+    { varyings: 'out' },
+    { text: /* glsl */ `\
+out float vCellNorm;
 
 float depthAt(usampler2D tex, ivec2 p) {
   return float(texelFetch(tex, p, 0).r);
@@ -157,6 +218,38 @@ void main() {
   // register. A shed point would come out carrying the speed of whichever live point
   // shared its warp.
   vSpeed = 0.0;
+  // The glyph field's three, initialised here under exactly the rule above rather than
+  // where they are computed, which is hundreds of lines below the early returns.
+  //
+  // **What leaves them unwritten is the gate and not the ghost**, and the correction is
+  // recorded rather than quietly made, because the wrong reason stood here for a while and
+  // reads as authoritative. This paragraph used to say a ghost never reaches the cell
+  // arithmetic. A *live* ghost reaches it exactly the way a live point does - it falls
+  // through the same lines - and a dead one leaves at the early return above with a point
+  // size of zero, so it rasterises nothing and could not draw a wrong character if it
+  // wanted to. What actually skips the block is the block's own guard: it is gated on the
+  // two masters together, so at every look drawing no characters and no rain - which is
+  // nine of the ten shipped ones - nothing down there runs at all. The fragment stage
+  // still takes the fraction of vRain on every fragment, unguarded and deliberately so,
+  // and a rain
+  // of 0 is no protection: the multiplier that makes the term inert is applied to the
+  // result, and zero times whatever an undefined register holds is not reliably zero.
+  //
+  // The identity each one is initialised to is the value that makes its consumer inert:
+  // seed and rain at zero name the first character and the top of a drop, and the cell
+  // normalisation at one is a multiply that changes no alpha. That third one is written
+  // unconditionally further down rather than under a gate, so what its initialisation
+  // covers is the early returns alone.
+` },
+    // The same declarations again as the value that makes each consumer inert, and this
+    // is the half that has to sit here rather than where the varyings are computed. There
+    // are three early returns above this line and a whole branch - the ghost - that never
+    // reaches the block below, so a varying only written on the live path is undefined
+    // everywhere else, and undefined in a shader is whatever the last invocation left in
+    // the register.
+    { varyings: 'init' },
+    { text: /* glsl */ `\
+  vCellNorm = 1.0;
 
   if (aSlot > 0.5) {
     // The ghost: what the ray used to be looking at. A hard swap earns a longer
@@ -316,140 +409,123 @@ void main() {
   // The operators are not uniform on purpose: regionNoise and ripple cannot go negative
   // and are tested against zero, where regionPush and regionMask run from -1 and would be
   // switched off across half their travel by the same test.
-  float rw = (regionPush != 0.0 || regionNoise > 0.0 || regionMask != 0.0 || ripple > 0.0)
+` },
+    // The region weight, computed once for everything that reads it, under a gate that is
+    // the four consumers' own `when` clauses rather than a list kept here. The comment
+    // above is the one the monolith carried and it is left exactly as it was, because the
+    // property it insists on - that a term reading this weight without joining the gate is
+    // inert rather than broken - is now true by construction instead of by attention: a
+    // package that consumes this service gets its term, and one that forgets to consume it
+    // has no chunk in the program either.
+    //
+    // **This one closes nothing, which is the whole difference from `cell` below.** `rw` is
+    // a value at the surrounding scope and the four displacements that read it sit in the
+    // stage and the slot underneath, so there is no block for a consumer's chunk to go
+    // inside - the gate is a conditional expression and its consumers are placed by name.
+    // The operators are the consumers' own and are deliberately not uniform, for the reason
+    // the comment above gives: two of the four run from -1.
+    {
+      service: 'region',
+      open: '  float rw = (',
+      body: /* glsl */ `\
+)
     ? regionWeight(p0)
     : 0.0;
+`,
+      close: '',
+    },
+    { text: /* glsl */ `\
 
-  // Gated because it is the most expensive thing in this shader: eight hashes of three
-  // sines each, against the six the old sine field cost. A look with no turbulence pays
-  // none of it, which is the same bargain the ghost half of the geometry makes.
-  float amp = noise + regionNoise * rw;
-  if (amp > 0.0) {
-    pos += amp * vnoise3(p0 * noiseScale + time * noiseSpeed * vec3(0.7, 1.13, 0.31));
-  }
+  // Which cell of the room this point belongs to, and where it stands in the falling
+  // pattern. Both are read at the *undisplaced* position for the reason the region above
+  // is, and the consequence here is sharper than a crawling edge: a character's identity
+  // has to be a fact about the room, so that turbulence pushes points through a field of
+  // characters that stay where they are. Hashed off the running pos instead, the whole
+  // field boils the moment noise, the ripple or the region push leaves zero - and with all
+  // of them at zero, which is where a drop-one sweep leaves them, the picture is
+  // bit-identical to the correct one.
+  //
+  // **The grid is the lattice's own and there is deliberately not a second one.**
+  // latticeCell already names the cube the room is cut into, and a glyph field carrying
+  // a cell size of its own would be two independent world-cell quantisers in one shader
+  // with nothing holding their reasoning together. It is read here whatever lattice
+  // itself is, because the rain rides these same columns and works over round splats, so
+  // this cannot sit inside the snap's own guard.
+  //
+  // mat3(modelMatrix) rather than a rotation derived beside it, for the reason the snap
+  // below gives at length: the cloud carries the world tilt as its only transform, so this
+  // is exactly the sensor-to-levelled rotation and cannot come apart from the one the snap
+  // uses. Gated on the two masters together because neither consumer exists below them and
+  // the block is a mat3 multiply and two hashes on every point in the frame.
+` },
+    // Which cell of the room this point fell in, computed once for everything that keys
+    // on the lattice's own grid. The gate is generated from the `when` of every consumer
+    // rather than written out, which is the property that makes it right by construction:
+    // a build with neither consumer installed does not pay a mat3 multiply and two hashes
+    // on every point in the frame, and a build with one pays for one. The body is the
+    // room-space position and the cell index, because those are what "which cell" means
+    // and every consumer needs both.
+    {
+      service: 'cell',
+      open: '  if (',
+      body: /* glsl */ `\
+) {
+    vec3 room = mat3(modelMatrix) * p0;
+    vec3 wc = floor(room / latticeCell + 0.5);
+`,
+      close: '  }\n',
+    },
+    // The blank line between the cell's block and the displacement run belongs to neither,
+    // which is why it is a segment of its own rather than the tail of one joint or the head
+    // of the next. Written into the cell's `close` it would vanish with the glyph field;
+    // written into the turbulence chunk it would arrive a second time behind the push.
+    { text: '\n' },
+    // The displacements the region weight drives, in the order the file held them:
+    // turbulence, then the push, then the ripple. **Two displacement stages and not one,
+    // and the split is forced by the text rather than chosen.** The soft mask writes a
+    // varying in the middle of this run - it is a slot, because a build without the mask
+    // package still has to carry the crop's own dimming - and a joint standing between two
+    // chunks of one stage would have to be spliced into the middle of it, which is exactly
+    // what a stage cannot do. So the run above the mask and the run below it are two
+    // joints, and each one's chunks are ordered inside it.
+    { stage: 'v.regionDisplace' },
+    // How much of this point the region hides, which is a replacement rather than an
+    // addition: the mask and the crop's dimming are one multiply on one varying, so a
+    // package adding to it beside the core would be a second spelling of "how much is this
+    // point attenuated" and the two would have to be multiplied together somewhere anyway.
+    //
+    // **The only fallback in this file carrying text no build has ever drawn**, and it is
+    // worth saying out loud rather than leaving to be discovered. The other two that carry
+    // text at all - `v.pointSize` and `f.mark` - are the shipped statements exactly as they
+    // stood before anything claimed them, so an anchor into either is at worst in the wrong
+    // one of two live copies. This one has no original: the crop's dimming has shared its
+    // statement with the region mask since both existed, so the mask-less form is written
+    // here for the first time. What settles it is that vMask is written on every live path
+    // and read unconditionally down in the fragment stage, so an uninstalled mask has to
+    // leave a write here and the crop's half is the part belonging to every point in the
+    // frame - asserted by assembling the shipped set with the mask dropped, where `rw` has
+    // no reader left and this is the one write vMask gets.
+    {
+      slot: 'v.mask',
+      fallback: /* glsl */ `\
+  vMask = outsideCrop ? cropOutside : 1.0;
 
-  // Radial rather than along the field's gradient. The gradient of a rounded box is
-  // degenerate at the centre - there is no outward direction there - and flattens
-  // against the faces, where a radial push is defined everywhere and reads as a blob
-  // swelling. The guard is for the point that lands exactly on the centre, where
-  // normalize would hand back NaN and take the whole vertex with it.
-  if (regionPush != 0.0 && rw > 0.0) {
-    vec3 away = p0 - regionCentre;
-    float d = length(away);
-    if (d > 1e-4) pos += (away / d) * regionPush * rw;
-  }
-
-  // The region read a fourth way: a wave travelling out along the radius, so the volume
-  // breathes where the push only swells it. It shares the push's radial direction and its
-  // centre guard for the same reasons - the gradient of a rounded box is degenerate at the
-  // centre, and normalize there would hand back NaN and take the vertex with it.
-  //
-  // **The clock is stepped rather than continuous, which is the whole character of it.**
-  // A sine of raw time is a thing breathing; this design wants a thing being rebuilt by a
-  // machine, so the phase advances in eighth-cycles and the surface arrives at each one
-  // rather than sliding between them. Eight steps and not a parameter: the count is what
-  // makes it read as machinery, and a slider that could set it to a thousand would just
-  // be a way to author the smooth version this is deliberately not.
-  //
-  // The step is on the clock alone and not on the radius, so the wave is quantised in
-  // time and smooth in space. Quantising both would put the region on a set of shells,
-  // which is the lattice's job two blocks down and would be a second way to do it.
-  if (ripple > 0.0 && rw > 0.0) {
-    vec3 out0 = p0 - regionCentre;
-    float dist = length(out0);
-    if (dist > 1e-4) {
-      float cycles = dist * rippleFreq - floor(time * rippleSpeed * 8.0) * 0.125;
-      pos += (out0 / dist) * (sin(cycles * 6.2831853) * ripple * rw);
-    }
-  }
-
-  // Positive hides what is inside the region, negative what is outside. Carried to the
-  // fragment stage rather than culled here, because the whole point of the falloff is
-  // that the edge is soft.
-  //
-  // The crop's own dimming rides here rather than on a varying of its own, and it is
-  // the same idea rather than a similar one: both are a boundary the vertex stage knows
-  // about attenuating a fragment it cannot discard. A second varying would be a second
-  // spelling of "how much is this point attenuated", and the two would then have to be
-  // multiplied together somewhere anyway.
-  vMask = (regionMask > 0.0
-    ? 1.0 - regionMask * rw
-    : 1.0 + regionMask * (1.0 - rw))
-    * (outsideCrop ? cropOutside : 1.0);
-
-  // Datastream corruption: horizontal bands tear sideways, the way a failing
-  // feed shears. Bands are picked stochastically so it stutters rather than pulses.
-  //
-  // The shove is sensor-frame X applied before the view matrix, and the bands are
-  // depth-image rows, so the tear belongs to the feed rather than to the display. That
-  // is the point rather than an oversight: orbit around a torn band and it shoves in
-  // depth, which is what says the volume is corrupt, and under a levelled room the
-  // bands run at the angle the bracket was actually at. Screen-locked tearing is a
-  // different effect and would belong at the grade stage beside the scanlines.
-  //
-  // The floor of time times the rate is written twice rather than hoisted into a local,
-  // and the shove's ceiling is parenthesised as twice glitchShove rather than folded
-  // into the chain. Both are here to hold the float arithmetic at the defaults exactly
-  // where the literals left it - this file has already measured that handing a value
-  // through a variable licenses a contraction the inline expression does not get, and
-  // doubling 0.45 is exact in float32 where a re-associated product need not be. At the
-  // defaults the *geometry* of this block is bit-identical to the one-slider version it
-  // replaces, and that is measured rather than reasoned: with the flare taken to zero, the
-  // colour, depth and contour readings come back byte for byte identical to the pinned
-  // build at the shipped glitch of 0.18, over six frames, and the shove is live on both
-  // sides so the equality is not vacuous.
-  //
-  // **The flare is the exception and the claim used to be stated without it.** glitchTint
-  // defaults to 1.8 where the line it replaced baked 3.0, so the picture does move - see
-  // the registry entry for the measurement. The blanket version of this sentence stood for
-  // as long as it did because nothing ever rendered these two builds with the glitch
-  // switched on: the cross-build section renders at parameter defaults, where glitch is 0
-  // and none of this executes.
-  vGlitch = 0.0;
-  if (glitch > 0.0) {
-    // The axis the bands are cut along, and the default path is the old expression itself
-    // rather than one that computes what the old expression computed. That distinction has
-    // already cost this file a measurement twice - the comment above says why, and the
-    // raster's guard in the grade shader in web/post-chain.js says it again - so the zero
-    // case reaches the old division textually, with no local in the way to license a
-    // contraction the inline form does not get.
-    float band = glitchAxis > 0.0
-      ? floor(mix(position.y, position.x, glitchAxis) / glitchBands)
-      : floor(position.y / glitchBands);
-    float roll = hash(band + floor(time * glitchRate) * 31.7);
-    if (roll > 1.0 - glitch * glitchDensity) {
-      float shove = (hash(band * 3.1 + floor(time * glitchRate)) - 0.5) * glitch * (2.0 * glitchShove);
-      pos.x += shove;
-      vGlitch = abs(shove) * glitchTint;
-    }
-  }
-
-  // The volume rebuilt on a grid: every axis quantised to a cell, so surfaces break into
-  // steps and the cloud reads as something a machine is reconstructing rather than
-  // something that was measured. It sits last of the displacements, after the tear, so
-  // what gets snapped is the position the point actually ends at - a lattice applied
-  // before the turbulence would be smoothly pushed back off its own grid and buy nothing.
-  //
-  // **Snapped in the levelled frame and not the sensor's**, which is the whole of why this
-  // is more than a rounding. The grid has to belong to the room: with a canted mount the
-  // sensor frame is tilted, and a lattice cut along its axes would stand at whatever angle
-  // the bracket happened to be at, so the floor would step diagonally. Levelling first
-  // means the cells line up with the room, and a mount corrected afterwards does not
-  // re-cut the grid.
-  //
-  // **The rotation is the model matrix three already hands this shader, not a second copy
-  // of it.** The cloud carries the world tilt as its only transform, so mat3(modelMatrix)
-  // is exactly the sensor-to-levelled rotation and cannot drift from it the way a uniform
-  // derived beside it could. Getting back is the transpose rather than inverse(), which is
-  // both cheaper and exact - but that identity holds only while the matrix stays a pure
-  // rotation, so registry-check asserts the cloud carries no scale and no translation
-  // rather than leaving it as a thing this comment claims.
-  if (lattice > 0.0) {
-    mat3 level = mat3(modelMatrix);
-    vec3 cell = floor((level * pos) / latticeCell + 0.5) * latticeCell;
-    pos = mix(pos, transpose(level) * cell, lattice);
-  }
-
+`,
+    },
+    // The displacements an effect adds after the mask has read the region weight. A stage
+    // rather than a slot because these compose and their order is the whole of what they
+    // mean: the tear shoves a band of the feed sideways and the lattice quantises wherever
+    // the point ends up, so running them the other way round would snap a position the tear
+    // then walks off the grid. The order is declared in each package rather than left to
+    // whichever the server lists first, which is what makes "the order the file held them
+    // in" a fact rather than an accident of a directory listing.
+    //
+    // **A stage appends its chunks after whatever core text is left above it, so only the
+    // tail of a run can move.** That is what kept the turbulence, the push and the ripple
+    // core while the tear and the snap moved out, and it is why they needed a joint of
+    // their own to leave through rather than orders below these two.
+    { stage: 'v.displace' },
+    { text: /* glsl */ `\
   vUv = (position.xy + 0.5) / resolution;
   vDepth = z;
 
@@ -473,7 +549,33 @@ void main() {
   // points closer than about a quarter of a metre - and a check comparing two
   // output sizes has to keep out of that band rather than pretend it is not there.
   float k = bufferHeight / 1080.0;
+  // How big one lattice cell is on screen at this point's distance, in the same reference
+  // pixels vSize below is carried in, and it is derived from the projection rather than
+  // from a baked field of view because the fov is part of the camera pose and keyframes: a
+  // constant worked out at fifty degrees is wrong the moment a clip animates it.
+  // projectionMatrix[1][1] is cot(fov/2), so a world length L at view distance d spans
+  // L * P11 / d of clip space and half the frame is 540 reference pixels.
+  //
+  // max(0.15, -mv.z) is written out a second time rather than hoisted into the clamp
+  // below it, and that is deliberate: the clamp's exact text is what export-check's
+  // pointsize-absolute anchors on, so putting a local in the middle of it would take the
+  // control off rather than move it.
+  float dist = max(0.15, -mv.z);
+  float cellPx = latticeCell * projectionMatrix[1][1] * 540.0 / dist;
+` },
+    // How big the sprite is drawn, and the one joint here that is a replacement rather
+    // than an addition: an effect that grows the sprite into something other than a point
+    // has to stand where the clamp stood, not beside it. The fallback is that clamp,
+    // exactly as it was written before anything claimed this - pixels at 1080p over the
+    // view distance, floored at one framebuffer pixel and ceilinged at the literal 64 -
+    // and the long argument for both bounds is in the comment above `dist`.
+    {
+      slot: 'v.pointSize',
+      fallback: /* glsl */ `\
   gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);
+`,
+    },
+    { text: /* glsl */ `\
   // Carried in reference pixels rather than framebuffer ones, because the fragment
   // shader normalises a splat's additive energy against its area. For the same
   // image at twice the size each point covers four times the pixels, so it has to
@@ -481,6 +583,17 @@ void main() {
   // the identical look sum four times too bright at twice the resolution.
   vSize = gl_PointSize / k;
 
+` },
+    // What a displacement does to a splat's additive energy, cancelled in the stage that
+    // knows the view distance and the projection. A slot rather than a stage, and the only
+    // one here whose fallback is empty: `vCellNorm` is one factor on one multiply down in
+    // the fragment stage, so two effects writing it would be two answers to one question,
+    // and with nothing claiming it the 1.0 written above the early returns is what stands -
+    // which is exactly the value that makes that multiply inert. The declaration and that
+    // initialisation stay core for the same reason the `in` far below does: every additive
+    // fragment reads it whatever is installed.
+    { slot: 'v.cellNorm', fallback: '' },
+    { text: /* glsl */ `\
   // Cut-away points draw at half the size, and **this has to come after vSize or it
   // undoes the dimming it is meant to help.** The fragment stage normalises a splat's
   // additive energy against vSize squared, so a point reported at half size gets four
@@ -494,10 +607,44 @@ void main() {
   // order-dependently. A quarter of the footprint is a quarter of the occlusion, and it
   // reads as dust instead of as surface.
   if (outsideCrop) gl_PointSize *= 0.5;
-}
-`;
 
-export const fragmentShader = /* glsl */ `
+  // **The size the legibility crossfade reads, and it is the lesser of two readings rather
+  // than either one of them.** This is a third screen-space quantity and the file now
+  // carries three references rather than two, so it is worth stating what each is for. The
+  // 1080p reference is the unit every *look* value is expressed in, so that a document
+  // grades the same picture at any output size. Bloom's chain is frozen at 600 because
+  // UnrealBloomPass bakes its tap count in at construction and has no parameter to
+  // express. And this one is neither: the mark falls back to a splat at whichever limit is
+  // reached first, the look's own floor in reference pixels or what the buffer can actually
+  // resolve.
+  //
+  // **Both halves are load-bearing and each one alone is a defect.** Read purely in
+  // reference pixels the crossfade inverts at small buffers: the lower clamp lifts a
+  // sub-pixel sprite to one framebuffer pixel, which divides back into 15 reference pixels
+  // at a 128x72 export, so the far cloud the fallback exists for was reported as nearly
+  // legible and drew one arbitrary bit of a character per point instead of a dot. Read
+  // purely in framebuffer pixels the boundary between text and texture moves with the
+  // output size: the same document that turns to splats past four metres at 1080p holds
+  // characters to eight at 4K, which is a different picture rather than the same one at
+  // higher fidelity - and renderScale, which is a view parameter and keyframes nothing,
+  // would move the look. Dividing by max(k, 1) takes the smaller of the two: below 1080
+  // the divisor is 1 and this is the drawn sprite, at 1080 the two units coincide exactly,
+  // and above it this is the drawn sprite back in reference pixels.
+  //
+  // Taken here because this is the last line in the file that can move gl_PointSize, and
+  // the halving above it is inside the reading on purpose - a cut-away cell drawn at half
+  // its pixels has half the texels to resolve on, whatever the look asked for.
+  //
+  // vSize is a different quantity and stays one: it is what the additive normalisation
+  // divides by, it is taken before the halving, and it is in reference pixels always,
+  // because brightness has to be invariant to output size where legibility cannot be.
+  vLegiblePx = gl_PointSize / max(k, 1.0);
+}
+` },
+  ]),
+  fragment: frozen([
+    { text: /* glsl */ `\
+
 precision highp float;
 
 uniform sampler2D colorPrev, colorCurr;
@@ -507,6 +654,13 @@ uniform float duotoneDepth, duotoneHue, duotoneSplit, duotoneSpan, duotoneMotion
 uniform float readRgb, readDepth, readGhost, readContour, readBlackwall;
 uniform float rgbSaturation, depthGamma, ghostRim, ghostFill;
 uniform float contourBands, contourLo, contourHi, blackwallSweep;
+` },
+    // The uniforms an effect declares for this stage. A term is declared in the stage
+    // that reads it and in both when both read it, which is why the glyph field's master
+    // appears here as well as in the vertex stage: it grows the sprite up there and
+    // crossfades the mark down here.
+    { stage: 'f.decl' },
+    { text: /* glsl */ `\
 uniform int hasColor, softEdge;
 
 in vec2 vUv;
@@ -514,13 +668,26 @@ in float vDepth;
 in float vEdge;
 in float vGlitch;
 in float vSize;
+in float vLegiblePx;
 in float vGhost;
 in float vFade;
 in float vMask;
 in float vSpeed;
+` },
+    // The far end of the channels the vertex stage declared, from the same `varyings`
+    // entries, in the same order.
+    { varyings: 'in' },
+    { text: /* glsl */ `\
+in float vCellNorm;
 
 out vec4 fragColor;
 
+` },
+    // Whatever an effect needs at file scope: a table, a helper, a constant array. Above
+    // the ramps rather than below them because a helper has to be declared before the
+    // function that calls it in GLSL, and `main` is at the bottom.
+    { stage: 'f.helpers' },
+    { text: /* glsl */ `\
 // Black through red and orange to white, the palette a thermal camera writes rather
 // than the cool-to-warm one depthRamp uses - the two are deliberately different, so
 // that thermal on top of Depth mode is a second reading and not the same one twice.
@@ -572,6 +739,16 @@ void main() {
   vec2 d = gl_PointCoord - 0.5;
   float r2 = dot(d, d);
 
+` },
+    // What shape the mark is, which is a replacement for the same reason the point size
+    // is: an effect drawing something other than a round splat needs the disc test to
+    // stop cutting its corners, and a second test beside the first would be two answers
+    // to one question. The fallback is the pair that stood here before anything claimed
+    // it - the discard on the hard-edged branch, then the falloff - and it is the text
+    // that shipped rather than a reconstruction of it.
+    {
+      slot: 'f.mark',
+      fallback: /* glsl */ `\
   // Additive mode shapes the sprite purely with alpha falloff. Skipping the
   // discard keeps Apple's tile-based hidden-surface removal working.
   float falloff;
@@ -582,6 +759,9 @@ void main() {
     falloff = smoothstep(0.25, 0.02, r2);
   }
 
+`,
+    },
+    { text: /* glsl */ `\
   float t = clamp((vDepth - nearClip) / max(0.001, farClip - nearClip), 0.0, 1.0);
   vec3 rgb = hasColor == 1
     ? mix(texture(colorPrev, vUv).rgb, texture(colorCurr, vUv).rgb, mixT)
@@ -745,178 +925,35 @@ void main() {
   // and would otherwise be recorded as a parameter that cannot touch a pixel. That
   // argument is what the readings above have now been rebuilt around, so the rule it
   // states applies to the readings themselves: registry-check sweeps each of them.
-  if (thermal > 0.0) {
-    // Luminance where there is a colour camera, depth where there is not. A thermal
-    // picture is a reading of a signal, and with the colour stream off the only signal
-    // left is range - falling back to a flat tint instead would be a slider that
-    // appears to work and is showing nothing.
-    float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
-    float heat = hasColor == 1 ? lum : 1.0 - t;
-    col = mix(col, heatRamp(clamp(heat, 0.0, 1.0)), thermal);
-  }
-
-  if (edges > 0.0) {
-    // vEdge is the neighbour spread the vertex stage already computed for the
-    // speckle test, so an edge-only reading costs a mix rather than a second pass.
-    float e = pow(vEdge, 0.6);
-    col = mix(col, mix(vec3(0.02, 0.03, 0.05), vec3(0.82, 0.94, 1.0), e), edges);
-    alpha *= mix(1.0, 0.05 + 0.95 * e, edges);
-  }
-
-  // The duotone, and it is the governing tonal transform rather than a tint over one:
-  // the near pole runs toward black and the far pole toward hot, so a single term
-  // produces both the depth-keyed palette and the near-black silhouette against a
-  // burning core. The note beside the uniforms has why those are one parameter.
-  //
-  // It sits here, after the blend, for the reason thermal and edges above it do - a term
-  // written into one reading is inert in every other, and is then exercised only by
-  // whichever sweep arm happens to select that reading. And it sits *before* the glitch
-  // flare below rather than after it, which is a decision rather than an ordering
-  // accident: a torn band is emitted light, so it belongs on top of the tonal transform
-  // and not underneath one that would crush it back toward black.
-  //
-  // Read off t, the point's position inside the near/far clip range, so the split is a
-  // place in the room the way the crop faces are and not a fraction of a frame. The split
-  // is where the two poles meet and moving it decides which half of the room the subject
-  // falls in.
-  //
-  // **How wide the ramp is either side of that is a distance rather than a share of the
-  // box**, which is what duotoneSpan buys and why the division below exists. t is already
-  // normalised by the clip range, so a ramp stated in t is a ramp whose metres change
-  // every time a crop face moves - the grade would follow the framing, and shutting the
-  // far plane to steepen the toning would be the only way to steepen it. Dividing the span
-  // by the range converts metres back into t's units at the width the look asked for, and
-  // the long note beside the uniform carries what that was measured to cost.
-  //
-  // Guarded, and the shape was measured rather than chosen. Both shapes are arithmetically
-  // clean here, which is not obvious and is worth writing down: a mix at zero is a plus
-  // zero times b minus a, which is exact whether or not the compiler contracts it, where
-  // the mix at one this file guards elsewhere is the one that is not. So the question was
-  // never the identity but what a branch does to the contractions either side of it, which
-  // the flare below records going the surprising way. Measured here, guarded, against the
-  // pinned pre-registry build: readRgb, readDepth, readContour and readBlackwall all came
-  // back bit-identical over six frames, and readGhost reproduced its own pre-existing
-  // failure unchanged - the same two frames, 2 and 3, and the same pair of hashes
-  // 55d01311394e against 36fb79d8fa45. That last part was the half that mattered, because
-  // a row already red is where a new perturbation would hide.
-  //
-  // **That standing failure has since been measured and it was never this file's.** The
-  // two frames differed by one byte of 1,024,000, by exactly 1 - one channel of one
-  // fragment landing the other side of a rounding boundary between two independently
-  // compiled builds, which is the same contraction effect the flare below records rather
-  // than a term. registry-check's section 1b compares pictures now, with the threshold
-  // derived from that noise at one end and from ghost-alpha-term-dropped at the other,
-  // no backticks in this comment on purpose - it sits inside the GLSL template literal,
-  // and one here ends the shader. That is the seventh time in this repo,
-  // which moves 187k bytes by 47. So the row is green at baseline and a re-measurement
-  // like this one no longer has to reason around a red row while doing it.
-  if (duotoneDepth > 0.0) {
-    vec3 cold = hueSpin(vec3(0.020, 0.030, 0.075), duotoneHue);
-    vec3 heat = hueSpin(vec3(1.000, 0.380, 0.120), duotoneHue);
-    float w = duotoneSpan / max(0.001, farClip - nearClip);
-    float k = smoothstep(duotoneSplit - w * 0.5, duotoneSplit + w * 0.5, t);
-    // The motion half of the same transform, and it is the same two poles rather than a
-    // second palette laid over them: depth decides where the room falls between cold and
-    // hot, and this pushes whatever is moving through the room toward the hot end of it.
-    // That is the reading the depth key on its own cannot draw - a subject and the wall
-    // behind it are graded by where they stand, so a person walking through a scene is
-    // exactly as cold as the air they walk through until something keys on the walking.
+` },
+    // A term over the colour the readings produced, after the blend. It is a stage rather
+    // than a slot because these compose: a term written into one reading is inert in every
+    // other one, which is the argument every term here is arranged by, and two effects
+    // lifting the same colour is two multiplies rather than a conflict. The GLSL comment
+    // immediately above states that argument for the reader of the assembled shader, and it
+    // stays in the spine rather than travelling with the first chunk because it is the
+    // stage's own reason: a build with no tone effect installed still has the run, and the
+    // sentence explaining why terms belong here would otherwise vanish with the last
+    // package that happened to carry it.
     //
-    // Toward 1 rather than added to k, so a point at the hot end cannot be pushed past
-    // it and the term has its room where the picture is near-black, which is where a
-    // subject usually is. The far half of the room is already hot and has nothing to
-    // gain, which is right: motion is only news against the pole it is not at.
+    // **The whole run is generated now.** Five packages fill it, in the order the file held
+    // them and numbered with room between: the thermal at 100, the edges at 200, the duotone
+    // at 300, the glitch's flare at 400 and the rain's lift at 500. Each chunk carries why
+    // it sits where it does - the rain's says why it is below the flare, so that the line
+    // the flare's measurement was taken beside keeps the neighbours it was measured with.
     //
-    // **1200 mm/s is the speed at which a point reaches the pole**, and it is baked for
-    // the reason the two poles themselves are - a look parameterises how much of a ramp
-    // it wants, not the ramp. It is about the axial speed of somebody walking straight
-    // at the sensor at an ordinary pace, so the pole belongs to a person crossing the
-    // room rather than to a hand. Measured over the sample capture: the 99th percentile
-    // of a nearly-static stretch is 430 mm/s and the fastest sample in five pairs is
-    // about 1900, while a take with somebody moving through it runs a median of 286 and
-    // a 90th percentile of 1082.
-    //
-    // **The sensor's jitter is a displacement rather than a speed, so what it reads as
-    // here depends on how fast the frames arrive**, and that is worth knowing before
-    // trusting any threshold in these units. Measured on the same capture at two
-    // spacings: the median sample moves about 4mm whichever pair you take, which is 31
-    // mm/s across the 128ms pairs registry-check pins and about 140 mm/s across the
-    // capture's own 32ms ones. Real movement is a fixed speed and reads the same at both,
-    // so this estimator gets noisier as the link gets faster - which is a property of
-    // measuring a rate from two adjacent samples and not something a constant fixes.
-    //
-    // No floor under it, and that is measured rather than assumed. A smoothstep has zero
-    // derivative at the origin, which is most of the suppression on its own: on a wall
-    // planted flat at 1100mm with this amount at 1 and the depth at 1, driven through the
-    // editor at 1280 wide rather than through the check's own stage, mean red over the
-    // frame goes 7.83 still, 7.90 with 4mm of jitter across a 128ms pair, 8.76 with the
-    // same 4mm across a 32ms one, and 22.84 at a real 600 mm/s. So even at the frame rate
-    // where the jitter
-    // reads loudest it costs about one 8-bit step against fifteen for the signal. A floor
-    // would have to be stated in one unit or the other and neither is right at both
-    // spacings - in mm/s it would need re-tuning per link, which is what dividing by the
-    // span exists to stop, and in millimetres it would let a slow surface register over a
-    // slow link and vanish over a fast one.
-    //
-    // A duotoneMotion of 0 is exactly the picture this block drew before the term
-    // existed. mix at zero is x times one plus y times zero, or x plus zero times the
-    // difference, and both are exact whether or not the compiler contracts them - which
-    // is the same arithmetic the guard comment above this block records measuring, and
-    // it is measured again rather than inherited: the comparison is in registry-check's
-    // planted-motion section, where a frame with a fast point in it and a frame with a
-    // still one have to come back bit-identical while this sits at its default.
-    k = mix(k, 1.0, duotoneMotion * smoothstep(0.0, 1200.0, vSpeed));
-    col = mix(col, mix(cold, heat, k), duotoneDepth);
-  }
-
-  // Torn bands flare cyan where the feed shears - and it sits here, after the blend,
-  // for the reason thermal and edges two blocks up sit here. This line used to live
-  // inside the Blackwall branch, which made it inert in the other four readings while
-  // the displacement that earns it kept firing in all five: the geometry tore under
-  // Colour and Depth and nothing lit up, so a slider that plainly worked in one reading
-  // looked broken in the rest. Worse than inert, it was coupled to something nobody
-  // asked it to be - the readings normalise by their weight sum, so a dissolve from
-  // Blackwall into Depth dimmed the corruption on the way past and the flare rode the
-  // colour crossfade.
-  //
-  // Moving it changes what the Blackwall preset draws, because inside the branch the
-  // flare was multiplied by that reading's 0.55 + 0.75 * lum shading before the
-  // normalisation reached it. glitchTint was given a default of 1.8 to absorb that,
-  // rather than carrying 3.0 over, on the grounds that a term reconstructing the old
-  // inside-the-branch arithmetic would be a second implementation of this line.
-  //
-  // **That default is worse than the literal it replaced, measured on the reading the
-  // shipped preset actually uses.** Against the pinned build on readBlackwall at the
-  // shipped glitch of 0.18: 1.8 lands 30 of 255 off at worst with a frame mean of 0.0391,
-  // where 3.0 lands 5 off with a mean of 0.0062, and 0 and 5.0 are worse than either. No
-  // constant can match exactly, because the multiplier it is standing in for varied per
-  // fragment - but the ordering is not close, and the number was chosen without this
-  // comparison being run. Colour only, no alpha term: that is what the
-  // old line did, and an additive splat shows a brighter colour without being asked to
-  // cover more.
-  //
-  // Unconditional, and the missing guard on vGlitch is a measurement rather than an
-  // oversight. Guarded, this line reddened three of registry-check's five reading rows
-  // against the pinned pre-readings build - readDepth and readContour at frame 4 and
-  // readBlackwall at frames 0 and 1 - at parameter defaults, where glitch is 0 and the
-  // guard means the add never runs at all. Nothing mathematical moved: adding zero is
-  // exact, and the branch was never taken. What moved was the code around it, because a
-  // branch dropped into the common path costs the compiler contractions it was making
-  // across the lines either side. Written straight through, all five rows are bit-identical
-  // again and only the pre-existing readGhost failure remains. So the cost of a fragment
-  // being able to skip a multiply-add it does not need is three false regressions in a
-  // check with no tolerance and no way to re-baseline, and the multiply-add is cheaper.
-  //
-  // **The readGhost failure named above was the same effect as the three, and it has since
-  // been measured rather than lived with**: one byte of 1,024,000 differing by exactly 1,
-  // which is one fragment rounding the other way between two independently compiled
-  // builds. Section 1b compares pictures now, so "a check with no tolerance" is no longer
-  // the situation - but the conclusion above stands unchanged, because a tolerance sized
-  // to admit one byte at one step admits nothing like the three regressions that
-  // paragraph is about, and writing the multiply-add straight through is still cheaper
-  // than reasoning about what a branch did to the contractions around it.
-  col += vec3(0.2, 0.9, 1.0) * vGlitch;
-
+    // Those five are also the first stage in this build whose declared order disagrees with
+    // the order the packages arrive in, which `test/shader-assembly.test.mjs` records: the
+    // directory hands them over as duotone, edges, glitch, rain, thermal, so a build that
+    // lost the sort would draw a visibly different frame here rather than the identical one
+    // every other stage would still draw.
+    { stage: 'f.tone' },
+    // What the mark actually draws, if it draws something other than the falloff. It
+    // reads the colour above it, which is why it is here and not at either end: the one
+    // key that cannot be decided in the vertex stage is the luminance of the colour this
+    // cell is about to draw, and that does not exist until the line above.
+    { slot: 'f.glyph', fallback: '' },
+    { text: /* glsl */ `\
   // Cross-fade. A dying point thins out where it stood instead of blinking off,
   // and its replacement comes up over the same window.
   alpha *= vFade;
@@ -935,8 +972,80 @@ void main() {
   // satisfies it is 36 * 1.8^2. Leaving it at 36 would have moved the distance at
   // which the normalisation starts biting from 0.75m out to 1.35m - a look change
   // wearing a resolution fix's clothes.
-  if (softEdge == 1) alpha *= clamp(116.64 / (vSize * vSize), 0.05, 1.0);
+  //
+  // **The floor is gone, and growing the sprite to a cell is what took it away.** The 0.05
+  // looked harmless while a sprite was pointSize-sized: at 9 it only reaches a vSize of 48,
+  // where the floor takes over, within 19cm - nearer than a Kinect v2 will range. A
+  // cell-sized sprite moves the same threshold out by a factor of seven, to about 1.32m,
+  // which is where a person stands - and past it the normalisation has stopped scaling
+  // while the point count keeps climbing, so a subject walking toward the sensor blows out.
+  // The number that mattered was never the floor's value; it was the sprite size the floor
+  // is measured against. The ceiling at the other end bites below a vSize of about 11,
+  // which is 5.9m and past the far clip, and the fallback to dots covers it anyway.
+  //
+  // vCellNorm is the other half of the same idea and the vertex stage carries the argument
+  // for it: the term above normalises against the sprite, and the lattice breaks that by
+  // collapsing sources onto cells. It is exactly 1 wherever the lattice is 0, which is
+  // eight of the ten shipped looks, so multiplying by it there is exact and those eight
+  // render the frames they always did - asserted with hashes rather than argued, because
+  // this line is in the shared fragment path the flare's measurement is about.
+  if (softEdge == 1) alpha *= min(116.64 / (vSize * vSize), 1.0) * vCellNorm;
 
+  // **A fragment carrying no colour still writes depth.** The hard-edged path draws with
+  // depthWrite on and there is no alphaTest anywhere, so a fragment whose alpha comes out
+  // exactly zero is invisible in colour and solid in depth - a piece of geometry standing in
+  // front of whatever the room had behind it with nothing in the picture to say so. The
+  // crop's own comment up in the vertex stage already states the rule this rests on, that
+  // alpha alone is not enough because a faint point occludes at full strength; this is the
+  // same fact arriving where the alpha is exactly zero rather than merely low, and it is
+  // worse there, because a point you cannot see is a point nobody looks for.
+  //
+  // **Three ways a fragment arrives here at exactly zero, and the condition is one statement
+  // rather than three cases.** Most of an 8x8 bitmask is margin, so every off bit of every
+  // character is one. A point born this frame carries a fade of exactly 0 for as long as its
+  // sprite is being rasterised, so the whole sprite is one. And the disc the hard-edged
+  // branch cuts lands smoothstep(0.25, 0.02, r2) on 0 at exactly r2 = 0.25, which is the one
+  // ring of fragments the r2 > 0.25 test above lets through. Written as the product, so it
+  // covers the three that exist and whatever a later term multiplies in.
+  //
+  // **The condition was confined to characters for one commit and the confinement is gone.**
+  // The glyph field introduced a *suppressed* disc test - a look drawing characters keeps its
+  // square sprite - and the repair that shipped with it carried glyphMix > 0.0 so that it
+  // put back only what that suppression had removed. The other two are older than the glyph
+  // field by a long way, they are not that branch's to repair inside a repair, and widening
+  // the condition to reach them moves four shipped documents. That movement is what this
+  // change buys and it was approved rather than absorbed.
+  //
+  // Measured, interleaved against the confined form, over 15 pinned program positions - six
+  // source frames of captures/sample.knct at stride 4 with three substeps each, drawn into
+  // a 572x322 buffer inside a 640x360 viewport at device scale 1, off the pinned drive with a
+  // planted colour image. **contour 847, depth 915, ghost 931 and rgb 901 differing pixels**
+  // over the run, each moving at 12 of the 15 positions, and those four are exactly the
+  // documents that ship with additive off. The same run splits the two older halves apart: a
+  // discard reaching births alone accounts for 835 / 903 / 919 / 889 of those pixels at the
+  // five positions where a frame lands and sinceFrameSec is 0, and one reaching the disc's
+  // rim alone accounts for 12 on every look, at nine positions. The two sum to the whole on
+  // every arm, which is the statement that these three are the class rather than three of it.
+  // The same look with no lattice and a pointSize of 40 moves 4805.
+  //
+  // **The first term is the path and it is not tidiness.** The additive branch shapes its
+  // sprite with falloff alone and takes no discard at all, so that Apple's tile-based
+  // hidden-surface removal keeps working - the comment above that branch says so - and it
+  // draws with depthWrite off, so a zero-alpha fragment there occludes nothing and there
+  // is nothing here to repair. Measured rather than assumed, on the same run: all six of the
+  // shipped additive documents come back byte-identical with this discard ungated entirely,
+  // so the gate costs no correction and keeps the tiler.
+  //
+  // The product is written out twice rather than hoisted into a local, following the
+  // distance term in the vertex stage: this file has already measured that handing a value
+  // through a variable licenses a contraction the inline expression does not get, and the
+  // line below it is in the shared fragment path the flare's measurement is about. That the
+  // branch itself costs no contraction is measured rather than argued, and it is the same
+  // reading as above: the six additive looks are byte-identical with this line present and
+  // its condition short-circuiting on the path term.
+  if (softEdge == 0 && alpha * falloff <= 0.0) discard;
   fragColor = vec4(col * exposure, alpha * falloff);
 }
-`;
+` },
+  ]),
+});

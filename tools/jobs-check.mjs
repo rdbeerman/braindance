@@ -166,10 +166,163 @@ const MUTATIONS = {
     '  const spec = Object.hasOwn(CODECS, codec) ? CODECS[codec] : null;\n  if (!spec) throw new Error(`unknown codec ${codec}`);',
     '  const spec = CODECS[codec];\n  if (!CODECS[codec]) throw new Error(`unknown codec ${codec}`);',
   ]] },
+  // **The worker's door waved open.** The job still fails, because `exportClip` refuses
+  // the same clip from the other end - so the *outcome* rows on either side of this stay
+  // green and only the reason row moves. That is the point of aiming it here: the two
+  // gates agree about whether the render happens and differ in what they say and in what
+  // it cost to say it, and the row that carries the claim is the one asserting the
+  // sentence. A control reddening the state row as well would mean this door was the only
+  // thing standing between a missing effect and a file, which it is not and must not be
+  // mistaken for.
+  'worker-door-waved-open': { file: 'tools/render-worker.mjs', edits: [[
+    "    return (job.requires ?? []).filter((e) => !installed.has(e.id) && !allowed.has(e.id));",
+    '    return [];',
+  ]] },
+  // The envelope's own half, and it is aimed at the derivation rather than at the field.
+  // Taking the caller's list instead of the document's leaves every job this file queues
+  // recorded correctly - none of them asks for one - and admits a job that can lie about
+  // what it needs, which is a worker's door answered by the thing it is a door against.
+  //
+  // Two edits, because the caller's list has to be let into the function before it can be
+  // preferred: a spec that only rewrote the derivation would be reading a name that is
+  // not in scope, which is a mutated build that does not run rather than one that runs
+  // wrong.
+  'envelope-takes-the-callers-requires': { file: 'server/jobs.js', edits: [
+    [
+      "codec = 'h264', suppressEffects = [] }) {",
+      "codec = 'h264', suppressEffects = [], requires: asked = null }) {",
+    ],
+    [
+      '    const requires = used.map((id) => ({ ...carried.find((e) => e?.id === id) }));',
+      '    const requires = asked ?? used.map((id) => ({ ...carried.find((e) => e?.id === id) }));',
+    ],
+  ] },
+  // **The other half of the same field, and the two are not one control.** The mutation
+  // above is about a `requires` arriving beside the document; this one is about the
+  // `requires` arriving *inside* it, which is the shape this door actually shipped: the
+  // comment said "derived" and the line copied `project.requires`, and a caller hands over
+  // the whole body. It restores that exactly - the document's list taken whole, with the
+  // comparison that would have caught the disagreement gone - so a job whose values name
+  // an effect its list does not claim is queued with an empty envelope and the worker's
+  // door finds nothing to refuse.
+  //
+  // Two edits for the reason the pair above has two: leaving the refusal standing would
+  // refuse the very documents this mutation exists to let through, so the run would be
+  // measuring a build nobody could reach.
+  'envelope-trusts-the-documents-requires': { file: 'server/jobs.js', edits: [
+    [
+      '    if (unlisted.length || unclaimed.length) {',
+      '    if (false) {',
+    ],
+    [
+      '    const requires = used.map((id) => ({ ...carried.find((e) => e?.id === id) }));',
+      '    const requires = Array.isArray(project.requires) ? project.requires.map((e) => ({ ...e })) : [];',
+    ],
+  ] },
+  // **One id claimed twice, which the two comparisons beside it read as claimed once.**
+  // `unlisted` asks whether a used id appears in the list and `unclaimed` asks a set, so
+  // neither can count - and the envelope resolves each used id with `find`, which keeps the
+  // first entry and drops every other. A document claiming two versions of one effect is
+  // therefore recorded as whichever came first, and the worker's door then answers about a
+  // version nobody chose. This puts that back: one edit, because the rule is one `if` and
+  // nothing downstream of it stands in the way.
+  'envelope-takes-a-repeated-requires-id': { file: 'server/jobs.js', edits: [[
+    '    if (duplicated.length) {',
+    '    if (false) {',
+  ]] },
   // The beat that stops for good after one dropped connection, which is how it
   // shipped: any rejection cleared the interval and nothing ever re-armed it. It is
   // aimed at the one line both the interval and the first beat go through, so a
   // control cannot be satisfied by whichever of the two the mutation missed.
+  // **The list's own shape, read but never held to one.** This is the door exactly as it
+  // shipped: `carried` took whatever `project.requires` was if it happened to be an array
+  // and dropped it otherwise, and no entry in it was ever asked what it was. The two
+  // comparisons underneath are about which *ids* a list claims and an unreadable entry
+  // claims none, so a list of `[{}]` agreed with a document that names nothing and every
+  // malformed shape either sailed through or came back wearing the disagreement rule's
+  // message. What must redden is the seven shape rows and not the twin beside them, because
+  // a well-formed entry is taken on both builds.
+  //
+  // Two edits, because the rule and the read it stands in front of are two lines and leaving
+  // either would be a mutation that half applies: the refusal alone would still be enforced,
+  // and the read alone would throw on a non-array instead of ignoring one.
+  'queue-takes-any-requires-shape': { file: 'server/jobs.js', edits: [
+    [
+      '    if (project.requires !== undefined) {\n'
+      + "      const listShape = requiresListRefusal('a job\\'s project', project.requires);\n"
+      + '      if (listShape) throw new Error(listShape);\n'
+      + '      for (const entry of project.requires) {\n'
+      + "        const bad = requiresEntryRefusal('a job\\'s project', entry);\n"
+      + '        if (bad) throw new Error(bad);\n'
+      + '      }\n'
+      + '    }\n',
+      '',
+    ],
+    [
+      '    const carried = project.requires ?? [];',
+      '    const carried = Array.isArray(project.requires) ? project.requires : [];',
+    ],
+  ] },
+  // **The preflight snapshot taken once, which is how the worker shipped.** `/effects` was
+  // read before the first claim and that answer served every job the worker went on to take,
+  // so an install or a retune landing mid-run was invisible for the rest of it. The
+  // memoising wrapper restores exactly that and changes nothing else: the first job's
+  // reading is kept and handed back to every job after it.
+  //
+  // What must redden is the *second* job's skew line alone. The first job's answer is
+  // correct on both builds, which is what makes that row the control for this one rather
+  // than a second copy of it.
+  'preflight-snapshot-is-taken-once': { file: 'tools/render-worker.mjs', edits: [[
+    '  const readInstalledEffects = async () => {\n',
+    '  let snapshotOnce = null;\n'
+    + '  const readInstalledEffects = async () => {\n'
+    + '    if (!snapshotOnce) snapshotOnce = await readEffectsNow();\n'
+    + '    return snapshotOnce;\n'
+    + '  };\n'
+    + '  const readEffectsNow = async () => {\n',
+  ]] },
+  // **The preflight read asked once, which is how it shipped.** It runs after the claim and
+  // before the first heartbeat, so a connection reset there failed a claimed job through
+  // `/finish` into a terminal state - and a worker and its server are two processes with a
+  // restart, a proxy or a moment of `EHOSTUNREACH` between them. The budget is edited rather
+  // than the loop, because one attempt *is* the shipped shape and a loop deleted by hand
+  // would also delete the timeout and the checks, which the mutation below is about.
+  //
+  // What must redden is the blip arm's take-resolution row and its skew line - the job comes
+  // back naming a read instead of getting past the preflight - and the outage arm's row
+  // asserting the worker asked more than once.
+  'preflight-asks-once': { file: 'tools/render-worker.mjs', edits: [[
+    '  const EFFECT_READ_TRIES = 4;', '  const EFFECT_READ_TRIES = 1;',
+  ]] },
+  // **A read that did not work read as a store with nothing in it, which is how it shipped.**
+  // `.json()` parses an error body perfectly well and `?? []` takes a missing `effects` key
+  // as an empty listing, so a 500 - or a 200 from a proxy reporting its own failure, which no
+  // status check can see - came back as the sentence about a worker that has no `rain`, from
+  // a machine that has rain.
+  //
+  // What must redden is the pair of rows in each arm that read *which sentence* the job came
+  // back under. The outcome is `failed` on both builds, which is what makes those rows the
+  // discriminating ones rather than the ones about state.
+  'preflight-reads-a-failure-as-an-empty-store': { file: 'tools/render-worker.mjs', edits: [[
+    '        const res = await fetch(`${URL_}/effects`, { signal: AbortSignal.timeout(5000) });\n'
+    + '        if (!res.ok) throw new Error(`it answered ${res.status}`);\n'
+    + '        const body = await res.json();\n'
+    + '        if (!body || !Array.isArray(body.effects)) {\n'
+    + "          throw new Error('it answered a body that is not a list of installed packages');\n"
+    + '        }\n'
+    + '        for (const e of body.effects) {\n'
+    + '          if (!e || typeof e.id !== \'string\') throw new Error(`it listed the entry ${JSON.stringify(e)}, which names no id`);\n'
+    + '        }\n'
+    + '        return {\n'
+    + '          installed: new Set(body.effects.map((e) => e.id)),\n'
+    + '          versions: new Map(body.effects.map((e) => [e.id, e.version])),\n'
+    + '        };',
+    '        const listing = (await (await fetch(`${URL_}/effects`)).json()).effects ?? [];\n'
+    + '        return {\n'
+    + '          installed: new Set(listing.map((e) => e.id)),\n'
+    + '          versions: new Map(listing.map((e) => [e.id, e.version])),\n'
+    + '        };',
+  ]] },
   'heartbeat-stops-on-first-error': { file: 'tools/render-worker.mjs', edits: [[
     '      const beatOnce = () => { heartbeat().catch((err) => missedBeat(err.message)); };',
     '      const beatOnce = () => { heartbeat().catch((err) => { stopBeating(); console.error(`[worker] ${job.id} heartbeat: ${err.message}`); }); };',
@@ -184,10 +337,14 @@ if (MUTATE && !MUTATIONS[MUTATE]) {
 let assertions = 0;
 let failures = 0;
 let crashed = null;
+// Kept as well as counted, because a run that ends early is read by which rows
+// fired and not by how many did - a mutation is only caught if the rows that
+// reddened are the ones its entry above says it is about.
+const fired = [];
 const check = (ok, label, detail = '') => {
   assertions++;
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`);
-  if (!ok) failures++;
+  if (!ok) { failures++; fired.push(label.trim()); }
   return ok;
 };
 const section = (title) => console.log(`\n[jobs] ${title}`);
@@ -200,6 +357,14 @@ const root = join(WORK, 'root');
 mkdirSync(root, { recursive: true });
 cpSync(join(REPO, 'server'), join(root, 'server'), { recursive: true });
 cpSync(join(REPO, 'web'), join(root, 'web'), { recursive: true });
+// **`effects-builtin` is staged because without it the server refuses to boot at all.**
+// The effect store declines the absence of its shipped root deliberately, so a broken
+// install cannot read as nothing-installed - which makes a staged tree missing it a
+// server this check can never start, and every run then reports `DID NOT RUN` with no
+// assertions rather than reddening a row. Copied rather than symlinked, like the two
+// trees above it, so a mutation naming a chunk under it could not rewrite the repo's own
+// source.
+cpSync(join(REPO, 'effects-builtin'), join(root, 'effects-builtin'), { recursive: true });
 // **The worker is staged too, and the render row spawns the staged copy.** It used to
 // be copied nowhere and spawned from the repo path, so a mutation naming
 // `tools/render-worker.mjs` would have edited a file nothing runs and reported a miss
@@ -329,6 +494,64 @@ const PROJECT = {
   outputSize: '1280x720',
   appliedPreset: null,
 };
+// **The same project with four values and two keyed tracks under an effect nothing here
+// has ever shipped**, which is how a document from a machine carrying something this one
+// lacks is staged without an uninstall to do it with. `sparkle` is a syntactically valid
+// effect id and no package in `effects-builtin/` is called that; the render section
+// asserts as much before it leans on it, because the day somebody ships one every row
+// about a missing effect stops asking anything while still printing a pass.
+//
+// It is a *loadable* document rather than a broken one - `restoreProject` parks these and
+// opens the clip - which is the whole point: the worker's door is about a job it cannot
+// draw whole, not about a job it cannot read.
+const PARKED_PROJECT = {
+  ...PROJECT,
+  requires: [{ id: 'sparkle', version: '1.0.0' }],
+  look: {
+    params: {
+      ...PROJECT.look.params,
+      'sparkle.amount': 0.6,
+      'sparkle.size': 3.25,
+      'sparkle.hue': 210,
+      'sparkle.jitter': 0.125,
+    },
+    tracks: {
+      'sparkle.amount': [
+        { t: 0, value: 0, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+        { t: 2, value: 0.9, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+      ],
+      'sparkle.hue': [{ t: 0.5, value: 10, easeOut: [[0.1, 0.2]], easeIn: [[0.3, 0.4]] }],
+    },
+  },
+};
+
+// **The same project over an effect this build *does* ship, at a version it does not.** The
+// preflight arm at the end of the render section needs a job whose envelope names an
+// installed package - so the worker's skew line fires and quotes the version this machine
+// has - and `9.9.9` is a version no build of this program will ever carry, which is what
+// makes the quoted half of that line the only thing that can move.
+//
+// It names every one of rain's four parameters, because a document naming a subset of an
+// installed effect is one the loader refuses per effect. It never reaches the loader - the
+// jobs built from it name a capture no take on this worker hashes, so they fail at the take
+// resolution one step past the skew line, which is what makes the arm cost two claims
+// instead of two renders - but a fixture that would break if it ever did get that far is a
+// fixture the next person to move this arm inherits.
+const SKEW_PROJECT = {
+  ...PROJECT,
+  requires: [{ id: 'rain', version: '9.9.9' }],
+  look: {
+    params: {
+      ...PROJECT.look.params,
+      'rain.amount': 0.4,
+      'rain.speed': 0.55,
+      'rain.span': 1.3,
+      'rain.trail': 0.45,
+    },
+    tracks: {},
+  },
+};
+
 // Version 2, and no `outputFps`. The rate moved onto the project, so a deliverable naming
 // one is a version 1 document - and this fixture was one, which mattered more than it
 // looks: `applyDeliverable` refuses those, the worker used to adopt with a bare assignment
@@ -356,16 +579,23 @@ const enqueue = (over = {}) => post('/jobs', {
 const refusedBecause = (res, needle) => res.status === 400 && String(res.body.error ?? '').includes(needle);
 
 /**
- * A forwarding proxy that destroys the socket on the first heartbeat and answers
- * nothing, which is the one failure the worker's beat used to turn into permanent
- * silence.
+ * A forwarding proxy that interferes with exactly one kind of request on its way through,
+ * and carries everything else verbatim.
  *
- * **`ECONNRESET` at the worker's `fetch` is what this is for, and nothing cheaper
- * produces it.** A 500 from the server resolves with a status rather than throwing, and
- * a 409 is handled inside the beat, so a transport-level failure is the only thing that
- * reaches the rejection path - and reaching it is the whole claim. Dropping the socket
- * without a response is exactly a reused keep-alive connection the far end had already
- * closed, or a moment of `EHOSTUNREACH` on a worker pointed at a remote `--url`.
+ * **One proxy with the interference handed in, rather than one proxy per failure.** Two
+ * arms need a broken link between a worker and its server - the heartbeat that gets
+ * dropped, and the `/effects` read the preflight makes - and the forwarding half of this
+ * is thirty lines of `Host` headers, raw sockets and WebSocket upgrades that would be
+ * copied wrong the second time. What differs between them is a predicate and a response,
+ * so that is the argument: `interfere(req, res, state)` handles the request and answers
+ * true, or leaves it alone and answers false.
+ *
+ * **`ECONNRESET` at the worker's `fetch` is what the heartbeat policy is for, and nothing
+ * cheaper produces it.** A 500 from the server resolves with a status rather than
+ * throwing, and a 409 is handled inside the beat, so a transport-level failure is the only
+ * thing that reaches the rejection path - and reaching it is the whole claim. Dropping the
+ * socket without a response is exactly a reused keep-alive connection the far end had
+ * already closed, or a moment of `EHOSTUNREACH` on a worker pointed at a remote `--url`.
  *
  * **It carries the whole render rather than the queue calls, because the worker has one
  * `--url`.** It resolves the take over it, loads `/edit` over it, and the page opens the
@@ -378,15 +608,11 @@ const refusedBecause = (res, needle) => res.status === 400 && String(res.body.er
  * `Origin` names this proxy and `originAllowed` compares the two, so rewriting `Host`
  * to the server's would turn every mutating request the page makes into a 403.
  */
-async function startDroppingProxy(listenPort, targetPort) {
-  const state = { dropped: 0 };
+async function startInterferingProxy(listenPort, targetPort, interfere) {
+  const state = { dropped: 0, failed: 0, served: 0 };
   const target = { host: '127.0.0.1', port: targetPort };
   const proxy = createServer((req, res) => {
-    if (state.dropped === 0 && req.method === 'POST' && /^\/jobs\/[^/]+\/heartbeat$/.test(req.url ?? '')) {
-      state.dropped++;
-      req.socket.destroy();
-      return;
-    }
+    if (interfere(req, res, state)) return;
     const up = request({ ...target, path: req.url, method: req.method, headers: req.headers }, (upRes) => {
       res.writeHead(upRes.statusCode ?? 502, upRes.headers);
       upRes.pipe(res);
@@ -419,9 +645,50 @@ async function startDroppingProxy(listenPort, targetPort) {
   return {
     state,
     url: `http://localhost:${listenPort}`,
-    close: () => { proxy.closeAllConnections?.(); proxy.close(); },
+    close: () => new Promise((done) => {
+      proxy.closeAllConnections?.();
+      proxy.close(() => done());
+    }),
   };
 }
+
+/** The first heartbeat dropped on the floor with no answer at all. */
+const dropsOneHeartbeat = (req, res, state) => {
+  if (state.dropped > 0 || req.method !== 'POST' || !/^\/jobs\/[^/]+\/heartbeat$/.test(req.url ?? '')) return false;
+  state.dropped++;
+  req.socket.destroy();
+  return true;
+};
+
+/**
+ * The worker's own `/effects` reads answered badly, and the browser's left alone.
+ *
+ * **`Referer` is what tells the two apart, and something has to.** The worker opens a page
+ * on the same `--url` and that page polls `/effects` every six seconds through this same
+ * proxy - so a one-shot failure planted on the address is as likely to be spent on a tick
+ * of the page's poll as on the read it was staged for, which is the shape
+ * `docs/instruments.md` files under an interception sharing a route. A `fetch` from node
+ * sends no `Referer` and a request the browser makes from a loaded document always does,
+ * so the discrimination is a property of who is asking rather than a count of how many
+ * have asked.
+ *
+ * `answer` decides what a caught read gets: `null` is a 500 carrying the error body a
+ * server sends, and a body is a 200 carrying it - the misconfigured proxy that reports its
+ * own failure with a success status, which is the one shape a status check cannot see.
+ * `times` is how many of them are caught, so an arm can stage a blip or an outage.
+ */
+const failsWorkerEffectReads = ({ times = 1, answer = null } = {}) => (req, res, state) => {
+  if (req.method !== 'GET' || !/^\/effects\/?$/.test(req.url ?? '')) return false;
+  if (req.headers.referer !== undefined) return false;
+  // Counted before the budget is spent, so the detail on a row can say how many of the
+  // worker's reads this policy saw as well as how many it answered badly.
+  state.served++;
+  if (state.failed >= times) return false;
+  state.failed++;
+  res.writeHead(answer === null ? 500 : 200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(answer ?? { error: 'the store could not be read' }));
+  return true;
+};
 
 try {
   const serverLog = await startServer();
@@ -492,13 +759,159 @@ try {
   check(lossless.status === 200,
     'and lossless takes the odd dimension it has no reason to refuse, so that rule is a property of the codec rather than of every export',
     `${lossless.status} ${(lossless.body.error ?? '').slice(0, 40)}`);
+  // **The effects a job's look is built from, on the envelope, derived rather than
+  // taken.** A worker has to answer "can this machine draw this at all" before it opens
+  // a page, and it cannot do that from a field buried inside a document body - so the
+  // record carries the list, and it carries the *project's* list rather than one the
+  // caller supplied. That is a second spelling of a fact the record already holds, which
+  // is the shape this repo refuses everywhere it can and compares everywhere it cannot:
+  // `syntax-check` holds `CAPTURE_FORMAT` to the grabber the same way. So the row asks
+  // for the two to be equal entry for entry, and the row beside it asks what happens
+  // when a caller tries to write its own.
+  const withParked = await enqueue({ project: PARKED_PROJECT, output: 'check-parked-envelope' });
+  check(withParked.status === 200
+    && JSON.stringify(withParked.body.requires) === JSON.stringify(PARKED_PROJECT.requires),
+  'a job\'s envelope carries the effects its project requires, entry for entry',
+  `${withParked.status} ${JSON.stringify(withParked.body.requires ?? withParked.body.error)}`);
+  const lying = await enqueue({
+    project: PARKED_PROJECT, output: 'check-parked-lying', requires: [{ id: 'nothing', version: '9.9.9' }],
+  });
+  check(lying.status === 200
+    && JSON.stringify(lying.body.requires) === JSON.stringify(PARKED_PROJECT.requires),
+  'and it is derived from the document rather than accepted from the caller, so a job cannot lie about what it needs',
+  `asked for nothing 9.9.9, recorded ${JSON.stringify(lying.body.requires ?? lying.body.error)}`);
+  // **The lie the row above cannot see, because the caller owns the document too.** There
+  // is no `requires` argument, so the row above asks whether an unknown request field is
+  // ignored - which it is, and was before this door derived anything. The list that
+  // actually reached the envelope was `project.requires`, and that is caller data: a body
+  // whose values name `sparkle` and whose list claims nothing recorded an empty envelope,
+  // so the worker's door found nothing missing and spent a take resolve and a browser
+  // before `restoreProject` refused the same document from the other end. Both directions,
+  // because the derivation can disagree with the list either way round and a document with
+  // one of them is a hand edit halfway done.
+  const understated = await enqueue({
+    project: { ...PARKED_PROJECT, requires: [] },
+    output: 'check-parked-understated',
+  });
+  check(refusedBecause(understated, 'sparkle'),
+    'a project whose values name an effect its own requires list does not claim is refused at the queue, by name',
+    `${understated.status} ${(understated.body.error ?? JSON.stringify(understated.body.requires)).slice(0, 120)}`);
+  const overstated = await enqueue({
+    project: { ...PARKED_PROJECT, requires: [...PARKED_PROJECT.requires, { id: 'nothing', version: '9.9.9' }] },
+    output: 'check-parked-overstated',
+  });
+  check(refusedBecause(overstated, 'nothing'),
+    'and one whose list claims an effect no value is named under is refused the same way',
+    `${overstated.status} ${(overstated.body.error ?? JSON.stringify(overstated.body.requires)).slice(0, 120)}`);
+  // **And one id twice, which neither disagreement row above can see.** `unlisted` asks for
+  // membership and the overstated row asks about a set, so a list carrying `sparkle` twice
+  // satisfies both exactly as well as a list carrying it once - and the envelope then keeps
+  // whichever entry came first and drops the other, so a document claiming two versions of
+  // one effect is recorded as one of them by position. It was refused, late, on the machine
+  // that opens the document; the point of this door is that it is refused here.
+  const repeated = await enqueue({
+    project: {
+      ...PARKED_PROJECT,
+      requires: [{ id: 'sparkle', version: '1.0.0' }, { id: 'sparkle', version: '2.0.0' }],
+    },
+    output: 'check-parked-repeated',
+  });
+  check(refusedBecause(repeated, 'sparkle')
+    && /more than once/.test(repeated.body.error ?? ''),
+  'a project claiming one effect twice in its requires list is refused at the queue, naming the id',
+  `${repeated.status} ${(repeated.body.error ?? JSON.stringify(repeated.body.requires)).slice(0, 130)}`);
+  // The positive twin, and it is not the row above it. A door refusing every disagreement
+  // is satisfied by a door refusing everything, so the thing that says this one discriminates
+  // is a document whose two readings agree keeping the *version* the document authored - which
+  // is the half the server cannot derive and has to carry across.
+  const carriedWhole = await enqueue({
+    project: { ...PARKED_PROJECT, requires: [{ id: 'sparkle', version: '2.5.0', rev: 'abc123' }] },
+    output: 'check-parked-pinned',
+  });
+  check(carriedWhole.status === 200
+    && JSON.stringify(carriedWhole.body.requires) === JSON.stringify([{ id: 'sparkle', version: '2.5.0', rev: 'abc123' }]),
+  'and where the two agree the document\'s own entry is carried whole, version and rev included, because neither is derivable here',
+  `${carriedWhole.status} ${JSON.stringify(carriedWhole.body.requires ?? carriedWhole.body.error)}`);
+  // **And what an entry *is*, which every comparison above reads straight past.** The two
+  // disagreement rows and the repeat row are about which ids a list claims, and an entry
+  // nobody can read claims no id at all - so a `requires` that is an object, an entry that
+  // is a string, an entry with nothing in it, an id that could never name a package, an
+  // entry with no version, a rev that is not a string and a stray key beside the two that
+  // belong were every one of them queued or refused for the wrong reason. The worker's own
+  // door then reads that envelope, finds nothing missing in a claim nobody could read,
+  // resolves a take, launches a browser and spends a minute of GPU before the loader refuses
+  // the same document from the other end, which is the journey this door exists to shorten.
+  //
+  // The rule is the loader's own - `requiresEntryRefusal` in `web/format.js`, which
+  // `refuseRequires` asks of the same entries on the machine that opens the document - so
+  // what these rows hold is that the queue asks it rather than that a second copy of it
+  // agrees.
+  //
+  // One row per shape rather than one row over seven, because the sentence is the
+  // assertion: a door that refused all seven with the disagreement rule's message would be
+  // a door that never learned any of these, and reading which rule fired is the only way to
+  // see that.
+  const misshapenRequires = [
+    ['a requires that is not a list at all', { id: 'sparkle', version: '1.0.0' }, 'requires belong'],
+    ['an entry that is not an object', ['sparkle'], 'requires entry'],
+    ['an entry with nothing in it', [{}], 'not an effect id'],
+    ['an id that could never name a package', [{ id: 'Sparkle!', version: '1.0.0' }], 'not an effect id'],
+    ['an entry carrying no version', [{ id: 'sparkle' }], 'a version is a non-empty string'],
+    ['a rev that is not a string', [{ id: 'sparkle', version: '1.0.0', rev: 7 }], 'a rev is a non-empty string'],
+    ['a stray key beside the two that belong', [{ id: 'sparkle', version: '1.0.0', extra: 'why' }], 'has no place there'],
+  ];
+  const misshapenIds = [];
+  for (const [what, requires, needle] of misshapenRequires) {
+    // Against a document whose values *do* name the effect, so a row that went green
+    // because the list and the values agreed about nothing would be reading the
+    // disagreement rule instead of this one.
+    const res = await enqueue({
+      project: { ...PARKED_PROJECT, requires },
+      output: `check-requires-${misshapenIds.length}`,
+    });
+    if (typeof res.body.id === 'string') misshapenIds.push(res.body.id);
+    check(refusedBecause(res, needle),
+      `  a job's project carrying ${what} is refused at the queue, naming that rule`,
+      `${res.status} ${(res.body.error ?? JSON.stringify(res.body.requires)).slice(0, 110)}`);
+  }
+  // The positive twin the seven above need, and it is a *shape* twin rather than the
+  // agreement twin two rows up: the entry that carries every optional field the rule allows
+  // has to be taken, or a queue refusing every list at all would satisfy all seven.
+  const wellShaped = await enqueue({
+    project: { ...PARKED_PROJECT, requires: [{ id: 'sparkle', version: '1.0.0', rev: 'sha256:beef' }] },
+    output: 'check-requires-ok',
+  });
+  check(wellShaped.status === 200
+    && JSON.stringify(wellShaped.body.requires) === JSON.stringify([{ id: 'sparkle', version: '1.0.0', rev: 'sha256:beef' }]),
+  '  while an entry carrying every field the rule allows is taken whole, so the shape rules refuse a shape rather than a list',
+  `${wellShaped.status} ${JSON.stringify(wellShaped.body.requires ?? wellShaped.body.error)}`);
+
+  // And the operator's half, which *is* the caller's because it is a decision rather
+  // than a fact. Held to the id shape, because a suppression naming something that could
+  // never be an effect id covers nothing and would read as covering something.
+  const badSuppress = await enqueue({ project: PARKED_PROJECT, output: 'check-parked-bad', suppressEffects: ['Sparkle!'] });
+  const goodSuppress = await enqueue({ project: PARKED_PROJECT, output: 'check-parked-good', suppressEffects: ['sparkle'] });
+  check(refusedBecause(badSuppress, 'suppressEffects')
+    && goodSuppress.status === 200
+    && JSON.stringify(goodSuppress.body.suppressEffects) === '["sparkle"]',
+  'a suppression is a list of effect ids, refused when it is not one and carried when it is',
+  `${badSuppress.status} ${(badSuppress.body.error ?? '').slice(0, 60)}; then ${goodSuppress.status} `
+  + `${JSON.stringify(goodSuppress.body.suppressEffects ?? goodSuppress.body.error)}`);
+
   // Everything this block queued goes back off, records and all, because the section
   // below reasons about exactly what is queued and asserts it is one job. Removed by
   // unlinking the file rather than through a route, since there is no route that deletes
   // a job - and a record is a file, which is the same door the planted records further
   // down go through.
-  for (const id of [...strays, goodCodec.body.id, lossless.body.id]) {
-    rmSync(join(jobsDir, `${id}.json`), { force: true });
+  // The two disagreement rows are in this list even though a working build refuses both
+  // and leaves nothing to remove: under `envelope-trusts-the-documents-requires` they are
+  // queued, and a record left behind there would redden the "one job" precondition of the
+  // section below - a control fired at this block reaching four sections down, which is
+  // the blast radius `docs/instruments.md` says to keep a mutation out of.
+  for (const id of [...strays, ...misshapenIds, goodCodec.body.id, lossless.body.id,
+    withParked.body.id, lying.body.id, understated.body.id, overstated.body.id,
+    repeated.body.id, carriedWhole.body.id, wellShaped.body.id, goodSuppress.body.id]) {
+    if (typeof id === 'string') rmSync(join(jobsDir, `${id}.json`), { force: true });
   }
 
   section('the queue hands a job only to a machine that can reproduce it');
@@ -769,6 +1182,65 @@ try {
     check(/version 1/.test(String(refusedRecord.error ?? '')),
       '  and the reason it carries is the version rather than something it failed at later',
       String(refusedRecord.error ?? 'no reason recorded').slice(0, 100));
+    // **The other job this build cannot read, and it fails for a different reason at a
+    // different moment.** The version gate above is about a document whose shape this
+    // build cannot place; this is about a document it can place perfectly and cannot
+    // *draw* - the look names an effect nothing here has installed, so the values under
+    // it would be parked and the file would come out missing a layer with nothing in it
+    // to say so.
+    //
+    // The precondition first, because a fixture that cannot hold the property proves
+    // nothing while looking exactly like a proof: if `sparkle` is ever shipped, both rows
+    // below stop being about a missing effect and go on passing.
+    const packages = (await get('/effects')).effects ?? [];
+    check(!packages.some((p) => p.id === 'sparkle'),
+      'sparkle is not a package this build ships, which is what makes the two rows below about a missing effect',
+      `${packages.length} installed: ${packages.map((p) => p.id).join(', ')}`);
+    const missingJob = await enqueue({
+      capture: take.hash, output: 'jobs-check-missing', width: 320, height: 180, project: PARKED_PROJECT,
+    });
+    check(missingJob.status === 200,
+      'a job whose look names an effect this worker has not got is queued, because the queue is not where that is decided either',
+      missingJob.body.id ?? missingJob.body.error);
+    const doorman = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', URL_, '--name', 'jobs-check-missing', '--drain', '--max', '1'], { stdio: 'ignore' });
+    await new Promise((done) => doorman.on('close', done));
+    const missingRecord = await get(`/jobs/${missingJob.body.id}`);
+    check(missingRecord.state === 'failed',
+      '  and the worker refuses it rather than rendering a file with a layer of the look absent',
+      `state ${missingRecord.state}${missingRecord.error ? `, ${missingRecord.error.slice(0, 80)}` : ''}`);
+    // **The reason is the assertion and not the outcome**, and that is what keeps this
+    // door separable from the page's own refusal. `exportClip` refuses the same clip from
+    // the other end, so a build with this door waved open still comes back `failed` - the
+    // rows would agree and one of the two gates would be doing all the work. What differs
+    // is the sentence and what it cost to produce: the door names the ids and versions off
+    // the envelope before a take is resolved or a page is loaded.
+    check(/sparkle 1\.0\.0/.test(String(missingRecord.error ?? ''))
+      && /this worker has no/.test(String(missingRecord.error ?? '')),
+    '  and the reason enumerates the effect and the version off the envelope, before any page was opened',
+    String(missingRecord.error ?? 'no reason recorded').slice(0, 120));
+
+    // The positive twin, in this file's own idiom: a door that refused everything would
+    // satisfy both rows above. Trimmed by its deliverable so the twin costs a handful of
+    // frames rather than a second whole take.
+    const allowedJob = await enqueue({
+      capture: take.hash,
+      output: 'jobs-check-suppressed',
+      width: 320,
+      height: 180,
+      project: PARKED_PROJECT,
+      deliverable: { ...DELIVERABLE, out: 0.5 },
+      suppressEffects: ['sparkle'],
+    });
+    const allowed = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', URL_, '--name', 'jobs-check-suppressed', '--drain', '--max', '1'], { stdio: 'ignore' });
+    await new Promise((done) => allowed.on('close', done));
+    const allowedRecord = await get(`/jobs/${allowedJob.body.id}`);
+    check(allowedRecord.state === 'done' && Number(allowedRecord.frames) > 0,
+      '  while the same job carrying suppressEffects for it renders, so the door refuses a job rather than every job',
+      `state ${allowedRecord.state}, ${allowedRecord.frames ?? 0} frames`
+      + `${allowedRecord.error ? `, ${allowedRecord.error.slice(0, 70)}` : ''}`);
+
     let probed = '';
     try {
       probed = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,nb_frames',
@@ -804,7 +1276,7 @@ try {
     // interval being shortened in the worker for the benefit of the instrument. The
     // failure budget is a count of consecutive failures, so a short interval spends the
     // same seven and just does it sooner.
-    const proxy = await startDroppingProxy(PROXY_PORT, PORT);
+    const proxy = await startInterferingProxy(PROXY_PORT, PORT, dropsOneHeartbeat);
     proxies.push(proxy);
     const beaten = await enqueue({ capture: take.hash, output: 'jobs-check-heartbeat', width: 320, height: 180 });
     const beatWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
@@ -830,6 +1302,210 @@ try {
       'and it went on saying so afterwards - a beat that stops for good on one dropped connection leaves a live render looking dead to the queue',
       `heartbeat ${beatRecord.heartbeat ?? 'null'} against claimed ${beatRecord.claimed ?? 'null'}`
       + `, ${((beatRecord.heartbeat ?? 0) - (beatRecord.claimed ?? 0)) / 1000}s apart`);
+    // Closed here rather than in the `finally`, because the two arms further down want this
+    // same port for a proxy with a different policy on it - and a listener nobody closed is
+    // an `EADDRINUSE` that reads as a machine with a stranger on the port.
+    await proxy.close();
+
+    section('the store a worker answers from is read per job, not per worker');
+    // **A worker takes up to sixteen jobs and used to answer for all of them out of one
+    // reading.** `/effects` was fetched before the first claim, so an install or a retune
+    // landing while the loop ran was invisible for the rest of it: a job needing a package
+    // that had just arrived came back "this worker has no rain" from a machine that had
+    // rain, and a job rendered against a retuned package had the version it *used* to be
+    // quoted into the skew line - which is the line somebody reads to decide whether a file
+    // is a render of what they asked for, on the path that runs with nobody watching.
+    //
+    // **Two jobs through one worker with the store moved between them**, because that is
+    // the only arrangement in which a reading and a memory differ. The version is what is
+    // read rather than the presence: a fork of a shipped package is a store move this file
+    // can stage without a package of its own, and the skew line prints both halves, so a
+    // stale answer is a wrong string rather than a missing one.
+    //
+    // **Neither job renders, and that is the arm's design rather than its limit.** The
+    // preflight and the skew line both come before the take is resolved, so a job naming a
+    // capture no take here hashes reaches them and then fails one step later - two claims
+    // and two fetches instead of two renders. The precondition rows below assert exactly
+    // that, because an arm whose jobs failed for some other reason would print no skew line
+    // at all and both readings would be missing rather than wrong.
+    // **Everything still queued goes first, and it is a precondition rather than tidying.**
+    // The sections above leave a job pinned to a renderer class this machine is not, and a
+    // claim that finds work it cannot take is answered 409 - which is correct, and is the
+    // one answer that makes this worker give up between its two jobs instead of waiting for
+    // the second. Removed by unlinking the record, since there is no route that deletes a
+    // job, which is the same door the planted records above go through.
+    for (const job of (await get('/jobs')).jobs ?? []) {
+      if (job.state === 'queued') rmSync(join(jobsDir, `${job.id}.json`), { force: true });
+    }
+    const stillQueued = ((await get('/jobs')).jobs ?? []).filter((j) => j.state === 'queued');
+    check(stillQueued.length === 0,
+      'the queue holds nothing else claimable before this arm starts, so the worker below waits for its second job rather than being turned away from somebody else\'s',
+      `${stillQueued.length} still queued${stillQueued.length ? `: ${stillQueued.map((j) => `${j.id} wants ${j.renderer}`).join(', ')}` : ''}`);
+    const rainBefore = ((await get('/effects')).effects ?? []).find((e) => e.id === 'rain');
+    check(rainBefore?.version === '1.0.0' && rainBefore?.builtin === true,
+      'rain ships with this build at 1.0.0 and nothing is forking it, which is what the two readings below are read against',
+      `rain ${rainBefore ? `${rainBefore.version}, builtin=${rainBefore.builtin}` : 'is not installed'}`);
+    const skewA = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-skew-a' });
+    // `--max 2` with no `--drain`, so the worker takes the job that exists and then waits
+    // for the one that does not exist yet rather than exiting on an empty queue.
+    const preflight = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', URL_, '--name', 'jobs-check-preflight', '--max', '2', '--poll', '300'],
+    { stdio: ['ignore', 'pipe', 'pipe'] });
+    const preflightLog = [];
+    preflight.stdout.on('data', (c) => preflightLog.push(c.toString()));
+    preflight.stderr.on('data', (c) => preflightLog.push(c.toString()));
+    const exited = new Promise((done) => { preflight.on('close', done); });
+    // Waited for by the record rather than by a pause, because what the next step needs is
+    // the first job to be *finished with* - the fork has to land between two claims and
+    // nowhere else.
+    const settledA = await (async () => {
+      for (let waited = 0; waited < 180000; waited += 250) {
+        const rec = await get(`/jobs/${skewA.body.id}`).catch(() => ({}));
+        if (rec.state === 'done' || rec.state === 'failed') return rec;
+        await new Promise((done) => { setTimeout(done, 250); });
+      }
+      return {};
+    })();
+    check(/no take on this worker hashes/.test(String(settledA.error ?? '')),
+      '  the first job reaches the preflight and then fails at the take, so the line it printed is a preflight rather than a render',
+      `state ${settledA.state ?? 'never settled'}${settledA.error ? `, ${settledA.error.slice(0, 70)}` : ''}`);
+    // The store moved while the worker is between claims: rain's own package, forked back
+    // over itself at a version this build never shipped. Every parameter is kept, so the
+    // install door takes it and the assembled programs do not move.
+    const rainPkg = await get('/effects/rain');
+    const rainChunks = {};
+    for (const c of rainPkg.manifest?.chunks ?? []) {
+      if (rainChunks[c.file] === undefined) {
+        rainChunks[c.file] = await (await fetch(`${URL_}/effects/rain/file/${encodeURIComponent(c.file)}`)).text();
+      }
+    }
+    const forkRes = await fetch(`${URL_}/effects/rain`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ manifest: { ...rainPkg.manifest, version: '3.1.4' }, chunks: rainChunks }),
+    });
+    const forkBody = await forkRes.json().catch(() => ({}));
+    check(forkRes.status === 200 && forkBody.manifest?.version === '3.1.4',
+      '  and rain is forked to 3.1.4 while that worker is between claims, which is the only thing that moves between the two readings',
+      `${forkRes.status} ${forkBody.error ?? `version ${forkBody.manifest?.version}`}`);
+    const skewB = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-skew-b' });
+    // Cleared rather than left to fire, because a pending timer holds the event loop open
+    // for its whole window - a deadline meant to stop this arm hanging would have been the
+    // thing that made the run take three minutes longer than it needed to.
+    let preflightDeadline = null;
+    const preflightCode = await Promise.race([
+      exited,
+      new Promise((done) => {
+        preflightDeadline = setTimeout(() => { preflight.kill('SIGKILL'); done('timed out'); }, 180000);
+      }),
+    ]);
+    clearTimeout(preflightDeadline);
+    const printed = preflightLog.join('');
+    check(new RegExp(`${skewA.body.id} renders with rain 1\\.0\\.0 where the job asks for 9\\.9\\.9`).test(printed),
+      '  the first job is told which version it will draw on, off the store as it stood when that job was claimed',
+      (printed.split('\n').find((l) => l.includes(`${skewA.body.id} renders with`)) ?? 'no skew line for the first job').slice(0, 130));
+    // **The discriminating row, and the one above is deliberately not.** A worker that read
+    // the store once is right about the first job by construction; what a snapshot cannot be
+    // right about is the second, because the answer changed after it was taken.
+    check(new RegExp(`${skewB.body.id} renders with rain 3\\.1\\.4 where the job asks for 9\\.9\\.9`).test(printed),
+      '  and the second job is told 3.1.4, so the preflight is a reading taken per job rather than a snapshot taken per worker',
+      (printed.split('\n').find((l) => l.includes(`${skewB.body.id} renders with`)) ?? 'no skew line for the second job').slice(0, 130));
+    check(preflightCode !== 'timed out',
+      '  and the worker took both jobs and exited, so both readings above are its whole account of the run',
+      `exit ${preflightCode}, ${printed.split('\n').filter((l) => l.includes('renders with')).length} skew lines printed`);
+
+    section('a queue call that did not work is not a store with nothing in it');
+    // **The preflight asks the server what is installed, and every way that question can
+    // fail used to be answered as "nothing is".** `.json()` on a 500 parses the error body
+    // perfectly well, `?? []` read the missing `effects` key as an empty listing, and the
+    // gate then refused the job with the sentence about a worker that has no `rain` - naming
+    // a package the machine has and sending whoever reads the queue to install something
+    // that is already there. And it ran once: one connection reset between a worker and its
+    // own server, in the seconds after a claim and before the first heartbeat, failed a
+    // claimed job through `/finish` into a terminal state.
+    //
+    // **Two fixtures, because there are two rules and one of them is invisible to the
+    // other.** A 500 answered once is a blip a retry clears, and the reading is that the job
+    // gets past the preflight at all. A 200 carrying an error body is the shape a status
+    // check cannot see, and the reading is which sentence the failure comes back under.
+    //
+    // Neither job renders, on the arm above's reasoning: the preflight and the skew line
+    // both come before the take is resolved, so a job naming a capture no take here hashes
+    // reaches them and fails one step later. The take sentence is what says the preflight
+    // was passed.
+    for (const job of (await get('/jobs')).jobs ?? []) {
+      if (job.state === 'queued') rmSync(join(jobsDir, `${job.id}.json`), { force: true });
+    }
+    // A worker under a proxy that answers one of its `/effects` reads with a 500 and leaves
+    // every read the browser makes alone - the page it opens polls the same address every
+    // six seconds through the same proxy, so a plant that could not tell them apart would be
+    // spent on a tick of that poll as readily as on the read it was staged for.
+    const rainNow = ((await get('/effects')).effects ?? []).find((e) => e.id === 'rain');
+    check(typeof rainNow?.version === 'string',
+      'rain is installed on this worker at a version this arm reads off the store rather than assuming, since the arm above forks it',
+      `rain ${rainNow ? `is at ${rainNow.version}` : 'is not installed'}`);
+    const blipProxy = await startInterferingProxy(PROXY_PORT, PORT, failsWorkerEffectReads({ times: 1 }));
+    proxies.push(blipProxy);
+    const blipped = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-effects-blip' });
+    const blipWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', blipProxy.url, '--name', 'jobs-check-effects-blip', '--drain', '--max', '1'],
+    { stdio: ['ignore', 'pipe', 'pipe'] });
+    const blipLog = [];
+    blipWorker.stdout.on('data', (c) => blipLog.push(c.toString()));
+    blipWorker.stderr.on('data', (c) => blipLog.push(c.toString()));
+    await new Promise((done) => { blipWorker.on('close', done); });
+    const blipRecord = await get(`/jobs/${blipped.body.id}`);
+    const blipPrinted = blipLog.join('');
+    const blipError = String(blipRecord.error ?? '');
+    await blipProxy.close();
+    // The fixture's own delivery, before anything is read off it: exactly one read was
+    // answered 500, and it was one the worker made rather than one its page made.
+    check(blipProxy.state.failed === 1,
+      'exactly one referer-less GET /effects was answered 500, so what follows is about the read the worker makes rather than about a tick of the page\'s poll',
+      `${blipProxy.state.failed} answered 500 of ${blipProxy.state.served} referer-less reads seen`);
+    check(/no take on this worker hashes/.test(blipError),
+      'and the job still reaches the take resolution, so one failed read of the store does not fail a job the worker had already claimed',
+      `state ${blipRecord.state ?? 'never settled'}${blipError ? `, ${blipError.slice(0, 90)}` : ''}`);
+    // **The discriminating row, and it is about which sentence rather than about which
+    // outcome.** A build that refused here would also come back `failed`, so the outcome
+    // says nothing; what says it is that the words the queue records send somebody to the
+    // right machine. A read that did not work is not a package this worker has not got, and
+    // the two answers are two different jobs of work for whoever reads them.
+    check(!/this worker has no/.test(blipError) && !/this worker has no/.test(blipPrinted),
+      'and it is never told the worker has no rain, which is the sentence a failed queue call used to come back as',
+      blipError ? blipError.slice(0, 110) : 'no error recorded at all');
+    check(new RegExp(`${blipped.body.id} renders with rain ${rainNow?.version?.replace(/\./g, '\\.')} where the job asks for 9\\.9\\.9`).test(blipPrinted),
+      '  and the skew line quotes the version this machine holds, so the retry read a real listing rather than being waved through with an empty one',
+      (blipPrinted.split('\n').find((l) => l.includes('renders with')) ?? 'no skew line printed at all').slice(0, 130));
+
+    // **The second fixture, and the one a status check cannot see.** A proxy that reports
+    // its own failure with a 200 answers `res.ok` true and `.json()` parses its error body,
+    // so the only thing between that and "nothing is installed" is holding the body to the
+    // shape a listing has. Every attempt is caught here rather than one, because the claim
+    // is about the sentence a genuine outage comes back under.
+    const outageProxy = await startInterferingProxy(PROXY_PORT, PORT,
+      failsWorkerEffectReads({ times: 99, answer: { error: 'this proxy could not reach the store' } }));
+    proxies.push(outageProxy);
+    const outaged = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-effects-outage' });
+    const outageWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+      '--url', outageProxy.url, '--name', 'jobs-check-effects-outage', '--drain', '--max', '1'],
+    { stdio: ['ignore', 'pipe', 'pipe'] });
+    const outageLog = [];
+    outageWorker.stdout.on('data', (c) => outageLog.push(c.toString()));
+    outageWorker.stderr.on('data', (c) => outageLog.push(c.toString()));
+    await new Promise((done) => { outageWorker.on('close', done); });
+    const outageRecord = await get(`/jobs/${outaged.body.id}`);
+    const outageError = String(outageRecord.error ?? '');
+    await outageProxy.close();
+    check(outageProxy.state.failed >= 2,
+      'every referer-less GET /effects is answered 200 with a body that is not a listing, and the worker asked more than once',
+      `${outageProxy.state.failed} answered that way`);
+    check(/could not read/.test(outageError) && /\/effects/.test(outageError),
+      'so the job fails naming the read it could not make, which is the one fact whoever reads the queue needs',
+      `state ${outageRecord.state ?? 'never settled'}${outageError ? `, ${outageError.slice(0, 110)}` : ''}`);
+    check(!/this worker has no/.test(outageError),
+      '  and not as a worker missing a package, which is what a 200 carrying an error body used to be read as',
+      outageError ? outageError.slice(0, 110) : 'no error recorded at all');
   } else {
     console.log('  ...   render row skipped by --no-render, so nothing here proves a job becomes a file');
   }
@@ -851,14 +1527,40 @@ try {
 }
 
 console.log(`\n[jobs] ${assertions} assertions, ${failures} failed`);
-// Before any other verdict, a run that threw has not earned a verdict either way.
+/**
+ * **The count decides, and it decides before the crash does.**
+ *
+ * A mutation here damages the queue the rows below it go on to drive, and the damage is
+ * the point: `finish-accepts-any-state` lets a queued job be marked done, so the claim two
+ * rows later is handed nothing and `held.id` throws, and `requeue-refuses-all-running`
+ * leaves the rescued job running, so the claim after it throws the same way. Both had
+ * already reddened the two rows their entry above says they are about. Putting the crash
+ * first reports `DID NOT RUN` over a caught mutation, which is the census-of-exit-codes
+ * shape `docs/instruments.md` files: the tool reads as broken while it is doing its job,
+ * and the operator re-runs it forever.
+ *
+ * So a mutated run with failures is caught however it ended, and it says that it ended
+ * early, because the rows after the crash never ran and the count is a floor rather than
+ * the whole picture. A run with no failures is the other way round: crashed means
+ * `DID NOT RUN`, and finishing cleanly means the mutation was not caught at all. The
+ * ordering is `tools/effect-check.mjs`'s, and the reasoning there is the same reasoning.
+ *
+ * The null dereferences themselves stay. A guard at either claim runs on a clean build
+ * too, where a claim answering nothing is a real failure, and it would turn that into a
+ * row that quietly did not run - an assertion that cannot fail, bought with a number.
+ */
+if (MUTATE && failures > 0) {
+  console.log(`[jobs] caught, as required (${failures} assertion${failures === 1 ? '' : 's'} fired)`);
+  if (crashed) console.log(`[jobs] and the run ended early: ${crashed.message} - the count is a floor`);
+  console.log(`[jobs] rows that fired: ${fired.join(' | ')}`);
+  process.exit(1);
+}
 if (crashed) {
   console.log(`[jobs] DID NOT RUN - ${crashed.message}. Nothing here is a finding: re-run it.`);
   process.exit(2);
 }
 if (MUTATE) {
-  if (failures === 0) { console.log('[jobs] NOT CAUGHT - the check passed a queue it should have rejected'); process.exit(1); }
-  console.log(`[jobs] caught, as required (${failures} assertion${failures === 1 ? '' : 's'} fired)`);
+  console.log('[jobs] NOT CAUGHT - the check passed a queue it should have rejected');
   process.exit(1);
 }
 console.log(failures === 0 ? '[jobs] PASS' : `[jobs] FAIL (${failures})`);

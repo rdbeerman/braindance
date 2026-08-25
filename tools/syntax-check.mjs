@@ -105,7 +105,66 @@ const MUTATIONS = {
   // path survives every edit to the file it names and the line survives none of them.
   'line-citation-past-the-end': {
     file: 'docs/proof-tools.md',
-    edits: [['`web/main.js:9860` is and what made', '`web/main.js:98600` is and what made']],
+    edits: [['`gpuTimer.poll` in `web/main.js` is and what made', '`gpuTimer.poll` in `web/main.js:98600` is and what made']],
+  },
+
+  // The package-parse gate's control: one manifest with one brace doubled is a package
+  // the store throws on, and the gate has to name it rather than print a clean count.
+  // The rain package because it is the one whose shape docs/reference.md walks through.
+  'manifest-does-not-parse': {
+    file: 'effects-builtin/rain/manifest.json',
+    edits: [['{\n  "format": 1,', '{{\n  "format": 1,']],
+  },
+
+  // The assembled-program row's first control, and it plants the defect that row was
+  // written for rather than an invented one: `export-check`'s `pointsize-absolute` pointed
+  // at `web/cloud-shader.js` for a whole commit after the glyph field moved out, matching
+  // the `v.pointSize` fallback exactly once while the text the driver compiles came from
+  // the package's own chunk. Repointing it there again reproduces that state exactly.
+  //
+  // **It is the count rule's blind spot as well as the move rule's subject**, which is why
+  // this is the control and not a line invented for the purpose. The glyph chunk's `else`
+  // branch carries the old clamp statement verbatim - the chunk's own comment says it is
+  // kept byte-identical on purpose - so the anchor still appears exactly once in the
+  // assembled programs, and only applying the edit and finding them unmoved can see it.
+  'anchor-in-dead-fallback': {
+    file: 'tools/export-check.mjs',
+    edits: [[
+      "  'pointsize-absolute': { file: 'effects-builtin/glyph/size.vert.glsl', edits: [[",
+      "  'pointsize-absolute': { file: 'web/cloud-shader.js', edits: [[",
+    ]],
+  },
+
+  // The second control, for the other half of the same row, and it has to plant its
+  // duplicate in a *different* file from the one the anchor names. A line copied inside its
+  // own chunk is already refused by the row above - two matches in one file - so a control
+  // built that way would prove nothing about the assembled text. Copied into a neighbouring
+  // package's chunk, `lattice-ignored`'s anchor still matches its own file exactly once,
+  // the edit still moves the vertex program, and the only thing that can see the second
+  // copy is counting the anchor against what the two programs actually hold: the mutation
+  // would then reach one of the two sites and be recorded under the whole one's name.
+  'anchor-duplicated-into-a-second-chunk': {
+    file: 'effects-builtin/glitch/tear.vert.glsl',
+    edits: [['  vGlitch = 0.0;', '  vGlitch = 0.0;\n  if (lattice > 0.0) {']],
+  },
+
+  // The same rule's third control, and the one the grade pass made necessary. Both plants
+  // above put their duplicate in the same *program* as the anchor, so a count that
+  // partitioned by program - asking each of the four assembled strings on its own rather
+  // than summing them - would go on catching both while claiming something it no longer
+  // tested. That partition is the tempting shape, because a file belongs to a program and it
+  // reads as tidier to ask its own; what it misses is a line living in two programs at once,
+  // which is exactly what a shared idea copied between the point shader and the grade would
+  // be.
+  //
+  // So `streak-ignored`'s guard is planted in the thermal package's tone chunk, which feeds
+  // the cloud's fragment program. Its own file still matches once, the anchor row above stays
+  // green, and each program taken alone still counts one - only the sum over all of them
+  // sees two, and only then would the edit reach one of the two sites and be recorded under
+  // the whole mutation's name.
+  'anchor-duplicated-into-a-second-program': {
+    file: 'effects-builtin/thermal/heat.frag.glsl',
+    edits: [['  if (thermal > 0.0) {', '  if (thermal > 0.0) {\n      if (streak > 0.0) {']],
   },
 
   // The third half of the same row, and the one that says the walk reaches outside the
@@ -168,15 +227,21 @@ if (mutateAt !== -1 && !MUTATIONS[mutation]) {
 // the split began and 4 after `scene.js`, `curve.js` and `record-poll.js`; it was 9 with
 // `world-tilt.js`, `export-sizes.js` and `plan-geometry.js` beside them, 11 with
 // `view-window.js` and `clip-range.js`, 13 with `cloud-shader.js` and `bloom-pass.js`,
-// 15 with `gpu-textures.js` and `surface-memory.js`, 16 with `post-chain.js`, and it is
-// 17 with `point-cloud.js`. `test` moves with it for the same reason - most of those
+// 15 with `gpu-textures.js` and `surface-memory.js`, 16 with `post-chain.js`, and 17 with
+// `point-cloud.js`. It is 18 with `grade-shader.js`, which is the first of these to be cut
+// out of a module other than `main.js` - the grade pass's GLSL had to leave `post-chain.js`
+// because a spine has to evaluate under bare node and that file imports three.js. Two
+// modules arrived between those without the floor following them, `shader-assembly.js` and
+// `effect-manifests.js`, so the number is under the tree by more than one; that is the slack
+// this file's own header asks for, a tripwire rather than a manifest.
+// `test` moves with it for the same reason - most of those
 // modules arrived with a test file, which is most of why they are modules - but it has
 // stopped moving, and the last three phases are why. `surface-memory.js` asks the live
 // context whether it can render to float, `post-chain.js` hands a composer a renderer and
 // `point-cloud.js` imports both of them, so none of the three can be imported under bare
 // node at all, and a floor that counted a test nobody can write would be a floor that has
 // to be lowered later.
-const FLOORS = { server: 5, test: 10, tools: 12, web: 17 };
+const FLOORS = { server: 5, test: 10, tools: 12, web: 18 };
 
 // **Two different questions, so two different sets, and the difference is the point.**
 // `PARSES` is what `node --check` can be handed and have its answer mean anything - a
@@ -473,7 +538,7 @@ const withoutStringBodies = (src) => {
   const citing = walkShipped(ROOT).map((p) => relative(ROOT, p)).sort();
 
   const cited = new Set();
-  // Keyed by the citation as written, so `web/main.js` and `web/main.js:9860` are two
+  // Keyed by the citation as written, so `web/main.js` and `web/main.js:1` are two
   // entries and the line form is not answered by the bare one appearing elsewhere.
   const modules = new Map();
   let scanned = 0;
@@ -493,6 +558,14 @@ const withoutStringBodies = (src) => {
     // which is the one that fails where somebody sees it.
     const text = /\.(js|mjs)$/.test(rel) ? withoutStringBodies(raw) : raw;
     for (const m of text.matchAll(/\bdocs\/[A-Za-z0-9._-]+\.md\b/g)) cited.add(m[0]);
+    // The effect packages are a citable class the moment prose can name a chunk or a
+    // manifest: `effects-builtin/rain/manifest.json` has to resolve the way a docs
+    // page does, or the prose rots from the first day of the surface existing. No
+    // separate floor - nothing may cite a package yet, and over-reporting is for
+    // matches, not absences; the existence check below covers whatever appears. The
+    // first thing this matcher ever caught was this comment's own example naming a
+    // chunk file that does not exist yet, which is the class working as written.
+    for (const m of text.matchAll(/\beffects-builtin\/[a-z][a-z0-9]*\/[A-Za-z0-9._-]+\.[a-z]+\b/g)) cited.add(m[0]);
     // A range takes its last line, because that is the bound the file has to reach: a
     // `:844-847` whose 844 still exists and whose 847 does not is a citation half of which
     // is off the end, and reading the start would call that resolved.
@@ -539,6 +612,37 @@ const withoutStringBodies = (src) => {
     if (!gone.length && !past.length) {
       console.log(`  web/    all ${modules.size} cited modules exist, ${byLine.length} of them named by line`);
     }
+  }
+}
+
+// **Every shipped effect package parses.** The manifests are data the client assembles
+// the registry from, and a manifest that does not parse is a package the store throws
+// on at read - a server that boots and then 500s on `/effects`. The gate is the same
+// shape as the per-directory parse floors above: every manifest must parse, an id must
+// match its directory (the namespace parameters carry), and zero packages is its own
+// failure, because an empty directory here is a build with no effects that would
+// otherwise print a clean line about nothing.
+{
+  const root = join(ROOT, 'effects-builtin');
+  const ids = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()
+    : [];
+  if (ids.length === 0) {
+    fail('effects-builtin/ holds no packages, so this build ships no effects - the directory is gone or this scan is looking in the wrong place');
+  } else {
+    const bad = [];
+    for (const id of ids) {
+      const path = join(root, id, 'manifest.json');
+      if (!existsSync(path)) { bad.push(`${id} has no manifest.json`); continue; }
+      try {
+        const manifest = JSON.parse(sourceWithMutation(`effects-builtin/${id}/manifest.json`) ?? readFileSync(path, 'utf8'));
+        if (manifest.id !== id) bad.push(`${id}/manifest.json declares id ${JSON.stringify(manifest.id)}`);
+      } catch (err) {
+        bad.push(`${id}/manifest.json does not parse: ${err.message}`);
+      }
+    }
+    if (bad.length) fail(`${bad.join('; ')} - a package the store cannot read is a server that boots and then refuses /effects`);
+    else console.log(`  effects/ all ${ids.length} shipped packages parse and name themselves`);
   }
 }
 
@@ -854,14 +958,14 @@ const withoutStringBodies = (src) => {
     // declare `{ file, edits }` like everything else, so a nested-array first element
     // is no longer a shape this row recognises and would fail below naming the tool.
     if (Array.isArray(spec)) {
-      return typeof spec[0] === 'string' ? { anchors: [{ file: REGISTRATION, from: spec[0] }] } : null;
+      return typeof spec[0] === 'string' ? { anchors: [{ file: REGISTRATION, from: spec[0], to: spec[1] }] } : null;
     }
     if (typeof spec === 'function') return { anchorless: 'functions that redirect the oracle' };
     if (spec === null || typeof spec === 'string') return { anchorless: 'whole replacement file bodies' };
     if (typeof spec === 'object') {
       if (typeof spec.file === 'string' && Array.isArray(spec.edits)) {
         return {
-          anchors: spec.edits.map(([from, , where]) => ({ file: where ?? spec.file, from })),
+          anchors: spec.edits.map(([from, to, where]) => ({ file: where ?? spec.file, from, to })),
         };
       }
       // `registry-check`'s old `{ from, to }` shape used to be read here and resolved to
@@ -875,6 +979,15 @@ const withoutStringBodies = (src) => {
     return null;
   };
 
+  // **Off disk and deliberately not through the mutation substitution**, which is a
+  // distinction this row had for free until the assembled-program rule below arrived with
+  // controls that stage source text. The question here is whether the tree still holds an
+  // anchor's text; the question below is what that text assembles into. Reading a staged
+  // file here answers the first question about a file nobody has, and it does it in the
+  // shape that is hardest to read: `spec-drifts` replaces the very line it anchors on, so
+  // this row would report the running control's own anchor as stale on every run of it -
+  // one extra red row per control, none of them findings, on four of the seven controls
+  // this tool carries.
   const targets = new Map();
   const targetSource = (path) => {
     if (!targets.has(path)) {
@@ -884,10 +997,133 @@ const withoutStringBodies = (src) => {
     return targets.get(path);
   };
 
+  // ---- and the same anchor asked of the text the driver is handed
+  //
+  // **A file is not a program any more, and the row above cannot tell the difference.**
+  // Since the cloud's two shaders became a spine plus the installed packages' chunks, a
+  // slot carries the text to use when nothing claims it - so `web/cloud-shader.js` holds
+  // two copies of the shipped point-size statement and the shipped mark, one of them live
+  // and one of them a fallback nothing compiles while the glyph package is installed. An
+  // anchor in the dead copy matches its file **exactly once**, which is all the row above
+  // asks, and the control it belongs to then edits a line no driver ever sees. That is not
+  // hypothetical: `export-check`'s `pointsize-absolute` sat in that fallback for a commit,
+  // green the whole time, and it was found by reading rather than by any check.
+  //
+  // So every anchor into one of the files the programs are built out of is asked two more
+  // questions, and they catch different things. **It appears exactly once across every
+  // assembled program**, which finds a line that reaches no program and a line that reaches
+  // two sites where the edit would reach one - a half-delivered mutation recorded under the
+  // whole one's name. And **applying the edit moves one of them**, which is the one that
+  // sees the dead fallback, because the fallback's twin is the live chunk's own text: the
+  // count is 1 either way and only the edit can tell which copy it landed in.
+  //
+  // **Across every program and not within the one the file belongs to**, which is what the
+  // grade pass made a real question rather than a wording. There are two spines now and four
+  // assembled strings, and a line copied from the point shader into the grade's would count
+  // once in each if the question were asked per program - so the sum is taken over all of
+  // them, exactly as `assembleShaders` collects the joints of every spine before reading a
+  // package. A count that partitioned by file would have been a rule that got weaker every
+  // time this repo grew a program.
+  //
+  // The assembler is in the list too. It is here because the emit is text as much as a spine
+  // is - an anchor on a branch the assembler never takes is the same dead control wearing
+  // JavaScript - and it can be here because it imports nothing, so its bytes evaluate under
+  // a `data:` module the way the spines' do. The count question is not asked of it: its
+  // anchors are JavaScript and the programs are GLSL.
+  //
+  // **`web/post-chain.js` is deliberately not in this list, and the exclusion has a
+  // mechanism behind it rather than a promise.** It holds the grade pass's uniform table and
+  // not a byte of its GLSL, and it imports three.js, so it could not be evaluated here even
+  // if it did. The thing that keeps that honest is that it has nothing left to anchor a
+  // shader mutation on: every GLSL anchor that used to name it names `web/grade-shader.js`
+  // or a chunk now, and one that drifted back would be an anchor into a file with no shader
+  // in it.
+  //
+  // Nothing here needs a server, a browser or a package. `assembleShaders` is concatenation
+  // over data handed in, and the manifests and chunks are files - which is the whole reason
+  // the assembler was written import-free and pure.
+  const SPINES = { cloud: 'web/cloud-shader.js', grade: 'web/grade-shader.js' };
+  const SPINE_EXPORT = { cloud: 'cloudSpine', grade: 'gradeSpine' };
+  const ASSEMBLER = 'web/shader-assembly.js';
+  const isSpine = (file) => Object.values(SPINES).includes(file);
+  const isChunk = (file) => /^effects-builtin\/[^/]+\/[^/]+\.glsl$/.test(file);
+  const buildsTheProgram = (file) => isSpine(file) || file === ASSEMBLER || isChunk(file);
+
+  const moduleOf = (source) => import(`data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`);
+  // A string replacement rather than a pattern one: `String.replace` reads `$&` and its
+  // relatives out of a replacement *string*, and a mutation's `to` is source text that owes
+  // this row nothing about dollar signs.
+  const swap = (body, from, to) => body.replace(from, () => to);
+
+  // **These three read through the substitution where the row above reads off disk**, and
+  // the seam is the point rather than an inconsistency: what assembles is the question here,
+  // so a control that stages one of the four files has to reach this and must not reach the
+  // anchor-existence row, where it would report its own anchor as stale.
+  let clean = null, spineSources = null, assemblerSource = null, basePackages = null;
+  try {
+    spineSources = Object.fromEntries(Object.entries(SPINES)
+      .map(([name, file]) => [name, sourceWithMutation(file)]));
+    assemblerSource = sourceWithMutation(ASSEMBLER);
+    const builtin = join(ROOT, 'effects-builtin');
+    // The manifests are read off disk even so: `manifest-does-not-parse` is the
+    // package-parse gate's control and owns that question one block up, and routing it
+    // through here as well would give one control two red rows in two rules asking the
+    // same thing.
+    basePackages = readdirSync(builtin, { withFileTypes: true })
+      .filter((e) => e.isDirectory()).map((e) => e.name).sort()
+      .map((id) => {
+        const manifest = JSON.parse(readFileSync(join(builtin, id, 'manifest.json'), 'utf8'));
+        const chunks = {};
+        for (const c of manifest.chunks ?? []) chunks[c.file] = sourceWithMutation(`effects-builtin/${id}/${c.file}`);
+        return { id, manifest, chunks };
+      });
+  } catch (err) {
+    // A `fail` rather than a throw, following the rule the whole suite is written under: a
+    // run that dies here exits non-zero with nothing asserted, which reads exactly like a
+    // check that ran and found something.
+    fail(`the shipped packages could not be read for the assembled-program rule - ${String(err.message).split('\n')[0]}`);
+  }
+
+  const assembleStaged = async (staged = {}) => {
+    const spines = {};
+    for (const [name, source] of Object.entries(spineSources)) {
+      spines[name] = (await moduleOf(staged.spines?.[name] ?? source))[SPINE_EXPORT[name]];
+    }
+    const { assembleShaders } = await moduleOf(staged.assembler ?? assemblerSource);
+    const packages = basePackages.map((p) => ({ ...p, chunks: { ...p.chunks } }));
+    if (staged.chunk) {
+      const [, id, name] = staged.chunk.file.split('/');
+      const pkg = packages.find((p) => p.id === id);
+      if (!pkg) throw new Error(`${staged.chunk.file} names an effect package this build does not ship`);
+      pkg.chunks[name] = staged.chunk.text;
+    }
+    return assembleShaders(spines, packages);
+  };
+
+  // Every assembled string, flattened, so the count below is over the whole build rather
+  // than over whichever pair a file happens to belong to.
+  const everyProgram = (built) => Object.values(built)
+    .flatMap((p) => [p.vertexShader, p.fragmentShader]);
+  const sameProgram = (a, b) => {
+    const x = everyProgram(a), y = everyProgram(b);
+    return x.length === y.length && x.every((s, i) => s === y[i]);
+  };
+
+  if (basePackages) {
+    try {
+      clean = await assembleStaged();
+    } catch (err) {
+      fail(`the spine and the shipped packages do not assemble at all, so no anchor could be checked against the programs - ${String(err.message).split('\n')[0]}`);
+    }
+  }
+
+  let programChecked = 0, dead = 0, miscounted = 0;
   let tablesDeclared = 0, tablesWithAnchors = 0, anchorsChecked = 0, stale = 0, unreadable = 0;
   const anchorless = [];
   for (const name of readdirSync(join(ROOT, 'tools')).filter((f) => PARSES.test(f)).sort()) {
-    const source = readFileSync(join(ROOT, 'tools', name), 'utf8');
+    // Through the substitution for the reason `targetSource` above is: the two controls for
+    // the assembled-program rule below move a *spec*, and a spec is source text in a tool.
+    const source = sourceWithMutation(`tools/${name}`);
     const declared = DECLARATION.exec(source);
     if (!declared) continue;
     tablesDeclared++;
@@ -937,7 +1173,7 @@ const withoutStringBodies = (src) => {
         if (!anchorless.some((a) => a.name === name)) anchorless.push({ name, why: shape.anchorless });
         continue;
       }
-      for (const { file, from } of shape.anchors) {
+      for (const { file, from, to } of shape.anchors) {
         const body = targetSource(file);
         if (body === null) {
           fail(`${name}/${mutation} anchors into ${file}, which does not exist`);
@@ -950,6 +1186,44 @@ const withoutStringBodies = (src) => {
           stale++;
           fail(`${name}/${mutation} matches ${hits} times in ${file}, expected exactly 1`
             + ` - ${hits === 0 ? 'the text it anchors on has moved, so this control cannot run' : 'the text it anchors on appears more than once, so the tool refuses it'}`);
+          continue;
+        }
+        if (!clean || !buildsTheProgram(file) || typeof to !== 'string') continue;
+        programChecked++;
+        if (file !== ASSEMBLER) {
+          const inProgram = everyProgram(clean)
+            .reduce((n, text) => n + text.split(from).length - 1, 0);
+          if (inProgram !== 1) {
+            miscounted++;
+            fail(`${name}/${mutation} anchors on text appearing ${inProgram} times in the assembled programs, not once`
+              + ` - ${inProgram === 0 ? 'it matches its file and reaches no program, so the edit lands in text nothing compiles'
+                : 'the edit reaches one of those sites and the control would be recorded under the whole mutation\'s name'}`);
+          }
+        }
+        // Staged against what assembles rather than against what `targetSource` read, so a
+        // running control that moved one of the four files is not silently reverted here
+        // by an edit applied to the tree's own copy of it.
+        const chunkOf = (rel) => {
+          const [, id, chunk] = rel.split('/');
+          return basePackages.find((p) => p.id === id)?.chunks[chunk] ?? '';
+        };
+        const spineNamed = Object.entries(SPINES).find(([, path]) => path === file)?.[0];
+        let after = null;
+        try {
+          after = await assembleStaged(
+            spineNamed ? { spines: { [spineNamed]: swap(spineSources[spineNamed], from, to) } }
+              : file === ASSEMBLER ? { assembler: swap(assemblerSource, from, to) }
+                : { chunk: { file, text: swap(chunkOf(file), from, to) } },
+          );
+        } catch (err) {
+          dead++;
+          fail(`${name}/${mutation} staged against ${file} and the programs would not assemble - ${String(err.message).split('\n')[0]}`);
+        }
+        if (after && sameProgram(after, clean)) {
+          dead++;
+          fail(`${name}/${mutation} edits ${file} and no assembled program moves`
+            + ' - a slot carries a second copy of the shipped text, so an anchor can match its file exactly once'
+            + ' and still sit in the copy nothing compiles');
         }
       }
     }
@@ -978,6 +1252,23 @@ const withoutStringBodies = (src) => {
     console.log(`  anchors/ ${anchorsChecked} checked in ${tablesWithAnchors} tables of ${tablesDeclared} declared, ${parts.join(', ')}`);
   } else {
     console.log(`  anchors/ all ${anchorsChecked} in ${tablesWithAnchors} tables match once, of ${tablesDeclared} declared`);
+  }
+
+  // The assembled-program half gets its own line rather than being folded into the one
+  // above, because it counts a different population - the anchors into the four files the
+  // shaders are built out of, which is a fraction of the whole - and a total covering both
+  // would read as though every anchor had been asked the harder question.
+  if (clean === null) {
+    // Nothing further to say: the two failures above already name why, and a clean line
+    // here would be this row reporting on a comparison that never ran.
+  } else if (programChecked === 0) {
+    fail('no anchor was checked against the assembled shader programs, so that rule passed on nothing'
+      + ' - either the mutations stopped naming the spine and the chunks, or this scan is looking in the wrong place');
+  } else if (dead || miscounted) {
+    console.log(`  program/ ${programChecked} shader anchors checked against the assembled programs, `
+      + [dead && `${dead} reaching no program`, miscounted && `${miscounted} not appearing exactly once`].filter(Boolean).join(', '));
+  } else {
+    console.log(`  program/ all ${programChecked} shader anchors appear once across the assembled programs and move one when applied`);
   }
 }
 
@@ -1087,10 +1378,13 @@ const withoutStringBodies = (src) => {
 
 console.log(`\n${total} JavaScript files, ${failed} failed`);
 // Said out loud because `npm test` runs this, and a green `npm test` that meant "the
-// suite passed" would be the most expensive wrong impression in the repo. **One thing here
-// executes rather than parses**, and it is named rather than buried: the specification row
+// suite passed" would be the most expensive wrong impression in the repo. **Two things here
+// execute rather than parse**, and they are named rather than buried. The specification row
 // imports a copy of `server/protocol.js`, which is a module of constants with no imports of
-// its own, and reads its exported values. Nothing is called and no behaviour is exercised.
-// Everything else is `node --check` and nothing runs.
+// its own, and reads its exported values; nothing is called and no behaviour is exercised.
+// The anchor row imports the two spines and `web/shader-assembly.js` the same way and
+// does call one function - `assembleShaders`, which concatenates the strings it is handed
+// and touches nothing outside them. Both files import nothing, which is what lets their
+// bytes evaluate here at all. Everything else is `node --check` and nothing runs.
 console.log('syntax only - no proof tool ran here; see CLAUDE.md "Proof tools" for the suite and what each of them needs');
 process.exit(failed ? 1 : 0);

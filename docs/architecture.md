@@ -67,6 +67,201 @@ proves.
 renderer class it will draw with. [Get a video out](../README.md#5-get-a-video-out) has the
 rest.
 
+## The effect store
+
+The look is not one program. Every effect is a package — a manifest and the GLSL chunks it
+splices into the shaders — and the page assembles both point-cloud programs, the grade pass, the
+parameter registry and the panel out of whatever the store holds. `server/effect-store.js` serves
+them and `web/shader-assembly.js` joins them.
+
+**Two roots, and the user's copy wins.** `effects-builtin/` is what the build ships with and
+nothing in this program writes into it; `effects/` is where an install lands. An id present in
+both resolves from the user's, which *is* the fork mechanism: install a package under a shipped
+id and it shadows the shipped one, delete that copy and the shipped one answers again. The
+shipped set is therefore always available to fall back to, which is why removing a builtin
+nothing forks is refused rather than performed. It is the same shape the preset store uses, and
+what makes it its own class rather than a fourth construction of that one is what is stored: a
+package is a directory of files, so a revision has to be computed over the set and a read has to
+say which files exist before a client can fetch them one at a time.
+
+```
+GET    /effects              { effects: [ every id either root holds, with its files and
+                               revisions ], generation: how many times this store has changed }
+GET    /effects/:id          one package: the parsed manifest, the file index, the revision
+GET    /effects/:id/file/:n  one file's bytes, as text/plain
+PUT    /effects/:id          { manifest, chunks: { <file>: <text> } }  installs into effects/
+DELETE /effects/:id          removes the user's copy only
+```
+
+A revision is a hash of the bytes: `sha256` per file, and the package's own over the sorted
+`name hash` lines. Never a re-serialisation — a manifest that round-trips through `JSON.parse`
+is a different byte stream with the same meaning, and provenance is about bytes.
+
+**The generation is beside the list because a hash of bytes cannot say that a change was
+undone.** A client assembles a set out of one listing, a request per package and a request per
+chunk, and the thing it has to be sure of is that all of those came from one revision of the
+store — which it asks by listing again at the end and requiring the answer to be the one it
+started from. Contents alone cannot answer it: install a fork and delete it again, which
+restores the shipped package rather than removing anything, and every revision on both sides of
+that pair is identical while the store answered as something else in between. A read straddling
+it passes the comparison by construction, assembles a program out of two revisions, and records
+the revision it opened with, so nothing later ever disagrees either. The counter is the store's
+own history rather than its contents, which is the axis that pair moves along; it is bumped by
+`install` and `remove` and by nothing else, and it is not durable, because a restart makes the
+two listings disagree and the client retries.
+
+**An install is atomic because a package is a directory.** The whole thing is written under
+`<id>.<seq>.tmp`, any existing copy is renamed to `<id>.<seq>.old`, the new one is renamed in and
+the old one deleted. Those suffixes carry a dot and an effect id may not, so a crashed install is
+invisible to every read by the same rule that decides what an id is — and the next install of
+that id sweeps what it left.
+
+**Between those two renames the id resolves to nothing, and that window is the one place this
+store can lose work.** A machine losing power there comes back with the only copy of the package
+in its aside and nothing at the live id, which reads as an uninstall rather than as damage — so
+the store puts it back when it is constructed, before anything can read it, and the sweep removes
+an aside only while there is a live directory beside it to measure against. An uninstall renames
+aside too, and its aside is named `<id>.<seq>.gone` for exactly this reason: one suffix per
+intent, so "should this come back" is answered by the name rather than guessed at, and a recovery
+that could not tell the two apart would undo somebody's uninstall on every restart.
+
+**A package file is an ordinary file.** `effects/` is the one directory in this program a client
+can write into, so the file route asks what a name *is* rather than what it points at — a symlink
+planted there is refused whether or not it aims somewhere legitimate, which is a narrower rule
+than the realpath-and-containment pair the static tree uses and needs no notion of where the roots
+are.
+
+What may be written at all is decided before any of it: the door in
+`server/effect-door.js` runs the real assembler against the set that would exist after the
+install, and a package that would not assemble, would bind a uniform no program declares or would
+name an identifier this build has not got is refused with the reason and never reaches disk.
+A parameter whose `def` or `max` is not on the step grid its own `min` anchors is refused there
+too, and the door asks by running `snapScalar` — the arithmetic the registry snaps with — rather
+than by describing it: a default the snap would move is a number the manifest states and the
+program never holds, which makes an untouched effect read as modified from the first paint and
+puts a `requires` entry for it into every document saved afterwards. The
+alternative is a package that installs cleanly and breaks the *next* page load, where the only
+evidence is a console nobody has open.
+
+**And the same door is asked again of what is already on disk, at every start.** A package got
+through it once, against the build that was running the day it was installed, and a fork outlives
+the build it was made on: upgrade the program and the spine may have dropped or renamed a joint
+that fork's GLSL names, or the builtin it shadows may have grown a parameter it does not carry.
+Nothing about the fork changes and it goes on shadowing the upgraded builtin, so the page fetches
+it and `assembleShaders` throws while `web/main.js` is still evaluating — no `__kinect`, neither
+surface opening, and the machine that upgraded is the machine that stops working. So the store
+re-runs `doorRefusal` and `forkRefusal` over every package in the *user* root, against this
+build's spines; a package either of them now refuses is renamed to `<id>.<seq>.incompatible`,
+which is invisible to every read by the rule the `.tmp` suffix relies on and is swept by nothing,
+and the shipped package answers for that id again. Renamed and never deleted, because a fork is
+authored work and "this build cannot use it" is not a reason to destroy it; announced in the log
+with the door's own sentence, because an id that used to answer with somebody's fork and now
+answers with the builtin is a change nobody asked for. Only the user root, because a builtin is
+this build's own package and one this build cannot assemble is a broken build rather than a
+migration.
+
+Two things about *when* and *against what*, both of which were wrong in ways that quarantined
+packages nothing was wrong with. The gate runs from inside `listen`'s callback rather than at
+construction, because it renames directories and the port is what says this process is the one
+entitled to: two servers on one effects root is two servers on one port, so the loser of the bind
+exits having touched nothing. It is sound because everything the gate does is synchronous `fs` —
+the socket is accepting by then, but a request handler is a callback on a later turn of the event
+loop, so no route is ever answered out of a store that has not been gated. And each package is
+doored against the builtins plus the packages already *validated* rather than against everything
+on disk: the door assembles `[...beside, candidate]` and reports what fails under the candidate's
+name, so one unusable fork used to make its innocent neighbours come back "does not assemble",
+with the blame landing on whichever the walk reached first. The pass repeats while it is still
+promoting packages, because a package may legitimately read another's varying and a single sweep
+would refuse a pair this build's own install door accepts.
+
+### Assembly: a spine with joints, and the chunks that fill them
+
+`web/cloud-shader.js` and `web/grade-shader.js` each export a **spine** — verbatim GLSL segments
+with named joints between them — and `web/shader-assembly.js` concatenates a spine with whatever
+the installed packages bring. Neither module imports anything and neither interpolates: a chunk's
+text is spliced between two segments exactly as it arrived, because every transformation on the
+way is a byte that could move without breaking a compile or showing in a picture anybody would
+look twice at.
+
+A joint is one of four kinds, and the kind decides what filling it means:
+
+- a **stage** takes any number of chunks, concatenated by the `order` each declares — which is
+  why two packages can both add uniforms to one declaration block;
+- a **slot** takes at most one claimant and carries the text to use when nothing claims it, so a
+  slot is a *replacement* and an uninstalled effect is exact identity by construction;
+- a **service** is a value the spine computes under a gate its consumers generate, the condition
+  built from each consumer's own `when` clause and joined in `gateOrder`, so a term that reads
+  the value without joining the gate is inert rather than broken;
+- **varyings** are generated from the packages' declarations in all three places at once — the
+  `out` list, the `in` list and the initialisation — so one declaration is the only statement of
+  the fact.
+
+Joint names are collected across every spine at once rather than per spine, so two spines
+offering one name is a refusal rather than a chunk quietly spliced into both. A chunk naming a
+joint nothing holds is refused by name, for the same reason the alternative design was rejected:
+tagging each chunk with its program's name means a tag nobody spelled right lands the chunk in no
+program at all, the page boots, and the effect is simply gone.
+
+### Hotload is boot, run a second time
+
+`adoptEffectPackages` rebuilds the shader programs, the parameter registry, the panel and the
+uniform cells from a set of packages, and ends by walking every value back through `params.set`.
+Boot is its first call. There is no separate install path, which is the point: a code path that
+only runs after an install is a code path nobody exercises until it matters.
+
+Parking and unparking are the serialise/restore round trip rather than two loops. An arriving
+effect finds its values in the document and applies them; a departing one finds them unrecognised
+and parks them, and the badge, the validation and the suppression prune all fall out of code that
+already existed. Pages converge by comparing revision lines every few seconds, standing down
+while an export, a preset gesture or a track evaluation is running, and asking again after the
+last read so a gesture that starts mid-poll defers it rather than being run over.
+
+**A hotload that fails part-way puts the page back.** The door is not a compiler — GLSL that is
+syntactically broken while naming only identifiers this build has gets past it, and a shader that
+will not link is a log line rather than an exception — so the page warms the swapped programs and
+treats a link failure as a throw. Restoring the open document can throw too, reachably: install a
+fork that adds a parameter while a document holds that effect and the completeness rule refuses
+the subset. Either way the page re-adopts the packages and the programs it was holding and
+restores the document it had, synchronously and without the network, because the moment there is
+nothing left to fall back to is the wrong moment to need a fetch. The corner where the rollback
+itself fails says to reload the page and repaints nothing, since a panel painted over a state no
+document describes is a page that looks well and is not.
+
+### A document may name an effect this build has not got
+
+The refusal splits three ways on one predicate. A bare name core does not know is a typo, and a
+dotted name whose package *is* installed but lacks the suffix is a half-package: both refuse. A
+dotted name whose prefix is not installed **parks** — the viewer loads, the installed part renders
+pixel-identically, and the values and tracks under that prefix go to a pool nothing evaluates and
+nothing destroys. The serialiser merges the pool back without inspecting it, so a load-save round
+trip through a build lacking the effect returns every parked key holding exactly the value it
+arrived with — nothing renormalised, nothing rebuilt, nothing dropped and nothing added beside it
+— and `requires` carries the document's own entries whole so version and revision survive. Presets
+exclude the pool by construction: a project merges it back and a preset must not.
+
+**Per key and not per byte, which this page said the other way round for a while.** Two things in
+the round trip move bytes without touching a value: the parked keys are appended after the
+installed ones, so a document that interleaved them comes back re-ordered, and every number goes
+through `JSON.parse`, which reads `1e0` and writes `1`. A load and save on a machine missing an
+effect therefore changes the file and moves its revision. That is accepted — what the parking
+promises is that the work is intact, not that the file is the one it was — and the distinction is
+worth keeping straight, because `tools/library-check.mjs` proves the value property and no arm
+anywhere proves the byte one.
+
+**An effect that is here at another version is surfaced and never refused.** `requires` carries
+a version and the loader compares it against what is installed, but a version string says nothing
+about which direction is compatible, so refusing would make every retune of an effect a wall in
+front of every clip on the machine. The clip loads, the installed version draws it, and the bar
+carries `document requires glyph 1.0.0, installed is 2.0.0` — a line and no control, because
+there is nothing to decide and export is not refused for it. The notice does not survive the next
+save, which is the derived field working rather than a loss: the list records what the document
+was last built from, and this machine has now built it.
+
+Export refuses by default while anything is parked, naming the ids and versions, because a video
+leaves this machine and nothing in it says a layer of the look was absent. Suppressing is the
+operator saying this render may go without that effect, per effect and per session, and the
+deliverable's sidecar records what was skipped rather than rewriting the clip.
+
 ## Program time is the edit coordinate
 
 Source time is a position inside the capture; program time a position inside the output.

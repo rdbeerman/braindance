@@ -1,0 +1,100 @@
+{
+  "format": 1,
+  "id": "stock",
+  "version": "1.0.0",
+  "title": "Film stock",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "film stock",
+      "panel": {
+        "group": "stock",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "grade",
+        "uniform": "stock",
+        "gates": true
+      },
+      "role": "master"
+    },
+    "balance": {
+      "def": 0,
+      "min": -1,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "stock balance",
+      "panel": {
+        "group": "stock",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "grade",
+        "uniform": "stockBalance"
+      },
+      "under": "amount"
+    },
+    "split": {
+      "def": 0.45,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "stock split",
+      "panel": {
+        "group": "stock",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "grade",
+        "uniform": "stockSplit"
+      },
+      "under": "amount"
+    },
+    "latitude": {
+      "def": 0.3,
+      "min": 0.02,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "stock latitude",
+      "panel": {
+        "group": "stock",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "grade",
+        "uniform": "stockLatitude"
+      },
+      "under": "amount"
+    }
+  },
+  "panelGroups": [
+    {
+      "key": "stock",
+      "label": "Film stock",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "post",
+      "order": 300
+    }
+  ],
+  "chunks": [
+    {
+      "stage": "g.decl",
+      "order": 350,
+      "file": "decl.grade.glsl"
+    },
+    {
+      "stage": "g.body",
+      "order": 350,
+      "file": "curve.grade.glsl"
+    }
+  ]
+}

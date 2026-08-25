@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "id": "lattice",
+  "version": "1.0.0",
+  "title": "Lattice",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "lattice",
+      "panel": {
+        "group": "displacement",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "lattice"
+      },
+      "role": "master"
+    }
+  },
+  "chunks": [
+    {
+      "stage": "v.displace",
+      "order": 200,
+      "file": "snap.vert.glsl"
+    },
+    {
+      "slot": "v.cellNorm",
+      "file": "energy.vert.glsl"
+    }
+  ]
+}

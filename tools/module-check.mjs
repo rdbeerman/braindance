@@ -166,7 +166,7 @@
 // which is what makes it free in the one file that is full of registries and menu tables.
 //
 // What is left open is the **method shorthand**, `{ poll(gl) { ... } }`, found by a control
-// coming back NOT CAUGHT: `web/main.js:9860` defines one, and it made an alias of `poll` look
+// coming back NOT CAUGHT: `gpuTimer` in `web/main.js` defines one, and it made an alias of `poll` look
 // read. It is not closable by widening the rule above, and the measurement says so rather than
 // the argument - excluding a hit followed by `:` or by `(` at the head of a line calls
 // **twelve** live imports unused, `writeClipRange`, `tiltQuaternion` and `pollRecordState`
@@ -327,7 +327,7 @@ const MUTATIONS = {
   // spelling nobody thought of leaving the tree with less in it than the tree has.
   'export-form-nothing-claims': {
     file: 'web/format.js',
-    edits: [['export const PROJECT_VERSION = 5;', 'export const PROJECT_VERSION = 5;\nexport const { major, minor } = { major: 1, minor: 0 };']],
+    edits: [['export const PROJECT_VERSION = 6;', 'export const PROJECT_VERSION = 6;\nexport const { major, minor } = { major: 1, minor: 0 };']],
   },
 
   // A barrel, refused rather than followed. Resolving one needs a second resolver - which
@@ -428,7 +428,7 @@ const MUTATIONS = {
   // asks for", where it cost rule 3 three of the four ways a binding arrives.
   //
   // The alias is `recordPoll` because the first one was `poll`, and that came back NOT
-  // CAUGHT: `web/main.js:9860` defines a method called `poll` in an object literal, which is
+  // CAUGHT: `gpuTimer` in `web/main.js` defines a method called `poll` in an object literal, which is
   // a name written in code position and not a reference to anything, and a use question
   // asked of a name rather than of a scope cannot tell the two apart. That is a false
   // negative this tool has and the header says so; what it must not do is sit inside a
@@ -522,8 +522,8 @@ const MUTATIONS = {
   // The same, for a name whose only occurrences are property keys. `main.js` writes `fov:` in
   // five object literals and nowhere else, which is a name in code position with no dot in
   // front of it - the shape that keeps a dead import green in the one file that is full of
-  // registries and menu tables. What must not serve here is the method shorthand, `poll(gl) {`
-  // at `web/main.js:9860`: measured with the alias put back to `poll`, this run comes back
+  // registries and menu tables. What must not serve here is the method shorthand,
+  // `gpuTimer.poll(gl)` in `web/main.js`: measured with the alias put back to `poll`, this run comes back
   // NOT CAUGHT, and that limitation belongs in the header rather than inside a control.
   'import-used-only-as-an-object-key': {
     file: 'web/main.js',
@@ -1378,7 +1378,7 @@ const EXEMPTIONS = [
   {
     module: 'web/post-chain.js',
     binding: 'grade',
-    why: 'The one combined grade pass. Eight look parameters write their term into `uniforms` and four of them gate `enabled` on whether any term is up, which is the reason the pass is one rather than four.',
+    why: 'The one combined grade pass. Eighteen look parameters write their term into `uniforms` and seven of them gate `enabled` on whether any term is up - which seven read off the packages\' `gates` bindings rather than listed - and that is the reason the pass is one rather than four.',
   },
   // The one entry in this table that is not a three.js object with a published interface,
   // and the only one that needed arguing rather than citing. A uniform is a cell the GPU

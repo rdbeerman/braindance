@@ -1,5 +1,35 @@
 {
-  "version": 5,
+  "version": 6,
+  "requires": [
+    {
+      "id": "glitch",
+      "version": "1.0.0"
+    },
+    {
+      "id": "duotone",
+      "version": "1.0.0"
+    },
+    {
+      "id": "rgbsplit",
+      "version": "1.0.0"
+    },
+    {
+      "id": "raster",
+      "version": "1.0.0"
+    },
+    {
+      "id": "grain",
+      "version": "1.0.0"
+    },
+    {
+      "id": "streak",
+      "version": "1.0.0"
+    },
+    {
+      "id": "vignette",
+      "version": "1.0.0"
+    }
+  ],
   "values": {
     "pointSize": 8.1,
     "opacity": 1,
@@ -9,18 +39,14 @@
     "snapDelta": 250,
     "fade": 120,
     "wake": 550,
-    "noise": 0,
-    "noiseScale": 3,
-    "noiseSpeed": 0.7,
-    "lattice": 0,
-    "latticeCell": 0.05,
-    "glitch": 0.1,
-    "glitchDensity": 0.45,
-    "glitchShove": 0.45,
-    "glitchTint": 1.8,
-    "glitchBands": 12,
-    "glitchAxis": 0,
-    "glitchRate": 7,
+    "cell": 0.05,
+    "glitch.amount": 0.1,
+    "glitch.density": 0.45,
+    "glitch.shove": 0.45,
+    "glitch.tint": 1.8,
+    "glitch.bands": 12,
+    "glitch.axis": 0,
+    "glitch.rate": 7,
     "regionX": 0,
     "regionY": 0,
     "regionZ": -2,
@@ -29,12 +55,6 @@
     "regionD": 0,
     "regionRound": 0.5,
     "regionSoft": 0.2,
-    "regionPush": 0,
-    "regionNoise": 0,
-    "regionMask": 0,
-    "ripple": 0,
-    "rippleFreq": 4,
-    "rippleSpeed": 1,
     "readRgb": 0,
     "readDepth": 0,
     "readGhost": 0,
@@ -49,24 +69,22 @@
     "blackwallSweep": 0.28,
     "scan": 0.35,
     "rim": 0.5,
-    "thermal": 0,
-    "edges": 0,
-    "duotoneDepth": 0.92,
-    "duotoneHue": 28,
-    "duotoneSplit": 0.48,
-    "duotoneSpan": 5.95,
-    "duotoneMotion": 0.35,
+    "duotone.amount": 0.92,
+    "duotone.hue": 28,
+    "duotone.split": 0.48,
+    "duotone.span": 5.95,
+    "duotone.motion": 0.35,
     "bloom": 0.8,
     "trails": 0.45,
-    "rgbSplit": 1.2,
-    "scanlines": 0.34,
-    "scanAngle": 0,
-    "scanPitch": 0.4,
-    "scanHard": 0.85,
-    "grain": 0.2,
-    "streak": 0.2,
-    "streakAngle": 0,
-    "vignette": 0.62,
+    "rgbsplit.amount": 1.2,
+    "raster.amount": 0.34,
+    "raster.angle": 0,
+    "raster.pitch": 0.4,
+    "raster.hard": 0.85,
+    "grain.amount": 0.2,
+    "streak.amount": 0.2,
+    "streak.angle": 0,
+    "vignette.amount": 0.62,
     "crush": 0.06,
     "denoise": true,
     "edgeTol": 120

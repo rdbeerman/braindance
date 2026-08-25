@@ -1,0 +1,91 @@
+{
+  "version": 6,
+  "requires": [
+    {
+      "id": "glyph",
+      "version": "1.0.0"
+    },
+    {
+      "id": "lattice",
+      "version": "1.0.0"
+    },
+    {
+      "id": "duotone",
+      "version": "1.0.0"
+    },
+    {
+      "id": "rain",
+      "version": "1.0.0"
+    },
+    {
+      "id": "raster",
+      "version": "1.0.0"
+    },
+    {
+      "id": "grain",
+      "version": "1.0.0"
+    },
+    {
+      "id": "vignette",
+      "version": "1.0.0"
+    }
+  ],
+  "values": {
+    "pointSize": 8.1,
+    "opacity": 1,
+    "exposure": 0.25,
+    "additive": true,
+    "glyph.amount": 1,
+    "glyph.tone": 0.3,
+    "glyph.hash": 1,
+    "glyph.rain": 0.6,
+    "interpolate": true,
+    "snapDelta": 250,
+    "fade": 120,
+    "wake": 550,
+    "lattice.amount": 1,
+    "cell": 0.055,
+    "regionX": 0,
+    "regionY": 0,
+    "regionZ": -2,
+    "regionW": 0,
+    "regionH": 0,
+    "regionD": 0,
+    "regionRound": 0.5,
+    "regionSoft": 0.2,
+    "readRgb": 0,
+    "readDepth": 1,
+    "readGhost": 0,
+    "readContour": 0,
+    "readBlackwall": 0,
+    "rgbSaturation": 1,
+    "depthGamma": 1,
+    "ghostRim": 0.7,
+    "ghostFill": 0.35,
+    "contourBands": 12,
+    "contourWidth": 0.08,
+    "blackwallSweep": 0.28,
+    "scan": 0,
+    "rim": 0.55,
+    "duotone.amount": 0.9,
+    "duotone.hue": 105,
+    "duotone.split": 0.15,
+    "duotone.span": 2,
+    "duotone.motion": 0,
+    "rain.amount": 0.8,
+    "rain.speed": 0.55,
+    "rain.span": 1.3,
+    "rain.trail": 0.45,
+    "bloom": 0.05,
+    "trails": 0.15,
+    "raster.amount": 0.25,
+    "raster.angle": 0,
+    "raster.pitch": 0.5,
+    "raster.hard": 0.85,
+    "grain.amount": 0.12,
+    "vignette.amount": 0.7,
+    "crush": 0.1,
+    "denoise": true,
+    "edgeTol": 120
+  }
+}

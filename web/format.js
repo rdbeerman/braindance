@@ -83,8 +83,20 @@
  * above `aspect` in `serialiseProjectBody` declines to pay for a field presets have
  * nothing to do with. It is paid here because the thing that moved is the *format* of
  * something both kinds could carry, rather than a field only one of them has.
+ *
+ * **Version 6 names the look's parameters by the effect they belong to.** A version 5
+ * document said `glyphTone`; a version 6 document says `glyph.tone`, carries a
+ * `requires` list naming the effects its values are built from, and leaves out every
+ * effect it holds at inert defaults. The dot is load-bearing rather than cosmetic: it
+ * is what lets a reader tell a typo from an effect this machine does not have, and
+ * the `requires` list is what lets it say *which* effect is missing instead of
+ * refusing the whole document for one unknown name. There is no way across, as ever -
+ * the renames are one-to-one and a converter could exist, which is exactly why this
+ * paragraph records that one deliberately does not: every document this project holds
+ * was re-authored at 6, and a reader of both shapes is the second implementation this
+ * design keeps refusing.
  */
-export const PROJECT_VERSION = 5;
+export const PROJECT_VERSION = 6;
 
 /**
  * The sentence a document from the wrong version gets, in one place because the two
@@ -93,8 +105,8 @@ export const PROJECT_VERSION = 5;
  * **This build carries no migration, and the refusal says so rather than sending anybody
  * looking for one.** There used to be a one-shot rewriter under `tools/` that converted
  * documents on disk, and four bands here that told a version 3 or 4 document which steps
- * stood between it and this one. Both are gone: every document this project has ever held
- * is version 5, so the converter was a one-way rewriter of authored work that nothing
+ * stood between it and this one. Both are gone: every document this project holds is
+ * re-authored at the current version, so the converter was a one-way rewriter of authored work that nothing
  * could exercise - the most dangerous shape a piece of untested code can have, since its
  * *successful* outcome is that the original is gone. Deleting it is the greenfield call,
  * and the cost is stated rather than hidden: a version 3 or 4 document, if one exists
@@ -313,3 +325,155 @@ export const DEPTH_H = 424;
  * and that is a third spelling this could absorb rather than a claim that it has.
  */
 export const POINTS = DEPTH_W * DEPTH_H;
+
+/**
+ * The effect a dotted look name belongs to, or null for a core parameter - and it is a
+ * fact about the document format rather than about the registry, which is why it is here.
+ *
+ * The version 6 paragraph above is this function's whole specification: a version 5
+ * document said `glyphTone` and a version 6 document says `glyph.tone`, and the dot is
+ * what lets a reader tell a typo from an effect this machine has not got. Every consumer
+ * of that distinction has to split a name the same way or the three-way refusal splits
+ * differently at two doors - which is the drift this file exists to refuse, arriving in a
+ * parser rather than in a constant.
+ *
+ * **Its second reader is the render queue, and that is what moved it out of
+ * `web/main.js`.** `server/jobs.js` derives a job's `requires` from the namespaces its
+ * project's own values and tracks carry, and the page derives the same list from the same
+ * names on the way out; a server-side copy of `indexOf('.')` would be the second spelling
+ * of the one rule both ends have to agree about.
+ */
+export const effectOf = (name) => {
+  const dot = name.indexOf('.');
+  return dot > 0 ? name.slice(0, dot) : null;
+};
+
+/** The effect ids a set of look names touches, in first-appearance order. */
+export const effectIdsIn = (names) => [...new Set(names.map(effectOf).filter(Boolean))];
+
+/**
+ * The id shape a `requires` entry names, which is the same shape a package directory and a
+ * parameter namespace carry.
+ *
+ * Module-local rather than exported, on the reasoning `server/effect-door.js` writes out
+ * where it restates the store's two patterns: this is one door asked at one moment - is
+ * this document's list readable - and the other spellings are different doors asked at
+ * different moments of an id's life. What must not happen is two readers of *this* rule,
+ * and there are two of those: the loader in `web/main.js` and the render queue in
+ * `server/jobs.js`.
+ */
+const REQUIRES_ID = /^[a-z][a-z0-9]*$/;
+
+/**
+ * Whether a `requires` list is a list at all, as a sentence or null.
+ *
+ * Separate from the entry rule below because the two callers ask them at different
+ * moments: the loader has already dealt with an absent list by the time it gets here, and
+ * the queue has to allow an absent one and refuse a present one that is not a list.
+ */
+export const requiresListRefusal = (what, requires) => (Array.isArray(requires) ? null
+  : `${what} carries ${JSON.stringify(requires)} where its requires belong: a requires list is an array of { id, version } entries`);
+
+/**
+ * One `requires` entry held to its shape, as a sentence or null.
+ *
+ * **Two doors read this list and only one of them used to check it.** `refuseRequires` in
+ * `web/main.js` has asked these five questions since the list existed, on the machine that
+ * opens the document; the render queue compared id *sets* and nothing else, so
+ * `requires: [{}]`, an entry with no version, an id that could never name a package and a
+ * stray key beside the two that belong were all queued without comment. What that costs is
+ * the thing the queue's envelope exists to prevent: the worker's own door reads the
+ * envelope, finds nothing missing in a claim nobody can read, resolves a take, launches a
+ * browser and spends a minute of GPU before the loader refuses the same document from the
+ * other end.
+ *
+ * A sentence rather than a throw because the two callers frame their own errors, and `what`
+ * is a noun phrase the caller owns for the same reason `versionRefusal` takes one - the
+ * loader is talking about a file somebody opened and the queue is talking about a job
+ * somebody posted.
+ */
+export function requiresEntryRefusal(what, entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return `${what} carries a requires entry ${JSON.stringify(entry)}: each entry is an object with an id and a version`;
+  }
+  const strays = Object.keys(entry).filter((k) => !['id', 'version', 'rev'].includes(k));
+  if (strays.length) {
+    return `${what} carries ${strays.join(', ')} on a requires entry, which has no place there: an entry is id, version and optionally rev`;
+  }
+  if (typeof entry.id !== 'string' || !REQUIRES_ID.test(entry.id)) {
+    return `${what} requires ${JSON.stringify(entry.id)}, which is not an effect id: an id is lowercase letters and digits, the prefix its parameters carry`;
+  }
+  if (typeof entry.version !== 'string' || entry.version.length === 0) {
+    return `${what} requires ${entry.id} at version ${JSON.stringify(entry.version)}: a version is a non-empty string`;
+  }
+  if (entry.rev !== undefined && (typeof entry.rev !== 'string' || entry.rev.length === 0)) {
+    return `${what} pins ${entry.id} to rev ${JSON.stringify(entry.rev)}: a rev is a non-empty string when it is there at all`;
+  }
+  return null;
+}
+
+/**
+ * How many decimal places a number is written to, which is how far the registry rounds a
+ * value after snapping it onto its slider's grid.
+ *
+ * **It is here because `snapScalar` below needs it and because it is the half of that
+ * arithmetic whose cases can be written out.** `test/param-grid.test.mjs` holds it to them
+ * under bare node.
+ *
+ * **A dot in the decimal spelling was the whole of the rule and JavaScript stops writing
+ * one.** `String(x)` switches to exponent notation below 1e-6, so `String(1e-7)` is
+ * `"1e-7"` with no dot anywhere in it - which read as zero decimals, and a parameter
+ * declaring that step had every value it ever held rounded to a whole number. The range
+ * collapsed to its integer positions with every control still moving and every slider
+ * still showing a number, which is the shape that gets found by somebody wondering why an
+ * effect only has two settings. The exponent is read now, so the count is what the value
+ * actually needs: `1e-7` is seven places, `1.5e-7` is eight, and `1e+21` is none because
+ * there is nothing after the point.
+ *
+ * Capped at the 100 places `toFixed` will accept, because a step below 1e-100 would
+ * otherwise turn a rounding into a `RangeError` on the first write. The install door
+ * refuses a step finer than 1e-6 long before that, so the cap is for the values that do
+ * not come through a door - a core parameter declared here in this repo.
+ */
+export const decimalsOf = (x) => {
+  const s = String(x);
+  const e = s.search(/[eE]/);
+  if (e < 0) {
+    const dot = s.indexOf('.');
+    return dot < 0 ? 0 : s.length - dot - 1;
+  }
+  const mantissa = s.slice(0, e);
+  const dot = mantissa.indexOf('.');
+  const fraction = dot < 0 ? 0 : mantissa.length - dot - 1;
+  return Math.min(100, Math.max(0, fraction - Number(s.slice(e + 1))));
+};
+
+/**
+ * Where a scalar actually lands: clamped into its own bounds, snapped onto the step grid
+ * its `min` anchors, and rounded to the decimals `min` and `step` imply.
+ *
+ * **This used to live in `web/main.js` beside the registry, on the argument that the
+ * registry is the only thing that performs it. It has a second performer now.** The
+ * install door in `server/effect-door.js` refuses a manifest whose `def` or `max` this
+ * arithmetic would move, and the only way to ask that question exactly is to run the
+ * arithmetic: an epsilon on `(def - min) / step` is a *description* of where a value lands,
+ * and a description is the thing that drifts from the line it describes. So the door
+ * imports this, and "would the registry move it" is answered by moving it.
+ *
+ * The rounding is the half that is easy to leave out and the half that decides. A range
+ * input hands back a value already snapped and already rounded to the decimals its own
+ * attributes imply; a value set headlessly does not go through the DOM at all. Without the
+ * round trip through `toFixed`, `0 + 55 * 0.01` is 0.5500000000000001 where the slider says
+ * 0.55, and two runs of one project disagree by a hair with nothing recording why.
+ *
+ * The final clamp is what makes a `max` off its own grid the one case this cannot see:
+ * the snap can step past `max` and the clamp puts it back, so the value at the top of the
+ * range is always itself. The door asks that question by widening the ceiling rather than
+ * by adding a tolerance here - see the grid refusals there.
+ */
+export const snapScalar = (spec, value) => {
+  const clamped = Math.min(spec.max, Math.max(spec.min, value));
+  const snapped = spec.min + Math.round((clamped - spec.min) / spec.step) * spec.step;
+  const decimals = Math.max(decimalsOf(spec.min), decimalsOf(spec.step));
+  return Math.min(spec.max, Math.max(spec.min, Number(snapped.toFixed(decimals))));
+};

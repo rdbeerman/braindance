@@ -99,11 +99,30 @@ blackwall, ghost rim, ghost fill, bands, thickness, wall sweep, scan, rim, therm
 edges — each carry a slider and a value.](media/look.png)
 
 `blackwall`, `contour`, `depth`, `ghost` and `rgb` ship in `presets-builtin/` and cannot be
-overwritten, and beside them ship four graded looks — `ember`, `grille`, `voxel` and
-`tearline` — which are Blackwall with somebody's grade already on it rather than a place to
-start. **save** writes yours to `presets/`, and **export** and **import** move them
+overwritten, and beside them ship five graded looks — `ember`, `grille`, `voxel`, `tearline`
+and `cascade` — which are one reading with somebody's grade already on it rather than a place
+to start. **save** writes yours to `presets/`, and **export** and **import** move them
 between machines as JSON. Every scalar underneath is still yours to move, and a row you have
 changed grows a **↺** that puts just that one back.
+
+Package effects start out of the sidebar. Press **+ add effect** to search the installed
+packages and keep one in reach. A project, preset, value or keyframe that uses an effect
+reveals it automatically, so the rack cannot hide work. **Remove** is the only way to take
+an effect back out: when it carries values or keyframes the editor asks first, then resets
+all of its values and deletes all of its tracks as one undoable edit. The rack choice is a
+local panel preference and is not written into the project.
+
+**The effects those sliders drive are packages on disk, and they follow the same two-root
+rule.** Eighteen ship in `effects-builtin/`, each a manifest beside the GLSL it splices into the
+shaders, and the page assembles both point-cloud programs, the grade pass, the parameter
+registry and the panel out of whatever is installed. `effects/` is the writable root: a package
+installed there under a shipped id shadows it, and deleting that copy brings the shipped one
+back, so there is always something to fall back to. A page that is open when an install happens
+rebuilds itself rather than needing a reload, and a clip naming an effect this machine has not
+got still opens — the missing part is carried, a badge in the application bar says what is
+parked, and export refuses until you say it may go without it.
+[Installing an effect](docs/reference.md#installing-an-effect-and-taking-one-away) has the
+routes, the rules the door enforces and the `--effects` flags.
 
 ### 2. Find it in the gallery
 
@@ -289,10 +308,10 @@ edits, offline.
 ## Going deeper
 
 - **[docs/reference.md](docs/reference.md)** is the command line, the viewer and timeline
-  controls, levelling a canted mount, the five readings and presets.
+  controls, levelling a canted mount, the five readings, presets, and installing an effect.
 - **[docs/architecture.md](docs/architecture.md)** is how the pieces fit, the four surfaces,
-  program time as the edit coordinate, surface memory, frame interpolation and the `.knct`
-  wire format.
+  the effect store and how the shaders are assembled from it, program time as the edit
+  coordinate, surface memory, frame interpolation and the `.knct` wire format.
 - **[docs/performance.md](docs/performance.md)** is what this costs: rendering cost, the USB
   topology that was the whole bottleneck, the OpenCL and CPU depth solves, and the things
   that looked obviously worth doing and were measured not to be.

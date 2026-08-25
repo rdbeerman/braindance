@@ -452,7 +452,10 @@
   .paneltab[aria-selected="true"] { color: var(--accent); }
   .paneltab:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
   #panel .group[hidden] { display: none; }
+  #panel .group.rackempty { display: none; }
   #lookPresetGroup > label { margin-bottom: 6px; }
+  #effectRackGroup { padding-top: 10px; }
+  #effectRackOpen { width: 100%; }
 
   .dialog-head {
     display: flex;
@@ -547,6 +550,25 @@
   #exportDialog { width: min(480px, calc(100vw - 32px)); }
   #obsDialog { width: min(480px, calc(100vw - 32px)); }
   #projectDialog { width: min(480px, calc(100vw - 32px)); }
+  #effectRackDialog { width: min(430px, calc(100vw - 32px)); }
+  .effect-rack-intro {
+    margin: 0 0 14px; color: var(--dim); font-size: 11px; line-height: 1.45;
+  }
+  .effect-rack-list {
+    display: grid; gap: 1px; max-height: min(54vh, 520px); overflow-y: auto;
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .effect-rack-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+    gap: 12px; min-height: 48px; padding: 7px 0; border-bottom: 1px solid var(--line);
+  }
+  .effect-rack-row:last-child { border-bottom: 0; }
+  .effect-rack-name { min-width: 0; }
+  .effect-rack-name b { display: block; color: var(--ink); font-size: 12px; font-weight: 500; }
+  .effect-rack-name small { display: block; margin-top: 2px; color: var(--dim); font-size: 9px; }
+  .effect-rack-actions { display: flex; align-items: center; gap: 5px; }
+  .effect-rack-actions .dialog-secondary { min-height: 29px; padding: 0 9px; }
+  .effect-rack-empty { padding: 18px 0; color: var(--dim); font-size: 11px; text-align: center; }
   /* The two readouts inside the export dialog - what the chosen deliverable is, and the
      range the press will take. Both are `<b>` in a field rather than an input, because
      neither is typed into here, and both want the dim monospaced voice the rest of the
@@ -764,6 +786,12 @@
   #tNote:empty { display: none; }
   #tResume { border: none; background: none; padding: 0; }
   #tResumeOpen { padding: 5px 10px; }
+  /* One missing effect, one entry: its sentence and the control that lets a render go
+     without it, kept together so two of them cannot read as one. `inline-flex` rather
+     than `block` for the same reason the chip around it is one - the button has to sit
+     on the text's baseline, and the chip stays a single row of the application bar
+     whatever it holds. `paintMissingEffects` carries why it does not stack. */
+  .missingfx { display: inline-flex; align-items: center; gap: 7px; }
   /* `hidden` on a chip, which needs saying because `.tchip` already sets a display and
      an author rule beats the `[hidden] { display: none }` in the browser's own sheet.
      Without this a chip marked hidden stays on screen with nothing in it, which is the
@@ -989,8 +1017,13 @@
   .tmk:focus-visible { outline: 0; color: var(--ink); }
   .tmk.sel { color: var(--ink); }
 
+  /* Above the keys, which is why this is 6 and not the 3 it was. The diamonds had to
+     rise over the cut markers' grab zone - see `.tkey` for the press that zone was
+     eating - and a playhead left underneath them would be broken by every key it swept
+     past, on the one line you follow while the take is rolling. It is
+     `pointer-events: none`, so lifting it takes no gesture off anything. */
   .tplayhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink);
-    pointer-events: none; z-index: 3; }
+    pointer-events: none; z-index: 6; }
   .tplayhead::before { content: ""; position: absolute; top: 0; left: -5px;
     border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--ink); }
 
@@ -1018,7 +1051,12 @@
      `elementFromPoint` found 5 grabbable pixels there rather than 11. Reaching into
      the kept range instead keeps the whole zone on screen at either extreme, and it
      is where the pointer wants to be anyway: you drag the edge of the block you are
-     keeping. Where the two nearly coincide `out` wins, being later in the markup. */
+     keeping. Where the two nearly coincide `out` wins, being later in the markup.
+
+     It still reaches down over the lanes, and it is `.tkey`/`.thandle` standing above
+     it that keeps that from mattering: the zone owns the lane whitespace, a key owns
+     itself. Lowering the zone here instead would have handed the ruler's marks the
+     same win over it, on the one surface where trimming is the whole point. */
   .tcut::after { content: ""; position: absolute; top: 0; bottom: 0; }
   .tcut-in::after { left: -4px; width: 16px; }
   .tcut-out::after { left: -12px; width: 16px; }
@@ -1046,9 +1084,25 @@
      box are dead, so the target is smaller than it measures. The diamonds were 9px and
      the handles 7px, which is an aim rather than a click, and these two are the whole
      of keyframe editing. The drawn shapes stay small; only the reach grows. */
+  /* **Above the cut markers rather than under them, which is what stops a press meant
+     for a key from trimming the clip instead.** `#tIn` and `#tOut` are 1px lines whose
+     grab zone reaches 16px inward at `z-index: 4`, and they run the whole column from
+     the ruler down past the last lane - so that zone lies over the lanes as well as
+     over the ruler, where trimming is the only gesture there is. Nothing between a
+     diamond and those markers opens a stacking context - `.tlane`, `.trow` and
+     `#tLanes` are all `z-index: auto` - so the two numbers were compared directly and
+     4 beat 2. Measured at a 640-wide viewport on the 243s `fixture-1g`: the bed runs
+     525px from x 115, the bloom key at 4s draws centred on x 123.6, `#tIn`'s zone owns
+     x 114.5 to 126.5, and clicking that key's own centre selected nothing, drew no
+     handle, and moved the clip-in to 00:03.986 - a silent retrim from a press aimed at
+     a keyframe. Raising these two leaves the zone everything it still needs, the ruler
+     and the lane whitespace between keys, and gives a key the pixels it is drawn on.
+     The one cost is that a diamond now paints over a marker's line where they cross,
+     which is the right way round: the line has the shading either side of it to say
+     where the range ends, and a key has only itself. */
   .tkey {
     position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px;
-    background: var(--dim); transform: rotate(45deg); cursor: grab; z-index: 2;
+    background: var(--dim); transform: rotate(45deg); cursor: grab; z-index: 5;
   }
   .tkey::after, .thandle::after { content: ""; position: absolute; inset: -4px; }
   /* And these two take the vertical axis back off the lane, because they are the only
@@ -1061,10 +1115,12 @@
   .tkey, .thandle { touch-action: none; }
   .tkey:hover { background: var(--ink); }
   .tkey.sel { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-low); }
+  /* The same level as a key, for the same reason: a handle is only ever drawn beside
+     the key it belongs to, so a zone that eats one eats the other. */
   .thandle {
     position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px;
     border-radius: 50%; background: var(--paper-1); border: 1px solid var(--accent);
-    cursor: grab; z-index: 2;
+    cursor: grab; z-index: 5;
   }
 </style>
 </head>
@@ -1137,11 +1193,20 @@
          `openTake` is the only caller that can decide it, because deciding needs the
          take's hash.
 
+         `#tMissing` is the effects this document names that this build has not got. It
+         is the fourth thing in the slot and it belongs here for the reason `#tResume`
+         does: it is a statement about the session, and it is the only place the person
+         at the screen is told that part of the clip is being carried rather than drawn.
+         Empty it hides itself the way the note does, so an ordinary document leaves the
+         bar exactly as bare as it was; `paintMissingEffects` fills it, one line per
+         missing effect, each with the toggle that lets an export go without that one.
+
          `#appStatus` is the sensor and the rate coming in. `paintStatus` has been writing
          it since the bar arrived and there was nothing here to write to. -->
     <div class="appstatus" id="appStatusSlot">
       <span class="tchip" id="tNote"></span>
       <span class="tchip" id="tResume" hidden><b id="tResumeWhen"></b><button id="tResumeOpen" type="button">restore autosave</button></span>
+      <span class="tchip warn" id="tMissing" hidden></span>
       <span id="appStatus"></span>
     </div>
   </header>
@@ -1251,6 +1316,11 @@
          conditioned into, where the points are moved to, how they are drawn, what
          colour they take, what persists between frames, and what the optics do. -->
     <div id="gradeAnchor" hidden></div>
+    <div class="group" id="effectRackGroup" data-panel-tab="look" hidden>
+      <div class="btnrow">
+        <button id="effectRackOpen" type="button">+ add effect</button>
+      </div>
+    </div>
   </div><!-- #panelBody -->
 
   <!-- What the panel becomes when it is collapsed: the three things you press with the
@@ -1439,6 +1509,22 @@
       </div>
     </div>
   </section>
+
+  <dialog id="effectRackDialog" aria-labelledby="effectRackTitle">
+    <div class="dialog-head">
+      <h2 id="effectRackTitle">Effects</h2>
+      <button class="dialog-close" id="effectRackClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <p class="effect-rack-intro">Add only the effects you want in the sidebar. Removing an
+      effect resets its values and deletes its keyframes.</p>
+    <div class="dialog-field">
+      <label for="effectRackSearch">Find an effect</label>
+      <div class="dialog-input-row">
+        <input id="effectRackSearch" type="search" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <div class="effect-rack-list" id="effectRackList" aria-label="Installed effects"></div>
+  </dialog>
 
   <!-- What the clip *is*, as opposed to what is made from it. Built like `#exportDialog`
        and `#obsDialog` below - the same head, the same `.dialog-field` rows, the same

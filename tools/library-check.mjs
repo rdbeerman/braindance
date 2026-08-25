@@ -275,6 +275,67 @@ const MUTATIONS = {
     '  if (project.version !== PROJECT_VERSION) {',
     '  if (false) {',
   ]] },
+  // **The parked pool never reaching the file again.** The clip still opens, the badge
+  // still says what is missing, the installed half still renders and still round-trips -
+  // and the save quietly drops the one part of the document this machine had no business
+  // touching. That is the destructive shape parking exists to prevent, and it is silent
+  // by construction: nothing on screen changes and the loss only shows up on the machine
+  // that had the effect.
+  //
+  // Aimed at the merge rather than at the pool, so the load half stays exactly as it is
+  // and the rows about parking-on-load stay green. What must redden is the file: the two
+  // byte-for-byte rows, the requires row, and the second-trip row.
+  'save-forgets-the-parked-pool': { file: 'web/main.js', edits: [
+    [
+      '      params: { ...lookParams, ...parked.params },',
+      '      params: { ...lookParams },',
+    ],
+    [
+      '        ...parked.tracks,\n      },',
+      '      },',
+    ],
+  ] },
+  // The other half of the same merge, and it has its own control because the row about
+  // the `requires` entry stays green under the one above: that mutation keeps the entry
+  // and drops the values, this one keeps the values and drops the entry. Both write a
+  // file the loader refuses on its next read, for opposite reasons - which is the
+  // both-directions rule in `refuseRequires` being the thing that catches each of them.
+  //
+  // **Three rows, and the third is the fixture rather than the claim.** The entry row and
+  // the reopen row carry it; the second-trip row goes with them because that reload is
+  // what it reads, and a mutation that stops the file reopening takes every row standing
+  // on the reopened document with it. The two byte-comparison rows stay green, because
+  // the values really do come back - which is the split that says this control and
+  // `save-forgets-the-parked-pool` are asking different questions.
+  'save-forgets-the-parked-requires': { file: 'web/main.js', edits: [[
+    '  const requires = [...requiresFor(kept), ...parked.requires];',
+    '  const requires = [...requiresFor(kept)];',
+  ]] },
+  // **The version a document was authored against, compared with nothing.** This is how it
+  // shipped: `refuseRequires` holds the list and the values to each other in both
+  // directions and never looks at the version beside them, so a clip built on one build of
+  // an effect opened on another and rendered the other without a word. The comparison is
+  // left standing and its result thrown away, which is the smallest edit that puts the
+  // silence back - a build with the detection deleted outright would also stop the hook
+  // existing, and a row that fell over on `undefined` is a crash rather than a catch.
+  //
+  // Must redden the two rows about the mismatched document - the hook and the sentence on
+  // the bar - and leave the matched control green, because a build that reported nothing
+  // agrees with a correct one about a document that has nothing to report.
+  'skew-goes-unreported': { file: 'web/main.js', edits: [[
+    '    .filter((e) => e.wanted !== e.installed);',
+    '    .filter(() => false);',
+  ]] },
+  // **The completeness rule reading the values and not the tracks**, which is the build
+  // this branch found: an effect a document uses only through a track was outside the loop
+  // entirely, so the demand was never made and the file was rewritten on save. It reddens
+  // the track-only row alone - the values-truncation row beside it stays green, because
+  // that document names glyph in `look.params` and reaches the loop either way, and that
+  // split is what says the two rows are asking different questions rather than one twice.
+  'completeness-reads-the-values-only': { file: 'web/main.js', edits: [[
+    '  const touched = effectIdsIn([...Object.keys(project.look.params), ...Object.keys(project.look.tracks)]);',
+    '  const touched = effectIdsIn(Object.keys(project.look.params));',
+  ]] },
   // **The capture format's band comes off.** A take whose hello declares a generation
   // this build has never read is opened on this build's assumptions instead of being
   // refused - which is the whole of the failure the format number exists to prevent,
@@ -1568,7 +1629,7 @@ const MUTATIONS = {
   // ---- a shipped look and the definition it is written against
   //
   // The two controls for section 8's completeness arm, and they are a pair because the
-  // arm compares two things that are genuinely separate: nine documents on disk, and one
+  // arm compares two things that are genuinely separate: ten documents on disk, and one
   // line of code saying what a document has to name. One mutation falsifies each side,
   // and each has to redden its own row - a control that reddened both would be saying the
   // arm noticed *something*, which is what a single equality already says.
@@ -1613,18 +1674,22 @@ const MUTATIONS = {
     'const key = `${capture.index.hash}`;',
   ]] },
   // **And the other side of the comparison: the definition, narrowed by one group.**
-  // `completeLookNames` is the look tag less its framing, and this drops `post` as well -
-  // so the nine documents go on naming `bloom`, `grain`, `vignette` and the four beside
-  // them while the definition has stopped asking for any of them. The documents are then
-  // supersets rather than equals, which is the direction a "names at least" row could
-  // never see, and it is the direction a wrongly *grown* exclusion arrives from: framing
-  // creeping back into the filter reads identically from here.
+  // `coreLookNames()` is the look tag less its framing and less every effect's own
+  // parameters, and this drops `post` from it as well - but `post` mostly holds effect
+  // parameters that `effectOf(n) === null` already excludes (`rgbsplit.amount`,
+  // `grain.amount`, `streak.amount`, `streak.angle`, `vignette.amount`), so what this
+  // mutation actually removes from the core is the two `post` members no effect
+  // claims: `bloom` and `crush`. The ten documents go on naming both while the
+  // definition has stopped asking for either, so the documents become supersets
+  // rather than equals - the direction a "names at least" row could never see, and
+  // the direction a wrongly *grown* exclusion arrives from: framing creeping back
+  // into the filter reads identically from here.
   //
   // It leaves `wholeLookTag` easier to satisfy rather than harder, so the provenance rows
   // above stay green and this reddens the extra-values row alone.
   'complete-look-drops-a-group': { file: 'web/main.js', edits: [[
-    "const completeLookNames = () => params.names('look').filter((n) => PARAMS[n].group !== 'framing');",
-    "const completeLookNames = () => params.names('look').filter((n) => PARAMS[n].group !== 'framing' && PARAMS[n].group !== 'post');",
+    "  .filter((n) => PARAMS[n].group !== 'framing' && effectOf(n) === null);",
+    "  .filter((n) => PARAMS[n].group !== 'framing' && PARAMS[n].group !== 'post' && effectOf(n) === null);",
   ]] },
 };
 
@@ -2209,6 +2274,11 @@ function stageServer() {
   // page error. A staged tree is supposed to be an install, and an install has the looks
   // that ship in it.
   cpSync(join(REPO, 'presets-builtin'), join(root, 'presets-builtin'), { recursive: true });
+  // The effects that ship, for the same reason one paragraph up - and a harder edge:
+  // the effect store refuses to BOOT on a missing builtin root rather than answering
+  // an empty list, precisely so a broken install cannot read as nothing-installed.
+  // A staged tree without this line is a server this tool cannot even start.
+  cpSync(join(REPO, 'effects-builtin'), join(root, 'effects-builtin'), { recursive: true });
   for (const name of ['node_modules', 'vendor']) {
     const from = join(REPO, name);
     if (existsSync(from) && !existsSync(join(root, name))) symlinkSync(from, join(root, name));
@@ -5433,7 +5503,21 @@ async function runChecks() {
     // are genuinely about a take run on a page that has one.
     {
       const { page: takePage, errors: takeErrors } = await openPage(browser, editorPage(macUrl, 'local-clip'), { width: 640, height: 400 });
-      await takePage.waitForFunction('globalThis.__kinect?.timeline?.transport() !== null', null, { timeout: 40000 });
+      // **`!== null` here was vacuously true and the wait returned before the page had
+      // booted.** `globalThis.__kinect?.timeline?.transport()` answers `undefined` while
+      // the module is still evaluating, and `undefined !== null` is true - so the guard
+      // resolved on its first tick and the unguarded read on the next line threw
+      // `Cannot read properties of undefined (reading 'timeline')`, which ends the run
+      // with the section's own rows unasked. It was harmless for as long as `load` meant
+      // the page was up; `docs/instruments.md` records the commit that stopped being
+      // true, when the effect packages moved onto the wire and `__kinect` began
+      // publishing after the event `goto` waits for. Measured here at 234 of the run's
+      // assertions, on a machine that had just finished two other proof tools.
+      //
+      // `Boolean(...)` is the whole fix and it keeps the timeout reachable, which is what
+      // separates a page that is slow from a page that never boots. Three waits in this
+      // file were written the same way and all three moved together.
+      await takePage.waitForFunction('Boolean(globalThis.__kinect?.timeline?.transport())', null, { timeout: 40000 });
       await takePage.evaluate('globalThis.__kinect.timeline.settled()');
       check(await takePage.evaluate('globalThis.__kinect.library.takeHash()')
         === (await getJson(`${macUrl}/library/takes`)).takes.find((t) => t.id === 'local-clip').hash,
@@ -5471,7 +5555,7 @@ async function runChecks() {
     // A look nothing defaults to, so a restore that did nothing cannot pass.
     const SCRAMBLE = {
       pointSize: 21.6, opacity: 0.62, exposure: 2.35, bloom: 1.35, trails: 0.62,
-      rgbSplit: 2.4, scanlines: 0.44, grain: 0.31, scan: 0.62, rim: 0.28, fade: 340, wake: 720,
+      'rgbsplit.amount': 2.4, 'raster.amount': 0.44, 'grain.amount': 0.31, scan: 0.62, rim: 0.28, fade: 340, wake: 720,
     };
     // The deterministic drive rather than the timeline: an image comparison needs a
     // program position rendered with nothing between the walk and the pixels, and
@@ -5550,6 +5634,158 @@ async function runChecks() {
     check(JSON.parse(readFileSync(join(WORK, 'projects/own-footage.json'), 'utf8')).take?.hash?.startsWith('sha256:'),
       'and a project saved from the editor names its footage by content hash rather than by path');
 
+    // ---- a document naming an effect this build has not got
+    //
+    // **The round trip that has to be lossless is the one this build cannot read.** A
+    // machine without an effect still has to be able to open a clip, work on the part it
+    // does have, and save - and if the parts it cannot read do not come back out of that
+    // save exactly as they went in, opening a colleague's clip is a destructive act, and
+    // it destroys precisely the work nobody on this machine can redo.
+    //
+    // Staged rather than uninstalled, because there is no uninstall here: `sparkle` is a
+    // valid effect id and no package ships under it. The row asserting that comes first,
+    // since an arm whose missing effect turned out to be installed would pass every row
+    // below by never parking anything.
+    const installedIds = await page.evaluate(`(() => [...new Set(globalThis.__kinect.params.names('look')
+      .filter((n) => n.includes('.')).map((n) => n.slice(0, n.indexOf('.'))))])()`);
+    check(!installedIds.includes('sparkle'),
+      'sparkle is not an effect this build has, which is what makes the rows below about a missing one',
+      `${installedIds.length} installed: ${installedIds.join(', ')}`);
+
+    // Four values and two keyed tracks, one of the tracks carrying ease handles, because
+    // a handle is the part of a key this build cannot check and therefore the part most
+    // likely to be quietly rewritten by something that thought it understood it.
+    const PARKED_VALUES = {
+      'sparkle.amount': 0.6,
+      'sparkle.size': 3.25,
+      'sparkle.hue': 210,
+      'sparkle.jitter': 0.125,
+    };
+    const PARKED_TRACKS = {
+      'sparkle.amount': [
+        { t: 0, value: 0, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+        { t: 2, value: 0.9, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+      ],
+      'sparkle.hue': [{ t: 0.5, value: 10, easeOut: [[0.1, 0.2]], easeIn: [[0.3, 0.4]] }],
+    };
+    const parkedFixture = { values: PARKED_VALUES, tracks: PARKED_TRACKS, id: 'sparkle', version: '1.0.0' };
+    // **Each step's outcome is reported separately, because they fail for different
+    // reasons and a shared flag makes one row answer for another.** The first version of
+    // this returned one `error` for the whole block, so a build that loaded the document
+    // perfectly and then saved a file its own next load refuses reddened the row saying
+    // the document *loads* - a row whose sentence stayed true while it went red, which is
+    // the shape `docs/instruments.md` names as a defect in the row rather than a finding.
+    // The reload is where that damage shows, so the reload gets a row.
+    const parked = await page.evaluate(`(async (f) => {
+      const k = globalThis.__kinect;
+      const clean = k.library.serialiseProject();
+      const doc = JSON.parse(JSON.stringify(clean));
+      Object.assign(doc.look.params, f.values);
+      Object.assign(doc.look.tracks, f.tracks);
+      doc.requires = [...(doc.requires ?? []), { id: f.id, version: f.version }];
+      const out = { clean };
+      try {
+        k.library.restoreProject(doc);
+        out.loaded = true;
+        out.missing = k.library.missingEffects();
+      } catch (e) { out.loaded = false; out.loadError = String(e.message ?? e); return out; }
+      const body = k.library.serialiseProject();
+      out.put = (await fetch('/projects/parked-round-trip', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })).status;
+      // And straight back in, so what the rows below compare is a document that has been
+      // through the loader twice rather than one the serialiser happened to hand back.
+      const again = await (await fetch('/projects/parked-round-trip')).json();
+      try {
+        k.library.restoreProject(again.body);
+        out.reloaded = true;
+        out.second = k.library.serialiseProjectBody();
+      } catch (e) { out.reloaded = false; out.reloadError = String(e.message ?? e); }
+      return out;
+    })(${JSON.stringify(parkedFixture)})`);
+
+    check(parked.loaded === true,
+      'a document with values and tracks under an effect this build has not got loads rather than being refused',
+      parked.loadError ?? `PUT ${parked.put}`);
+    check(JSON.stringify(parked.missing) === JSON.stringify([{
+      id: 'sparkle', version: '1.0.0', values: 4, tracks: 2, suppressed: false,
+    }]),
+    'and what it could not read is parked rather than dropped - four values, two tracks, at the version the document asked for',
+    JSON.stringify(parked.missing ?? null));
+    // **The file it saves has to open again, and on a build that sheds the pool it does
+    // not.** `requires` is derived from the values, so a save that keeps the entry and
+    // drops the values writes a document the loader's own both-directions rule refuses -
+    // which means the damage is not only a silent loss on the machine without the effect,
+    // it is a file nothing anywhere can open afterwards. That is a different claim from
+    // the value comparison below and it is the one that fires first.
+    check(parked.reloaded === true,
+      'and the file it saves is a document this build can open again',
+      parked.reloadError ?? 'reopened');
+
+    // **The claim, read off the file on disk - and it is per-key value identity rather
+    // than byte identity, which these rows used to say and could not prove.** What the
+    // parking guarantees is that every key the pool holds comes back holding the same
+    // *value*, structure and all: the numbers are not renormalised, the ease handles are
+    // not rebuilt, no key is dropped and none is invented. What it does not guarantee is
+    // the bytes, and two things in the round trip see to that - the parked keys are
+    // appended after the installed ones, so a document that interleaved them comes back
+    // re-ordered, and every number goes through `JSON.parse`, which reads `1e0` and writes
+    // `1`. The document's revision therefore moves across a load and save on a machine
+    // missing an effect, and that is accepted behaviour; the promise being kept is that
+    // nothing this build cannot read is altered, dropped or reinterpreted.
+    //
+    // Compared as one string per side, in the fixture's own key order, rather than field
+    // by field: a comparison that walked each value and rebuilt it would pass a build that
+    // had renormalised them, which is exactly the damage a machine without the effect is
+    // not entitled to do. The order the two sides are read in is this file's, not the
+    // file's, which is the honest reading of what it holds - the file's own order is not
+    // part of the claim.
+    const parkedFile = JSON.parse(readFileSync(join(WORK, 'projects/parked-round-trip.json'), 'utf8'));
+    const pick = (from, keys) => JSON.stringify(Object.fromEntries(keys.map((k) => [k, from?.[k]])));
+    const valueKeys = Object.keys(PARKED_VALUES);
+    const trackKeys = Object.keys(PARKED_TRACKS);
+    check(pick(parkedFile.look?.params, valueKeys) === pick(PARKED_VALUES, valueKeys),
+      'every parked value comes back out of the saved file holding exactly what went in, key for key',
+      pick(parkedFile.look?.params, valueKeys));
+    check(pick(parkedFile.look?.tracks, trackKeys) === pick(PARKED_TRACKS, trackKeys),
+      'and so does every parked track, key times, values and ease handles alike',
+      pick(parkedFile.look?.tracks, trackKeys).slice(0, 120));
+    // **And nothing under the pool's prefixes was invented on the way through**, which the
+    // two rows above cannot see: they ask about the keys the fixture named and would pass a
+    // build that had added a fifth `sparkle` value beside them. Read off the file rather
+    // than off the fixture, so the population is what the document actually holds.
+    const parkedIn = (o) => Object.keys(o ?? {}).filter((k) => k.startsWith('sparkle.')).sort();
+    check(JSON.stringify(parkedIn(parkedFile.look?.params)) === JSON.stringify(valueKeys.slice().sort())
+      && JSON.stringify(parkedIn(parkedFile.look?.tracks)) === JSON.stringify(trackKeys.slice().sort()),
+    'and the file carries those keys and no others under that prefix, so nothing was added beside them either',
+    `${JSON.stringify(parkedIn(parkedFile.look?.params))} / ${JSON.stringify(parkedIn(parkedFile.look?.tracks))}`);
+    // The `requires` entry survives with them, because the values are still in the
+    // document - a file that kept the values and dropped the claim would be refused by
+    // its own next load, which is the loader's own rule read from the other side.
+    check(JSON.stringify((parkedFile.requires ?? []).find((e) => e.id === 'sparkle')) === '{"id":"sparkle","version":"1.0.0"}',
+      'and the requires entry stays with them, at the version the document was authored against',
+      JSON.stringify(parkedFile.requires ?? null));
+    // Twice through the loader, so the property is stability rather than one lucky pass.
+    check(pick(parked.second?.look?.params, valueKeys) === pick(PARKED_VALUES, valueKeys)
+      && pick(parked.second?.look?.tracks, trackKeys) === pick(PARKED_TRACKS, trackKeys),
+    'and a second trip through the loader moves them no further than the first did',
+    pick(parked.second?.look?.params, valueKeys));
+
+    // **And the page goes back to a document with nothing parked in it, asserted rather
+    // than assumed.** Every row below this one serialises whatever the page is holding,
+    // and a pool left behind puts a `requires` entry into each of those documents - so
+    // under a build that sheds the pool on save, the refusals block's own positive
+    // control reddens for a reason that has nothing to do with it. That is this file's
+    // own noise reaching a later sweep, and the rule is to move the noise: section 14 of
+    // `editor-check` asserts its cleanup landed for exactly this reason, and so does this.
+    const cleaned = await page.evaluate(`(async (clean) => {
+      globalThis.__kinect.library.restoreProject(clean);
+      return globalThis.__kinect.library.missingEffects();
+    })(${JSON.stringify(parked.clean ?? null)})`);
+    check(Array.isArray(cleaned) && cleaned.length === 0,
+      'and putting the clip back leaves nothing parked, so the rows below serialise a document with no missing effect in it',
+      JSON.stringify(cleaned));
+
     // ---- the three refusals, built as source rather than through JSON, because
     // JSON.stringify turns NaN and undefined into null and a case labelled NaN
     // would silently be testing null a second time.
@@ -5620,6 +5856,43 @@ async function runChecks() {
       ['a reading that is not a number', 'p.look.params.readBlackwall = "1";'],
       ['a retime rate of zero or less', 'p.composition.retime.rate = 0;'],
       ['a preset stamp that is not a name and a rev', 'p.appliedPreset = { name: 42 };'],
+      // The record a deliverable's embedded document carries, which arrives here whenever
+      // somebody opens a render's own `.job.json` body. It is a list of `{ id, version }`
+      // naming the effects that render went without, and a malformed one is a document
+      // this build cannot place for the same reason a malformed `requires` is - the two
+      // are the same kind of claim about the same namespace.
+      ['a suppressed list that is not a list', 'p.suppressed = "sparkle";'],
+      ['a suppressed entry with no version', 'p.suppressed = [{ id: "sparkle" }];'],
+      ['a suppressed entry whose id could not be an effect id', 'p.suppressed = [{ id: "Sparkle!", version: "1.0.0" }];'],
+      // **The completeness rule asked of the half of the document it used to skip.** A
+      // document owes every parameter of an effect it uses, and "uses" was read off
+      // `look.params` alone - so a clip whose only mention of the glyph field is a track on
+      // `glyph.tone` named no glyph value, reached the loop over no ids at all, and loaded.
+      // Nothing else refused it either: the track's name is one the registry knows and its
+      // tag is `look`. What it left was three glyph parameters restored to their defaults
+      // under a curve somebody did author, and a save that then wrote all four out, because
+      // the save rule keeps an effect whose track has keys. A file rewritten on the machine
+      // that only opened it, silently.
+      //
+      // Both truncations are here rather than one, because they reach the same refusal from
+      // opposite sides and a single row could be satisfied by a rule that only saw its own:
+      // the first names the effect in its values and leaves one out, the second names it
+      // only in its tracks and leaves all of them out.
+      // **The `requires` entry is replaced rather than appended, and that is not
+      // fastidiousness.** `refuse` builds each case out of whatever the page is currently
+      // holding, and a case that is ACCEPTED - which is exactly what a mutation of this
+      // rule produces - leaves the page holding it, so the next case serialises a document
+      // that already claims glyph. Appended, the entry then appears twice and the refusal
+      // that fires is the duplicate rule rather than the completeness rule these rows are
+      // about: a control reddening a row for a neighbouring reason, which reads as a catch
+      // and says nothing about the question. Measured, under
+      // `completeness-reads-the-values-only`, before this was written as a replacement.
+      ['a project naming part of an effect in its values',
+        "p.look.params['glyph.amount'] = 0.5; p.look.params['glyph.tone'] = 0.2; p.look.params['glyph.hash'] = 1;"
+        + " p.requires = [...(p.requires ?? []).filter((e) => e.id !== 'glyph'), { id: 'glyph', version: '1.0.0' }];"],
+      ['a project whose only use of an effect is a track',
+        "p.look.tracks['glyph.tone'] = [{ t: 0, value: 0.2 }, { t: 1, value: 0.6 }];"
+        + " p.requires = [...(p.requires ?? []).filter((e) => e.id !== 'glyph'), { id: 'glyph', version: '1.0.0' }];"],
     ];
     const results = [];
     for (const [label, source] of cases) results.push(await refuse(label, source));
@@ -5631,6 +5904,120 @@ async function runChecks() {
     const good = await refuse('an unmodified project', '');
     check(good.message === 'ACCEPTED', 'and an unmodified project still loads',
       good.message === 'ACCEPTED' ? '' : good.message.slice(0, 80));
+
+    // **The control the two truncation rows need, and it is not the row above.** An
+    // unmodified project names no effect at all - the save rule sheds every effect held at
+    // defaults - so it passes a loader whose completeness rule refuses every document that
+    // mentions one. The shape that says the rule discriminates is a document naming an
+    // effect *whole* and keying one of its parameters, which is the shape the two rows
+    // above are each one key short of.
+    //
+    // The parameter list is read off the registry rather than written here, so a fork that
+    // adds a fifth glyph key is asked by existing rather than by somebody remembering; the
+    // floor beside it is what stops the row passing on an empty list, which is how it would
+    // read if the prefix ever stopped naming an installed effect.
+    const wholeEffect = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const clean = k.library.serialiseProject();
+      const p = k.library.serialiseProject();
+      const names = k.params.names('look').filter((n) => n.startsWith('glyph.'));
+      // Read off the live registry rather than off \`spec\`, which answers with a projection
+      // carrying \`default\` and not \`def\` - a probe pointed at a field that has never existed
+      // reads \`undefined\` on a correct build, which is the shape docs/instruments.md files
+      // under a reading that is not a finding. \`get\` cannot answer with anything the
+      // parameter could not hold.
+      for (const n of names) p.look.params[n] = k.params.get(n);
+      p.look.tracks['glyph.tone'] = [{ t: 0, value: 0.2 }, { t: 1, value: 0.6 }];
+      // Replaced rather than appended, for the reason the two cases above carry: a mutation
+      // of this rule leaves an earlier case's document on the page, and an appended entry
+      // would then be a duplicate refused by a different rule entirely.
+      p.requires = [...(p.requires ?? []).filter((e) => e.id !== 'glyph'), { id: 'glyph', version: '1.0.0' }];
+      let threw = null;
+      try { k.library.restoreProject(p); } catch (e) { threw = String(e.message ?? e); }
+      k.library.restoreProject(clean);
+      return { threw, names };
+    })()`);
+    check(wholeEffect.threw === null && wholeEffect.names.length >= 4,
+      'while a project naming a whole effect and keying one of its parameters loads, which is what the two rows above are each one key short of',
+      wholeEffect.threw ?? `${wholeEffect.names.length} glyph parameters named: ${wholeEffect.names.join(', ')}`);
+
+    // **A document authored against another build of an effect this machine does have.**
+    // `requires` carries a version and nothing was comparing it, so a clip built on glyph
+    // 1.0.0 opened on a machine carrying 2.0.0 and rendered 2.0.0 without a word - the
+    // picture is a look nobody authored and the only evidence is a field nobody reads. It
+    // is surfaced rather than refused, because a version string says nothing about which
+    // direction is compatible and refusing would make every retune of an effect a wall in
+    // front of every clip; what the load owes is the sentence.
+    //
+    // The matched document is built by raising the parameter and letting the serialiser
+    // derive the entry, so the version it claims is whatever this build actually has rather
+    // than a literal that goes stale the first time a package is retuned. The mismatched
+    // one is that document with the version moved and nothing else, which is what makes the
+    // pair a comparison of one term.
+    const skew = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const chip = () => ({
+        hidden: document.getElementById('tMissing')?.hidden ?? null,
+        notices: [...document.querySelectorAll('#tMissing .missingfx[data-skew]')]
+          .map((e) => e.querySelector('b').textContent),
+      });
+      const clean = k.library.serialiseProject();
+      k.params.set('glyph.amount', 0.5);
+      const matched = k.library.serialiseProjectBody();
+      const authored = (matched.requires ?? []).find((e) => e.id === 'glyph')?.version ?? null;
+      const skewed = JSON.parse(JSON.stringify(matched));
+      skewed.requires = skewed.requires.map((e) => (e.id === 'glyph' ? { ...e, version: '0.9.0' } : e));
+      const out = { authored };
+      k.library.restoreProject(skewed);
+      out.mismatched = { hook: k.library.effectVersionSkew(), ...chip() };
+      k.library.restoreProject(matched);
+      out.matched = { hook: k.library.effectVersionSkew(), ...chip() };
+      k.library.restoreProject(clean);
+      return out;
+    })()`);
+    check(JSON.stringify(skew.mismatched?.hook) === JSON.stringify([
+      { id: 'glyph', wanted: '0.9.0', installed: skew.authored },
+    ]),
+    'a document naming an effect at a version this build has not got loads, and says which pair it is',
+    JSON.stringify(skew.mismatched?.hook ?? null));
+    // The sentence a person actually gets, read off the bar rather than off the hook. A
+    // build whose detection worked and whose painter did not would pass the row above and
+    // leave the operator with nothing at all - which is the same split the badge's own
+    // rows draw between `missingEffects()` and the chip.
+    check(skew.mismatched?.hidden === false
+      && JSON.stringify(skew.mismatched?.notices) === JSON.stringify([
+        `document requires glyph 0.9.0, installed is ${skew.authored}`,
+      ]),
+    'and the bar carries that sentence, one entry for the effect, where a person can read it',
+    `hidden ${skew.mismatched?.hidden}, ${JSON.stringify(skew.mismatched?.notices ?? null)}`);
+    // The control, and it is the half that would go unnoticed: a build that reported a skew
+    // on every document would satisfy both rows above and put a permanent notice on the bar.
+    check(JSON.stringify(skew.matched?.hook) === '[]'
+      && skew.matched?.hidden === true
+      && JSON.stringify(skew.matched?.notices) === '[]',
+    'while the same document at the version this build has says nothing, so the notice is about the disagreement rather than about the effect',
+    `hook ${JSON.stringify(skew.matched?.hook ?? null)}, hidden ${skew.matched?.hidden}, ${JSON.stringify(skew.matched?.notices ?? null)}`);
+
+    // **The other half of the `suppressed` rule, and it is the half with no throw in it.**
+    // A well-formed record has to load - it is what a deliverable's own document looks
+    // like - and it has to change nothing, because it is a statement about a render that
+    // already happened rather than a decision this editor inherits. A build that adopted
+    // it would answer the export refusal with a file somebody else wrote, so the row reads
+    // the suppression back off the page rather than only checking that nothing threw.
+    const adopted = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const p = k.library.serialiseProject();
+      p.suppressed = [{ id: 'sparkle', version: '1.0.0' }];
+      try { k.library.restoreProject(p); } catch (e) { return { threw: String(e.message ?? e) }; }
+      return {
+        threw: null,
+        suppressed: k.library.missingEffects().filter((m) => m.suppressed).length,
+        body: Object.hasOwn(k.library.serialiseProjectBody(), 'suppressed'),
+      };
+    })()`);
+    check(adopted.threw === null && adopted.suppressed === 0 && adopted.body === false,
+      'a well-formed suppressed record loads and is not adopted - it says what a render went without, not what this editor may skip',
+      adopted.threw ?? `${adopted.suppressed} suppressed on the page, key written back: ${adopted.body}`);
 
     // Straight at the registry, because the load path is one of four doors into it
     // and the other three were gated the same wrong way. `spec`, `get`, `normalise`
@@ -5679,7 +6066,7 @@ async function runChecks() {
   console.log('\n[library] presets carry look and a provenance stamp');
   {
     const { page, errors } = await openPage(browser, editorPage(macUrl, 'local-clip'), { width: 640, height: 400 });
-    await page.waitForFunction('globalThis.__kinect?.timeline?.transport() !== null', null, { timeout: 40000 });
+    await page.waitForFunction('Boolean(globalThis.__kinect?.timeline?.transport())', null, { timeout: 40000 });
     await page.evaluate('globalThis.__kinect.timeline.settled()');
 
     // A preset saved off a Blackwall clip whose values have then been moved away from
@@ -5687,7 +6074,7 @@ async function runChecks() {
     // shipped look could not tell "your values came back" from "the built-in look for
     // this reading was reapplied", which is the confusion a preset library exists to
     // avoid. The reading goes in through the registry with everything else now.
-    const TUNED = { bloom: 2.4, trails: 0.11, rgbSplit: 4.2, grain: 0.77, pointSize: 30.5 };
+    const TUNED = { bloom: 2.4, trails: 0.11, 'rgbsplit.amount': 4.2, 'grain.amount': 0.77, pointSize: 30.5 };
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
       k.params.apply({ readRgb: 0, readBlackwall: 1 });
@@ -5722,7 +6109,7 @@ async function runChecks() {
     const applied = await retryOnContextLoss('applying the preset', () => page.evaluate(`(async () => {
       const k = globalThis.__kinect;
       k.params.apply({ readBlackwall: 0, readRgb: 1 });
-      k.params.apply({ bloom: 0, trails: 0, rgbSplit: 0, grain: 0, pointSize: 9 });
+      k.params.apply({ bloom: 0, trails: 0, 'rgbsplit.amount': 0, 'grain.amount': 0, pointSize: 9 });
       const before = { pose: k.params.get('camera'), values: k.params.values(k.params.names('look')) };
       const docRes = await fetch('/presets/hand-tuned');
       k.library.applyStoredPreset(await docRes.json());
@@ -5733,10 +6120,10 @@ async function runChecks() {
         stamp: k.library.appliedPreset(),
       };
     })()`));
-    check(applied.after.bloom === TUNED.bloom && applied.after.rgbSplit === TUNED.rgbSplit
-      && applied.after.grain === TUNED.grain && applied.after.pointSize === TUNED.pointSize,
+    check(applied.after.bloom === TUNED.bloom && applied.after['rgbsplit.amount'] === TUNED['rgbsplit.amount']
+      && applied.after['grain.amount'] === TUNED['grain.amount'] && applied.after.pointSize === TUNED.pointSize,
       'applying a preset restores the values it was saved with, not a built-in look',
-      `bloom ${applied.after.bloom} rgbSplit ${applied.after.rgbSplit} pointSize ${applied.after.pointSize}`);
+      `bloom ${applied.after.bloom} rgbsplit.amount ${applied.after['rgbsplit.amount']} pointSize ${applied.after.pointSize}`);
     check(applied.after.readBlackwall === 1 && applied.after.readRgb === 0,
       'and it restores the reading, which needs no special case to travel',
       `readBlackwall ${applied.after.readBlackwall}`);
@@ -5798,57 +6185,99 @@ async function runChecks() {
     // 33 of the 72 ordered pairs rendered a different frame in sequence than the same
     // look rendered alone. A user reported it as "the voxel effect stays".
     //
-    // So the rule is set equality against `completeLookNames()` - the look tag less its
-    // framing, which is the shot rather than the look - and the two directions are two
-    // rows because they fail for different reasons and each has a control of its own. A
-    // document short of a key is the layering bug above. A document carrying a key the
-    // definition does not ask for is the same drift arriving from the other end: it says
-    // the exclusion has widened underneath the documents, which is what would happen if
-    // framing crept back into that filter, and a "names at least" row cannot see it at
-    // all.
+    // So the rule was set equality against one constant. It is per document now,
+    // because `wholeLookNames` is a function of the document rather than of the build:
+    // an effect's parameters belong to a document only when that document's own
+    // `requires` claims the effect, so what a document owes is `coreLookNames()` plus
+    // the full parameter list of every effect its `requires` names. Three rows follow
+    // rather than two - a document short of a key it owes is the layering bug above; a
+    // document carrying a key nothing asks for is the same drift from the other end,
+    // whether that is a widened exclusion in `coreLookNames` or an effect the document
+    // uses without declaring it; and a `requires` list that disagrees with the effects
+    // the values actually touch, in either direction, is a hand edit the derivation on
+    // save would never produce.
     //
-    // **The two sides are independent probes rather than one quantity read twice.** The
-    // documents are bytes on disk, enumerated off the directory so a tenth look added
-    // next year is asked by existing; the required set is code, read off the live
-    // registry through the page so a tool spelling the framing exclusion out for itself
-    // would be a second statement of the line, drifting in the direction where this goes
-    // on passing. Fetched through `/presets/:name` - the route the picker uses - rather
-    // than off disk, so what is under test is what the program is served.
-    const required = await page.evaluate('globalThis.__kinect.completeLookNames()');
+    // **The sides stay independent probes rather than one quantity read twice.** The
+    // documents are bytes on disk, enumerated off the directory so an eleventh look
+    // added next year is asked by existing; what each owes is computed off the live
+    // registry through the page - `coreLookNames()`, `effectOf()` and
+    // `effectParamNames()` - so a tool spelling the namespace split out for itself
+    // would be a second statement of the line, drifting in the direction where this
+    // goes on passing. Fetched through `/presets/:name` - the route the picker uses -
+    // rather than off disk, so what is under test is what the program is served.
+    const core = await page.evaluate('globalThis.__kinect.coreLookNames()');
     const shippedDocs = [];
     for (const name of shippedNames) {
       let values = null;
+      let requires;
       try {
         const doc = await getJson(`${macUrl}/presets/${name}`);
-        if (doc?.body?.values && typeof doc.body.values === 'object') values = doc.body.values;
+        if (doc?.body?.values && typeof doc.body.values === 'object') {
+          values = doc.body.values;
+          requires = doc.body.requires;
+        }
       } catch { /* an answer that is not a document is a document that did not come back */ }
-      shippedDocs.push({ name, values });
+      shippedDocs.push({ name, values, requires });
     }
     const readable = shippedDocs.filter((d) => d.values !== null);
     // The floor, and it fails where neither row below can: a look that 404s or answers
-    // something that is not a document simply drops out of both comparisons, so a run
-    // with nothing readable would report set equality over the empty set. The required
+    // something that is not a document simply drops out of every comparison, so a run
+    // with nothing readable would report set equality over the empty set. The core
     // count is printed rather than asserted - a registry that answered with nothing is
     // the extras row's to catch, where every key in every document is one it did not ask
     // for.
     check(readable.length === shippedNames.length && readable.length > 0,
-      'and each of them comes back through the route the picker reads, so the two rows below compare something',
-      `${readable.length} of ${shippedNames.length} documents read, against ${required.length} values the registry says a whole look is`);
+      'and each of them comes back through the route the picker reads, so the rows below compare something',
+      `${readable.length} of ${shippedNames.length} documents read, against ${core.length} core values every look owes`);
+
+    // One evaluate over the whole readable set rather than one per document, so the
+    // ten reads land against a single, coherent snapshot of `PARAMS` instead of one
+    // that could in principle change between them.
+    const analysis = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const core = k.coreLookNames();
+      const docs = ${JSON.stringify(readable.map((d) => ({ name: d.name, values: d.values, requires: d.requires ?? [] })))};
+      return docs.map((d) => {
+        const names = Object.keys(d.values);
+        const usedIds = [...new Set(names.map((n) => k.effectOf(n)).filter(Boolean))];
+        const requiresIds = d.requires.map((r) => r.id);
+        const required = [...core, ...requiresIds.flatMap((id) => k.effectParamNames(id))];
+        return {
+          name: d.name,
+          missing: required.filter((n) => !names.includes(n)),
+          extra: names.filter((n) => !required.includes(n)),
+          touchedNotRequired: usedIds.filter((id) => !requiresIds.includes(id)),
+          requiredNotTouched: requiresIds.filter((id) => !usedIds.includes(id)),
+        };
+      });
+    })()`);
 
     const say = (rows) => rows.map((r) => `${r.name}: ${r.keys.slice(0, 6).join(' ')}`
       + `${r.keys.length > 6 ? ` (+${r.keys.length - 6} more)` : ''}`).join('; ');
-    const missing = readable
-      .map((d) => ({ name: d.name, keys: required.filter((n) => !Object.hasOwn(d.values, n)) }))
-      .filter((d) => d.keys.length > 0);
+    const missing = analysis.map((d) => ({ name: d.name, keys: d.missing })).filter((d) => d.keys.length > 0);
     check(missing.length === 0,
-      'every look that ships names every value the registry says a whole look is',
-      missing.length ? say(missing) : `all ${readable.length} name all ${required.length}`);
-    const extra = readable
-      .map((d) => ({ name: d.name, keys: Object.keys(d.values).filter((k) => !required.includes(k)) }))
-      .filter((d) => d.keys.length > 0);
+      "every look that ships names every value coreLookNames() and its own requires say it owes",
+      missing.length ? say(missing) : `all ${readable.length} name everything they claim`);
+    const extra = analysis.map((d) => ({ name: d.name, keys: d.extra })).filter((d) => d.keys.length > 0);
     check(extra.length === 0,
       'and none of them names a value that is not one of those',
-      extra.length ? say(extra) : `all ${readable.length} name nothing beyond the ${required.length}`);
+      extra.length ? say(extra) : `all ${readable.length} name nothing beyond what they claim`);
+
+    // The third direction, which the two rows above cannot see: `requires` is derived
+    // from the values on save, so a document whose list disagrees with what its values
+    // actually touch is a hand edit that slipped past the derivation. An effect used
+    // but not listed would load fine here and render wrong on a build missing that
+    // effect; an effect listed but never used claims part of the look the look does not
+    // make.
+    const requiresMismatch = analysis
+      .map((d) => ({
+        name: d.name,
+        keys: [...d.touchedNotRequired.map((id) => `+${id}`), ...d.requiredNotTouched.map((id) => `-${id}`)],
+      }))
+      .filter((d) => d.keys.length > 0);
+    check(requiresMismatch.length === 0,
+      "and each one's requires list names exactly the effects its own values touch",
+      requiresMismatch.length ? say(requiresMismatch) : `all ${readable.length} requires lists agree with their values`);
 
     // The fork. Written through the same route a save uses, because the claim is about
     // that route rather than about a helper.
@@ -5859,7 +6288,7 @@ async function runChecks() {
     // file under test is the one the process can actually reach.
     const builtinPath = join(WORK, 'builtin-presets/blackwall.json');
     const bytesBefore = readFileSync(builtinPath, 'utf8');
-    const forkBody = { version: PROJECT_VERSION, values: { ...shipped.values, bloom: 5.5 } };
+    const forkBody = { version: PROJECT_VERSION, requires: shipped.requires, values: { ...shipped.values, bloom: 5.5 } };
     await post(`${macUrl}/presets/blackwall`, forkBody, 'PUT');
     check(readFileSync(builtinPath, 'utf8') === bytesBefore,
       'saving over a shipped look leaves the shipped file byte-identical',
@@ -6002,7 +6431,7 @@ async function runChecks() {
   console.log('\n[library] marks on the editor\'s scrubber, through the retime curve');
   {
     const { page, errors } = await openPage(browser, editorPage(macUrl, 'local-clip'), { width: 1100, height: 700 });
-    await page.waitForFunction('globalThis.__kinect?.timeline?.transport() !== null', null, { timeout: 40000 });
+    await page.waitForFunction('Boolean(globalThis.__kinect?.timeline?.transport())', null, { timeout: 40000 });
     await page.evaluate('globalThis.__kinect.timeline.settled()');
 
     // **`timeline.settled()` settles the transport, and the marks are not on it.**
