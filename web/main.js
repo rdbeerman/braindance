@@ -2135,11 +2135,12 @@ const presetPickGroups = [];
  *
  * The full argument for it is on `refreshGroups`, which is its only reader. It is declared
  * here rather than there for the boot-order reason its neighbours are: `buildPanel` clears
- * it with the seven maps that find the panel's elements again, because a rebuilt group is
+ * it with the maps that find the panel's elements again, because a rebuilt group is
  * a new element that has never been painted whatever this map remembers - and boot's first
  * `buildPanel` runs well above the line `refreshGroups` sits on.
  */
 const groupPainted = new Map();
+const effectRackPainted = new Map();
 
 // What each parameter is worth in a project nobody has touched, computed once per
 // registry.
@@ -2456,6 +2457,7 @@ function makeResetButton(name) {
   button.setAttribute('aria-label', `${name} reset to default`);
   button.append(resetGlyph());
   button.addEventListener('click', () => {
+    retainEffectFor(name);
     params.set(name, resetTarget(name));
     history.commit();
     // The press removes its own control: writing the default makes the row unmodified,
@@ -2665,6 +2667,8 @@ function panelPlace(group, groupNode) {
 // of one table is exactly the drift this generator exists to remove.
 const panelGroupNodes = new Map();
 const panelGroupParams = new Map();
+const panelGroupElements = new Map();
+const panelEffectRows = new Map();
 
 // One head per group, whether or not the group can be shut, because two shapes of
 // header is two sets of CSS and the one that gets forgotten is the one nobody is
@@ -2717,7 +2721,7 @@ let panelRowsEmitted = 0;
  * taught about none. The cost is a few dozen elements built twice a session, against a
  * page that has just recompiled two shader programs.
  *
- * **Everything the last pass left behind is dropped first, and each of the seven maps is
+ * **Everything the last pass left behind is dropped first, and each lookup map is
  * a name the panel is found again by.** A generated group carries `data-group` and a
  * hand-written one carries an id, which is what makes the selector below able to remove
  * exactly what this function made - the distinction was drawn for a different reason
@@ -2733,6 +2737,8 @@ function buildPanel() {
   resetButtons.clear();
   panelGroupNodes.clear();
   panelGroupParams.clear();
+  panelGroupElements.clear();
+  panelEffectRows.clear();
   panelTail.clear();
   groupDefaults.clear();
   // **The map that says a group has already been painted, cleared with the nodes it is
@@ -2742,10 +2748,11 @@ function buildPanel() {
   // about elements that had been thrown away. A group whose values happened not to change
   // across the install came back with no `shut` class, no `aria-expanded` and an empty
   // mark, showing as open with the panel's own header saying nothing about it, and the
-  // next refresh agreed with itself and left it there. It belongs with the seven maps
+  // next refresh agreed with itself and left it there. It belongs with the lookup maps
   // above rather than beside its own reader, because the thing that invalidates it is
   // exactly what invalidates them: the elements are new.
   groupPainted.clear();
+  effectRackPainted.clear();
   panelRowsEmitted = 0;
   for (const group of PANEL_GROUPS) {
   const groupNode = panelNode('div', group.lookgroup ? 'group lookgroup' : 'group');
@@ -2755,6 +2762,7 @@ function buildPanel() {
   // registry key away from colliding with one of them silently.
   groupNode.dataset.group = group.key;
   groupNode.dataset.panelTab = group.tab;
+  panelGroupElements.set(group.key, groupNode);
   // Named apart from the keyframe button the row loop below declares, which is a
   // different button in a narrower scope: one `button` meaning two things in one loop
   // is how the wrong element ends up registered.
@@ -2801,6 +2809,7 @@ function buildPanel() {
     // `README.md` describes the ↺ under the recorder's *Look* tab, which is where this
     // was found - the page and the page's own documentation disagreeing about a control,
     // with the condition above naming the reason for the other one.
+    let mountedRow = row;
     if (spec.tag === 'look') {
       const keyButton = EDITING ? makeKeyButton(name) : null;
       // After the keyframe control where there is one, which is the order the design
@@ -2814,6 +2823,7 @@ function buildPanel() {
         const checkrow = panelNode('div', 'checkrow');
         checkrow.append(row, ...beside);
         groupNode.append(checkrow);
+        mountedRow = checkrow;
       } else {
         row.append(...beside);
         groupNode.append(row);
@@ -2823,6 +2833,11 @@ function buildPanel() {
     }
     rows++;
     panelRowsEmitted++;
+    const owner = effectOf(name);
+    if (owner) {
+      if (!panelEffectRows.has(owner)) panelEffectRows.set(owner, []);
+      panelEffectRows.get(owner).push(mountedRow);
+    }
     // The evidence set for this group, recorded here because here is where the row was
     // emitted. A group asks whether anybody has touched it by walking exactly the
     // parameters it put on screen, so the header and the rows under it cannot come to
@@ -3928,6 +3943,199 @@ function storeGroupOverride() {
   }
 }
 
+// Which installed effects a person has chosen to keep in the inspector. This is panel
+// state, not project state: values and tracks still decide what the document contains,
+// while this set only keeps an otherwise idle effect within reach. A touched effect is
+// always present whether or not it is named here, so local storage can never hide work.
+const EFFECT_RACKED = 'kinect.rackedEffects';
+const rackedEffects = new Set();
+try {
+  const saved = localStorage.getItem(EFFECT_RACKED);
+  if (saved !== null && saved.trim() !== '') {
+    const parsed = JSON.parse(saved);
+    if (Array.isArray(parsed)) {
+      for (const id of parsed) if (typeof id === 'string' && id) rackedEffects.add(id);
+    }
+  }
+} catch {
+  // The values and tracks remain authoritative when storage is unavailable or damaged.
+}
+
+function storeRackedEffects() {
+  try {
+    localStorage.setItem(EFFECT_RACKED, JSON.stringify([...rackedEffects].sort()));
+  } catch {
+    // The rack still works for this page; only the preference is lost on reload.
+  }
+}
+
+function retainEffectFor(name) {
+  const id = effectOf(name);
+  if (!id || rackedEffects.has(id)) return;
+  rackedEffects.add(id);
+  storeRackedEffects();
+}
+
+function effectTouched(id) {
+  return effectParamNames(id).some(paramTouched);
+}
+
+function effectPresent(id) {
+  return rackedEffects.has(id) || effectTouched(id);
+}
+
+function effectGroups(id) {
+  const keys = new Set(effectParamNames(id).map((name) => PARAMS[name].group));
+  return PANEL_GROUPS.filter((group) => keys.has(group.key));
+}
+
+function refreshEffectRack() {
+  let moved = false;
+  const installed = new Set(effectIds());
+  for (const id of [...effectRackPainted.keys()]) {
+    if (!installed.has(id)) effectRackPainted.delete(id);
+  }
+  for (const id of installed) {
+    const present = effectPresent(id);
+    if (effectRackPainted.get(id) === present) continue;
+    effectRackPainted.set(id, present);
+    for (const row of panelEffectRows.get(id) ?? []) row.hidden = !present;
+    moved = true;
+  }
+  if (!moved) return;
+
+  // A package-owned group leaves with its last visible effect row. Mixed groups remain
+  // because their core rows are basic clip controls and do not belong to the rack.
+  for (const [key, node] of panelGroupElements) {
+    const visible = (panelGroupParams.get(key) ?? []).some((name) => {
+      const id = effectOf(name);
+      return id === null || effectPresent(id);
+    });
+    node.classList.toggle('rackempty', !visible);
+  }
+}
+
+function effectRackEntry(id) {
+  const names = effectParamNames(id);
+  const moved = names.filter((name) => params.get(name) !== groupDefaults.get(name));
+  const keys = names.reduce((count, name) => count + (tracks.get(name)?.keys.length ?? 0), 0);
+  return { names, moved, keys };
+}
+
+let effectRackConfirming = null;
+
+function addEffectToRack(id) {
+  if (!effectInstalled(id)) return false;
+  rackedEffects.add(id);
+  storeRackedEffects();
+  for (const group of effectGroups(id)) {
+    if (!group.collapses) continue;
+    groupOverride.set(group.key, true);
+    groupOverrideDirty = true;
+  }
+  refreshPanel();
+
+  const first = effectParamNames(id)[0];
+  const group = PANEL_GROUPS.find((entry) => entry.key === PARAMS[first]?.group);
+  const dialog = document.getElementById('effectRackDialog');
+  if (dialog.open) dialog.close();
+  if (group) setPanelTab(group.tab);
+  requestAnimationFrame(() => {
+    const control = panelControls.get(first);
+    control?.scrollIntoView({ block: 'center' });
+    control?.focus({ preventScroll: true });
+  });
+  return true;
+}
+
+function removeEffectFromRack(id) {
+  if (!effectInstalled(id)) return false;
+  const { names } = effectRackEntry(id);
+  effectRackConfirming = null;
+  rackedEffects.delete(id);
+  storeRackedEffects();
+
+  // Values and tracks leave as one document edit. The rack choice itself stays outside
+  // undo, so undo restores the work and its touched state makes the effect appear again.
+  withoutRepaint(() => {
+    for (const name of names) params.set(name, resetTarget(name));
+  });
+  for (const name of names) tracks.delete(name);
+  if (selection && names.includes(selection.owner)) selection = null;
+  lanesChanged();
+  requestRepaint();
+  history.commit();
+  paintEffectRackDialog();
+  return true;
+}
+
+function paintEffectRackDialog() {
+  const list = document.getElementById('effectRackList');
+  const search = document.getElementById('effectRackSearch');
+  if (!list || !search) return;
+  const query = search.value.trim().toLocaleLowerCase();
+  const packages = effectPackages
+    .map((entry) => ({ id: entry.id, title: entry.manifest.title || entry.id }))
+    .filter(({ id, title }) => !query
+      || id.toLocaleLowerCase().includes(query)
+      || title.toLocaleLowerCase().includes(query))
+    .sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+
+  list.replaceChildren();
+  if (packages.length === 0) {
+    list.append(panelNode('div', 'effect-rack-empty', 'No installed effects match.'));
+    return;
+  }
+
+  for (const { id, title } of packages) {
+    const entry = effectRackEntry(id);
+    const row = panelNode('div', 'effect-rack-row');
+    row.dataset.effectRack = id;
+    const name = panelNode('div', 'effect-rack-name');
+    const detail = [];
+    if (entry.moved.length) detail.push(`${entry.moved.length} changed`);
+    if (entry.keys) detail.push(`${entry.keys} ${entry.keys === 1 ? 'key' : 'keys'}`);
+    if (!detail.length) detail.push(`${entry.names.length} ${entry.names.length === 1 ? 'control' : 'controls'}`);
+    name.append(panelNode('b', null, title), panelNode('small', null, `${id} · ${detail.join(' · ')}`));
+
+    const actions = panelNode('div', 'effect-rack-actions');
+    if (!effectPresent(id)) {
+      const add = panelNode('button', 'dialog-secondary', 'add');
+      add.type = 'button';
+      add.dataset.effectAdd = id;
+      add.setAttribute('aria-label', `add ${title} to the sidebar`);
+      add.addEventListener('click', () => addEffectToRack(id));
+      actions.append(add);
+    } else if (effectRackConfirming === id) {
+      const cancel = panelNode('button', 'dialog-secondary', 'cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => { effectRackConfirming = null; paintEffectRackDialog(); });
+      const remove = panelNode('button', 'dialog-secondary', 'reset & remove');
+      remove.type = 'button';
+      remove.dataset.effectConfirmRemove = id;
+      remove.setAttribute('aria-label', `reset and remove ${title}`);
+      remove.addEventListener('click', () => removeEffectFromRack(id));
+      actions.append(cancel, remove);
+    } else {
+      const remove = panelNode('button', 'dialog-secondary', 'remove');
+      remove.type = 'button';
+      remove.dataset.effectRemove = id;
+      remove.setAttribute('aria-label', `remove ${title} from the sidebar`);
+      remove.addEventListener('click', () => {
+        if (entry.moved.length || entry.keys) {
+          effectRackConfirming = id;
+          paintEffectRackDialog();
+        } else {
+          removeEffectFromRack(id);
+        }
+      });
+      actions.append(remove);
+    }
+    row.append(name, actions);
+    list.append(row);
+  }
+}
+
 
 /**
  * Whether one parameter carries evidence that somebody has been here: a keyframe track
@@ -4158,8 +4366,13 @@ function toggleGroup(key) {
 // The no-op declared beside `paramWritten` becomes the real thing here, where both of
 // the stores the predicate reads exist, and the panel is painted once for the state the
 // page booted into.
-groupRevealChanged = refreshGroups;
-refreshGroups();
+function refreshPanel() {
+  refreshEffectRack();
+  refreshGroups();
+}
+
+groupRevealChanged = refreshPanel;
+refreshPanel();
 
 // Every track written through the one door, at one program position. This is the
 // evaluator the note on `evaluating` asked for: it runs inside
@@ -4225,6 +4438,7 @@ const keyTolerance = () => 0.5 / (timeline ? timeline.outputFps : 30);
  * spring back on its own.
  */
 function writeFromControl(name, value) {
+  retainEffectFor(name);
   const applied = params.set(name, value);
   const track = tracks.get(name);
   if (track && track.keys.length > 0) {
@@ -4238,6 +4452,7 @@ function writeFromControl(name, value) {
 
 /** Adds a key at the playhead, or removes the one already there. */
 function toggleKey(name) {
+  retainEffectFor(name);
   const track = trackFor(name);
   const existing = track.keyAt(playheadSec(), keyTolerance());
   if (existing) {
@@ -10772,10 +10987,14 @@ function presetFromCurrentLook(names) {
  */
 
 /** Every look parameter of one effect, in declaration order. */
-const effectParamNames = (id) => params.names('look').filter((n) => effectOf(n) === id);
+function effectParamNames(id) {
+  return params.names('look').filter((n) => effectOf(n) === id);
+}
 
 /** The ids of every effect the registry currently declares. */
-const effectIds = () => effectIdsIn(params.names('look'));
+function effectIds() {
+  return effectIdsIn(params.names('look'));
+}
 
 /**
  * Whether an effect id names a package this build actually has.
@@ -12137,6 +12356,7 @@ function deleteSelectedKey() {
     selection = null;
     timingChanged();
   } else {
+    retainEffectFor(owner);
     tracks.get(owner).removeKey(key);
     // A track with no keys left is not a track. The parameter keeps the value it is
     // holding right now rather than snapping anywhere: `dropTrackIfEmpty` only stops
@@ -14571,6 +14791,11 @@ const shell = shellElements({
   lookImport: 'menuLookImport',
   lookExport: 'menuLookExport',
   state: 'menuState',
+  effectRackOpen: 'effectRackOpen',
+  effectRackDialog: 'effectRackDialog',
+  effectRackClose: 'effectRackClose',
+  effectRackSearch: 'effectRackSearch',
+  effectRackList: 'effectRackList',
   exportClose: 'exportClose',
   projectDialog: 'projectDialog',
   projectClose: 'projectClose',
@@ -14667,6 +14892,17 @@ function openDialog(dialog) {
 // is already current - it would cost nothing today and would hide the day one of those
 // writers stops, which is the wrong direction for something only ever seen inside a modal.
 shell.projectSettings.addEventListener('click', () => openDialog(shell.projectDialog));
+shell.effectRackOpen.addEventListener('click', () => {
+  effectRackConfirming = null;
+  shell.effectRackSearch.value = '';
+  paintEffectRackDialog();
+  openDialog(shell.effectRackDialog);
+  shell.effectRackSearch.focus();
+});
+shell.effectRackSearch.addEventListener('input', () => {
+  effectRackConfirming = null;
+  paintEffectRackDialog();
+});
 // One command for the deliverable, where there were two. `Render` opened this dialog and
 // `Export` jumped past it into `saveExportCopy` when there was something to hand over,
 // which meant one menu item did two unrelated things according to state nothing in the menu
@@ -14962,6 +15198,8 @@ shell.state.addEventListener('click', () => {
 });
 
 shell.exportClose.addEventListener('click', () => ui.exportDialog.close());
+shell.effectRackClose.addEventListener('click', () => shell.effectRackDialog.close());
+shell.effectRackDialog.addEventListener('close', () => { effectRackConfirming = null; });
 shell.projectClose.addEventListener('click', () => shell.projectDialog.close());
 shell.projectDone.addEventListener('click', () => shell.projectDialog.close());
 shell.obsClose.addEventListener('click', () => shell.obsDialog.close());

@@ -82,6 +82,10 @@
 //   node tools/editor-check.mjs --mutate reset-collapses-the-slot --no-render # must FAIL
 //   node tools/editor-check.mjs --mutate reset-strands-focus     --no-render # must FAIL
 //   node tools/editor-check.mjs --mutate reset-writes-around-the-registry --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate effect-rack-shows-every-effect --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate effect-rack-ignores-touched --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate effect-rack-remove-keeps-tracks --no-render # must FAIL
+//   node tools/editor-check.mjs --mutate effect-rack-reset-forgets-effect --no-render # must FAIL
 //   node tools/editor-check.mjs --mutate export-ignores-name              # must FAIL
 //
 // `--no-render` drops the real-export rows and says so in the verdict, the way
@@ -793,6 +797,67 @@ const MUTATIONS = {
     ]],
   },
 
+  // The rack claims every installed effect is present, which puts all package rows back
+  // into a fresh sidebar. The section below asks the row and the package-only group,
+  // before it has touched a value or pressed Add, so this cannot pass as a remembered
+  // local choice.
+  //
+  // Must redden: **eight rack rows** - fresh absence; the value and track leaving again;
+  // search and Add; focus after Add; confirmed removal making the row leave; and the
+  // final local-preference equality. Measured 2026-08-25: `563 assertions, 11 failed`,
+  // including the same three unrelated gesture rows the unmutated run fired.
+  'effect-rack-shows-every-effect': {
+    file: 'web/main.js',
+    edits: [[
+      'function effectPresent(id) {\n  return rackedEffects.has(id) || effectTouched(id);\n}',
+      'function effectPresent(id) {\n  return true;\n}',
+    ]],
+  },
+
+  // The other half of presence is removed: only the local preference is consulted, so a
+  // value or keyframe restored from a document can be active while its controls remain
+  // hidden. The rack section drives both forms independently and clears each before it
+  // moves on, which tells a missing value term from a missing track term.
+  //
+  // Must redden: **three rack rows** - the value reveal, the track reveal, and undo
+  // restoring work without restoring visibility. Measured 2026-08-25: `563 assertions,
+  // 6 failed`, including the unmutated run's same three unrelated gesture rows.
+  'effect-rack-ignores-touched': {
+    file: 'web/main.js',
+    edits: [[
+      'function effectPresent(id) {\n  return rackedEffects.has(id) || effectTouched(id);\n}',
+      'function effectPresent(id) {\n  return rackedEffects.has(id);\n}',
+    ]],
+  },
+
+  // Removing an effect resets its values but leaves its tracks behind. The panel still
+  // shows it because a track is work, so the row about disappearing and the direct track
+  // count both catch the half-delete while undo remains able to complete the run.
+  //
+  // Must redden: **one rack row**, the confirmed removal's joined value/track/presence
+  // assertion. Measured 2026-08-25: `563 assertions, 4 failed`, including the unmutated
+  // run's same three unrelated gesture rows.
+  'effect-rack-remove-keeps-tracks': {
+    file: 'web/main.js',
+    edits: [['  for (const name of names) tracks.delete(name);\n', '']],
+  },
+
+  // The reset writes the default without retaining the effect first. On the last touched
+  // value that makes the effect and its control leave under the pointer, which is the
+  // moving-panel failure the rack is required to prevent. The proof clears the track
+  // first so this one gesture is the only evidence holding the effect in the sidebar.
+  //
+  // Must redden: **one rack row**, the reset-retains assertion. Measured 2026-08-25:
+  // `563 assertions, 4 failed`, including the unmutated run's same three unrelated
+  // gesture rows.
+  'effect-rack-reset-forgets-effect': {
+    file: 'web/main.js',
+    edits: [[
+      "  button.addEventListener('click', () => {\n    retainEffectFor(name);\n    params.set(name, resetTarget(name));",
+      "  button.addEventListener('click', () => {\n    params.set(name, resetTarget(name));",
+    ]],
+  },
+
   // The falsification control for the derived half of section 16: every collapsible
   // group answers "nobody has been here" whatever the document holds, so a group
   // carrying live values renders shut and stays shut.
@@ -1259,12 +1324,12 @@ const MUTATIONS = {
       ['const resetButtons = new Map();', 'const resetButtons = new Map();\nconst resetTouched = new Set();'],
       ['  const modified = value !== resetTarget(name);', '  const modified = resetTouched.has(name);'],
       [
-        'function writeFromControl(name, value) {\n  const applied = params.set(name, value);',
-        'function writeFromControl(name, value) {\n  resetTouched.add(name);\n  const applied = params.set(name, value);',
+        'function writeFromControl(name, value) {\n  retainEffectFor(name);\n  const applied = params.set(name, value);',
+        'function writeFromControl(name, value) {\n  retainEffectFor(name);\n  resetTouched.add(name);\n  const applied = params.set(name, value);',
       ],
       [
-        '    params.set(name, resetTarget(name));\n    history.commit();',
-        '    resetTouched.delete(name);\n    params.set(name, resetTarget(name));\n    history.commit();',
+        '    retainEffectFor(name);\n    params.set(name, resetTarget(name));\n    history.commit();',
+        '    retainEffectFor(name);\n    resetTouched.delete(name);\n    params.set(name, resetTarget(name));\n    history.commit();',
       ],
     ],
   },
@@ -2553,10 +2618,10 @@ const DRIVER_RULES = [
   },
   {
     key: 'shelldialogs',
-    what: 'a control in the Project settings, Export, OBS, or state dialog',
+    what: 'a control in the Project settings, Export, OBS, effect-rack, or state dialog',
     by: 'section 1 opens each application dialog, drives every enabled control, and '
       + 'asserts every format the export dialog offers is one the server encodes',
-    match: (row) => inGroup(row, '#projectDialog', '#exportDialog', '#obsDialog'),
+    match: (row) => inGroup(row, '#projectDialog', '#exportDialog', '#obsDialog', '#effectRackDialog'),
   },
   {
     key: 'paneltabs',
@@ -2712,6 +2777,7 @@ const DRIVER_IDS = {
   tPlay: 'section 2 - toggles playback and the state is read back',
   tRate: 'section 4 - the anchor rows and the seek-storm row',
   tCamView: 'section 1 - looks through the program camera and reads the orbit back',
+  effectRackOpen: 'section 1 - opens the installed-effect search, adds every effect, and removes one',
   tRateKey: 'section 5 - plants and removes a retime key',
   // `tFps` is deliberately not here. It moved into Project settings with the rate itself,
   // so the `shelldialogs` rule covers it and section 1 drives it - which is a credit that
@@ -3070,6 +3136,269 @@ try {
   console.log('\n[1] every control the editor renders is one this file knows how to drive');
   // =====================================================================
   //
+  // Package effects are a rack rather than a second permanent panel. Ask its absence
+  // before any gesture, then ask both forms of derived presence before pressing Add:
+  // a value and a track. Row.hidden is the reading rather than checkVisibility because
+  // the group's own collapse is a separate layer and a quiet group is meant to be shut.
+  const rackFresh = await page.evaluate(() => {
+    const k = globalThis.__kinect;
+    const ids = k.effectIds();
+    const rowFor = (name) => document.getElementById(name)?.closest('.row, .checkrow') ?? null;
+    const packageGroups = [...document.querySelectorAll('#panelBody > [data-group]')]
+      .filter((group) => {
+        const names = [...group.querySelectorAll('input[id]')]
+          .map((input) => input.id).filter((name) => k.params.names().includes(name));
+        return names.length > 0 && names.every((name) => k.effectOf(name) !== null);
+      });
+    const effectRows = ids.flatMap((id) => k.effectParamNames(id).map(rowFor)).filter(Boolean);
+    const coreRows = k.params.names('look').filter((name) => k.effectOf(name) === null)
+      .map(rowFor).filter(Boolean);
+    return {
+      ids,
+      effectRows: effectRows.length,
+      hiddenEffectRows: effectRows.filter((row) => row.hidden).length,
+      coreRows: coreRows.length,
+      hiddenCoreRows: coreRows.filter((row) => row.hidden).length,
+      packageGroups: packageGroups.length,
+      emptyPackageGroups: packageGroups.filter((group) => group.classList.contains('rackempty')).length,
+    };
+  });
+  check(rackFresh.ids.length > 0
+    && rackFresh.effectRows === rackFresh.hiddenEffectRows
+    && rackFresh.packageGroups === rackFresh.emptyPackageGroups,
+  'a fresh clip keeps every installed package effect out of the sidebar',
+  `${rackFresh.hiddenEffectRows} of ${rackFresh.effectRows} effect rows hidden, `
+    + `${rackFresh.emptyPackageGroups} of ${rackFresh.packageGroups} package groups empty`);
+  check(rackFresh.coreRows > 0 && rackFresh.hiddenCoreRows === 0,
+    'and the basic clip controls remain in it',
+    `${rackFresh.coreRows - rackFresh.hiddenCoreRows} of ${rackFresh.coreRows} core rows retained`);
+
+  await page.evaluate("__kinect.params.set('grain.amount', 0.4)");
+  await settle();
+  const valueRevealed = await page.evaluate(`(() => {
+    const row = document.getElementById('grain.amount')?.closest('.row, .checkrow');
+    return row ? !row.hidden : false;
+  })()`);
+  check(valueRevealed,
+    'a value restored without an Add gesture reveals the effect that owns it',
+    `grain row visible=${valueRevealed}`);
+  await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const spec = k.params.spec('grain.amount');
+    k.params.set('grain.amount', k.params.normalise('grain.amount', spec.default));
+  })()`);
+  await settle();
+  const valueCleared = await page.evaluate(`(() => {
+    const row = document.getElementById('grain.amount')?.closest('.row, .checkrow');
+    return row ? row.hidden : false;
+  })()`);
+  check(valueCleared,
+    'and it leaves again when that programmatic value carries no work and was never added',
+    `grain row hidden=${valueCleared}`);
+
+  await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    k.keyframes.setTracks({ 'grain.amount': [{ t: 0, value: k.params.get('grain.amount') }] });
+  })()`);
+  await settle();
+  const trackRevealed = await page.evaluate(`(() => {
+    const row = document.getElementById('grain.amount')?.closest('.row, .checkrow');
+    return row ? !row.hidden : false;
+  })()`);
+  check(trackRevealed,
+    'a keyframe track reveals its effect even where the parked value equals the default',
+    `grain row visible=${trackRevealed}`);
+  await page.evaluate('__kinect.keyframes.setTracks({})');
+  await settle();
+  const trackCleared = await page.evaluate(`(() => {
+    const row = document.getElementById('grain.amount')?.closest('.row, .checkrow');
+    return row ? row.hidden : false;
+  })()`);
+  check(trackCleared,
+    'and clearing that track removes the otherwise idle effect again',
+    `grain row hidden=${trackCleared}`);
+
+  // The add path is the surface a person uses: open, search, press the result, and read
+  // both the row and the focus it hands back. The conditional keeps the mutation that
+  // incorrectly makes every effect present from ending the run before its failed rows
+  // can be counted.
+  await page.locator('#effectRackOpen').click();
+  check(await page.evaluate('document.getElementById("effectRackDialog").open'),
+    'the add button opens the installed-effect search');
+  await page.locator('#effectRackSearch').fill('halation');
+  const searched = await page.evaluate(`(() => ({
+    rows: [...document.querySelectorAll('#effectRackList [data-effect-rack]')]
+      .map((row) => row.dataset.effectRack),
+    add: document.querySelector('[data-effect-add="halation"]')?.dataset.effectAdd ?? null,
+  }))()`);
+  check(JSON.stringify(searched.rows) === JSON.stringify(['halation']) && searched.add === 'halation',
+    'search narrows the installed list to the matching effect and offers Add',
+    `${searched.rows.join(', ') || 'no rows'}, add=${searched.add}`);
+  const halationAdd = page.locator('[data-effect-add="halation"]');
+  const couldAddHalation = await halationAdd.count() === 1;
+  if (couldAddHalation) await halationAdd.click();
+  else {
+    await page.locator('#effectRackClose').click();
+    await page.evaluate("document.querySelector('[data-group-toggle=halation]')?.click()");
+  }
+  await page.waitForTimeout(50);
+  const halationAdded = await page.evaluate(`(() => {
+    const row = document.getElementById('halation.amount')?.closest('.row, .checkrow');
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
+    return {
+      hidden: row?.hidden ?? null,
+      stored,
+      focused: document.activeElement?.id ?? null,
+      dialogOpen: document.getElementById('effectRackDialog').open,
+    };
+  })()`);
+  check(couldAddHalation && halationAdded.hidden === false
+    && halationAdded.stored.includes('halation') && !halationAdded.dialogOpen,
+  'Add closes the search and retains the effect in the sidebar without changing its value',
+  `add=${couldAddHalation}, hidden=${halationAdded.hidden}, stored=${JSON.stringify(halationAdded.stored)}`);
+  check(halationAdded.focused === 'halation.amount',
+    'and the first control receives the caret, so Add lands where the work starts',
+    `focused ${JSON.stringify(halationAdded.focused)}`);
+
+  // Give the effect a value and a track through its real controls, then drive both
+  // confirmation choices. The destructive press must make one history entry for all
+  // values and tracks; the direct track read is the term a reset-only implementation
+  // cannot satisfy.
+  await page.evaluate(`(() => {
+    const input = document.getElementById('halation.amount');
+    input.value = '0.7';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  if (couldAddHalation) {
+    await page.locator('button[aria-label="halation.amount keyframe"]').click();
+  } else {
+    await page.evaluate(`document.querySelector('button[aria-label="halation.amount keyframe"]').click()`);
+  }
+  if (couldAddHalation) await page.locator('#effectRackOpen').click();
+  else await page.evaluate("document.getElementById('effectRackOpen').click()");
+  await page.locator('#effectRackSearch').fill('halation');
+  await page.locator('[data-effect-remove="halation"]').click();
+  const confirmation = await page.evaluate(`(() => ({
+    confirm: Boolean(document.querySelector('[data-effect-confirm-remove="halation"]')),
+    value: globalThis.__kinect.params.get('halation.amount'),
+    keyed: globalThis.__kinect.keyframes.names().includes('halation.amount'),
+  }))()`);
+  check(confirmation.confirm && confirmation.value === 0.7 && confirmation.keyed,
+    'Remove asks before destroying an effect that carries a value or keyframe, and the first press changes nothing',
+    `confirm=${confirmation.confirm}, value=${confirmation.value}, keyed=${confirmation.keyed}`);
+  await page.getByRole('button', { name: 'cancel', exact: true }).click();
+  check(await page.locator('[data-effect-remove="halation"]').count() === 1,
+    'Cancel returns to the effect without changing it');
+  await page.locator('[data-effect-remove="halation"]').click();
+  const beforeRemoveDepth = await page.evaluate('__kinect.keyframes.undo.depth()');
+  await page.locator('[data-effect-confirm-remove="halation"]').click();
+  await settle();
+  const removedEffect = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const row = document.getElementById('halation.amount')?.closest('.row, .checkrow');
+    const spec = k.params.spec('halation.amount');
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
+    return {
+      atDefault: k.params.get('halation.amount') === k.params.normalise('halation.amount', spec.default),
+      keyed: k.keyframes.names().includes('halation.amount'),
+      hidden: row?.hidden ?? null,
+      stored,
+      depth: k.keyframes.undo.depth(),
+    };
+  })()`);
+  check(removedEffect.atDefault && !removedEffect.keyed && removedEffect.hidden
+    && !removedEffect.stored.includes('halation'),
+  'the confirmed removal resets every value, deletes every track, and takes the effect out of the sidebar',
+  `default=${removedEffect.atDefault}, keyed=${removedEffect.keyed}, hidden=${removedEffect.hidden}, `
+    + `stored=${JSON.stringify(removedEffect.stored)}`);
+  check(removedEffect.depth === beforeRemoveDepth + 1,
+    'and all of that is one undoable edit',
+    `history ${beforeRemoveDepth} -> ${removedEffect.depth}`);
+  await page.locator('#effectRackClose').click();
+  await page.evaluate('__kinect.keyframes.undo.pop()');
+  await settle();
+  const undoRemoval = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const row = document.getElementById('halation.amount')?.closest('.row, .checkrow');
+    return {
+      value: k.params.get('halation.amount'),
+      keyed: k.keyframes.names().includes('halation.amount'),
+      hidden: row?.hidden ?? null,
+    };
+  })()`);
+  check(undoRemoval.value === 0.7 && undoRemoval.keyed && undoRemoval.hidden === false,
+    'undo restores the value, the track, and the visible effect together',
+    `value=${undoRemoval.value}, keyed=${undoRemoval.keyed}, hidden=${undoRemoval.hidden}`);
+
+  // Clear the restored track without a user gesture, leaving the value as the only
+  // evidence. The reset itself must retain the effect before it removes that evidence,
+  // or the row disappears under the pointer.
+  await page.evaluate('__kinect.keyframes.setTracks({})');
+  if (undoRemoval.hidden === true) {
+    await page.evaluate(`document.querySelector('button[aria-label="halation.amount reset to default"]').click()`);
+  } else {
+    await page.locator('button[aria-label="halation.amount reset to default"]').click();
+  }
+  await settle();
+  const resetRetained = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const row = document.getElementById('halation.amount')?.closest('.row, .checkrow');
+    const spec = k.params.spec('halation.amount');
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
+    return {
+      atDefault: k.params.get('halation.amount') === k.params.normalise('halation.amount', spec.default),
+      hidden: row?.hidden ?? null,
+      stored,
+    };
+  })()`);
+  check(resetRetained.atDefault && resetRetained.hidden === false
+    && resetRetained.stored.includes('halation'),
+  'resetting the last touched value keeps the effect in the sidebar until Remove is pressed',
+  `default=${resetRetained.atDefault}, hidden=${resetRetained.hidden}, stored=${JSON.stringify(resetRetained.stored)}`);
+
+  // Rack the rest through Add rather than by writing the preference. That makes every
+  // installed row available to the existing control sweep and leaves the dialog open so
+  // its generated Remove controls are enumerated as well.
+  let rackAdds = 0;
+  for (let i = 0; i <= rackFresh.ids.length; i++) {
+    if (!await page.evaluate('document.getElementById("effectRackDialog").open')) {
+      await page.locator('.paneltab[data-panel-tab="look"]').click();
+      await page.locator('#effectRackOpen').click();
+    }
+    const next = page.locator('[data-effect-add]').first();
+    if (await next.count() === 0) break;
+    await next.click();
+    rackAdds++;
+  }
+  if (!await page.evaluate('document.getElementById("effectRackDialog").open')) {
+    await page.locator('.paneltab[data-panel-tab="look"]').click();
+    await page.locator('#effectRackOpen').click();
+  }
+  const rackComplete = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
+    const hidden = k.effectIds().filter((id) => k.effectParamNames(id).some((name) => {
+      const row = document.getElementById(name)?.closest('.row, .checkrow');
+      return !row || row.hidden;
+    }));
+    return {
+      ids: [...k.effectIds()].sort(),
+      stored: [...stored].sort(),
+      hidden,
+      removes: document.querySelectorAll('#effectRackList [data-effect-remove]').length,
+    };
+  })()`);
+  check(JSON.stringify(rackComplete.stored) === JSON.stringify(rackComplete.ids)
+    && rackComplete.hidden.length === 0 && rackComplete.removes === rackComplete.ids.length,
+  'adding the remaining installed effects makes every one available to the sidebar and the control sweep',
+  `${rackAdds} added in the loop, ${rackComplete.hidden.length} hidden, `
+    + `${rackComplete.removes} remove controls for ${rackComplete.ids.length} effects`);
+
   // The sweep is over what the page actually contains rather than over a list kept
   // here, which is the only version of this that survives somebody adding a button.
   //
@@ -3166,6 +3495,7 @@ try {
       groups: ['#appBar', '#panel', '#panelTabs', '#lookPresetGroup', '#cameraGroup', '#navRow',
         '#recordGroup', '#recLookGroup', '#sensorGroup', '#monitorGroup',
         '#programOutGroup', '#presetPick', '#projectDialog', '#exportDialog', '#obsDialog',
+        '#effectRackDialog',
         '#panelDock', '.appmenu']
         .filter((g) => el.closest(g)),
       kf: el.classList.contains('kf'),
@@ -3199,7 +3529,7 @@ try {
   // went on saying "in the panel" about sixty-odd controls in a modal - a diagnostic
   // that names the wrong surface is how a reader stops being able to tell a sweep that
   // grew from one that moved.
-  const DIALOG_GROUPS = ['#presetPick', '#exportDialog', '#obsDialog'];
+  const DIALOG_GROUPS = ['#presetPick', '#exportDialog', '#obsDialog', '#effectRackDialog'];
   const inDialog = sweep.filter((r) => DIALOG_GROUPS.some((group) => r.groups.includes(group))).length;
   const inTbar = sweep.filter((r) => r.inTbar).length;
   note(`${sweep.length} interactive controls on the editor`,
@@ -3273,6 +3603,10 @@ try {
     withControls.length ? `${withControls.join(', ')} has a control` : `${composition.length} checked: ${composition.join(', ')}`);
   check(sweep.some((r) => r.id === 'tPlay') && sweep.some((r) => r.id === 'tSetIn'),
     'the strip is among what was swept', `${sweep.filter((r) => r.inTbar).map((r) => r.id).filter(Boolean).slice(0, 6).join(', ')}...`);
+
+  await page.locator('#effectRackClose').click();
+  check(await page.evaluate('!document.getElementById("effectRackDialog").open'),
+    'the effect search closes from its corner after its generated controls were swept');
 
   // Being in the document is not the same as being reachable, which is the whole of
   // what was wrong with this control before it moved. It sat under thirteen groups of
@@ -3355,7 +3689,7 @@ try {
   // the store it is about to make claims about.
   await page.evaluate(`(() => {
     [...document.querySelectorAll('#panelBody > [data-panel-tab] .grouptoggle')]
-      .filter((b) => b.getAttribute('aria-expanded') === 'true' && b.checkVisibility())
+      .filter((b) => b.getAttribute('aria-expanded') === 'true')
       .forEach((b) => b.click());
     localStorage.removeItem('kinect.panelGroupsOpen');
   })()`);

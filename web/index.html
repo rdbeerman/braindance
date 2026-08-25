@@ -452,7 +452,10 @@
   .paneltab[aria-selected="true"] { color: var(--accent); }
   .paneltab:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
   #panel .group[hidden] { display: none; }
+  #panel .group.rackempty { display: none; }
   #lookPresetGroup > label { margin-bottom: 6px; }
+  #effectRackGroup { padding-top: 10px; }
+  #effectRackOpen { width: 100%; }
 
   .dialog-head {
     display: flex;
@@ -547,6 +550,25 @@
   #exportDialog { width: min(480px, calc(100vw - 32px)); }
   #obsDialog { width: min(480px, calc(100vw - 32px)); }
   #projectDialog { width: min(480px, calc(100vw - 32px)); }
+  #effectRackDialog { width: min(430px, calc(100vw - 32px)); }
+  .effect-rack-intro {
+    margin: 0 0 14px; color: var(--dim); font-size: 11px; line-height: 1.45;
+  }
+  .effect-rack-list {
+    display: grid; gap: 1px; max-height: min(54vh, 520px); overflow-y: auto;
+    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .effect-rack-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+    gap: 12px; min-height: 48px; padding: 7px 0; border-bottom: 1px solid var(--line);
+  }
+  .effect-rack-row:last-child { border-bottom: 0; }
+  .effect-rack-name { min-width: 0; }
+  .effect-rack-name b { display: block; color: var(--ink); font-size: 12px; font-weight: 500; }
+  .effect-rack-name small { display: block; margin-top: 2px; color: var(--dim); font-size: 9px; }
+  .effect-rack-actions { display: flex; align-items: center; gap: 5px; }
+  .effect-rack-actions .dialog-secondary { min-height: 29px; padding: 0 9px; }
+  .effect-rack-empty { padding: 18px 0; color: var(--dim); font-size: 11px; text-align: center; }
   /* The two readouts inside the export dialog - what the chosen deliverable is, and the
      range the press will take. Both are `<b>` in a field rather than an input, because
      neither is typed into here, and both want the dim monospaced voice the rest of the
@@ -1294,6 +1316,11 @@
          conditioned into, where the points are moved to, how they are drawn, what
          colour they take, what persists between frames, and what the optics do. -->
     <div id="gradeAnchor" hidden></div>
+    <div class="group" id="effectRackGroup" data-panel-tab="look" hidden>
+      <div class="btnrow">
+        <button id="effectRackOpen" type="button">+ add effect</button>
+      </div>
+    </div>
   </div><!-- #panelBody -->
 
   <!-- What the panel becomes when it is collapsed: the three things you press with the
@@ -1482,6 +1509,22 @@
       </div>
     </div>
   </section>
+
+  <dialog id="effectRackDialog" aria-labelledby="effectRackTitle">
+    <div class="dialog-head">
+      <h2 id="effectRackTitle">Effects</h2>
+      <button class="dialog-close" id="effectRackClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <p class="effect-rack-intro">Add only the effects you want in the sidebar. Removing an
+      effect resets its values and deletes its keyframes.</p>
+    <div class="dialog-field">
+      <label for="effectRackSearch">Find an effect</label>
+      <div class="dialog-input-row">
+        <input id="effectRackSearch" type="search" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <div class="effect-rack-list" id="effectRackList" aria-label="Installed effects"></div>
+  </dialog>
 
   <!-- What the clip *is*, as opposed to what is made from it. Built like `#exportDialog`
        and `#obsDialog` below - the same head, the same `.dialog-field` rows, the same

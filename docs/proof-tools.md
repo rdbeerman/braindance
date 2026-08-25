@@ -328,6 +328,10 @@ node tools/editor-check.mjs --mutate import-saves-before-validating --no-render 
 node tools/editor-check.mjs --mutate picker-ignores-the-boxes --no-render # ... the subset a preset is written with
 node tools/editor-check.mjs --mutate readings-tick-alone --no-render   # ... and the five weights that move as one
 node tools/editor-check.mjs --mutate apply-says-nothing --no-render    # ... and that applying one says so, on the control that inherited the gesture
+node tools/editor-check.mjs --mutate effect-rack-shows-every-effect --no-render # ... a fresh sidebar showing every installed package without Add. Reddens eight rack rows
+node tools/editor-check.mjs --mutate effect-rack-ignores-touched --no-render # ... active values and tracks left hidden because they were not added. Reddens three rack rows
+node tools/editor-check.mjs --mutate effect-rack-remove-keeps-tracks --no-render # ... Remove resetting values while leaving the effect's keyframes behind. Reddens one rack row
+node tools/editor-check.mjs --mutate effect-rack-reset-forgets-effect --no-render # ... reset making the last touched effect disappear under the pointer. Reddens one rack row
 node tools/editor-check.mjs --mutate group-never-reveals --no-render      # ... a panel group is open because the clip says so
 node tools/editor-check.mjs --mutate reveal-ignores-tracks --no-render    # ... and a keyframe counts where the value does not
 node tools/editor-check.mjs --mutate override-prunes-only-on-toggle --no-render # ... and the override the document, not the toggle, has caught up with
@@ -475,6 +479,8 @@ node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the sh
                                                           #     are lying. Reddens exactly one row of nine and leaves the
                                                           #     write-sweep row beside it green, because that one is about the
                                                           #     live path and the fault is in the boot write - read the rows
+node tools/boot-check.mjs --mutate effect-rack-shows-every-effect # ... every installed package row shown on a fresh recorder.
+                                                          #     Reddens exactly the package-row visibility assertion
 node tools/effect-check.mjs                               # installing an effect: revisions, the door, the hotload, park and restore
 node tools/effect-check.mjs --mutate temporaries-are-visible # ... the id filter the store lists directories through, widened, so
                                                           #     a crashed install's `<id>.<seq>.tmp` becomes a package `/effects`

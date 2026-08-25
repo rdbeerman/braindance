@@ -246,7 +246,7 @@ const MUTATIONS = {
    */
   'rebuild-keeps-the-paint': {
     file: 'web/main.js',
-    edits: [['\n  groupPainted.clear();\n  panelRowsEmitted = 0;', '\n  panelRowsEmitted = 0;']],
+    edits: [['\n  groupPainted.clear();', '']],
   },
 
   /**
@@ -1419,6 +1419,9 @@ try {
       params: k.params.names().length,
       groups: document.querySelectorAll('#panelBody > [data-group]').length,
       probeRows: document.querySelectorAll('[data-group="probe"] .row').length,
+      probeRowsHidden: [...document.querySelectorAll('[data-group="probe"] .row')]
+        .filter((row) => row.hidden).length,
+      probeRackEmpty: document.querySelector('[data-group="probe"]')?.classList.contains('rackempty') ?? null,
       groupLabel: document.querySelector('[data-group="probe"] .grouphead label')?.textContent ?? null,
       knows: k.params.names().includes('probe.amount') && k.params.names().includes('probe.hue'),
       cell: Object.hasOwn(k.uniforms, 'probeAmount') && Object.hasOwn(k.uniforms, 'probeHue'),
@@ -1431,12 +1434,31 @@ try {
     adopted.params === before.params + 2 && adopted.knows, `${before.params} -> ${adopted.params}`);
   ok('and they are at the end of the look order, which is where the placement rule puts a package nothing has a layout for',
     JSON.stringify(adopted.appended) === JSON.stringify(['probe.amount', 'probe.hue']), JSON.stringify(adopted.appended));
-  ok('the panel grew the package\'s own group, with a row for each parameter',
-    adopted.groups === before.groups + 1 && adopted.probeRows === 2,
-    `${adopted.groups} groups, ${adopted.probeRows} probe rows, heading ${JSON.stringify(adopted.groupLabel)}`);
+  ok('the panel grew the package\'s own group and rows, but keeps a newly installed idle effect out of the sidebar',
+    adopted.groups === before.groups + 1 && adopted.probeRows === 2
+      && adopted.probeRowsHidden === adopted.probeRows && adopted.probeRackEmpty === true,
+    `${adopted.groups} groups, ${adopted.probeRowsHidden} of ${adopted.probeRows} probe rows hidden, `
+    + `rack empty=${adopted.probeRackEmpty}, heading ${JSON.stringify(adopted.groupLabel)}`);
   ok('the uniform cells its bindings need were minted, because no hand-written table holds them',
     adopted.cell === true, `probeAmount and probeHue ${adopted.cell ? 'present' : 'missing'}`);
   ok('and the assembled program carries its chunk text', adopted.inShader === true);
+
+  await page.locator('.paneltab[data-panel-tab="look"]').click();
+  await page.locator('#effectRackOpen').click();
+  await page.locator('[data-effect-add="probe"]').click();
+  const racked = await page.evaluate(() => {
+    const row = document.getElementById('probe.amount')?.closest('.row, .checkrow');
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
+    return { hidden: row?.hidden ?? null, stored, focused: document.activeElement?.id ?? null };
+  });
+  ok('and Add makes that hot-loaded effect available without a reload or a value change',
+    racked.hidden === false && racked.stored.includes('probe'),
+    `hidden=${racked.hidden}, stored=${JSON.stringify(racked.stored)}, focused=${JSON.stringify(racked.focused)}`);
+  await page.locator('#effectRackOpen').click();
+  await page.locator('[data-effect-remove="probe"]').click();
+  await page.locator('#effectRackClose').click();
+  await page.locator('.paneltab[data-panel-tab="record"]').click();
 
   // ---- and now boot-check's own question, on the page that has just been rebuilt
   //

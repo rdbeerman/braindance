@@ -446,7 +446,8 @@ with either refused by name. A refused package leaves nothing behind.
 reassembled and swapped, the registry and the panel are rebuilt from the new set, and every value
 is written back through the same door a slider uses — so the controls show what the registry
 holds, the values in flight are where they were, and a newly installed effect's parked values
-come back and apply. What you were looking at survives it: the tab that was up stays up, a group
+come back and apply. A newly installed package stays out of the sidebar until it is added or used.
+What you were looking at survives it: the tab that was up stays up, a group
 you had collapsed stays collapsed, and the preset picker still lists what it listed. Each of
 those was read once at boot before, so after the first install the panel either lost them or went
 on reporting a state it no longer had. A package that changed no GLSL is adopted without recompiling anything,
@@ -630,8 +631,11 @@ on it would hold the pass open for every look there has ever been.
 
 The panel is generated from the registry at boot. A parameter is one entry naming its group
 and label, and the row, bounds, readout and keyframe control are built from that, so an
-effect cannot get a control the registry does not own. The generator refuses to boot if the
-rows it emitted are not the parameters that were declared.
+effect cannot get a control the registry does not own. Package-effect rows are hidden until
+the effect is added with **+ add effect** or any of its values or tracks carries work.
+Removing one resets every value and deletes every track in one confirmed, undoable edit.
+The local rack preference is panel state, not project state. The generator refuses to boot
+if the rows it emitted are not the parameters that were declared.
 
 ## Presets
 

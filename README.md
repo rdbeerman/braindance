@@ -105,8 +105,15 @@ to start. **save** writes yours to `presets/`, and **export** and **import** mov
 between machines as JSON. Every scalar underneath is still yours to move, and a row you have
 changed grows a **↺** that puts just that one back.
 
+Package effects start out of the sidebar. Press **+ add effect** to search the installed
+packages and keep one in reach. A project, preset, value or keyframe that uses an effect
+reveals it automatically, so the rack cannot hide work. **Remove** is the only way to take
+an effect back out: when it carries values or keyframes the editor asks first, then resets
+all of its values and deletes all of its tracks as one undoable edit. The rack choice is a
+local panel preference and is not written into the project.
+
 **The effects those sliders drive are packages on disk, and they follow the same two-root
-rule.** Sixteen ship in `effects-builtin/`, each a manifest beside the GLSL it splices into the
+rule.** Eighteen ship in `effects-builtin/`, each a manifest beside the GLSL it splices into the
 shaders, and the page assembles both point-cloud programs, the grade pass, the parameter
 registry and the panel out of whatever is installed. `effects/` is the writable root: a package
 installed there under a shipped id shadows it, and deleting that copy brings the shipped one

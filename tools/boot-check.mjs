@@ -64,6 +64,7 @@
 //
 //   node tools/boot-check.mjs
 //   node tools/boot-check.mjs --mutate reset-before-the-panel-generator   # ... and must FAIL
+//   node tools/boot-check.mjs --mutate effect-rack-shows-every-effect      # ... and must FAIL
 //
 // Needs a GPU browser and a free port. No capture, no sensor, no server already running.
 
@@ -133,6 +134,17 @@ const MUTATIONS = {
         '    params.set(name, Object.hasOwn(held, name) ? held[name] : PARAMS[name].def);\n  }\n  buildPanel();\n',
       ],
     ],
+  },
+  // The second half of first paint: package rows exist because the registry owns them,
+  // but none belongs in a fresh sidebar. Returning true here restores the permanent
+  // all-effects panel while leaving the registry/control value diff perfectly green.
+  // Must redden exactly the package-row visibility assertion below.
+  'effect-rack-shows-every-effect': {
+    file: 'web/main.js',
+    edits: [[
+      'function effectPresent(id) {\n  return rackedEffects.has(id) || effectTouched(id);\n}',
+      'function effectPresent(id) {\n  return true;\n}',
+    ]],
   },
 };
 
@@ -337,11 +349,14 @@ async function main() {
       }
       return {
         name,
+        effect: k.effectOf(name),
         kind: k.params.spec ? k.params.spec(name).kind : null,
+        tag: k.params.spec ? k.params.spec(name).tag : null,
         pose: value !== null && typeof value === 'object',
         control: el ? el.type : null,
         registry: (value !== null && typeof value === 'object') ? null : value,
         shown: !el ? null : (el.type === 'checkbox' ? el.checked : el.value),
+        rowHidden: el?.closest('.row, .checkrow')?.hidden ?? null,
         unwritten,
       };
     });
@@ -366,6 +381,17 @@ async function main() {
   const posedControls = poses.filter((r) => r.control !== null);
   check(posedControls.length === 0, 'and a pose is the only thing the panel does not draw a control for',
     `${poses.length} poses: ${poses.map((r) => r.name).join(', ') || 'none'}`);
+
+  const packageRows = scalars.filter((r) => r.effect !== null);
+  const coreRows = scalars.filter((r) => r.effect === null && r.tag === 'look');
+  const hiddenCoreRows = coreRows.filter((r) => r.rowHidden !== false);
+  check(packageRows.length > 0 && packageRows.every((r) => r.rowHidden === true),
+    'every installed package effect starts out of the sidebar',
+    `${packageRows.filter((r) => r.rowHidden === true).length} of ${packageRows.length} rows hidden`);
+  check(coreRows.length > 0 && hiddenCoreRows.length === 0,
+    'and every basic clip control remains in it',
+    `${coreRows.length - hiddenCoreRows.length} of ${coreRows.length} rows retained`
+      + (hiddenCoreRows.length ? `; hidden: ${hiddenCoreRows.map((r) => r.name).join(', ')}` : ''));
 
   // ------------------------------------------------------- 2. the diff this file is for
   //
