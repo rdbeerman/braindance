@@ -1426,6 +1426,33 @@ try {
       hidden: seen.hidden.map((t) => t.tab),
     };
   };
+  // A package group is built only for an effect somebody has added, so both arms add every
+  // installed effect through the rack dialog first: the rows below ask about reachability, not
+  // rack membership.
+  const rackEveryEffect = async (page) => {
+    const racked = [];
+    for (let guard = 0; guard <= 40; guard += 1) {
+      await page.click('#panelTabs [role="tab"][data-panel-tab="look"]');
+      const door = await page.evaluate(`(() => {
+        const b = document.getElementById('effectRackOpen');
+        return b !== null && b.checkVisibility({ checkVisibilityCSS: true });
+      })()`);
+      if (!door) throw new Error('the rack door is not on this surface, so no package group can be added');
+      await page.click('#effectRackOpen');
+      const next = await page.evaluate(`(() => {
+        const add = document.querySelector('#effectRackList button[data-effect-add]');
+        return add === null ? null : add.dataset.effectAdd;
+      })()`);
+      if (next === null) {
+        await page.evaluate(`document.getElementById('effectRackDialog').close()`);
+        return racked;
+      }
+      // Adding closes the dialog and moves to the group's own tab, so each one is a fresh open.
+      await page.click(`#effectRackList button[data-effect-add="${next}"]`);
+      racked.push(next);
+    }
+    throw new Error(`the rack still offered an effect after ${racked.length} were added: ${racked.join(' ')}`);
+  };
   const panelRun = await onFreshPage('the panel arms', { }, async ({ page }) => {
     // **The collapse rule needs a document with something in it, and this arm was giving
     // it one with nothing.** Which groups the panel leaves open derives from the clip, so
@@ -1447,12 +1474,13 @@ try {
       __kinect.params.set(name, was === 0 ? 1 : was * 1.7);
       return { name, was, now: __kinect.params.get(name) };
     })()`);
+    const racked = await rackEveryEffect(page);
     const walked = await walkTabs(page);
     await page.evaluate(`__kinect.params.reset([${JSON.stringify(nudge.name)}])`);
-    return { ...walked, nudge };
+    return { ...walked, nudge, racked };
   });
   const recPanelRun = await onFreshPage('the recorder panel arm', { path: RECORDER_PATH },
-    async ({ page }) => walkTabs(page));
+    async ({ page }) => { await rackEveryEffect(page); return walkTabs(page); });
   if (!panelRun.ok) throw new Error(`the editor panel arm did not run: ${panelRun.error}`);
   if (!recPanelRun.ok) throw new Error(`the recorder panel arm did not run: ${recPanelRun.error}`);
   {

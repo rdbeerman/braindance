@@ -577,9 +577,9 @@ const MUTATIONS = {
     edits: [
       ["  { path: '/sensor/health', pattern: /^\\/sensor\\/health$/, read: serveSensorHealth },\n", ''],
       [
-        '  // The table first, the file tree second. `serveRoute` answers false only for a',
-        '  if (urlPath === \'/sensor/health\') { serveSensorHealth(req, res); return; }\n\n'
-        + '  // The table first, the file tree second. `serveRoute` answers false only for a',
+        '  let handledByTable = true;',
+        '  if (urlPath === \'/sensor/health\') { serveSensorHealth(req, res); return; }\n'
+        + '  let handledByTable = true;',
       ],
     ],
   },
@@ -1130,11 +1130,8 @@ const MUTATIONS = {
   // drain that finally runs is quadratic in it. The stall is synchronous, so the
   // grabber sees backpressure and drops depth packets at the device.
   'settle-drains-on-poll-only': { file: 'server/recorder.js', edits: [[
-    `    // Drained on the frame path rather than only when something asks for state, and
-    // that placement is what makes the queue bounded by the ceiling below instead of
-    // by the length of the take. \`settle\` carries the measurement and the mechanism.
-    settle(take);`,
-    '    /* mutation: the queue is drained only when something asks for state */',
+    '\n    settle(take);\n',
+    '\n    /* mutation: the queue is drained only when something asks for state */\n',
   ]] },
   // The head advances and the array is never compacted, which leaves the depth
   // correct and the allocation growing with the take - and puts every operation over
@@ -1150,9 +1147,8 @@ const MUTATIONS = {
   // carrying it is the panel's five-second poll - and after the queue drains on
   // every write, no monitor has to be open for the drop to happen at all.
   'drop-transition-silent': { file: 'server/recorder.js', edits: [[
-    `        // stays green costs the take.
-        this.onChange(this.state);`,
-    '        /* mutation: the drop is left to the five-second poll */',
+    '        this.onChange(this.state);\n      }\n      return;',
+    '        /* mutation: the drop is left to the five-second poll */\n      }\n      return;',
   ]] },
   // The push moves out from behind the transition flag and fires per dropped frame,
   // which is a socket write in the frame path on the one machine that cannot afford
@@ -1622,8 +1618,8 @@ const MUTATIONS = {
   // the identity test it copies appears verbatim in the spawn-`error` handler thirty
   // lines up and a bare anchor would match twice.
   'exit-keeps-the-child-reference': { file: 'server/index.js', edits: [[
-    '      // restart branch returns before the rest of the handler runs.\n      if (child === proc) child = null;',
-    '      // restart branch returns before the rest of the handler runs.',
+    '      if (child === proc) child = null;\n      // The hello goes with',
+    '      // The hello goes with',
   ]] },
 
   // ---- a shipped look and the definition it is written against

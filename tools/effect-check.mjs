@@ -249,7 +249,7 @@ const MUTATIONS = {
    */
   'rebuild-forgets-the-tab': {
     file: 'web/main.js',
-    edits: [['\n  hideOffTab();\n\n  // And the dialog', '\n\n  // And the dialog']],
+    edits: [['\n  hideOffTab();\n\n', '\n\n']],
   },
 
   /**

@@ -2946,7 +2946,7 @@ function startLive() {
       // At the top with the two nullings below, because every exit path matters and the
       // restart branch returns before the rest of the handler runs.
       if (child === proc) child = null;
-      // **The hello goes with the grabber that sent it.** `/record/start` stamps the
+      // The hello goes with the grabber that sent it. `/record/start` stamps the
       // take it opens with whatever is in here, and between a grabber exiting and the
       // next one handshaking that is the *previous* grabber's - so a take started
       // during a USB drop or a colour toggle carried a hello describing a moment

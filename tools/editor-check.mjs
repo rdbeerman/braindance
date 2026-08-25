@@ -1102,23 +1102,14 @@ const MUTATIONS = {
   'fit-lands-after-history-begins': {
     file: 'web/main.js',
     edits: [
-      // Lifted out of its place above the marks...
       ['  await fitCropToTake(id, params.get(\'near\'), params.get(\'far\'))\n'
-        + '    .catch((err) => { say(`the crop box could not be fitted to this take: ${err.message}`); });\n'
-        + '  // Awaited, so the first paint of the ruler already has the ticks on it. A take',
-      '  // Awaited, so the first paint of the ruler already has the ticks on it. A take'],
-      // ...and put back on the far side of the baseline, committing like any other edit,
-      // which is exactly what it must not be. The comment above `begin` is part of the
-      // anchor because `history.begin()` alone appears twice in this file.
-      ['  // The stack starts from whatever the clip already is, so the first undo has\n'
-        + '  // somewhere honest to land rather than an empty document.\n'
-        + '  history.begin();',
-      '  // The stack starts from whatever the clip already is, so the first undo has\n'
-        + '  // somewhere honest to land rather than an empty document.\n'
-        + '  history.begin();\n'
+        + '    .catch((err) => { say(`the crop box could not be fitted to this take: ${err.message}`); });\n',
+      ''],
+      ['\n  history.begin();\n',
+      '\n  history.begin();\n'
         + '  await fitCropToTake(id, params.get(\'near\'), params.get(\'far\'))\n'
         + '    .catch((err) => { say(`the crop box could not be fitted to this take: ${err.message}`); });\n'
-        + '  history.commit();'],
+        + '  history.commit();\n'],
     ],
   },
   // **The shape is written and the stage is not letterboxed to it.** `setProjectAspect`
@@ -2178,12 +2169,9 @@ const MUTATIONS = {
   'space-unbound': {
     file: 'web/main.js',
     edits: [[
-      '      // Or the page scrolls under the strip.\n      e.preventDefault();\n'
-      + '      // `pendingPlay` beside `playing` for the reason the play button\'s comment gives\n'
-      + '      // at length: a play warming up from a draft is a play this press means to stop.\n'
-      + '      if (timeline.playing || timeline.pendingPlay) pauseTransport();\n'
+      '      if (timeline.playing || timeline.pendingPlay) pauseTransport();\n'
       + '      else timeline.play().catch(showTimelineError);\n      return;',
-      '      // Or the page scrolls under the strip.\n      e.preventDefault();\n      return;',
+      '      return;',
     ]],
   },
 
@@ -2207,17 +2195,8 @@ const MUTATIONS = {
   'ease-handles-on-flat': {
     file: 'web/main.js',
     edits: [
-      [
-        '    // A flat segment gets none, for the reason `segmentHasShape` gives.\n'
-        + '    if (!segmentHasShape(keys, seg, row.kind)) continue;\n',
-        '',
-      ],
-      [
-        '      // A segment that went flat under the drag has no shape left to edit, so its\n'
-        + '      // handle has to go rather than be moved - which is a rebuild, not a move.\n'
-        + '      if (!segmentHasShape(keys, seg, row.kind)) return false;\n',
-        '',
-      ],
+      ['    if (!segmentHasShape(keys, seg, row.kind)) continue;\n', ''],
+      ['      if (!segmentHasShape(keys, seg, row.kind)) return false;\n', ''],
     ],
   },
 

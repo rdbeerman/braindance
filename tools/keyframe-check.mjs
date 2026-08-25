@@ -227,18 +227,8 @@ const MUTATIONS = {
   // slider mutates `retime.rate` outside the transport's exclusive queue, so a
   // committed step 4 could hit it too - it is only far harder to reach without a
   // drag rewriting the curve on every pointer move.
-  'seek-plans-once': { file: 'web/main.js', edits: [[
-    `    let planned = this.planSeek(programSec, options.frames);
-    for (let attempt = 0; !this.source.resident(planned.from, planned.to); attempt++) {
-      if (attempt >= SEEK_REPLANS) {
-        // Overtaken, not broken. The hand that moved the curve has already queued a
-        // repaint, so this operation is stale before it finishes and the useful
-        // thing to do is stand down quietly rather than shout - a drag rewrites the
-        // curve on every pointer move, and an error per move is an instrument
-        // crying wolf at its own user. Asking for a repaint here is what makes the
-        // quiet safe: it guarantees a successor, so standing down costs a frame
-        // rather than leaving a stale image nobody could attribute to anything.
-        this.overtaken++;
+  'seek-plans-once': { file: 'web/main.js', edits: [
+    [`        this.overtaken++;
         if (this.overtaken > SEEK_OVERTAKEN_LIMIT) {
           this.overtaken = 0;
           throw new Error(
@@ -251,10 +241,16 @@ const MUTATIONS = {
       }
       await this.source.ensure(planned.from, planned.to);
       planned = this.planSeek(programSec, options.frames);
-    }`,
+    }
+`, ''],
+    [`    let planned = this.planSeek(programSec, options.frames);
+    for (let attempt = 0; !this.source.resident(planned.from, planned.to); attempt++) {
+      if (attempt >= SEEK_REPLANS) {
+`,
     `    const planned = this.planSeek(programSec, options.frames);
-    await this.source.ensure(planned.from, planned.to);`,
-  ]] },
+    await this.source.ensure(planned.from, planned.to);
+`],
+  ] },
   // The pre-roll goes back to reading the uniforms, which hold the look at wherever
   // the playhead was parked rather than the look at the target.
   // The surface half alone. It used to carry the trails half too, which made it two
