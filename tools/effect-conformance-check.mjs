@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-// The plugin contract, as an instrument: every installed effect, asked whether it is really absent when it is off. A build with sixteen effects installed
-// and every value at its default has to draw exactly what a build with none of them installed draws. Three renders per package - the defaults, the master
-// at zero with everything the manifest says it gates raised, and the package served hollow so it contributes no GLSL - must be the same image byte for
-// byte, and a fourth with the package's own parameters raised must differ, or an effect reaching no pixel would satisfy the equality perfectly. The
-// population comes off `GET /effects`, so a seventeenth package is asked by existing. Needs a running server and a GPU browser.
+// The plugin contract, as an instrument: every installed effect, asked whether it is really absent
+// when it is off. A build with sixteen effects installed and every value at its default has to draw
+// exactly what a build with none of them installed draws. Three renders per package - the defaults,
+// the master at zero with everything the manifest says it gates raised, and the package served
+// hollow so it contributes no GLSL - must be the same image byte for byte, and a fourth with the
+// package's own parameters raised must differ, or an effect reaching no pixel would satisfy the
+// equality perfectly. The population comes off `GET /effects`, so a seventeenth package is asked by
+// existing. Needs a running server and a GPU browser.
 
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,10 +21,13 @@ const URL_BASE = flag('--url', 'http://localhost:8080');
 const MUTATE = argv.includes('--mutate') ? flag('--mutate') : null;
 
 /**
- * `leaks-at-zero` is served rather than written: this tool runs `--url` against a server somebody else started, so there is no staged tree to edit and
- * editing the checkout would leave a mutated working tree behind any crash. A function rather than a `{ file, edits }` table, which is the shape
- * `syntax-check`'s anchor row recognises as redirecting the oracle - so the run itself asserts the served text changed. It reddens the third arm alone,
- * because `vRain` is computed under `rain > 0.0` and the sub-keys are genuinely dead at zero. That is the whole argument for having the third arm.
+ * `leaks-at-zero` is served rather than written: this tool runs `--url` against a server somebody
+ * else started, so there is no staged tree to edit and editing the checkout would leave a mutated
+ * working tree behind any crash. A function rather than a `{ file, edits }` table, which is the
+ * shape `syntax-check`'s anchor row recognises as redirecting the oracle - so the run itself
+ * asserts the served text changed. It reddens the third arm alone, because `vRain` is computed
+ * under `rain > 0.0` and the sub-keys are genuinely dead at zero. That is the whole argument for
+ * having the third arm.
  */
 const MUTATIONS = {
   'leaks-at-zero': (text, path) => (
@@ -41,7 +47,8 @@ let checked = 0;
 let failed = 0;
 let crashed = null;
 let untested = null;
-// Which effect each failed row belongs to: the claim of the method control is that a leak in one package reddens that package's rows and no other's, and a count cannot say that.
+// Which effect each failed row belongs to: the claim of the method control is that a leak in one
+// package reddens that package's rows and no other's, and a count cannot say that.
 const firedFor = new Map();
 const ok = (label, pass, detail = '', effect = null) => {
   checked++;
@@ -57,8 +64,9 @@ const DEPTH_H = 424;
 const POSITIONS = [0.15, 0.7, 1.3];
 
 /**
- * The frames every arm renders, planted here rather than taken off a capture. A leaning plane, so the picture has range in it: on a flat wall every
- * depth-keyed term writes the same value at every pixel, which two builds can agree about for reasons unrelated to the term being read.
+ * The frames every arm renders, planted here rather than taken off a capture. A leaning plane, so
+ * the picture has range in it: on a flat wall every depth-keyed term writes the same value at every
+ * pixel, which two builds can agree about for reasons unrelated to the term being read.
  */
 const pinnedBuffer = () => {
   const FRAMES = 8;
@@ -68,7 +76,9 @@ const pinnedBuffer = () => {
     const at = f * (16 + depthBytes);
     out.writeUInt32LE(depthBytes, at);
     out.writeUInt32LE(0, at + 4);
-    // 200ms apart, so the eight span 1.4 seconds and every position below sits inside the run. A pinned source clamps past its last stamp, so positions beyond the end are the same frame twice.
+    // 200ms apart, so the eight span 1.4 seconds and every position below sits inside the run. A
+    // pinned source clamps past its last stamp, so positions beyond the end are the
+    // same frame twice.
     out.writeBigUInt64LE(BigInt(f * 200), at + 8);
     for (let y = 0; y < DEPTH_H; y++) {
       for (let x = 0; x < DEPTH_W; x++) {
@@ -81,8 +91,10 @@ const pinnedBuffer = () => {
 };
 
 /**
- * A colour image with structure in it, for the terms that key on one. `drive.pin` switches colour off because a JPEG decode is asynchronous and a hash
- * across one would be a hash of whether it had landed yet; a flat grey would put four packages in a dead zone the vacuity guard would blame them for.
+ * A colour image with structure in it, for the terms that key on one. `drive.pin` switches colour
+ * off because a JPEG decode is asynchronous and a hash across one would be a hash of whether it had
+ * landed yet; a flat grey would put four packages in a dead zone the vacuity guard
+ * would blame them for.
  */
 const COLOR_W = 64;
 const COLOR_H = 48;
@@ -101,12 +113,9 @@ const plantedColour = () => {
 };
 
 /**
- * A value clearly off the default and inside the bounds: three quarters of the way to whichever end is further from the default. Not the bound itself -
- * several shipped bounds are degenerate on purpose, so a raise landing on one can be inert for a reason about the bound rather than about the parameter.
- */
-/**
- * A line of a package's own GLSL that nothing else in the build writes: the longest line of its chunks with the comments taken out. A package with no
- * chunks at all has no such line, and its rows say so rather than asserting against an empty string that every program contains.
+ * A line of a package's own GLSL that nothing else in the build writes: the longest line of its
+ * chunks with the comments taken out. A package with no chunks at all has no such line, and its
+ * rows say so rather than asserting against an empty string that every program contains.
  */
 const markerOf = (pkg) => {
   const lines = Object.values(pkg.chunks ?? {}).join('\n')
@@ -117,6 +126,12 @@ const markerOf = (pkg) => {
   return lines.sort((a, b) => b.length - a.length)[0] ?? null;
 };
 
+/**
+ * A value clearly off the default and inside the bounds: three quarters of the way to whichever end
+ * is further from the default. Not the bound itself - several shipped bounds are degenerate on
+ * purpose, so a raise landing on one can be inert for a reason about the bound rather than
+ * about the parameter.
+ */
 const raisedValue = (spec) => {
   if (typeof spec.default === 'boolean') return !spec.default;
   const far = (spec.default - spec.min) > (spec.max - spec.default) ? spec.min : spec.max;
@@ -127,7 +142,9 @@ console.log(`[conformance] ${MUTATE ? `MUTATED: ${MUTATE} (served, not written)`
 console.log(`[conformance] against ${URL_BASE}\n`);
 
 let browser = null;
-// Which package `/effects/:id` is answering hollow for, and the body it answers with. Module state rather than a closure argument: the one route handler installed below outlives every package it serves.
+// Which package `/effects/:id` is answering hollow for, and the body it answers with. Module state
+// rather than a closure argument: the one route handler installed below outlives every
+// package it serves.
 let hollowFor = null;
 let hollowBody = null;
 try {
@@ -139,7 +156,9 @@ try {
     throw new Error(untested);
   }
 
-  // The population, off the store rather than off the page: the question below is whether the page is assembled from what the server holds, and a list taken from the page would be the page agreeing with itself.
+  // The population, off the store rather than off the page: the question below is whether the page
+  // is assembled from what the server holds, and a list taken from the page would be the page
+  // agreeing with itself.
   const listed = await fetch(`${URL_BASE}/effects`);
   if (!listed.ok) throw new Error(`GET /effects answered ${listed.status} - there is no population to check`);
   const { effects } = await listed.json();
@@ -148,7 +167,8 @@ try {
     const res = await fetch(`${URL_BASE}/effects/${encodeURIComponent(id)}`);
     if (!res.ok) throw new Error(`GET /effects/${id} answered ${res.status}`);
     const pkg = await res.json();
-    // The chunk text as well as the manifest, because the marker below is a line of the package's own GLSL and the manifest only names the files.
+    // The chunk text as well as the manifest, because the marker below is a line of the package's
+    // own GLSL and the manifest only names the files.
     pkg.chunks = {};
     for (const name of [...new Set((pkg.manifest.chunks ?? []).map((c) => c.file))]) {
       const chunk = await fetch(`${URL_BASE}/effects/${encodeURIComponent(id)}/file/${encodeURIComponent(name)}`);
@@ -163,10 +183,13 @@ try {
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(m.text()); });
-  // No socket, so nothing overwrites the planted frames: a live sensor wipes a plant in well under a second.
+  // No socket, so nothing overwrites the planted frames: a live sensor wipes a plant in
+  // well under a second.
   await page.routeWebSocket(/.*/, () => {});
 
-  // Every chunk fetch goes through here whatever the mutation is, so the unmutated path and the mutated one differ in one function call rather than in whether an interception is installed at all.
+  // Every chunk fetch goes through here whatever the mutation is, so the unmutated path and the
+  // mutated one differ in one function call rather than in whether an interception is
+  // installed at all.
   let mutatedText = 0;
   await page.route((url) => /\/effects\/[^/]+\/file\//.test(url.pathname), async (route) => {
     const res = await route.fetch();
@@ -176,7 +199,9 @@ try {
     await route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: next });
   });
 
-  // One handler consulting a variable: which package is served hollow changes sixteen times in a run, and a route added and removed per package cannot be removed at all, because `page.unroute` matches the matcher by reference.
+  // One handler consulting a variable: which package is served hollow changes sixteen times in a
+  // run, and a route added and removed per package cannot be removed at all, because `page.unroute`
+  // matches the matcher by reference.
   await page.route((url) => /^\/effects\/[a-z][a-z0-9]*$/.test(url.pathname), async (route) => {
     const id = new URL(route.request().url()).pathname.split('/')[2];
     if (id !== hollowFor) return route.continue();
@@ -193,7 +218,9 @@ try {
   });
 
   if (MUTATE) {
-    // Before believing a mutation was missed, confirm it did something: a served mutation whose target text has moved changes nothing, and a run of it reports the check as having found nothing.
+    // Before believing a mutation was missed, confirm it did something: a served mutation whose
+    // target text has moved changes nothing, and a run of it reports the check as
+    // having found nothing.
     ok(`the ${MUTATE} mutation reached the text it is about`, mutatedText > 0,
       `${mutatedText} served chunk${mutatedText === 1 ? '' : 's'} rewritten`);
   }
@@ -211,8 +238,10 @@ try {
     { rgba: plantedColour(), w: COLOR_W, h: COLOR_H });
 
   /**
-   * One render of one look, hashed at three program positions. The camera is written every time because the arms that drop a package rebuild the whole
-   * page in between, and `drive.reset` rewinds the pinned source and clears both accumulators - which is what makes three renders comparable at all.
+   * One render of one look, hashed at three program positions. The camera is written every time
+   * because the arms that drop a package rebuild the whole page in between, and `drive.reset`
+   * rewinds the pinned source and clears both accumulators - which is what makes three renders
+   * comparable at all.
    */
   const renderLook = (values, positions) => page.evaluate(async ({ v, ts }) => {
     const k = globalThis.__kinect;
@@ -231,7 +260,9 @@ try {
       k.drive.stepTo(t);
       hashes.push(await sha256(k.drive.readPixels()));
     }
-    // What the registry actually stored, handed back with the hashes: an arm that asked for a raise and got a clamp renders the defaults and looks exactly like an effect that cannot move a pixel.
+    // What the registry actually stored, handed back with the hashes: an arm that asked for a raise
+    // and got a clamp renders the defaults and looks exactly like an effect that
+    // cannot move a pixel.
     return { hashes, stored: Object.fromEntries(Object.keys(v).map((n) => [n, k.params.get(n)])) };
   }, { v: values, ts: positions });
 
@@ -242,7 +273,8 @@ try {
   ok('the defaults render, and the three positions are three different images',
     new Set(defaults).size === POSITIONS.length, brief(defaults));
 
-  // Bounds off the page rather than off the manifests read above: asking the page is what makes a raise land inside the bounds the page will clamp it to.
+  // Bounds off the page rather than off the manifests read above: asking the page is what makes a
+  // raise land inside the bounds the page will clamp it to.
   const specs = await page.evaluate(() => Object.fromEntries(
     globalThis.__kinect.params.names('look').map((n) => [n, globalThis.__kinect.params.spec(n)]),
   ));
@@ -264,9 +296,11 @@ try {
 
     const mark = markerOf(pkg);
 
-    // Only the keys the manifest says the master gates, which is `under`. Raising every non-master parameter is wrong about one shipped package:
-    // `noise.region` declares no `under` because it is a second amplitude in the same namespace, and raising it under a master at zero correctly moves
-    // the picture. The parameters that are neither the master nor under it are named in the row's own detail rather than quietly skipped.
+    // Only the keys the manifest says the master gates, which is `under`. Raising every non-master
+    // parameter is wrong about one shipped package: `noise.region` declares no `under` because it
+    // is a second amplitude in the same namespace, and raising it under a master at zero correctly
+    // moves the picture. The parameters that are neither the master nor under it are named in the
+    // row's own detail rather than quietly skipped.
     const under = known.filter((n) => pkg.manifest.params[n.split('.').slice(1).join('.')].under === masterShort);
     const ungated = known.filter((n) => n !== master && !under.includes(n));
     const held = Object.fromEntries(under.map((n) => [n, raisedValue(specs[n])]));
@@ -278,9 +312,11 @@ try {
     same(atZero, defaults), `${same(atZero, defaults) ? brief(defaults) : `${brief(atZero)} against ${brief(defaults)}`}`
       + `${ungated.length ? ` - held at its default beside the master: ${ungated.join(', ')}` : ''}`, id);
 
-    // Served hollow rather than dropped from the list: the client's declaration order places every shipped parameter by name, so a package missing from
-    // the list is a registry that cannot assemble. What absent means for a shader is that the package contributes no GLSL - the chunks go and the services
-    // they consume go with them, while the parameters and varyings stay, pinned at the inert value the prologue writes.
+    // Served hollow rather than dropped from the list: the client's declaration order places every
+    // shipped parameter by name, so a package missing from the list is a registry that cannot
+    // assemble. What absent means for a shader is that the package contributes no GLSL - the chunks
+    // go and the services they consume go with them, while the parameters and varyings stay, pinned
+    // at the inert value the prologue writes.
     hollowFor = id;
     hollowBody = JSON.stringify({ ...pkg, manifest: { ...pkg.manifest, chunks: [], consumes: [] } });
     const rebuilt = await page.evaluate(async () => {
@@ -306,7 +342,9 @@ try {
 
     ok(`${id} can be taken out of the served set and put back, so the arm above is about a rebuild rather than a refusal`,
       rebuilt === null && back === null, [rebuilt, back].filter(Boolean).join(' | ') || 'both rebuilds ran', id);
-    // Assert against the program, not against the interception: a route that did not fire, a hollowing that did not hollow and an unroute that did not restore all render a picture equal to the defaults.
+    // Assert against the program, not against the interception: a route that did not fire, a
+    // hollowing that did not hollow and an unroute that did not restore all render a picture equal
+    // to the defaults.
     if (mark) {
       ok(`${id}'s own text really does leave the assembled program while it is hollow, and comes back after`,
         goneWhileHollow === true && backWhileWhole === true,
@@ -319,7 +357,9 @@ try {
 
     const raised = Object.fromEntries(known.map((n) => [n, raisedValue(specs[n])]));
     const { hashes: loud, stored } = await renderLook(raised, POSITIONS);
-    // The raise has to have landed before its picture means anything: a value the registry clamped, snapped away or refused renders the defaults, and a vacuity row reading only the picture would blame the effect.
+    // The raise has to have landed before its picture means anything: a value the registry clamped,
+    // snapped away or refused renders the defaults, and a vacuity row reading only the picture
+    // would blame the effect.
     const short = Object.keys(raised).filter((n) => Math.abs(stored[n] - raised[n]) > (specs[n].step ?? 0) + 1e-9);
     ok(`${id}'s raise reaches the registry, so the row under it is about the effect rather than about the raise`,
       short.length === 0,
@@ -359,7 +399,9 @@ if (untested) {
   console.log(`[conformance] UNTESTED - ${untested}.`);
   process.exit(2);
 }
-// The count decides before the crash does: a mutation that half-breaks a page takes the driver down with it, and reporting DID NOT RUN over rows that had already fired is a caught mutation recorded as a run that proved nothing.
+// The count decides before the crash does: a mutation that half-breaks a page takes the driver down
+// with it, and reporting DID NOT RUN over rows that had already fired is a caught mutation recorded
+// as a run that proved nothing.
 if (MUTATE && failed > 0) {
   console.log(`[conformance] caught, as required (${failed} assertion${failed === 1 ? '' : 's'} fired)`);
   if (crashed) console.log(`[conformance] and the run ended early: ${crashed.message.split('\n')[0]} - the count is a floor`);

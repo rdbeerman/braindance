@@ -532,7 +532,8 @@ const declarationsIn = (src, mask) => {
     if (out.has(name)) continue;
     let shape = 'behaviour';
     if (m[1]) {
-      // A declaration list with two declarators is classified by its first name, which over-reports.
+      // A declaration list with two declarators is classified by its first name,
+      // which over-reports.
       let i = m.index;
       let depth = 0;
       let eq = -1;
@@ -1411,8 +1412,8 @@ const useSurface = (key, src, spans) => {
 
 // A use is a hit in code position that is not a property key. String bodies survive the blanking,
 // so the mask is asked instead of the text. A property key is decided by its neighbours - `{` or
-// `,` before, `:` after - rather than by a lookahead, which called twelve live imports dead.
-// Still open is the method shorthand `{ poll(gl) { ... } }`, which a search cannot tell from a call.
+// `,` before, `:` after - rather than by a lookahead, which called twelve live imports dead. Still
+// open is the method shorthand `{ poll(gl) { ... } }`, which a search cannot tell from a call.
 const codeAt = (surface, i) => (i >= 0 && i < surface.text.length && surface.mask[i] === CODE);
 const nextCode = (surface, from, step) => {
   let i = from;

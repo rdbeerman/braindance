@@ -28,7 +28,8 @@ test('the runner reports a planted failure, so a green run here means something'
     let output = '';
     try {
         // The reporter is named because without a tty Node picks one that prints no test names,
-      // and the file rather than its directory because `node --test <dir>` discovers nothing on v26.
+      // and the file rather than its directory because `node --test <dir>`
+      // discovers nothing on v26.
       output = execFileSync(
         process.execPath,
         ['--test', '--test-reporter=spec', join(dir, 'planted.test.mjs')],

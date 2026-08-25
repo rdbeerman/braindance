@@ -58,7 +58,8 @@ ok('and it names min-release-age, which is the only key npm turns into a cutoff'
   // Matched on the setting rather than on the substring, or the detail column quotes a comment.
   (source ?? '').split('\n').find((l) => /^\s*min-release-age\s*=/.test(l)) ?? 'no such line');
 
-// Asked of npm rather than compared against a version number: `config ls -l` lists every key it knows.
+// Asked of npm rather than compared against a version number: `config ls -l` lists
+// every key it knows.
 const known = (() => {
   try {
     return /^\s*min-release-age\s*=/m.test(execFileSync('npm', ['config', 'ls', '-l', ...MASK],
@@ -90,7 +91,8 @@ function resolveUnderGate(from) {
   }
 }
 
-// A registry this cannot reach answers nothing about the gate, but npm rejecting the value is a finding.
+// A registry this cannot reach answers nothing about the gate, but npm rejecting the
+// value is a finding.
 const said = resolveUnderGate(cwd);
 const valueRejected = /invalid config|Invalid time value/i.test(said);
 if (!valueRejected && !/notarget|No matching version/i.test(said)) {
@@ -114,7 +116,8 @@ ok('and the cutoff is at least 48 hours back, which is the window a compromised 
 ok('and not so far back that ordinary dependency work is impossible, which is how a gate gets deleted instead of corrected',
   valid && hours <= 24 * 400, valid ? `${(hours / 24).toFixed(1)} days` : 'no cutoff');
 
-// The positive twin: without it a cutoff proves only that some gate exists somewhere on this machine.
+// The positive twin: without it a cutoff proves only that some gate exists somewhere
+// on this machine.
 const bare = join(scratch, 'bare');
 mkdirSync(bare, { recursive: true });
 const elsewhere = resolveUnderGate(bare);

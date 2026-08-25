@@ -19,7 +19,8 @@ const MUTATIONS = {
     edits: [['  std::string logLevel = "warning";', '  std::string logLevel = ;']],
   },
 
-  // A wrong argument type, because `-fsyntax-only` is a semantic pass and this is the row that says so.
+  // A wrong argument type, because `-fsyntax-only` is a semantic pass and this is the
+  // row that says so.
   'grabber-type-error': {
     file: 'native/grabber.cpp',
     edits: [['  HdEncoder hdEncoder(jpegQuality);', '  HdEncoder hdEncoder("high");']],
@@ -119,7 +120,8 @@ const writeConfig = (dir, features) => {
     + '#endif\n');
 };
 
-// A mutation is a literal substitution that has to match exactly once, and is refused loudly otherwise.
+// A mutation is a literal substitution that has to match exactly once, and is refused
+// loudly otherwise.
 const sourceFor = (rel) => {
   const original = readFileSync(join(REPO, rel), 'utf8');
   if (!MUTATE || MUTATIONS[MUTATE].file !== rel) return original;

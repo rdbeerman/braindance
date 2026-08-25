@@ -33,9 +33,8 @@ const TAKE = flag('--take', 'sample');
 const HEADED = argv.includes('--headed');
 const MUTATE = flag('--mutate');
 const NO_RENDER = argv.includes('--no-render');
-// The window every layout row is measured at. 1512 is the laptop this is documented to run on;
-// the other two are there because one width cannot tell a bar that fits from a bar that happens
-// to fit.
+// The window every layout row is measured at. 1512 is the laptop this is documented to run on; the
+// other two are there because one width cannot tell a bar that fits from a bar that happens to fit.
 const WIDTHS = [1512, 1280, 1100];
 const VIEWPORT = { width: 1512, height: 900 };
 
@@ -123,8 +122,8 @@ const MUTATIONS = {
   },
 
   // Must redden the two pre-roll rows and leave the space-bar rows above them green: the key was
-  // never the control that was wrong, and a build that had broken pausing at large would take
-  // those with it.
+  // never the control that was wrong, and a build that had broken pausing at large would
+  // take those with it.
   'play-button-skips-pausetransport': {
     file: 'web/main.js',
     edits: [[
@@ -134,8 +133,8 @@ const MUTATIONS = {
   },
 
   // Must redden the pending-play outcome row and leave the pending-window row above it green,
-  // because the mutated build still enters the pending state - what it loses is the press that
-  // ends it.
+  // because the mutated build still enters the pending state - what it loses is the
+  // press that ends it.
   'toggle-plays-over-a-pending-play': {
     file: 'web/main.js',
     edits: [[
@@ -154,8 +153,8 @@ const MUTATIONS = {
     ]],
   },
 
-  // Must redden the revert row and leave the row above it green, since the refusal itself is
-  // unchanged.
+  // Must redden the revert row and leave the row above it green, since the refusal
+  // itself is unchanged.
   'picker-keeps-a-refused-look': {
     file: 'web/main.js',
     edits: [["          showPickerChoice(picker, appliedPreset?.name ?? '');\n", '']],
@@ -198,8 +197,8 @@ const MUTATIONS = {
     ]],
   },
 
-  // Must redden the two pivot rows and leave `Default camera position reaches OrbitControls
-  // reset` green.
+  // Must redden the two pivot rows and leave `Default camera position reaches
+  // OrbitControls reset` green.
   'reset-forgets-the-pivot': {
     file: 'web/scene.js',
     edits: [
@@ -375,9 +374,9 @@ const MUTATIONS = {
     ]],
   },
 
-  // Must redden eight rack rows: fresh absence; the value and track leaving again; search and
-  // Add; focus after Add; confirmed removal making the row leave; and the final local-preference
-  // equality.
+  // Must redden eight rack rows: fresh absence; the value and track leaving again; search and Add;
+  // focus after Add; confirmed removal making the row leave; and the final
+  // local-preference equality.
   'effect-rack-shows-every-effect': {
     file: 'web/main.js',
     edits: [[
@@ -1428,16 +1427,15 @@ const DRIVER_RULES = [
     what: 'an application-bar command or navigation link',
     by: 'section 1 opens every menu, drives the commands that stay on this page, and '
       + 'asserts the two real navigation destinations in the markup',
-    // `#navRow` plus a menu wrapper, not `#appBar`: written as the container this rule covered
-    // any button the bar grew, and `plant-unswept-control` passed while planting one beside
-    // `#tNote`.
+    // `#navRow` plus a menu wrapper, not `#appBar`: written as the container this rule covered any
+    // button the bar grew, and `plant-unswept-control` passed while planting one beside `#tNote`.
     match: (row) => inGroup(row, '#navRow') && (inGroup(row, '.appmenu') || row.tag === 'A'),
   },
   {
     key: 'preset',
     what: 'an entry, its delete, or the add button inside the preset picker',
-    // Before the panel-wide rule below it, because that one is the widest and ordering is
-    // precedence.
+    // Before the panel-wide rule below it, because that one is the widest and
+    // ordering is precedence.
     by: 'section 19 opens the picker, walks it with the keyboard, applies an entry, '
       + 'and deletes one and reads where the caret went',
     match: (row) => inGroup(row, '#lookPresetGroup')
@@ -1511,9 +1509,8 @@ const DRIVER_IDS = {
 const { chromium } = await loadPlaywright();
 
 /**
- * Which file each surface this tool opens is served from. An identity test rather than a
- * rule about a suffix, which would hand `web/menu.html`'s bytes over as the editor's own
- * document.
+ * Which file each surface this tool opens is served from. An identity test rather than a rule about
+ * a suffix, which would hand `web/menu.html`'s bytes over as the editor's own document.
  */
 const SURFACE_DOCUMENTS = {
   '/edit': 'web/index.html',
@@ -1521,10 +1518,9 @@ const SURFACE_DOCUMENTS = {
 };
 
 /**
- * Where the file a mutation names is asked for by a page opened at `documentPath`, and what
- * it is handed back as. Matched on the whole pathname rather than on the basename, because
- * two modules can end in the same name and the wrong one would be served without anything
- * failing.
+ * Where the file a mutation names is asked for by a page opened at `documentPath`, and what it is
+ * handed back as. Matched on the whole pathname rather than on the basename, because two modules
+ * can end in the same name and the wrong one would be served without anything failing.
  */
 function servedAt(file, documentPath) {
   if (file === SURFACE_DOCUMENTS[documentPath]) {
@@ -1553,10 +1549,9 @@ if (MUTATE) {
 }
 
 /**
- * Install the active mutation on one page, and hand back the count of times that page
- * actually asked for it. Keyed on the file the spec names rather than filtered against a
- * list of known files, and one helper for both surfaces, because `page.route` is installed
- * per page.
+ * Install the active mutation on one page, and hand back the count of times that page actually
+ * asked for it. Keyed on the file the spec names rather than filtered against a list of known
+ * files, and one helper for both surfaces, because `page.route` is installed per page.
  */
 async function serveMutation(page, documentPath) {
   if (!mutation) return { path: null, served: () => 0 };
@@ -1588,9 +1583,8 @@ const PICKER_STUB = `(() => {
 })()`;
 
 async function openEditor() {
-  // Local Network Access is off because serving the document through `route.fulfill` puts the
-  // page in a context Chromium treats as external, and its socket back to localhost is then
-  // refused.
+  // Local Network Access is off because serving the document through `route.fulfill` puts the page
+  // in a context Chromium treats as external, and its socket back to localhost is then refused.
   const browser = await chromium.launch({
     channel: 'chromium',
     headless: !HEADED,
@@ -1623,8 +1617,8 @@ async function openEditor() {
   // through `openTake`, and the marks, the library listings and the crop fit all land after it.
   await waitFor('globalThis.__kinect.takeOpened()', 'the take opened but never finished opening');
   // Gated on a mutation having been asked for rather than on a body this file recognised: a guard
-  // keyed on the same file name the route was selected by cannot fire for the file that selected
-  // no route.
+  // keyed on the same file name the route was selected by cannot fire for the file that
+  // selected no route.
   if (MUTATE && mutant.served() === 0) {
     throw new Error(`${MUTATE} was staged for ${mutation.file} at ${mutant.path} and the page never `
       + "requested it, so every row below would have measured the tree's own build");
@@ -2015,8 +2009,8 @@ try {
     'and the missing effect staged for that sweep is off the page again, so no later section serialises it',
     'nothing parked');
   // Counted over the panel rather than over the sweep - the subset dialog put 68 more controls in
-  // reach of the same selector, so a floor on the sweep would pass a build whose panel had gone
-  // entirely.
+  // reach of the same selector, so a floor on the sweep would pass a build whose panel
+  // had gone entirely.
   const inPanel = sweep.filter((r) => r.groups.includes('#panel')).length;
   check(inPanel > 60, 'and the sweep found the panel, not an empty page',
     `${inPanel} of ${sweep.length} controls are the panel's`);
@@ -2241,8 +2235,8 @@ try {
         : drift.map((d) => `${d.asked} -> ${d.codec}`).join(', '));
 
   // The other door: the deliverable is also reached by a project file, by the autosave and by the
-  // picker, so a control painted from its own clicks is silently wrong for every other way the
-  // document moves.
+  // picker, so a control painted from its own clicks is silently wrong for every other way
+  // the document moves.
     const codecDoor = `ec${process.pid}-codec`;
     const doorCodec = offered.find((codec) => codec !== afterPress.codec);
     const doorBody = JSON.stringify({ ...liveDeliverable, name: codecDoor, codec: doorCodec });
@@ -2567,9 +2561,8 @@ try {
     'Default camera position reaches OrbitControls reset', `${cameraBefore.join(',')} -> ${cameraReset.join(',')}`);
 
   // And the pivot, which the row above cannot see: `OrbitControls` captures `target0` in its
-  // constructor and `buildControls` copies the target in afterwards, so the home aim can be a
-  // fresh `(0, 0, 0)` while the cloud sits at `(0, 0, -2.2)` and the position alone still reads
-  // restored.
+  // constructor and `buildControls` copies the target in afterwards, so the home aim can be a fresh
+  // `(0, 0, 0)` while the cloud sits at `(0, 0, -2.2)` and the position alone still reads restored.
   const pivot = await page.evaluate('__kinect.controls.target.toArray()');
   check(Math.hypot(pivot[0] - 0, pivot[1] - 0, pivot[2] - (-2.2)) < 1e-6,
     '  and the orbit pivot comes back with it, rather than the world origin the constructor captured before the target was written',
@@ -2605,8 +2598,7 @@ try {
 
   // Read back through `controls.enabled` rather than through the attribute that was just written:
   // `setViewCamera` switches the orbit off while the program camera is on screen, so a build that
-  // moved `aria-pressed` and left the view where it was would satisfy the attribute and fail
-  // this.
+  // moved `aria-pressed` and left the view where it was would satisfy the attribute and fail this.
   const orbitBefore = await page.evaluate('__kinect.controls.enabled');
   await page.locator('#tCamView').click();
   const looking = await page.evaluate(`(() => ({
@@ -2735,8 +2727,8 @@ try {
   await settle();
   // The window is found rather than timed, because timing it missed: measured on this rig with
   // `fixture-1g` the transport reports `playing` at 71ms and the clip first moves at 92ms, so the
-  // window is about twenty milliseconds wide and a 60ms wait in the driver passed on the mutated
-  // build.
+  // window is about twenty milliseconds wide and a 60ms wait in the driver passed on
+  // the mutated build.
   const pressedInPreRoll = await page.evaluate(`(async () => {
     const t = __kinect.timeline.transport();
     const button = document.getElementById('tPlay');
@@ -3122,9 +3114,8 @@ try {
   // ------------------------------- and the rest of the strip, which held the same bug longer
   const STRIP = () => {
     // Every read goes through a guard, because `lanes-clear-siblings` takes the shades with the
-    // markers and an unguarded `.style` here throws inside a `page.evaluate` two sections after
-    // the mutation was already caught - exit 2 as DID NOT RUN, with its correct red rows
-    // discarded.
+    // markers and an unguarded `.style` here throws inside a `page.evaluate` two sections after the
+    // mutation was already caught - exit 2 as DID NOT RUN, with its correct red rows discarded.
     const left = (sel) => { const el = document.querySelector(sel); return el ? el.style.left : null; };
     const box = (sel) => {
       const el = document.querySelector(sel);
@@ -3275,8 +3266,8 @@ try {
     `landed at ${outOfBand}`);
 
   // A detent is for a value you are aiming at, not one you already had: a project can carry 1.02x
-  // and the first small input in the same neighbourhood came through the band and returned
-  // exactly 1.00.
+  // and the first small input in the same neighbourhood came through the band and
+  // returned exactly 1.00.
   const nudged = await page.evaluate(`(async () => {
     __kinect.keyframes.setRetime({ rate: 1.02, keys: [] });
     await __kinect.timeline.settled();
@@ -3691,8 +3682,8 @@ try {
     `first-out ${JSON.stringify(pairFirst.easeOut)}, last-in ${JSON.stringify(pairLast.easeIn)}`);
 
   // `assertMonotonic` argues that a handle anywhere in the unit box cannot run source time
-  // backwards, and that argument is about a cubic - a quintic with ordinates 0,1,0,1,0,1
-  // oscillates.
+  // backwards, and that argument is about a cubic - a quintic with ordinates
+  // 0,1,0,1,0,1 oscillates.
   await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [
     { t: 0, value: 0 }, { t: 6, value: 4 }, { t: 12, value: 11 } ] })`);
   await page.evaluate(`__kinect.editor.select('retime', 1)`);
@@ -4314,8 +4305,7 @@ try {
       : `${occupied.length} band(s) with content - nothing below can be measured`);
   // And where to put the plane, asked of the capture as well: on a room whose near content stops
   // short of it, the near arm reports its own content edge and the far arm reports a real cut, so
-  // the comparison comes out backwards while both numbers are honest readings of different
-  // things.
+  // the comparison comes out backwards while both numbers are honest readings of different things.
   const openEdge = [];
   for (const { near, far } of slabs) {
     await setCrop({ ...CROP_OPEN, near, far });
@@ -4409,8 +4399,8 @@ try {
     // ....  what this section deliberately does not test, because there is nothing there
     // The fit was written behind a gate asking whether the document had authored its four faces,
     // and the condition was false on every path that could reach it - `--mutate
-    // fit-overwrites-an-authored-box` removed the gate and came back NOT CAUGHT with every row
-    // green.
+    // fit-overwrites-an-authored-box` removed the gate and came back NOT CAUGHT with
+    // every row green.
     const PLANTED = '__editor-check-crop__';
     const planted = await fresh.page.evaluate(`(() => {
       const k = globalThis.__kinect;
@@ -4518,8 +4508,8 @@ try {
       const keyedAt = (await read()).programSec;
       const keyed = await page.evaluate(
         `__kinect.keyframes.valueAt('camera', ${keyedAt}).position`);
-      // Closed the instant the click is in. Left open it outlasts `settled()`'s two hundred turns and
-      // every row below fails as a timeout.
+      // Closed the instant the click is in. Left open it outlasts `settled()`'s two hundred turns
+      // and every row below fails as a timeout.
       await page.evaluate(`__kinect.controls.dampingFactor = ${dampingShipped}`);
       await settle();
       const poseRested = await poseOf();
@@ -4862,8 +4852,8 @@ try {
     await page.mouse.move(stage.x + 70, stage.y + 35);
     // The pointer stays down, and that is what makes this row deterministic rather than merely
     // likely: the handler admits both halves of the window through one guard, and driven through
-    // the release `orbitSettling` is cleared by the loop's settle branch the moment a frame finds
-    // nothing armed.
+    // the release `orbitSettling` is cleared by the loop's settle branch the moment a frame
+    // finds nothing armed.
     const landings = [];
     let midSettle = null;
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -4913,8 +4903,8 @@ try {
     `${win.startSec.toFixed(2)}s..${win.endSec.toFixed(2)}s of ${win.duration.toFixed(2)}s`);
 
   // Both directions are read off the page rather than one being recomputed here, because a check
-  // that reimplemented `pct` to test `secAtPct` would be comparing this file's arithmetic against
-  // itself.
+  // that reimplemented `pct` to test `secAtPct` would be comparing this file's
+  // arithmetic against itself.
   const roundTrip = await page.evaluate(`(() => {
     const out = [];
     for (const p of [0, 12.5, 50, 87.5, 100]) {
@@ -4977,9 +4967,9 @@ try {
     'the overview draws the window on the whole clip, which is what says where you are',
     `box at ${box.left} wide ${box.width}`);
 
-  // And it is driven, not merely drawn: the row above reads DOM state after no interaction at
-  // all, so a build whose pointerdown handler never fires would paint that box correctly forever
-  // and pass it.
+  // And it is driven, not merely drawn: the row above reads DOM state after no interaction at all,
+  // so a build whose pointerdown handler never fires would paint that box correctly
+  // forever and pass it.
   const miniBox = await page.locator('#tMini').boundingBox();
   const dragMini = async (fromF, toF, target) => {
     await page.evaluate('__kinect.editor.view.set(0.30, 0.42)');
@@ -5044,8 +5034,7 @@ try {
   }
 
   // The overview's own wheel is a different mapping rather than the same handler on a second
-  // element: an x on the ruler is a position in the window and an x here is a position in the
-  // clip.
+  // element: an x on the ruler is a position in the window and an x here is a position in the clip.
   await page.evaluate('__kinect.editor.view.set(0.2, 0.8)');
   await settle();
   const miniWheelBox = await page.locator('#tMini').boundingBox();
@@ -5262,8 +5251,8 @@ try {
   const LANED = ['bloom', 'grain.amount', 'raster.amount', 'rgbsplit.amount', 'glitch.amount', 'trails', 'rim',
     'thermal.amount', 'edges.amount', 'scan', 'noise.amount', 'denoise', 'exposure'];
   // The value each key holds is asked of the registry rather than assumed, because `denoise` is a
-  // step parameter and a key holding 0.2 makes `normalise` throw the moment anything evaluates
-  // the track.
+  // step parameter and a key holding 0.2 makes `normalise` throw the moment anything
+  // evaluates the track.
   const plantLanes = () => page.evaluate(`(() => {
     const spec = {};
     for (const n of ${JSON.stringify(LANED)}) {
@@ -5310,10 +5299,9 @@ try {
     '  and the rail follows them, or every lane would be labelled with its neighbour',
     `lanes at ${scrolled.scrollTop}px, rail at ${scrolled.railScrollTop}px`);
 
-  // And the other way into the same scroller, which the wheel rows cannot speak for: a lane
-  // covers its row and declared `touch-action: none`, so on a touchscreen the browser could not
-  // pan the stack and the delegated pointer handler returns on anything that is not a key or a
-  // handle.
+  // And the other way into the same scroller, which the wheel rows cannot speak for: a lane covers
+  // its row and declared `touch-action: none`, so on a touchscreen the browser could not pan the
+  // stack and the delegated pointer handler returns on anything that is not a key or a handle.
   await page.evaluate(`__kinect.editor.select('bloom', 0)`);
   await settle();
   const touch = await page.evaluate(`(() => {
@@ -5482,11 +5470,10 @@ try {
   try {
     const known = { bloom: 2.75, 'grain.amount': 0.66, readBlackwall: 1, readRgb: 0 };
     await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(known)})`);
-    // Moved again after the apply and never saved, which is what makes the row below able to
-    // fail: `exportPresetFile` takes its name from the picker and its values from the live look,
-    // and a build exporting the picker's document instead of the screen would write a file
-    // containing `known` and pass. 3.9 exists in neither the picker's document nor any shipped
-    // look.
+    // Moved again after the apply and never saved, which is what makes the row below able to fail:
+    // `exportPresetFile` takes its name from the picker and its values from the live look, and a
+    // build exporting the picker's document instead of the screen would write a file containing
+    // `known` and pass. 3.9 exists in neither the picker's document nor any shipped look.
     const onlyOnScreen = 3.9;
     await page.evaluate(`globalThis.__kinect.params.set('bloom', ${onlyOnScreen})`);
     await settle();
@@ -5788,8 +5775,8 @@ try {
         'and the caret is back on the control that opened the dialog rather than on the body the disable dropped it to',
         `focus is on ${JSON.stringify(done.focus)}`);
     } finally {
-      // Unrouted whatever happened above, because a parked PUT handler left installed would hold the
-      // first write of every row after this one.
+      // Unrouted whatever happened above, because a parked PUT handler left installed would hold
+      // the first write of every row after this one.
       releasePut();
       await page.unroute('**/presets/**', holdPut);
     }
@@ -5908,8 +5895,8 @@ try {
       `picker read ${JSON.stringify(pickedBefore)} before, ${JSON.stringify(pickedAfter)} after, `
       + `clip on ${JSON.stringify(appliedAfter?.name ?? null)}`);
   } finally {
-    // In a `finally` rather than after the last row, because a section that threw is exactly when the
-    // library is most likely to be left with a fixture in it.
+    // In a `finally` rather than after the last row, because a section that threw is exactly when
+    // the library is most likely to be left with a fixture in it.
     await cleanupPresets();
   }
 
@@ -5943,10 +5930,10 @@ try {
     };
 
     // ---- what a fresh open of this take actually gives
-    // The documents below have to differ from the clip a fresh open produces, and building them
-    // by toggling `outputSize` on whatever twelve sections of edits had left on screen lands on
-    // the fresh value roughly half the time - which turns the offer's silence into a pass for the
-    // wrong reason.
+    // The documents below have to differ from the clip a fresh open produces, and building them by
+    // toggling `outputSize` on whatever twelve sections of edits had left on screen lands on the
+    // fresh value roughly half the time - which turns the offer's silence into a pass for
+    // the wrong reason.
     await dropDoc(WORKING);
     await reopen();
     const fresh = await page.evaluate('__kinect.keyframes.project()');
@@ -5993,8 +5980,8 @@ try {
       'a working document stamped with this take\'s hash is offered back when it differs from the clip on screen',
       `chip ${offered.shown ? 'shown' : 'hidden'}, "${offered.when}"`);
     // Asked of the list rather than of the chip: read off the chip it would pass on a hidden one,
-    // which is the answer a red row above produces, so it would agree with any failure instead of
-    // ruling one out.
+    // which is the answer a red row above produces, so it would agree with any failure instead
+    // of ruling one out.
     const listedWorking = await page.evaluate(`(async () => {
       const list = (await (await fetch('/projects')).json()).projects ?? [];
       const w = list.find((d) => d.name === '${WORKING}');
@@ -6317,8 +6304,8 @@ try {
       `outside ${trim.outside.toFixed(2)}s | in ${trimmed.in?.toFixed(2)}s | park ${trim.park.toFixed(2)}s`
       + ` | inside ${trim.inside.toFixed(2)}s | out ${trimmed.out?.toFixed(2)}s, ${marksNow} ticks`);
     // Both ticks are hit-tested before anything below aims at one: `locator.click` waits for the
-    // element to become clickable, retries for thirty seconds and then takes the whole run down
-    // as DID NOT RUN.
+    // element to become clickable, retries for thirty seconds and then takes the whole run
+    // down as DID NOT RUN.
     const tickCover = await page.evaluate(`(() => {
       return [...document.querySelectorAll('#tMarks .tmk')].map((tick) => {
         const r = tick.getBoundingClientRect();
@@ -6432,14 +6419,14 @@ try {
     // ---- a take that fails to open must not be able to spend the recovery slot
     // The one door into `__working__` that is not an edit, and it is open on a page that is
     // deliberately still standing: `openTake` throws on a take this build refuses, the page stays
-    // up to say why, and `history.baseline` is still null because `begin()` is the last thing the
-    // open does.
+    // up to say why, and `history.baseline` is still null because `begin()` is the last
+    // thing the open does.
     await putDoc(WORKING, workingBody({ id: openId, hash: openHash }, false));
     const slotBefore = await (await fetch(`${URL_BASE}/projects/${WORKING}`)).json();
     await page.goto(`${URL_BASE}${EDITOR_PATH}?take=take-that-does-not-exist`, { waitUntil: 'load' });
     // Waited for by the state that decides, not by a timeout: the open has to have got far enough
-    // to have failed, and `takeOpened` reading false on a page that has not started yet is the
-    // same false.
+    // to have failed, and `takeOpened` reading false on a page that has not started yet
+    // is the same false.
     await page.waitForFunction(
       "document.getElementById('tNote')?.textContent?.includes('take-that-does-not-exist')",
       null, { timeout: 30000 }).catch(() => {});
@@ -6461,8 +6448,8 @@ try {
       `panel ${failedOpen.panel}, crop ${JSON.stringify(failedOpen.crop)}`);
 
     await page.click('#crop');
-    // The auto-save is fire-and-forget, so the write it would make is a round trip away from the
-    // press.
+    // The auto-save is fire-and-forget, so the write it would make is a round trip
+    // away from the press.
     const slotAfter = await page.evaluate(`(async () => {
       for (let i = 0; i < 40; i++) {
         const res = await fetch('/projects/${WORKING}');
@@ -6590,8 +6577,9 @@ try {
   // for its throw-on-unknown side effect and discarded the spec it got back.
   {
     const original = await page.evaluate('JSON.stringify(__kinect.library.serialiseProjectBody())');
-    // The keys are a parameter rather than a literal because the shape that walked past both refusals
-    // is an empty track, and a helper that can only plant a populated one cannot ask about it.
+    // The keys are a parameter rather than a literal because the shape that walked past both
+    // refusals is an empty track, and a helper that can only plant a populated one
+    // cannot ask about it.
     const handTo = (name, keys = [{ t: 0, value: 100 }, { t: 4, value: 140 }]) => page.evaluate(`(() => {
       const body = JSON.parse(${JSON.stringify(original)});
       body.look.tracks[${JSON.stringify(name)}] = ${JSON.stringify(keys)};
@@ -6612,8 +6600,8 @@ try {
     // The same document with no keys in it, which is the shape that walked past both refusals:
     // `restoreProject` skipped an empty track before it asked the two questions, and
     // `serialiseProjectBody` filters the entry back out on the next commit - so the document
-    // stopped saying what it said when it was opened, through the one shape with no edit in it to
-    // notice missing.
+    // stopped saying what it said when it was opened, through the one shape with no edit in it
+    // to notice missing.
     const emptyView = await handTo('renderScale', []);
     check(emptyView.threw && /view/.test(emptyView.message ?? ''),
       '  and an empty track on a view parameter is refused too, rather than skipped for being cheap to skip',
@@ -6792,8 +6780,8 @@ try {
     const released = await page.evaluate(`document.querySelector('#tMissing button[data-suppress="sparkle"]').getAttribute('aria-pressed')`);
     check(released === 'false', '  and pressing it again requires the effect back', String(released));
 
-    // Asserted rather than assumed: every section below serialises whatever the page is holding, and
-    // a pool left behind would put a `requires` entry into each of those documents.
+    // Asserted rather than assumed: every section below serialises whatever the page is holding,
+    // and a pool left behind would put a `requires` entry into each of those documents.
     await page.evaluate(`__kinect.library.restoreProject(JSON.parse(${JSON.stringify(original)}))`);
     await settle();
     const after = await page.evaluate(`(() => ({
@@ -6808,8 +6796,8 @@ try {
   console.log('\n[16] which panel groups are open is derived, and only disagreements are stored');
 
   // The claim is that no group carries a stored open/closed state: it is open when the document
-  // holds evidence that somebody has been inside it, with a person's disagreement the only thing
-  // written down.
+  // holds evidence that somebody has been inside it, with a person's disagreement the only
+  // thing written down.
   {
     const GROUP_STATE = `(() => {
       const vis = (el) => Boolean(el) && el.checkVisibility({ checkVisibilityCSS: true });
@@ -6839,8 +6827,9 @@ try {
       return groupOf(key);
     };
     const stored = () => page.evaluate("localStorage.getItem('kinect.panelGroupsOpen')");
-    // Back to a document nobody has touched. `params.reset` over the look tag is what `restoreProject`
-    // itself uses, so this is the state a fresh project arrives in rather than an approximation.
+    // Back to a document nobody has touched. `params.reset` over the look tag is what
+    // `restoreProject` itself uses, so this is the state a fresh project arrives in rather than
+    // an approximation.
     const freshLook = async () => {
       await page.evaluate("__kinect.keyframes.setTracks({})");
       await page.evaluate("__kinect.params.reset(__kinect.params.names('look'))");
@@ -6946,8 +6935,8 @@ try {
 
     // ---- 15e. a shut group that is in use says so
     // Pressed rather than assumed shut, because the state it starts in is exactly what
-    // `group-never-reveals` changes: on that build every group is already shut and a blind press
-    // would open one.
+    // `group-never-reveals` changes: on that build every group is already shut and a blind
+    // press would open one.
     await freshLook();
     await page.evaluate("__kinect.params.set('bloom', 1.5)");
     await settle();
@@ -7240,8 +7229,8 @@ try {
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return globalThis.__kinect.params.get(${JSON.stringify(name)});
     })()`);
-    // One step off the default, taken off the registry's own grid rather than chosen, so this cannot
-    // become a write of the value that was already there.
+    // One step off the default, taken off the registry's own grid rather than chosen, so this
+    // cannot become a write of the value that was already there.
     const oneStepOff = (name) => page.evaluate(`(() => {
       const k = globalThis.__kinect;
       const spec = k.params.spec(${JSON.stringify(name)});
@@ -7483,8 +7472,8 @@ try {
     check(openedBy.offered === 'yes' && opticalOpen,
       'a value moved into a collapsible group opens it and offers the reset, or the three rows below test nothing',
       `bloom offered=${openedBy.offered}, ${bloomGroup} open=${opticalOpen}`);
-    // Conditional for the reason `armReset` above is bounded: a press into a control the build is not
-    // offering is a thirty-second timeout rather than a finding.
+    // Conditional for the reason `armReset` above is bounded: a press into a control the build is
+    // not offering is a thirty-second timeout rather than a finding.
     if (openedBy.offered === 'yes') await page.click('.reset[data-reset=bloom]');
     await settle();
     const bloomDefault = await page.evaluate(
@@ -7561,8 +7550,8 @@ try {
       `prev disabled ${atHead.prev}, next disabled ${atHead.next}`);
 
     // Read before pressing, and fail the row rather than driving a control that is not there: an
-    // unguarded `click` on a disabled button waits out its full timeout and ends the run as a
-    // crash.
+    // unguarded `click` on a disabled button waits out its full timeout and ends
+    // the run as a crash.
     const walk = async (button, want, label) => {
       const before = await navState();
       const armed = button === '#tNextKey' ? !before.next : !before.prev;
@@ -7677,8 +7666,8 @@ try {
     const planted = await shape();
     // The list is the shipped looks, whatever has been saved, and the `none` row at the top - an
     // entry with no name and no file behind it, so it is neither shipped nor deletable and a rule
-    // reading "everything but the planted one is builtin" counts it as a shipped look that lost
-    // its badge.
+    // reading "everything but the planted one is builtin" counts it as a shipped look
+    // that lost its badge.
     const named = planted.names.filter((n) => n !== '');
     check(planted.names.includes(PLANTED) && planted.deletable.join(',') === PLANTED
       && planted.builtin.length === named.length - 1,
@@ -7737,10 +7726,10 @@ try {
     })()`);
     await settle();
 
-    // Which faces can be dragged is a measurement, not a list, and the two views disagreeing
-    // about it is the evidence: a face pointing along the line of sight projects its own movement
-    // onto nothing, which is why the top-down offers the four upright faces and refuses `bottom`
-    // and `top`.
+    // Which faces can be dragged is a measurement, not a list, and the two views disagreeing about
+    // it is the evidence: a face pointing along the line of sight projects its own movement onto
+    // nothing, which is why the top-down offers the four upright faces and refuses
+    // `bottom` and `top`.
     const planHandles = await handles(true);
     const planNames = planHandles.map((h) => h.param).sort();
     check(!planNames.includes('bottom') && !planNames.includes('top')
@@ -7800,8 +7789,8 @@ try {
       }
       const during = await page.evaluate("__kinect.params.get('right')");
       const shownDuring = await page.evaluate("document.getElementById('right').value");
-      // Read at the release rather than after `settle()`, which drains an accurate seek and renders a
-      // pre-roll nobody asked this row about.
+      // Read at the release rather than after `settle()`, which drains an accurate seek and renders
+      // a pre-roll nobody asked this row about.
       const after = await page.evaluate(
         '({ renders: __kinect.timeline.counters.renders, frames: globalThis.__cropFrames })');
       await page.mouse.up();
@@ -7828,8 +7817,8 @@ try {
       await page.evaluate("__kinect.params.set('right', 0.8)");
 
       // A handler that rendered would be asking for the next render itself: `renderProgramFrame`
-      // runs `advanceNavigation`, which calls `controls.update()`, which fires `change` on a
-      // damped control.
+      // runs `advanceNavigation`, which calls `controls.update()`, which fires `change` on
+      // a damped control.
       const renders = after.renders - before.renders;
       const frames = after.frames - before.frames;
       note(`${MOVES} pointer moves on a crop handle`,
@@ -7952,9 +7941,8 @@ try {
     check(shut.canvasBottom === shut.timeline.top,
       'and the picture runs down to the timeline strip, taking back the height a dock would have occupied',
       `canvas bottom ${shut.canvasBottom}, strip top ${shut.timeline.top}`);
-    // The collapsed panel's own box, which is the cascade rather than the arithmetic: the panel
-    // and the strip are both `position: fixed` at the same `z-index`, so the one written later
-    // wins.
+    // The collapsed panel's own box, which is the cascade rather than the arithmetic: the panel and
+    // the strip are both `position: fixed` at the same `z-index`, so the one written later wins.
     check(shut.panel.bottom === shut.timeline.top,
       'the collapsed panel stops exactly where the timeline strip starts rather than over it',
       `panel bottom ${shut.panel.bottom}, strip top ${shut.timeline.top}`);
@@ -8060,8 +8048,8 @@ try {
         };
 
         if (!onTop.own) {
-          // Skipped rather than attempted, and said out loud: a `click()` on a covered element retries for
-          // thirty seconds and then throws, which ends the file as a crash.
+          // Skipped rather than attempted, and said out loud: a `click()` on a covered element
+          // retries for thirty seconds and then throws, which ends the file as a crash.
           note('the two pose comparisons did not run, nor the row that separates them',
             'nothing can press a dock that whatever is over it is taking the presses for - '
             + 'three rows short, and the row above carries what this build is');
@@ -8096,8 +8084,8 @@ try {
             `dock ${sensorByDock.join(', ')} against panel ${sensorByPanel.join(', ')}`);
         }
       } finally {
-        // Closed before the editor is put back, so the last gesture of this section goes to the page
-        // section 22 inherits and nothing is left holding a socket on the shooting server.
+        // Closed before the editor is put back, so the last gesture of this section goes to the
+        // page section 22 inherits and nothing is left holding a socket on the shooting server.
         await recorder.close().catch(() => {});
       }
     }

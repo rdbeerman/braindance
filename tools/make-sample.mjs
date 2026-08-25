@@ -1,11 +1,14 @@
 #!/usr/bin/env node
-// A capture, synthesised, so a clone with no Kinect can run the suite. Written to the shape of the capture this repo actually holds: a nine-key hello with no
-// `format` (so it is a generation-zero take) and no `startedAt` (so `describeTake` dates it by mtime), and a real JPEG in every frame, because the decimation
-// row needs the colour block to be more than 35% of a divisor-4 message. The depth is synthesised geometry rather than noise - a back wall, a floor, a sphere
-// crossing the frame, and a band of zeroes, since `0 = no reading` is a value every reader has to handle. It is written mirrored, because the wire format is.
+// A capture, synthesised, so a clone with no Kinect can run the suite. Written to the shape of the
+// capture this repo actually holds: a nine-key hello with no `format` (so it is a generation-zero
+// take) and no `startedAt` (so `describeTake` dates it by mtime), and a real JPEG in every frame,
+// because the decimation row needs the colour block to be more than 35% of a divisor-4 message. The
+// depth is synthesised geometry rather than noise - a back wall, a floor, a sphere crossing the
+// frame, and a band of zeroes, since `0 = no reading` is a value every reader has to handle. It is
+// written mirrored, because the wire format is.
 //
-// It is a stand-in rather than footage: no depth jitter, no confidence gate chattering, no dropped frames, no colour camera halving its rate. Say which sample
-// a number came from.
+// It is a stand-in rather than footage: no depth jitter, no confidence gate chattering, no dropped
+// frames, no colour camera halving its rate. Say which sample a number came from.
 
 import { createWriteStream, existsSync, renameSync, rmSync, statSync } from 'node:fs';
 import { encodeMessage, TYPE_HELLO, TYPE_FRAME } from '../server/protocol.js';
@@ -13,8 +16,10 @@ import { DEPTH_W, DEPTH_H } from '../web/format.js';
 
 const argv = process.argv.slice(2);
 
-// The option names are a table rather than string literals scattered down the file: `--framse 10` put `10` into the positional list, left `--frames` on its
-// default and wrote a perfectly valid capture nobody asked for, which `--if-missing` then kept forever. Splitting the two kinds also keeps the positional count honest.
+// The option names are a table rather than string literals scattered down the file: `--framse 10`
+// put `10` into the positional list, left `--frames` on its default and wrote a perfectly valid
+// capture nobody asked for, which `--if-missing` then kept forever. Splitting the two kinds also
+// keeps the positional count honest.
 const VALUED = ['--frames', '--fps', '--quality'];
 const BOOLEAN = ['--force', '--if-missing'];
 
@@ -22,7 +27,9 @@ const positional = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (VALUED.includes(a)) {
-    // A valued option at the end of the line has no value, and skipping past it made `--frames` alone read as `--frames 284` - the same class as a misspelling, arriving with the name spelled right.
+    // A valued option at the end of the line has no value, and skipping past it made `--frames`
+    // alone read as `--frames 284` - the same class as a misspelling, arriving with the
+    // name spelled right.
     if (i + 1 >= argv.length) {
       console.error(`[make-sample] ${a} takes a value and none followed it. Nothing was written.`);
       process.exit(2);
@@ -58,9 +65,11 @@ if (!OUT) {
   process.exit(2);
 }
 
-// It refuses to overwrite, because the path this tool is run at is where a machine with a Kinect keeps real footage, and a capture cannot be shot again. Refusing
-// by default rather than prompting: the case that needs protecting is the unattended one. Three spellings, because there are three different things somebody means -
-// `--force` replaces, `--if-missing` leaves an existing capture alone so `npm run fixtures` still builds the loop, and the bare default stops.
+// It refuses to overwrite, because the path this tool is run at is where a machine with a Kinect
+// keeps real footage, and a capture cannot be shot again. Refusing by default rather than
+// prompting: the case that needs protecting is the unattended one. Three spellings, because there
+// are three different things somebody means - `--force` replaces, `--if-missing` leaves an existing
+// capture alone so `npm run fixtures` still builds the loop, and the bare default stops.
 if (existsSync(OUT) && !argv.includes('--force')) {
   const st = statSync(OUT);
   if (argv.includes('--if-missing')) {
@@ -73,14 +82,18 @@ if (existsSync(OUT) && !argv.includes('--force')) {
   console.error('[make-sample] or --if-missing if you only wanted one to exist.');
   process.exit(2);
 }
-// 284 frames at 30fps, the count and the rate the capture in this tree carries. Sized by frame count rather than by duration, because duration is the thing that differs between two files nobody committed.
+// 284 frames at 30fps, the count and the rate the capture in this tree carries. Sized by frame
+// count rather than by duration, because duration is the thing that differs between two files
+// nobody committed.
 const FRAMES = Number(flag('--frames', '284'));
 const FPS = Number(flag('--fps', '30'));
 const QUALITY = Number(flag('--quality', '82'));
 
-// Refused here rather than trusted to fail somewhere useful, because none of these fail anywhere at all: `Number('nope')` is NaN, `i < NaN` is false on the first
-// test, and `--frames nope` wrote a 162-byte file holding only the hello and exited 0. `npm run fixtures` then sees an existing capture and adopts the wreck. The
-// output is not opened until this has passed, so a refused run leaves whatever was at that path untouched.
+// Refused here rather than trusted to fail somewhere useful, because none of these fail anywhere at
+// all: `Number('nope')` is NaN, `i < NaN` is false on the first test, and `--frames nope` wrote a
+// 162-byte file holding only the hello and exited 0. `npm run fixtures` then sees an existing
+// capture and adopts the wreck. The output is not opened until this has passed, so a refused run
+// leaves whatever was at that path untouched.
 for (const [name, value, ok, wants] of [
   ['--frames', FRAMES, Number.isInteger(FRAMES) && FRAMES > 0, 'a whole number of frames above zero'],
   ['--fps', FPS, Number.isFinite(FPS) && FPS > 0, 'a rate above zero'],
@@ -93,21 +106,26 @@ for (const [name, value, ok, wants] of [
   }
 }
 
-// The sensor's own intrinsics, taken from the capture this stands in for. Hardcoded intrinsics skew the cloud in a way that is hard to spot and hard to attribute, which is why the hello carries them at all.
+// The sensor's own intrinsics, taken from the capture this stands in for. Hardcoded intrinsics skew
+// the cloud in a way that is hard to spot and hard to attribute, which is why the hello
+// carries them at all.
 const FX = 366.031494;
 const FY = 366.031494;
 const CX = 257.775909;
 const CY = 206.784195;
 
-// Depth in millimetres on the sensor's grid, `0` meaning no reading. Every surface is analytic, so what the file contains is known rather than measured.
+// Depth in millimetres on the sensor's grid, `0` meaning no reading. Every surface is analytic, so
+// what the file contains is known rather than measured.
 
 /**
- * One frame of depth, at phase `t` in [0, 1). The column-to-world-X step is the mirrored one and it is the whole reason this is not the obvious loop:
- * `worldX = -(col + 0.5 - CX) / FX * z`, so a positive world X is a low column, and the sphere is placed by solving that for `col`.
+ * One frame of depth, at phase `t` in [0, 1). The column-to-world-X step is the mirrored one and it
+ * is the whole reason this is not the obvious loop: `worldX = -(col + 0.5 - CX) / FX * z`, so a
+ * positive world X is a low column, and the sphere is placed by solving that for `col`.
  */
 function depthFrame(t) {
   const depth = new Uint16Array(DEPTH_W * DEPTH_H);
-  // The sphere crosses left to right and back, so a check reading a signed displacement cannot pass on a fixture that only ever moves one way.
+  // The sphere crosses left to right and back, so a check reading a signed displacement cannot pass
+  // on a fixture that only ever moves one way.
   const sweep = Math.sin(t * Math.PI * 2);
   const ballX = sweep * 0.55;          // metres, world, +X is the room's right
   const ballY = 0.12 * Math.cos(t * Math.PI * 4);
@@ -115,7 +133,8 @@ function depthFrame(t) {
   const BALL_R = 0.28;
 
   for (let row = 0; row < DEPTH_H; row++) {
-    // The vertical axis is not mirrored - only the horizontal is - so this is the plain unprojection with y growing up.
+    // The vertical axis is not mirrored - only the horizontal is - so this is the plain
+    // unprojection with y growing up.
     const ny = -(row + 0.5 - CY) / FY;
     for (let col = 0; col < DEPTH_W; col++) {
       const nx = -(col + 0.5 - CX) / FX;
@@ -124,7 +143,8 @@ function depthFrame(t) {
         const floorZ = -1.05 / ny;
         if (floorZ < z) z = floorZ;
       }
-      // The sphere, solved along the ray rather than drawn as a disc, so its depth really is a curved surface and a normal fit over it means something.
+      // The sphere, solved along the ray rather than drawn as a disc, so its depth really is a
+      // curved surface and a normal fit over it means something.
       const dx = nx;
       const dy = ny;
       const len = Math.hypot(dx, dy, 1);
@@ -144,7 +164,8 @@ function depthFrame(t) {
           if (hz < z) z = hz;
         }
       }
-      // A band of no-reading, placed on the wall rather than over the sphere so it cannot be confused with an occlusion.
+      // A band of no-reading, placed on the wall rather than over the sphere so it cannot be
+      // confused with an occlusion.
       const shadow = row > 70 && row < 96 && col > 300 && col < 470 && z > 3.0;
       depth[row * DEPTH_W + col] = shadow ? 0 : Math.round(Math.min(z, 8.0) * 1000);
     }
@@ -165,7 +186,8 @@ function colorFrame(depth, t) {
     if (mm === 0) {
       r = 10; g = 12; b = 16;
     } else if (mm > 3100) {
-      // A stripe pattern, so the JPEG carries real high-frequency content rather than compressing to almost nothing.
+      // A stripe pattern, so the JPEG carries real high-frequency content rather than compressing
+      // to almost nothing.
       const stripe = ((col >> 4) + (row >> 5)) & 1 ? 24 : 0;
       r = 96 + stripe + (row >> 3);
       g = 104 + stripe + (row >> 4);
@@ -174,17 +196,21 @@ function colorFrame(depth, t) {
       const check = ((col >> 5) ^ (row >> 5)) & 1 ? 30 : 0;
       r = 70 + check; g = 62 + check; b = 54 + check;
     } else {
-      // Lit from the upper left of the room, which after the mirror is the upper right of the buffer. Same sign the depth used, so the two cannot disagree about which side the light is on.
+      // Lit from the upper left of the room, which after the mirror is the upper right of the
+      // buffer. Same sign the depth used, so the two cannot disagree about which side
+      // the light is on.
       const shade = 1 - Math.min(1, (mm - 1200) / 900);
       r = Math.round(40 + 200 * shade);
       g = Math.round(60 + 150 * shade);
       b = Math.round(90 + 90 * shade);
     }
-    // Fine texture, here for the size rather than the look: a room of flat regions encodes to 13.7KB a frame against the real capture's 58KB, and the decimation
-    // row fails under about 14.6KB. Deterministic rather than random, so two runs of this tool produce the same file.
+    // Fine texture, here for the size rather than the look: a room of flat regions encodes to
+    // 13.7KB a frame against the real capture's 58KB, and the decimation row fails under about
+    // 14.6KB. Deterministic rather than random, so two runs of this tool produce the same file.
     const h = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b);
     const grain = ((h >>> 24) & 31) - 16;
-    // A slow global drift so consecutive frames are not byte-identical - a take whose frames all hash the same cannot tell a reader that seeks from one that does not.
+    // A slow global drift so consecutive frames are not byte-identical - a take whose frames all
+    // hash the same cannot tell a reader that seeks from one that does not.
     const drift = Math.round(6 * Math.sin(t * Math.PI * 2));
     rgb[i * 3] = Math.max(0, Math.min(255, r + drift + grain));
     rgb[i * 3 + 1] = Math.max(0, Math.min(255, g + drift + grain));
@@ -193,9 +219,10 @@ function colorFrame(depth, t) {
   return rgb;
 }
 
-// Written here rather than shelled out to ffmpeg, because this tool is the bootstrap: a generator needing a system package would fail exactly the person it exists
-// for, and one that used ffmpeg when present would produce different bytes on different machines. Baseline sequential, 4:4:4, one Huffman table pair shared by all
-// three components, with JPEG Annex K's published tables.
+// Written here rather than shelled out to ffmpeg, because this tool is the bootstrap: a generator
+// needing a system package would fail exactly the person it exists for, and one that used ffmpeg
+// when present would produce different bytes on different machines. Baseline sequential, 4:4:4, one
+// Huffman table pair shared by all three components, with JPEG Annex K's published tables.
 
 const ZIGZAG = [
   0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5,
@@ -263,7 +290,8 @@ class BitWriter {
       this.bits++;
       if (this.bits === 8) {
         this.bytes.push(this.acc & 0xff);
-        // A literal 0xFF inside the scan would be read as the start of a marker, so the format requires a zero byte after it.
+        // A literal 0xFF inside the scan would be read as the start of a marker, so the format
+        // requires a zero byte after it.
         if ((this.acc & 0xff) === 0xff) this.bytes.push(0x00);
         this.acc = 0;
         this.bits = 0;
@@ -282,7 +310,8 @@ function magnitude(v) {
   const a = Math.abs(v);
   let size = 0;
   while (size < 16 && a >= (1 << size)) size++;
-  // A negative coefficient is written as the one's complement of its magnitude in `size` bits, which is the format's own encoding and not a sign bit.
+  // A negative coefficient is written as the one's complement of its magnitude in `size` bits,
+  // which is the format's own encoding and not a sign bit.
   return [size, v < 0 ? v + (1 << size) - 1 : v];
 }
 
@@ -305,8 +334,9 @@ function fdct(block, out) {
 }
 
 /**
- * An RGB image to a baseline JPEG. Not subsampled: 4:2:0 halves the chroma resolution and needs a second block geometry, and what this file is for is a colour
- * block of realistic size that decodes to the room the depth describes.
+ * An RGB image to a baseline JPEG. Not subsampled: 4:2:0 halves the chroma resolution and needs a
+ * second block geometry, and what this file is for is a colour block of realistic size that decodes
+ * to the room the depth describes.
  */
 function encodeJpeg(rgb, width, height, quality) {
   const quant = quantAt(quality);
@@ -316,7 +346,8 @@ function encodeJpeg(rgb, width, height, quality) {
   const marker = (m) => { u8(0xff); u8(m); };
 
   marker(0xd8);                                   // SOI
-  // A JFIF APP0, with no EXIF anywhere - the mirror question was settled off a frame carrying JFIF and no orientation tag that anything downstream could have been applying.
+  // A JFIF APP0, with no EXIF anywhere - the mirror question was settled off a frame carrying JFIF
+  // and no orientation tag that anything downstream could have been applying.
   marker(0xe0); u16(16);
   u8(0x4a); u8(0x46); u8(0x49); u8(0x46); u8(0x00);
   u8(1); u8(1); u8(0); u16(1); u16(1); u8(0); u8(0);
@@ -339,7 +370,9 @@ function encodeJpeg(rgb, width, height, quality) {
   for (let c = 1; c <= 3; c++) { u8(c); u8(0x00); }
   u8(0); u8(63); u8(0);
 
-  // Colour conversion up front rather than per block, because a block straddling the right or bottom edge repeats the last real pixel and doing that on the planes keeps the edge rule in one place.
+  // Colour conversion up front rather than per block, because a block straddling the right or
+  // bottom edge repeats the last real pixel and doing that on the planes keeps the edge
+  // rule in one place.
   const planes = [new Float64Array(width * height), new Float64Array(width * height), new Float64Array(width * height)];
   for (let i = 0; i < width * height; i++) {
     const r = rgb[i * 3];
@@ -379,7 +412,9 @@ function encodeJpeg(rgb, width, height, quality) {
         let run = 0;
         for (let i = 1; i < 64; i++) {
           if (q[i] === 0) { run++; continue; }
-          // A run of more than fifteen zeroes is written as ZRL blocks: the run length in a coefficient symbol is four bits, and truncating it silently produces a file that decodes to the wrong image.
+          // A run of more than fifteen zeroes is written as ZRL blocks: the run length in a
+          // coefficient symbol is four bits, and truncating it silently produces a file that
+          // decodes to the wrong image.
           while (run > 15) { const [l, cc] = AC_TABLE.get(0xf0); bw.write(l, cc); run -= 16; }
           const [size, bits] = magnitude(q[i]);
           const [len, code] = AC_TABLE.get((run << 4) | size);
@@ -397,7 +432,8 @@ function encodeJpeg(rgb, width, height, quality) {
   return Buffer.concat([head, scan, Buffer.from([0xff, 0xd9])]);
 }
 
-// Nine keys, in the order the real capture carries them. `JSON.stringify` over a literal rather than a hand-built string, because a hello that is not JSON is a take nothing can parse.
+// Nine keys, in the order the real capture carries them. `JSON.stringify` over a literal rather
+// than a hand-built string, because a hello that is not JSON is a take nothing can parse.
 const hello = JSON.stringify({
   serial: '000000000000',
   firmware: 'synthetic',
@@ -410,17 +446,22 @@ const hello = JSON.stringify({
   color: true,
 });
 
-// Generated beside the target and renamed onto it, so a run that dies leaves nothing that looks like a capture: opening `OUT` directly truncates it at the first
-// byte, and the next `npm run fixtures` sees a file, exits 0 and adopts the wreck permanently. It also makes `--force` honest, which used to destroy the old capture before a single frame was encoded.
+// Generated beside the target and renamed onto it, so a run that dies leaves nothing that looks
+// like a capture: opening `OUT` directly truncates it at the first byte, and the next `npm run
+// fixtures` sees a file, exits 0 and adopts the wreck permanently. It also makes `--force` honest,
+// which used to destroy the old capture before a single frame was encoded.
 const TEMP = `${OUT}.part`;
 const stream = createWriteStream(TEMP);
-// Removed on any failure, including the ones nothing here catches: `exit` covers the ordinary throw, and the signals do not fire `exit` on their own.
+// Removed on any failure, including the ones nothing here catches: `exit` covers the ordinary
+// throw, and the signals do not fire `exit` on their own.
 const discard = () => { try { rmSync(TEMP, { force: true }); } catch { /* going away anyway */ } };
 let installed = false;
 process.on('exit', () => { if (!installed) discard(); });
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { discard(); process.exit(130); });
-// One error handler for the stream rather than one per write: a `once('error')` armed inside `write` is only ever removed by an error, so 284 frames armed 284 of
-// them. A plain `on('error')` with no rejection would be worse than the leak - it would turn a full disk into a `drain` that never comes.
+// One error handler for the stream rather than one per write: a `once('error')` armed inside
+// `write` is only ever removed by an error, so 284 frames armed 284 of them. A plain `on('error')`
+// with no rejection would be worse than the leak - it would turn a full disk into a `drain`
+// that never comes.
 let writeFailure = null;
 const waiting = new Set();
 stream.on('error', (err) => {
@@ -429,7 +470,8 @@ stream.on('error', (err) => {
   waiting.clear();
 });
 const write = (buf) => new Promise((res, rej) => {
-  // Awaited rather than fired and forgotten: a 138MB file written without watching the drain buffers the whole thing in memory.
+  // Awaited rather than fired and forgotten: a 138MB file written without watching the drain
+  // buffers the whole thing in memory.
   if (writeFailure) { rej(writeFailure); return; }
   if (stream.write(buf)) { res(); return; }
   waiting.add(rej);
@@ -438,7 +480,9 @@ const write = (buf) => new Promise((res, rej) => {
 
 await write(encodeMessage(TYPE_HELLO, Buffer.from(hello, 'utf8')));
 
-// Monotonic milliseconds from an arbitrary origin, which is what the sensor's `steady_clock` gives; they are not a wall clock. The origin is fixed rather than `Date.now()`, so two runs produce byte-identical files.
+// Monotonic milliseconds from an arbitrary origin, which is what the sensor's `steady_clock` gives;
+// they are not a wall clock. The origin is fixed rather than `Date.now()`, so two runs produce
+// byte-identical files.
 const STAMP_ORIGIN = 875_649_822;
 let colorTotal = 0;
 for (let i = 0; i < FRAMES; i++) {
@@ -459,12 +503,14 @@ for (let i = 0; i < FRAMES; i++) {
   }
 }
 
-// `end`'s callback receives the error when the final flush or close fails, and a resolve that ignored it renamed a truncated `.part` onto `OUT` with a success message over it.
+// `end`'s callback receives the error when the final flush or close fails, and a resolve that
+// ignored it renamed a truncated `.part` onto `OUT` with a success message over it.
 await new Promise((res, rej) => stream.end((err) => (err ? rej(err) : res())));
 if (writeFailure) throw writeFailure;
 renameSync(TEMP, OUT);
 installed = true;
-// `FRAMES - 1` frame gaps, not `FRAMES`: the stamps run from index 0, so the span the server and the editor read off the file is one frame period shorter than the count times the rate.
+// `FRAMES - 1` frame gaps, not `FRAMES`: the stamps run from index 0, so the span the server and
+// the editor read off the file is one frame period shorter than the count times the rate.
 console.log(`[make-sample] ${OUT}: ${FRAMES} frames at ${FPS}fps spanning `
   + `${((FRAMES - 1) / FPS).toFixed(2)}s, mean colour ${(colorTotal / FRAMES / 1024).toFixed(1)}KB a frame`);
 console.log('[make-sample] generation zero, no startedAt - a stand-in, not footage; say so when reporting a number from it');

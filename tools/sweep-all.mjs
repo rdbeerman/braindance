@@ -45,7 +45,8 @@ function run(tool, args, timeoutMs = 900_000) {
   });
 }
 
-// The refusal message is the enumeration, so an unparseable one throws rather than yielding no mutations.
+// The refusal message is the enumeration, so an unparseable one throws rather than
+// yielding no mutations.
 async function enumerate(tool) {
   const { out } = await run(tool, ['--mutate', '__enumerate__'], 60_000);
   const m = out.match(/unknown mutation __enumerate__ - have ([^\n]+)/);

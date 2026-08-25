@@ -16,8 +16,8 @@ const flag = (name, fallback = null) => {
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : fallback;
 };
 
-// Resolved against this file rather than the working directory, so the tool can be run
-// from anywhere.
+// Resolved against this file rather than the working directory, so the tool can be
+// run from anywhere.
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 
 const URL_BASE = flag('--url', 'http://localhost:8080');
@@ -1421,10 +1421,9 @@ if (beforeSource.js.includes('const PARAMS')) {
   throw new Error(`${BEFORE_REV}:web/main.js already contains the registry - pass an earlier rev with --before`);
 }
 
-// The program pose at a few positions, read in the same task as the render so the live loop
-// cannot re-render at 0 underneath the reading. Three orients cameras down -Z where it
-// orients everything else down +Z, so a slip would be invisible until something drew the
-// frustum.
+// The program pose at a few positions, read in the same task as the render so the live loop cannot
+// re-render at 0 underneath the reading. Three orients cameras down -Z where it orients everything
+// else down +Z, so a slip would be invisible until something drew the frustum.
 const readPoses = `(() => {
   const k = globalThis.__kinect;
   const out = {};
@@ -1690,10 +1689,9 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
   }
   againstSource.js = againstSource.js.replace(OLD_UNPROJECT_X, MIRRORED_UNPROJECT_X);
 
-  // The second intentional divergence. The zero-alpha discard is an approved change to the
-  // picture and the old arm has no such discard, so the patch hands it the same rule in its
-  // own source rather than letting the approved movement arrive as a finding about the
-  // readings.
+  // The second intentional divergence. The zero-alpha discard is an approved change to the picture
+  // and the old arm has no such discard, so the patch hands it the same rule in its own source
+  // rather than letting the approved movement arrive as a finding about the readings.
   const OLD_FRAG_OUTPUT = '  fragColor = vec4(col * exposure, alpha * falloff);';
   const DISCARDED_FRAG_OUTPUT = '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;\n'
     + '  fragColor = vec4(col * exposure, alpha * falloff);';
@@ -3159,9 +3157,9 @@ console.log('\n[registry] and a cell whose occupants disagree still draws one ch
 console.log('\n[registry] and a character travels with its point through the turbulence');
 {
   // The wall sits at a cell centre in depth and the turbulence is bounded inside that cell: a
-  // displacement larger than half a cell moves every point into a neighbouring depth cell at
-  // once, which changes the occupied set and is the one thing a build hashing the displaced
-  // point can see.
+  // displacement larger than half a cell moves every point into a neighbouring depth cell at once,
+  // which changes the occupied set and is the one thing a build hashing the
+  // displaced point can see.
   const NOISE = { 'noise.amount': 0.1, 'noise.scale': 1.5, 'noise.speed': 1 };
   const RIPPLE = {
     'noise.amount': 0, 'ripple.amount': 0.05, 'ripple.freq': 4, 'ripple.speed': 0.5,

@@ -1,13 +1,18 @@
 #!/usr/bin/env node
-// Levelling: the room is rotated into its own frame, and everything downstream of the rotation comes level with it. Nothing measures the angle a sensor was bolted
-// at, so `tilt` and `roll` are a human saying which way is up, and they turn the cloud rather than the camera - which levels the turntable, the top-down,
-// auto-orbit's axis and the exported frame at once, and every one of those is a separate way for the feature to be half-built.
+// Levelling: the room is rotated into its own frame, and everything downstream of the rotation
+// comes level with it. Nothing measures the angle a sensor was bolted at, so `tilt` and `roll` are
+// a human saying which way is up, and they turn the cloud rather than the camera - which levels the
+// turntable, the top-down, auto-orbit's axis and the exported frame at once, and every one of those
+// is a separate way for the feature to be half-built.
 //
-// Two of the five claims are invariants: the crop and the region are tested on the undisplaced position in the vertex shader, so rotating the world and the camera
-// by the same quaternion is a no-op and the two pictures have to be bit-identical, and the sensor view is posed in the sensor's frame, so its picture at any cant
-// is the picture it gives at none. Section 3 is measured two-sided, because a one-sided "it changed" row passes on any change at all. The frames are planted -
-// `z = c / (u . n)` along each pixel's own ray - so this needs no sensor and no capture, and `levelPair` can state the cant a surface should be level at instead
-// of asking the page for it. It spawns its own server, and a missing GPU browser exits 2, because untested is not passed.
+// Two of the five claims are invariants: the crop and the region are tested on the undisplaced
+// position in the vertex shader, so rotating the world and the camera by the same quaternion is a
+// no-op and the two pictures have to be bit-identical, and the sensor view is posed in the sensor's
+// frame, so its picture at any cant is the picture it gives at none. Section 3 is measured
+// two-sided, because a one-sided "it changed" row passes on any change at all. The frames are
+// planted - `z = c / (u . n)` along each pixel's own ray - so this needs no sensor and no capture,
+// and `levelPair` can state the cant a surface should be level at instead of asking the page for
+// it. It spawns its own server, and a missing GPU browser exits 2, because untested is not passed.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -23,69 +28,95 @@ const MUTATE = flag('--mutate');
 const WORK = join(REPO, '.level-check');
 const RECORDER_URL = `http://127.0.0.1:${PORT}/record`;
 
-// Each names source text and must match exactly once. A replacement matching nothing would run an unmutated build and be recorded as this check having missed a bug it was never shown.
+// Each names source text and must match exactly once. A replacement matching nothing would run an
+// unmutated build and be recorded as this check having missed a bug it was never shown.
 const MUTATIONS = {
-  // The parameters are accepted, stored and drawn on their sliders, and never reach the cloud. The control for section 1 rather than for any comparison, because every comparison below is satisfied by a build that draws the same picture twice.
+  // The parameters are accepted, stored and drawn on their sliders, and never reach the cloud. The
+  // control for section 1 rather than for any comparison, because every comparison below is
+  // satisfied by a build that draws the same picture twice.
   'tilt-ignored': { file: 'web/main.js', edits: [[
     '  cloud.quaternion.copy(worldTilt);',
     '  cloud.quaternion.identity();',
   ]] },
-  // The crop moves to the far side of the levelling, so the six faces stop being a place in the room. Section 2's identity sees it: the surviving set changes, and no camera move can put a discarded point back.
+  // The crop moves to the far side of the levelling, so the six faces stop being a place in the
+  // room. Section 2's identity sees it: the surviving set changes, and no camera move can put a
+  // discarded point back.
   'crop-follows-tilt': { file: 'web/cloud-shader.js', edits: [[
     '  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {',
     '  vec3 cropAt = (modelMatrix * vec4(pos, 1.0)).xyz;\n'
     + '  if (cropOn == 1.0 && (cropAt.x < cropL || cropAt.x > cropR || cropAt.y < cropB || cropAt.y > cropT)) {',
   ]] },
-  // The crop box is drawn straight off the uniforms, in the sensor's axes, over a cloud in the room's - what the top-down's old rectangle did for as long as levelling existed, with no control at all.
+  // The crop box is drawn straight off the uniforms, in the sensor's axes, over a cloud in the
+  // room's - what the top-down's old rectangle did for as long as levelling existed, with
+  // no control at all.
   'plan-box-ignores-tilt': { file: 'web/main.js', edits: [[
     '    ).applyQuaternion(worldTilt);',
     '    );',
   ]] },
-  // The switch reaches the shader and stops there, so the top-down goes on culling the cloud the picture is showing in full. Two readers, one of them told; the plan is now the only one left that can catch it.
+  // The switch reaches the shader and stops there, so the top-down goes on culling the cloud the
+  // picture is showing in full. Two readers, one of them told; the plan is now the only one left
+  // that can catch it.
   'crop-switch-reaches-only-the-shader': { file: 'web/point-cloud.js', edits: [[
     '  if (uniforms.cropOn.value !== 1) return false;\n',
     '',
   ]] },
-  // The picture levels and the box in the corner does not, which is the state this feature was built to end. Nothing outside section 3 can see it.
+  // The picture levels and the box in the corner does not, which is the state this feature was
+  // built to end. Nothing outside section 3 can see it.
   'plan-ignores-tilt': { file: 'web/main.js', edits: [[
     '      planVec.set(wx, wy, -z).applyQuaternion(worldTilt);',
     '      planVec.set(wx, wy, -z);',
   ]] },
-  // The plan culls on x alone, which is what it did while a top-down had no y to care about; levelling turns sensor y into the plan's own x and z, so discarded points reappear inside the footprint. Spelled out at the call site rather than by editing `croppedOut`, so two mutations do not redden the same rows.
+  // The plan culls on x alone, which is what it did while a top-down had no y to care about;
+  // levelling turns sensor y into the plan's own x and z, so discarded points reappear inside the
+  // footprint. Spelled out at the call site rather than by editing `croppedOut`, so two mutations
+  // do not redden the same rows.
   'plan-skips-vertical-crop': { file: 'web/main.js', edits: [[
     '      if (croppedOut(wx, wy, z)) continue;',
     '      if (uniforms.cropOn.value === 1\n'
     + '        && (z < uniforms.nearClip.value || z > uniforms.farClip.value\n'
     + '          || wx < uniforms.cropL.value || wx > uniforms.cropR.value)) continue;',
   ]] },
-  // The sensor view keeps navigation's own pole and axis, so on a levelled take the one button meaning "exactly what the sensor shot" shows a rolled picture. `sensor-view-check`'s fov rows cannot see this.
+  // The sensor view keeps navigation's own pole and axis, so on a levelled take the one button
+  // meaning "exactly what the sensor shot" shows a rolled picture. `sensor-view-check`'s fov rows
+  // cannot see this.
   'sensor-view-ignores-tilt': { file: 'web/main.js', edits: [[
     '  setNavigationUp(new THREE.Vector3(0, 1, 0).applyQuaternion(worldTilt));\n'
     + '  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).applyQuaternion(worldTilt);',
     '  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE);',
   ]] },
-  // The button takes tilt back to neutral and leaves roll behind. Reading both parameters and both sliders through the real control catches the half-reset.
+  // The button takes tilt back to neutral and leaves roll behind. Reading both parameters and both
+  // sliders through the real control catches the half-reset.
   'reset-keeps-roll': { file: 'web/main.js', edits: [[
     '  return writeWorldRotation(0, 0);',
     '  return writeWorldRotation(0, params.get(\'roll\'));',
   ]] },
-  // The region is read after the model rotation instead of on the undisplaced sensor-space position. Section 2 is the only thing that can see it, and only because that section switches a region effect on - at the default zeroes the shader never evaluates the region coordinate at all.
+  // The region is read after the model rotation instead of on the undisplaced sensor-space
+  // position. Section 2 is the only thing that can see it, and only because that section switches a
+  // region effect on - at the default zeroes the shader never evaluates the region
+  // coordinate at all.
   'region-follows-tilt': { file: 'web/cloud-shader.js', edits: [[
     '  vec3 p0 = pos;',
     '  vec3 p0 = (modelMatrix * vec4(pos, 1.0)).xyz;',
   ]] },
-  // The pair is composed the other way round, `Rz(roll) * Rx(tilt)`. Every surface leaning along one axis alone is carried onto the vertical by both orders, which is
-  // why section 3 plants surface B at 27 degrees of roll, and it is the two-sided reading that catches it - a canted plane fills a box too. `registry-check` catches it independently by writing `Rx * Rz` out longhand.
+  // The pair is composed the other way round, `Rz(roll) * Rx(tilt)`. Every surface leaning along
+  // one axis alone is carried onto the vertical by both orders, which is why section 3 plants
+  // surface B at 27 degrees of roll, and it is the two-sided reading that catches it - a canted
+  // plane fills a box too. `registry-check` catches it independently by writing `Rx *
+  // Rz` out longhand.
   'level-order-swapped': { file: 'web/world-tilt.js', edits: [[
     "const tiltEuler = new THREE.Euler(0, 0, 0, 'XYZ');",
     "const tiltEuler = new THREE.Euler(0, 0, 0, 'ZYX');",
   ]] },
-  // The shader goes back to being a faithful port of `Registration::getPointXYZ`: the frames arrive mirrored and nothing undoes it, so the cloud is a reflection of the room. This had no catcher for two years, and section 8 is its only one.
+  // The shader goes back to being a faithful port of `Registration::getPointXYZ`: the frames arrive
+  // mirrored and nothing undoes it, so the cloud is a reflection of the room. This had no catcher
+  // for two years, and section 8 is its only one.
   'x-not-mirrored': { file: 'web/cloud-shader.js', edits: [[
     '    -(pixel.x + 0.5 - center.x) / focal.x * z,',
     '     (pixel.x + 0.5 - center.x) / focal.x * z,',
   ]] },
-  // The sign is fixed in the shader and the top-down keeps the old one, so the picture shows the room the right way round and the plan beside it is a reflection. One says the sign matters, the other says which readers were told.
+  // The sign is fixed in the shader and the top-down keeps the old one, so the picture shows the
+  // room the right way round and the plan beside it is a reflection. One says the sign matters, the
+  // other says which readers were told.
   'plan-x-not-mirrored': { file: 'web/main.js', edits: [[
     '      const wx = (-(col + 0.5 - cx) / fx) * z;',
     '      const wx = ((col + 0.5 - cx) / fx) * z;',
@@ -96,13 +127,20 @@ if (MUTATE && !MUTATIONS[MUTATE]) {
   process.exit(2);
 }
 
-// A mutation applied in place and restored afterwards leaves a mutated working tree behind any crash. `web/` is copied rather than linked for the same reason: through a symlink every mutation here would rewrite the repo's own source.
+// A mutation applied in place and restored afterwards leaves a mutated working tree behind any
+// crash. `web/` is copied rather than linked for the same reason: through a symlink every mutation
+// here would rewrite the repo's own source.
 rmSync(WORK, { recursive: true, force: true });
 mkdirSync(WORK, { recursive: true });
-// `effects-builtin` is in this list because the effect store declines to boot without its shipped root, so from the moment the packages arrived the staged tree here was a server that could not start, and this tool reported `DID NOT RUN` on every run.
+// `effects-builtin` is in this list because the effect store declines to boot without its shipped
+// root, so from the moment the packages arrived the staged tree here was a server that could not
+// start, and this tool reported `DID NOT RUN` on every run.
 for (const dir of ['server', 'tools', 'web', 'effects-builtin']) cpSync(join(REPO, dir), join(WORK, dir), { recursive: true });
-// `native/` is deliberately not among these. A live socket wipes a plant in well under a second - measured, a sentinel written into all 217k samples was gone within
-// 500ms, because an arriving frame swaps the two depth textures. Section 1 checks the plant is still there rather than trusting this list, so adding `native` here fails that row instead of quietly changing what this tool proves.
+// `native/` is deliberately not among these. A live socket wipes a plant in well under a second -
+// measured, a sentinel written into all 217k samples was gone within 500ms, because an arriving
+// frame swaps the two depth textures. Section 1 checks the plant is still there rather than
+// trusting this list, so adding `native` here fails that row instead of quietly changing what
+// this tool proves.
 for (const name of ['node_modules', 'vendor', 'captures']) {
   const from = join(REPO, name);
   if (existsSync(from)) symlinkSync(from, join(WORK, name));
@@ -126,7 +164,8 @@ let checked = 0;
 let failed = 0;
 // A claim that could not be tested here at all, which is a third answer and not a quiet pass.
 let untested = null;
-// A run that threw rather than a claim that failed. Kept apart from `failed` so the verdict cannot count its own timeout as a mutation being caught.
+// A run that threw rather than a claim that failed. Kept apart from `failed` so the verdict cannot
+// count its own timeout as a mutation being caught.
 let crashed = null;
 const ok = (label, pass, detail = '') => {
   checked++;
@@ -157,7 +196,9 @@ const stopAll = async () => {
   await wait(150);
 };
 
-// Each is a unit normal in sensor metres and the depth at which its centre ray crosses. A is deliberately blind to the order the pair composes in - it leans along one axis only - while B and C lean both ways, which is why section 3 plants B.
+// Each is a unit normal in sensor metres and the depth at which its centre ray crosses. A is
+// deliberately blind to the order the pair composes in - it leans along one axis only - while B and
+// C lean both ways, which is why section 3 plants B.
 const SURFACES = [
   { name: 'A, tipped away from the sensor and not rolled', n: [0, 0.3, -1], z: 2.0 },
   { name: 'B, rolled in its bracket as well', n: [0.45, 0.89, -0.35], z: 2.2 },
@@ -165,10 +206,12 @@ const SURFACES = [
 ];
 
 /**
- * The pair that carries a planted normal onto the room's vertical, under the `Rx(tilt) * Rz(roll)` order the cloud is turned by. An oracle and not a convenience:
- * the cant that levels a surface is a fact about the normal this file planted, so it is computed here and never read back out of the page - a check that asked the
- * build under test which angles level its own plant would agree with any build by construction. `roll` is whatever takes the normal into the YZ plane, and `tilt`
- * is whatever then swings that onto the axis.
+ * The pair that carries a planted normal onto the room's vertical, under the `Rx(tilt) * Rz(roll)`
+ * order the cloud is turned by. An oracle and not a convenience: the cant that levels a surface is
+ * a fact about the normal this file planted, so it is computed here and never read back out of the
+ * page - a check that asked the build under test which angles level its own plant would agree with
+ * any build by construction. `roll` is whatever takes the normal into the YZ plane, and `tilt` is
+ * whatever then swings that onto the axis.
  */
 const levelPair = ([x, y, z]) => {
   const len = Math.hypot(x, y, z);
@@ -201,12 +244,15 @@ try {
   await page.goto(RECORDER_URL, { waitUntil: 'networkidle' });
   await page.waitForFunction('Boolean(globalThis.__kinect)', null, { timeout: 20000 });
 
-  // The panel overlaps the picture's left edge and its own hover state is a change a comparison would read. Taken out of the document rather than hit-tested around, because nothing here presses anything on it.
+  // The panel overlaps the picture's left edge and its own hover state is a change a comparison
+  // would read. Taken out of the document rather than hit-tested around, because nothing here
+  // presses anything on it.
   await page.evaluate(() => { document.getElementById('panel').style.display = 'none'; });
 
   /**
-   * Plants one analytic plane over the depth image. The look is flattened first: fade, wake and noise are temporal, so a picture compared against another picture
-   * would be comparing two moments of an accumulator rather than two geometries.
+   * Plants one analytic plane over the depth image. The look is flattened first: fade, wake and
+   * noise are temporal, so a picture compared against another picture would be comparing two
+   * moments of an accumulator rather than two geometries.
    */
   const plant = (surface) => page.evaluate(({ n: n0, z: zc }) => {
     const k = globalThis.__kinect;
@@ -226,7 +272,9 @@ try {
     data.fill(0);
     for (let row = 0; row < DH; row++) {
       for (let col = 0; col < DW; col++) {
-        // The page's unprojection inverted rather than upstream's - x carries the mirror correction `web/cloud-shader.js` explains. Planting through an un-negated ray would grade the plane fit against a normal nobody planted.
+        // The page's unprojection inverted rather than upstream's - x carries the mirror correction
+        // `web/cloud-shader.js` explains. Planting through an un-negated ray would grade the plane
+        // fit against a normal nobody planted.
         const ux = -(col + 0.5 - cx) / fx;
         const uy = -(row + 0.5 - cy) / fy;
         const den = ux * n[0] + uy * n[1] - n[2];
@@ -242,9 +290,10 @@ try {
   }, surface);
 
   /**
-   * Whether the planted frame is still the one the page is drawing. A sparse fingerprint taken at plant time, plus the texture identity: an arriving frame swaps
-   * the two depth textures, so `depthCurr` stops being the object the plant was written into. Both are asserted, because a build writing arrivals in place would
-   * keep the identity and lose the samples.
+   * Whether the planted frame is still the one the page is drawing. A sparse fingerprint taken at
+   * plant time, plus the texture identity: an arriving frame swaps the two depth textures, so
+   * `depthCurr` stops being the object the plant was written into. Both are asserted, because a
+   * build writing arrivals in place would keep the identity and lose the samples.
    */
   const plantFingerprint = () => page.evaluate(() => {
     const k = globalThis.__kinect;
@@ -275,7 +324,9 @@ try {
   }, [tilt, roll]);
 
   /**
-   * The rendered frame, and only the rendered frame. Two shots with a gap, which have to agree before either is used: a picture still moving makes every comparison below meaningless in the direction that reads as a pass.
+   * The rendered frame, and only the rendered frame. Two shots with a gap, which have to agree
+   * before either is used: a picture still moving makes every comparison below meaningless in the
+   * direction that reads as a pass.
    */
   const picture = async () => {
     await page.evaluate(() => globalThis.__kinect.keyframes.chrome.set(false));
@@ -292,7 +343,9 @@ try {
   await setTilt(0, 0);
   const flat = await picture();
   ok('a picture of a planted surface is stable enough to compare', flat.stable);
-  // Everything below this row is graded against a surface this tool chose, so this row says the surface on screen is still that one. Taken after a full `picture()`, because the window that matters is the one a comparison spans.
+  // Everything below this row is graded against a surface this tool chose, so this row says the
+  // surface on screen is still that one. Taken after a full `picture()`, because the window that
+  // matters is the one a comparison spans.
   const held = await plantHeld();
   ok('and it is still the planted surface after a settle, not a frame off the wire',
     held.sameTexture && held.sum === held.expected,
@@ -303,7 +356,8 @@ try {
     `${flat.hash} then ${canted.hash}`);
 
   console.log('\n2. the crop and the region stay in sensor metres');
-  // A box that actually bites. Left open, every point survives either way round and the identity below is true for a build with no crop at all.
+  // A box that actually bites. Left open, every point survives either way round and the identity
+  // below is true for a build with no crop at all.
   await page.evaluate(() => {
     const k = globalThis.__kinect;
     k.params.set('left', -0.4);
@@ -312,9 +366,11 @@ try {
     k.params.set('top', 0.45);
   });
   /**
-   * A region that actually bites, which this section claimed in its heading and did not do. The shader gates the whole region evaluation behind `push.amount`,
-   * `noise.region` and `mask.amount` being non-zero, so at their defaults a build evaluating it after the model rotation drew a pixel-identical picture and passed.
-   * A mask rather than a push, because a push moves points and a mask removes them, and the surviving set is what the identity below compares.
+   * A region that actually bites, which this section claimed in its heading and did not do. The
+   * shader gates the whole region evaluation behind `push.amount`, `noise.region` and `mask.amount`
+   * being non-zero, so at their defaults a build evaluating it after the model rotation drew a
+   * pixel-identical picture and passed. A mask rather than a push, because a push moves points and
+   * a mask removes them, and the surviving set is what the identity below compares.
    */
   const armRegion = () => page.evaluate(() => {
     const k = globalThis.__kinect;
@@ -350,7 +406,9 @@ try {
   ok('the same surface through a fixed pose is stable', bare.stable);
   await armRegion();
   const still = await picture();
-  // The row that stops the region rows below being vacuous: a region whose box missed the planted plane, or whose mask was left at zero, would satisfy every identity in this section by changing nothing.
+  // The row that stops the region rows below being vacuous: a region whose box missed the planted
+  // plane, or whose mask was left at zero, would satisfy every identity in this section by
+  // changing nothing.
   ok('switching the region on takes points out of the picture, so it is in the proof at all',
     bare.hash !== still.hash, `${bare.hash} then ${still.hash}`);
   ok('and the picture with the region on is stable enough to compare', still.stable);
@@ -359,7 +417,8 @@ try {
   const carried = await picture();
   ok('turning the world and the camera by the same rotation changes nothing at all',
     still.hash === carried.hash, `${still.hash} then ${carried.hash}`);
-  // Without this row the identity above is satisfied by a build where the camera is not carried either - two pictures that are the same because nothing moved.
+  // Without this row the identity above is satisfied by a build where the camera is not carried
+  // either - two pictures that are the same because nothing moved.
   await poseProgram(false);
   const notCarried = await picture();
   ok('and leaving the camera behind does change it, so the identity is not vacuous',
@@ -375,8 +434,10 @@ try {
 
   console.log('\n3. the top-down draws the levelled frame');
   /**
-   * The plan cloud's own bounding box in the inset, in pixels. Filtered by colour rather than by area: the path and the frustum are drawn in the same box in teal
-   * and orange, and the cloud is the only near-neutral thing in there. Read off the overlay's own backing store rather than out of a screenshot.
+   * The plan cloud's own bounding box in the inset, in pixels. Filtered by colour rather than by
+   * area: the path and the frustum are drawn in the same box in teal and orange, and the cloud is
+   * the only near-neutral thing in there. Read off the overlay's own backing store rather than out
+   * of a screenshot.
    */
   const planExtent = async () => {
     await page.evaluate(() => globalThis.__kinect.keyframes.chrome.set(true));
@@ -384,7 +445,8 @@ try {
     return page.evaluate(() => {
       const canvas = document.getElementById('chrome');
       const r = globalThis.__kinect.keyframes.chrome.inset();
-      // The overlay is drawn through a device-pixel-ratio transform, so the inset's CSS rectangle has to be taken back into the buffer's own scale.
+      // The overlay is drawn through a device-pixel-ratio transform, so the inset's CSS rectangle
+      // has to be taken back into the buffer's own scale.
       const scale = canvas.width / r.stage.w;
       const x0 = Math.round(r.x * scale);
       const y0 = Math.round(r.y * scale);
@@ -407,14 +469,18 @@ try {
           if (y > maxY) maxY = y;
         }
       }
-      // `sumX` and `insetW` are raw on purpose, and section 8 is what needs them: an extent is invariant under a reflection and a position is not, so every row measuring `w` and `h` would pass a plan drawn mirrored.
+      // `sumX` and `insetW` are raw on purpose, and section 8 is what needs them: an extent is
+      // invariant under a reflection and a position is not, so every row measuring `w` and `h`
+      // would pass a plan drawn mirrored.
       return n === 0
         ? { n: 0, sumX: 0, insetW: w }
         : { n, w: maxX - minX + 1, h: maxY - minY + 1, scale, sumX, insetW: w };
     });
   };
 
-  // Surface B leans along both axes, so the pair that levels it is a different pair under each composition order and this section is `level-order-swapped`'s catcher. The cant comes from `levelPair` rather than from the page.
+  // Surface B leans along both axes, so the pair that levels it is a different pair under each
+  // composition order and this section is `level-order-swapped`'s catcher. The cant comes from
+  // `levelPair` rather than from the page.
   await setTilt(0, 0);
   await plant(SURFACES[1]);
   const level = levelPair(SURFACES[1].n);
@@ -424,7 +490,9 @@ try {
     ok('a surface levelled flat covers the top-down in two directions',
       flatPlan.n > 200 && Math.min(flatPlan.w, flatPlan.h) > 8,
       `${flatPlan.n} plan points, ${flatPlan.w}x${flatPlan.h}px at tilt ${flatPose.tilt} roll ${flatPose.roll}`);
-    // The vertical crop, which this plan ignored on purpose until levelling existed: sensor y ran straight up the axis a top-down projects away, so culling on x alone was free. Measured with the room levelled flat, where a strip taken out of the surface is visible to this extent.
+    // The vertical crop, which this plan ignored on purpose until levelling existed: sensor y ran
+    // straight up the axis a top-down projects away, so culling on x alone was free. Measured with
+    // the room levelled flat, where a strip taken out of the surface is visible to this extent.
     await page.evaluate(() => {
       const k = globalThis.__kinect;
       k.params.set('bottom', -0.25);
@@ -435,7 +503,9 @@ try {
       croppedPlan.n > 0 && croppedPlan.n * 1.2 < flatPlan.n,
       `${flatPlan.n} plan points with the crop open, ${croppedPlan.n} with bottom/top closed`);
     await page.evaluate(() => globalThis.__kinect.params.reset(['bottom', 'top']));
-    // A further quarter turn about x stands the same surface on its edge, so its top-down collapses to a line. Two-sided on purpose: the fat reading alone passes on a plan that ignores the levelling entirely.
+    // A further quarter turn about x stands the same surface on its edge, so its top-down collapses
+    // to a line. Two-sided on purpose: the fat reading alone passes on a plan that ignores the
+    // levelling entirely.
     await setTilt(flatPose.tilt - 90, flatPose.roll);
     const edgePlan = await planExtent();
     const flatMinor = Math.min(flatPlan.w, flatPlan.h);
@@ -470,9 +540,12 @@ try {
     restored.afterLevelling.map((v) => v.toFixed(3)).join(', '));
 
   console.log('\n5. reset rotation puts both axes and both sliders back');
-  // Through the control and not through the hook, which is why these rows drive a button rather than calling `resetWorldRotation`. `editor-check` names this tool as `camLevelReset`'s driver.
+  // Through the control and not through the hook, which is why these rows drive a button rather
+  // than calling `resetWorldRotation`. `editor-check` names this tool as `camLevelReset`'s driver.
   await page.evaluate(() => { document.getElementById('panel').style.display = ''; });
-  // And the inspector holding it is selected, because the panel is four tabs now: every group outside the selected one is `display: none`. The tab is read off the group that contains the button rather than named.
+  // And the inspector holding it is selected, because the panel is four tabs now: every group
+  // outside the selected one is `display: none`. The tab is read off the group that contains the
+  // button rather than named.
   await page.evaluate(() => {
     const tab = document.getElementById('camLevelReset')?.closest('[data-panel-tab]')?.dataset.panelTab;
     if (tab) document.querySelector(`.paneltab[data-panel-tab="${tab}"]`)?.click();
@@ -484,7 +557,9 @@ try {
     roll: globalThis.__kinect.params.get('roll'),
     sliders: [document.getElementById('tilt').value, document.getElementById('roll').value],
   }));
-  // Both axes and both sliders. The sliders are read beside the parameters rather than instead of them, because a reset that moved the value and not the view looks like a reset that worked to anything asking only one of the two.
+  // Both axes and both sliders. The sliders are read beside the parameters rather than instead of
+  // them, because a reset that moved the value and not the view looks like a reset that worked to
+  // anything asking only one of the two.
   ok('reset rotation takes both axes and both sliders back to neutral',
     reset.tilt === 0 && reset.roll === 0 && reset.sliders.every((value) => Number(value) === 0),
     `rotation ${reset.tilt}/${reset.roll}, sliders ${reset.sliders.join('/')}`);
@@ -507,14 +582,18 @@ try {
   });
   ok('both are document state, so a project carries the cant it was levelled at',
     boundary.inDocument && !boundary.leakedToView, `${boundary.values.join(', ')} tagged ${boundary.tags.join('/')}`);
-  // Every orientation a mount can end up at has to be reachable on the sliders, and `levelPair`'s two `atan2`s say what that span is. A range short of these would refuse a bracket somebody actually built, by clamping rather than by saying so.
+  // Every orientation a mount can end up at has to be reachable on the sliders, and `levelPair`'s
+  // two `atan2`s say what that span is. A range short of these would refuse a bracket somebody
+  // actually built, by clamping rather than by saying so.
   ok('and the sliders reach every cant a surface can be levelled from',
     boundary.ranges[0][0] <= -90 && boundary.ranges[0][1] >= 90
     && boundary.ranges[1][0] <= -180 && boundary.ranges[1][1] >= 180,
     JSON.stringify(boundary.ranges));
   console.log('\n7. the crop box is drawn in the room and its switch reaches every reader');
 
-  // Section 2 asserts the crop is tested in sensor metres; this is the drawing's half of the same fact and it points the other way, because the box is drawn in the room. The old top-down rectangle got this half wrong for as long as levelling existed.
+  // Section 2 asserts the crop is tested in sensor metres; this is the drawing's half of the same
+  // fact and it points the other way, because the box is drawn in the room. The old top-down
+  // rectangle got this half wrong for as long as levelling existed.
   await setTilt(14, -9);
   const box = await page.evaluate(() => {
     const k = globalThis.__kinect;
@@ -522,7 +601,9 @@ try {
     const u = k.uniforms;
     const lo = [u.cropL.value, u.cropB.value, -u.farClip.value];
     const hi = [u.cropR.value, u.cropT.value, -u.nearClip.value];
-    // Turned by the quaternion read off the cloud rather than by one composed from the two sliders: that is the difference between holding the drawing to what the renderer is doing and to a second calculation that agrees by construction.
+    // Turned by the quaternion read off the cloud rather than by one composed from the two sliders:
+    // that is the difference between holding the drawing to what the renderer is doing and to a
+    // second calculation that agrees by construction.
     const v = new (k.freeCamera.position.constructor)();
     const rot = k.freeCamera.quaternion.clone().fromArray(q);
     const want = [];
@@ -535,7 +616,8 @@ try {
     }
     const got = k.cropBoxCorners();
     const worst = Math.max(...got.map((c, i) => Math.max(...c.map((n, j) => Math.abs(n - want[i][j])))));
-    // The control: a box already sitting in the room's frame would satisfy the comparison above without carrying anything, so the corners must also be somewhere the unrotated box is not.
+    // The control: a box already sitting in the room's frame would satisfy the comparison above
+    // without carrying anything, so the corners must also be somewhere the unrotated box is not.
     const bare = Math.max(...got.map((c, i) => Math.max(...c.map((n, j) => Math.abs(n
       - [(i & 1) ? hi[0] : lo[0], (i & 2) ? hi[1] : lo[1], (i & 4) ? hi[2] : lo[2]][j])))));
     return { worst, bare };
@@ -545,7 +627,9 @@ try {
   ok('and it is not simply the sensor box, which a levelled room would draw beside its cloud',
     box.bare > 0.05, `${box.bare.toFixed(3)} m from the unrotated box`);
 
-  // The switch, asked of a reader that is not the shader: the top-down walks the depth texture through the same six faces, so a `crop` wired to the shader alone leaves it culling a cloud the picture is showing in full.
+  // The switch, asked of a reader that is not the shader: the top-down walks the depth texture
+  // through the same six faces, so a `crop` wired to the shader alone leaves it culling a cloud the
+  // picture is showing in full.
   await plant(SURFACES[1]);
   const switchFlat = levelPair(SURFACES[1].n);
   await setTilt(switchFlat.tilt, switchFlat.roll);
@@ -565,17 +649,22 @@ try {
   ok('a crop that bites takes points out of the top-down',
     bitingPlan.n > 0 && bitingPlan.n * 1.2 < openPlan.n,
     `${openPlan.n} plan points with the box open, ${bitingPlan.n} with bottom/top closed`);
-  // Back to the open count exactly rather than merely upward: the same plant through the same camera is the same set of pixels twice, and a row asking only for more points would pass a build that widened the faces.
+  // Back to the open count exactly rather than merely upward: the same plant through the same
+  // camera is the same set of pixels twice, and a row asking only for more points would pass a
+  // build that widened the faces.
   ok('and releasing the switch hands them back, so the switch reaches more than the shader',
     releasedPlan.n === openPlan.n,
     `${bitingPlan.n} biting, ${releasedPlan.n} released, ${openPlan.n} open`);
 
   console.log('\n8. the unprojection is mirrored, on both readers that state it');
   /**
-   * A slab of constant depth in one column band, and nothing anywhere else. Asymmetric on purpose, and that is the only reason this section can exist: every other
-   * fixture here is a plane, symmetric about the optical axis, so no row that plants a `SURFACES` entry can see a sign on x - which is how a mirrored cloud sat in
-   * this program from its first commit through every proof tool in the suite. The flip was established on the rig, off a colour frame carrying branded text that
-   * reads only after one horizontal flip, and what this section does is pin the sign that measurement settled.
+   * A slab of constant depth in one column band, and nothing anywhere else. Asymmetric on purpose,
+   * and that is the only reason this section can exist: every other fixture here is a plane,
+   * symmetric about the optical axis, so no row that plants a `SURFACES` entry can see a sign on x
+   * - which is how a mirrored cloud sat in this program from its first commit through every proof
+   * tool in the suite. The flip was established on the rig, off a colour frame carrying branded
+   * text that reads only after one horizontal flip, and what this section does is pin the sign that
+   * measurement settled.
    */
   const plantBar = (offsetFrom, offsetTo, metres) => page.evaluate(({ a, b, z }) => {
     const k = globalThis.__kinect;
@@ -602,7 +691,9 @@ try {
   }, { a: offsetFrom, b: offsetTo, z: metres });
 
   /**
-   * The crop, used as a fixed frame of reference rather than as the thing under test. The six faces are world-space constants and the cloud's x is not, so half-opening the box turns "which side of the axis did this band land on" into "is the stage empty".
+   * The crop, used as a fixed frame of reference rather than as the thing under test. The six faces
+   * are world-space constants and the cloud's x is not, so half-opening the box turns "which side
+   * of the axis did this band land on" into "is the stage empty".
    */
   const keepSideOfAxis = (side) => page.evaluate((s) => {
     const k = globalThis.__kinect;
@@ -614,7 +705,8 @@ try {
   await setTilt(0, 0);
   await page.evaluate(() => globalThis.__kinect.sensorView());
   await wait(260);
-  // The reference, and it is an empty grid rather than an empty crop: every row below reads "equal to this" as "the band was entirely on the other side of the axis".
+  // The reference, and it is an empty grid rather than an empty crop: every row below reads "equal
+  // to this" as "the band was entirely on the other side of the axis".
   await plantBar(0, 0, 0);
   const emptyStage = await picture();
   ok('an empty depth grid draws a stable empty stage to compare against', emptyStage.stable,
@@ -622,7 +714,9 @@ try {
 
   const RIGHT_BAND = [80, 140];
   const LEFT_BAND = [-140, -80];
-  // Five metres rather than two, and the depth is what buys the top-down its margin: the band's world x is `offset / fx * z`. Measured at five, the two bands come out 0.288 apart and symmetric about the centre to within 0.004.
+  // Five metres rather than two, and the depth is what buys the top-down its margin: the band's
+  // world x is `offset / fx * z`. Measured at five, the two bands come out 0.288 apart and
+  // symmetric about the centre to within 0.004.
   const BAND_DEPTH = 5;
   const bandRight = await plantBar(RIGHT_BAND[0], RIGHT_BAND[1], BAND_DEPTH);
   await plantFingerprint();
@@ -636,7 +730,8 @@ try {
   ok('and the band is still the planted one, not a frame off the wire',
     heldRight.sameTexture && heldRight.sum === heldRight.expected,
     heldRight.sameTexture ? `checksum ${heldRight.sum} vs ${heldRight.expected}` : 'the depth texture was swapped under it');
-  // The load-bearing pair. A band on the image's right is at negative world x once the mirror is undone, so un-negating the unprojection inverts both rows together.
+  // The load-bearing pair. A band on the image's right is at negative world x once the mirror is
+  // undone, so un-negating the unprojection inverts both rows together.
   ok('a band on the image right survives a crop keeping only negative x',
     rightOnNeg.stable && rightOnNeg.hash !== emptyStage.hash,
     `${rightOnNeg.hash} against an empty ${emptyStage.hash}`);
@@ -644,7 +739,9 @@ try {
     rightOnPos.stable && rightOnPos.hash === emptyStage.hash,
     `${rightOnPos.hash} against an empty ${emptyStage.hash}`);
 
-  // Two-sided, because one side cannot tell a mirror from a build that culls: a row asking only that the right-hand band lands on negative x is satisfied by a shader that put every point there, or drew nothing.
+  // Two-sided, because one side cannot tell a mirror from a build that culls: a row asking only
+  // that the right-hand band lands on negative x is satisfied by a shader that put every point
+  // there, or drew nothing.
   await plantBar(LEFT_BAND[0], LEFT_BAND[1], BAND_DEPTH);
   await plantFingerprint();
   await keepSideOfAxis('positive');
@@ -658,8 +755,11 @@ try {
     leftOnNeg.stable && leftOnNeg.hash === emptyStage.hash,
     `${leftOnNeg.hash} against an empty ${emptyStage.hash}`);
 
-  // The top-down, asked the same question, because it states the unprojection for itself and a sign fixed in the shader alone leaves the plan drawing the room's left
-  // on the plan's right. Position rather than extent, since an extent is invariant under a reflection. The TOP-DOWN caption clears the brightness floor and both neutrality bounds, so it is measured and subtracted rather than filtered around.
+  // The top-down, asked the same question, because it states the unprojection for itself and a sign
+  // fixed in the shader alone leaves the plan drawing the room's left on the plan's right. Position
+  // rather than extent, since an extent is invariant under a reflection. The TOP-DOWN caption
+  // clears the brightness floor and both neutrality bounds, so it is measured and subtracted rather
+  // than filtered around.
   await page.evaluate(() => globalThis.__kinect.params.reset(['left', 'right', 'crop']));
   await plantBar(0, 0, 0);
   const planBare = await planExtent();
@@ -700,7 +800,8 @@ if (untested) {
   process.exit(2);
 }
 if (MUTATE) {
-  // Exit code alone cannot tell a caught mutation from a tool that crashed before asserting anything, and this repo has been bitten by exactly that twice.
+  // Exit code alone cannot tell a caught mutation from a tool that crashed before asserting
+  // anything, and this repo has been bitten by exactly that twice.
   if (failed === 0) { console.log('[level] NOT CAUGHT - the check passed a build it should have rejected'); process.exit(1); }
   console.log(`[level] caught, as required (${failed} assertion${failed === 1 ? '' : 's'} fired)`);
   process.exit(1);

@@ -1,6 +1,5 @@
-// The glyph field's point-size ceiling, held as arithmetic. This proves the ceiling is
-// *expressed* in reference pixels; it says nothing about whether a sprite stops growing
-// there on a GPU.
+// The glyph field's point-size ceiling, held as arithmetic. This proves the ceiling is *expressed*
+// in reference pixels; it says nothing about whether a sprite stops growing there on a GPU.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

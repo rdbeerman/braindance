@@ -127,7 +127,8 @@ function windowStats(samples) {
   const first = samples[0], last = samples.at(-1);
   const secs = (last.at - first.at) / 1000;
   if (!(secs > 20)) return null;
-  // The recorder's counter resets when a take closes, so the teardown window reads as a negative rate.
+  // The recorder's counter resets when a take closes, so the teardown window reads as
+  // a negative rate.
   if (last.frames < first.frames) return null;
   return {
     recordedFps: (last.frames - first.frames) / secs,
@@ -144,7 +145,8 @@ try {
     .split('\n').map((l) => `         ${l}`).join('\n')}`);
 
   // Listeners are resolved by port through `ss`, whose pipeline contains no text matching itself.
-  // The deployed unit is Restart=always, so it is stopped for the run and started again in teardown.
+  // The deployed unit is Restart=always, so it is stopped for the run and started
+  // again in teardown.
   await ssh(`sudo systemctl stop kinect-node 2>/dev/null || true; `
     + `${KILL_SERVER}; ${KILL_SAMPLER}; rm -f ${LOG} ${SAMPLES}; sleep 1`);
   sshDetached(`cd ${DIR} && XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 `
@@ -158,7 +160,8 @@ try {
   console.log(`[cost] recording, ${armed.frames} frames so far`);
 
   // Shipped base64 rather than quoted: through `bash -c "<script>"` the outer shell expands every
-  // `$(...)` and JSON quoting carries \n as two literal characters, so the sampler never ran at all.
+  // `$(...)` and JSON quoting carries \n as two literal characters, so the sampler
+  // never ran at all.
   const script = Buffer.from(SAMPLER(PORT, LOG, SAMPLES)).toString('base64');
   sshDetached(`echo ${script} | base64 -d > /tmp/monitor-cost.sh && `
     + 'setsid bash /tmp/monitor-cost.sh < /dev/null > /dev/null 2>&1');

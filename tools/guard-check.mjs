@@ -20,9 +20,11 @@ const PORT = Number(flag('--port', '8321'));
 const MUTATE = flag('--mutate');
 const WORK = join(REPO, '.guard-check');
 
-// Each names source text and must match exactly once. One row per term, so a red row names the claim.
+// Each names source text and must match exactly once. One row per term, so a red row
+// names the claim.
 const MUTATIONS = {
-  // The reads answer another origin again. It must redden the cross-origin read row alone, and leave the same-origin, absent and navigation rows green.
+  // The reads answer another origin again. It must redden the cross-origin read row alone, and
+  // leave the same-origin, absent and navigation rows green.
   'reads-answer-any-page': {
     file: 'server/index.js',
     edits: [[
@@ -40,7 +42,8 @@ const MUTATIONS = {
 `, '']] },
   'listen-any-host': { file: 'server/index.js', edits: [[
     "const HOST = flag('--host', LOOPBACK);", "const HOST = flag('--host', '0.0.0.0');"]] },
-  // The scheme half, as the predicate was first written: a parsed origin host against a raw Host string.
+  // The scheme half, as the predicate was first written: a parsed origin host against a
+  // raw Host string.
   'origin-ignores-scheme': { file: 'server/http-guard.js', edits: [[
     "  return originUrl.protocol === 'http:' && originUrl.host === hostUrl.host;",
     '  return originUrl.host === rawHost;',
@@ -50,13 +53,15 @@ const MUTATIONS = {
     '  if (/[@/?#\\s\\\\]/.test(rawHost)) return false;',
     '  if (false) return false;',
   ]] },
-  // The rebinding rule reverted to comparing the two headers against each other, which a rebound browser satisfies by construction. It must leave the address rows alone.
+  // The rebinding rule reverted to comparing the two headers against each other, which a rebound
+  // browser satisfies by construction. It must leave the address rows alone.
   'host-accepts-a-name': { file: 'server/http-guard.js', edits: [[
     `  const isAddress = /^\\d{1,3}(\\.\\d{1,3}){3}$/.test(hostname) || hostname.startsWith('[');
   if (!isAddress && hostname !== 'localhost' && !hostname.endsWith('.local')) return false;`,
     '  if (false) return false;',
   ]] },
-  // A `file://` page and a sandboxed iframe both send the literal string `null`, which is not a URL.
+  // A `file://` page and a sandboxed iframe both send the literal string `null`,
+  // which is not a URL.
   'origin-allows-null': { file: 'server/http-guard.js', edits: [[
     `  } catch {
     // \`null\` is what a sandboxed iframe and a \`file://\` page send, and it is not a
@@ -71,11 +76,13 @@ if (MUTATE && !MUTATIONS[MUTATE]) {
   process.exit(2);
 }
 
-// Copied out of `server/` with the siblings symlinked: a mutation applied in place leaves a mutated working tree behind any crash.
+// Copied out of `server/` with the siblings symlinked: a mutation applied in place leaves a mutated
+// working tree behind any crash.
 rmSync(WORK, { recursive: true, force: true });
 mkdirSync(WORK, { recursive: true });
 cpSync(join(REPO, 'server'), join(WORK, 'server'), { recursive: true });
-// `effects-builtin` is in the list because the effect store refuses to boot without its shipped root, so a staged tree without it will not start.
+// `effects-builtin` is in the list because the effect store refuses to boot without its shipped
+// root, so a staged tree without it will not start.
 for (const name of ['web', 'node_modules', 'vendor', 'captures', 'effects-builtin']) {
   const from = join(REPO, name);
   if (existsSync(from)) symlinkSync(from, join(WORK, name));
@@ -129,7 +136,8 @@ const upgrade = (origin, path = '/') => new Promise((resolve) => {
   setTimeout(() => done('timeout'), 5000);
 });
 
-// An upgrade carrying a chosen Host as well: a row varying only one of them tests half the predicate.
+// An upgrade carrying a chosen Host as well: a row varying only one of them tests
+// half the predicate.
 const upgradeWithHost = (origin, host) => new Promise((resolve) => {
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/`, { headers: { Origin: origin, Host: host } });
   const done = (r) => { try { ws.terminate(); } catch { /* already gone */ } resolve(r); };
@@ -200,12 +208,14 @@ try {
   ok('and an unknown socket path is still a 404 rather than a 403, so the guard did not swallow the router',
     await upgrade(`http://127.0.0.1:${PORT}`, '/nope') === 'refused 404');
 
-  // An origin is a scheme, a host and a port, and comparing a parsed host against a raw header compared one of the three. These rows send spellings, not values.
+  // An origin is a scheme, a host and a port, and comparing a parsed host against a raw header
+  // compared one of the three. These rows send spellings, not values.
   ok('an https origin is not this http server, even though the host and port match exactly',
     await upgrade(`https://127.0.0.1:${PORT}`) === 'refused 403');
   ok('and neither is a ws: or wss: origin, which is the same hole spelled differently',
     await upgrade(`wss://127.0.0.1:${PORT}`) === 'refused 403');
-  // The other direction: a refusal this strict would break the product, so canonicalising cases must open.
+  // The other direction: a refusal this strict would break the product, so canonicalising
+  // cases must open.
   const hostVariants = await Promise.all([
     upgradeWithHost(`http://127.0.0.1:${PORT}`, `127.0.0.1:${PORT}`),
     upgradeWithHost('http://localhost', 'localhost:80'),
@@ -213,7 +223,8 @@ try {
   ]);
   ok('while spellings of one authority still open - a default port written out, and a host in capitals',
     hostVariants.every((r) => r === 'open'), hostVariants.join(', '));
-  // A Host header is an authority and nothing else, and `new URL('http://' + host)` consumes userinfo, a path, a query or a fragment and normalises what is left.
+  // A Host header is an authority and nothing else, and `new URL('http://' + host)` consumes
+  // userinfo, a path, a query or a fragment and normalises what is left.
   const malformed = await Promise.all([
     upgradeWithHost(`http://127.0.0.1:${PORT}`, `evil.example@127.0.0.1:${PORT}`),
     upgradeWithHost(`http://127.0.0.1:${PORT}`, `127.0.0.1:${PORT}/path`),
@@ -227,7 +238,8 @@ try {
     !/^HTTP\/1\.1 101/.test(dup), dup.slice(0, 40));
 
   // Host equality alone cannot survive DNS rebinding: the attacker re-resolves a name they control
-  // onto this address, so both headers carry it. These rows are about loopback rather than `--host`.
+  // onto this address, so both headers carry it. These rows are about loopback
+  // rather than `--host`.
   const rebound = await Promise.all([
     upgradeWithHost(`http://evil.example.com:${PORT}`, `evil.example.com:${PORT}`),
     upgradeWithHost('http://evil.example.com', 'evil.example.com'),
@@ -236,7 +248,8 @@ try {
   ok('a Host that is a name the attacker could have pointed here does not upgrade, however exactly the Origin agrees with it - agreement is what rebinding manufactures',
     rebound.every((r) => r !== 'open'), rebound.join(', '));
 
-  // The positive twin: a guard refusing every authority would pass the row above and break every way this program is reached.
+  // The positive twin: a guard refusing every authority would pass the row above and break every
+  // way this program is reached.
   const stillReachable = await Promise.all([
     upgradeWithHost(`http://127.0.0.1:${PORT}`, `127.0.0.1:${PORT}`),
     upgradeWithHost(`http://[::1]:${PORT}`, `[::1]:${PORT}`),
@@ -247,9 +260,10 @@ try {
   ok('while an address literal, IPv6 loopback, `localhost` and an mDNS name all still open - the rule discriminates by the kind of authority, and a guard that refused everything would fail here rather than pass quietly',
     stillReachable.every((r) => r === 'open'), stillReachable.join(', '));
 
-  // The reads, and the header that is the only thing able to tell them apart: a cross-origin `<img>`
-  // sends no `Origin` at all, and several of these reads are expensive. `sec-fetch-site` is set by the
-  // browser and cannot be set by a page, so absent must pass or the peer link stops working.
+  // The reads, and the header that is the only thing able to tell them apart: a cross-origin
+  // `<img>` sends no `Origin` at all, and several of these reads are expensive. `sec-fetch-site` is
+  // set by the browser and cannot be set by a page, so absent must pass or the peer
+  // link stops working.
   const read = (site, path = `/capture/${SAMPLE_ID}/hello`) => fetch(`http://127.0.0.1:${PORT}${path}`, {
     headers: site === null ? {} : { 'sec-fetch-site': site },
   }).then((r) => r.status).catch(() => 'threw');
@@ -266,7 +280,8 @@ try {
   const navigation = await read('none');
   ok('and a top-level navigation is not refused, because typing the URL is not an attack and OBS opening a browser source is one of these',
     navigation === 200, `none -> ${navigation}`);
-  // Route-by-route would close the six that were found; the table's default is what closes the seventh.
+  // Route-by-route would close the six that were found; the table's default is what
+  // closes the seventh.
   const expensive = await Promise.all([
     read('cross-site', `/capture/${SAMPLE_ID}/extent?near=0.5&far=6`),
     read('cross-site', '/library/all'),

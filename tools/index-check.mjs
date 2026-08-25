@@ -74,7 +74,8 @@ async function scanCost(path) {
   }
   // Run 1 is reported apart from the rest but is not a cold read: this is the warm-cache ceiling.
   const rest = times.slice(1);
-  // Resident set after the scan, so "the scan never holds the file" is enforced rather than asserted.
+  // Resident set after the scan, so "the scan never holds the file" is enforced
+  // rather than asserted.
   return { size, index, first: times[0], rest, restP50: pct(rest, 50), rss: process.memoryUsage().rss };
 }
 
@@ -116,7 +117,8 @@ for (const path of FIXTURES) {
 }
 
 {
-  // The claim is that the working set does not track file size, so the check is the shape of the curve.
+  // The claim is that the working set does not track file size, so the check is the
+  // shape of the curve.
   const small = scans.get(FIXTURES[0]);
   const large = scans.get(FIXTURES[FIXTURES.length - 1]);
   const RSS_CEILING = 512e6;
@@ -144,7 +146,8 @@ for (const path of FIXTURES) {
 }
 
 {
-  // Flipped inside a payload rather than a framing header, which would move what the scanner parses too.
+  // Flipped inside a payload rather than a framing header, which would move what the
+  // scanner parses too.
   const src = FIXTURES[0];
   const copy = `${SCRATCH}/index-check-flip.knct`;
   await copyFile(src, copy);
@@ -167,11 +170,13 @@ for (const path of FIXTURES) {
 }
 
 {
-  // A same-size substitution is the one staleness case byte length cannot see, so mtime is checked beside it.
+  // A same-size substitution is the one staleness case byte length cannot see, so mtime is
+  // checked beside it.
   const copy = `${SCRATCH}/index-check-stale.knct`;
   await copyFile(FIXTURES[0], copy);
   const before = await buildIndex(copy);
-  // Read the mtime back rather than assuming the one set: Date carries milliseconds, the filesystem nanoseconds.
+  // Read the mtime back rather than assuming the one set: Date carries milliseconds, the
+  // filesystem nanoseconds.
   const target = Math.floor((await stat(copy)).mtimeMs) + 5000;
   await utimes(copy, new Date(target), new Date(target));
   const landed = (await stat(copy)).mtimeMs;
@@ -186,7 +191,8 @@ for (const path of FIXTURES) {
 }
 
 {
-  // The sidecar exists so a writer that died mid-take leaves a usable file, so cut one mid-frame and check.
+  // The sidecar exists so a writer that died mid-take leaves a usable file, so cut one
+  // mid-frame and check.
   const src = FIXTURES[0];
   const whole = await loadIndex(src);
   const keep = 100;
@@ -235,7 +241,8 @@ const BIG = FIXTURES[FIXTURES.length - 1];
   check(served.hash === capture.hash, `${id}: /index serves the sidecar's hash`);
   check(served.frames.offset.length === n, `${id}: /index serves ${n} frames`);
 
-  // One deliberately past the 2 GiB mark, which is the offset a whole-file read could not reach at all.
+  // One deliberately past the 2 GiB mark, which is the offset a whole-file read could
+  // not reach at all.
   const past2Gib = walk.frames.findIndex((f) => f.offset > 2 ** 31);
   const picks = [0, Math.floor(Math.random() * (n - 2)) + 1, past2Gib, n - 1];
   for (const k of picks) {
@@ -250,7 +257,8 @@ const BIG = FIXTURES[FIXTURES.length - 1];
     );
   }
 
-  // A run comes back framed, so it has to parse back into the payloads the single-frame endpoint serves.
+  // A run comes back framed, so it has to parse back into the payloads the single-frame
+  // endpoint serves.
   const a = Math.floor(n / 2);
   const b = a + 7;
   const run = await getBytes(`${URL_BASE}/capture/${id}/frames/${a}-${b}`);
@@ -268,7 +276,8 @@ const BIG = FIXTURES[FIXTURES.length - 1];
 
   check((await fetch(`${URL_BASE}/capture/${id}/frame/${n}`)).status === 404, 'a frame past the end is 404');
   check((await fetch(`${URL_BASE}/capture/${id}/frames/${n - 1}-${n - 4}`)).status === 404, 'a backwards range is 404');
-  // Encoded so the separators survive URL normalisation and the whole thing arrives as one path segment.
+  // Encoded so the separators survive URL normalisation and the whole thing arrives as
+  // one path segment.
   const traversal = await fetch(`${URL_BASE}/capture/..%2f..%2fetc%2fpasswd/index`);
   check(traversal.status === 404, `a traversing id is refused by the id guard (${traversal.status})`);
   check((await fetch(`${URL_BASE}/capture/nosuch/index`)).status === 404, 'an unknown capture is 404');
@@ -278,7 +287,8 @@ const BIG = FIXTURES[FIXTURES.length - 1];
 
 console.log('\n== the run endpoint survives the file moving underneath it ==');
 {
-  // The run used to be reopened by path while everything else read a retained handle: ENOENT inside a stream, after the headers had gone out, killed the process.
+  // The run used to be reopened by path while everything else read a retained handle: ENOENT inside
+  // a stream, after the headers had gone out, killed the process.
   const id = `index-check-victim-${process.pid}`;
   const victim = `captures/${id}.knct`;
   const replacement = `${SCRATCH}/index-check-replacement.knct`;
@@ -286,7 +296,8 @@ console.log('\n== the run endpoint survives the file moving underneath it ==');
   const src = FIXTURES[0];
   const srcIndex = await loadIndex(src);
   await copyFile(src, victim);
-  // Same length, one byte different inside frame 0's payload, so a wrong answer can only mean the wrong file.
+  // Same length, one byte different inside frame 0's payload, so a wrong answer can only
+  // mean the wrong file.
   await copyFile(src, replacement);
   const rfh = await open(replacement, 'r+');
   const one = Buffer.alloc(1);
@@ -350,7 +361,8 @@ console.log('\n== per-frame fetch latency over loopback ==');
   console.log(`  random interior   p50 ${ms(pct(random, 50))}   p90 ${ms(pct(random, 90))}`);
   console.log(`  sequential walk   p50 ${ms(pct(sequential, 50))}   p90 ${ms(pct(sequential, 90))}`);
 
-  // A prefetch run is why the range endpoint exists: eight frames one at a time against the same eight as a run.
+  // A prefetch run is why the range endpoint exists: eight frames one at a time against the
+  // same eight as a run.
   const RUN = 8;
   const perFrame = [];
   const asRun = [];

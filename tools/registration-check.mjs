@@ -32,20 +32,24 @@ const sh = (cmd, args, opts = {}) => {
   }
 };
 
-// Applied to OUR vendored registration.cpp, which is then rebuilt. An anchor that does not match exactly once is refused.
+// Applied to OUR vendored registration.cpp, which is then rebuilt. An anchor that does not match
+// exactly once is refused.
 const MUTATIONS = {
   'filter-tolerance': ['filter_tolerance(0.01f)', 'filter_tolerance(0.011f)'],
   'filter-width': ['filter_width_half(2)', 'filter_width_half(1)'],
-  // Makes the occlusion test never reject. It mutates the decision rather than the allocation, which segfaults.
+  // Makes the occlusion test never reject. It mutates the decision rather than the allocation,
+  // which segfaults.
   'filter-never-rejects': ['(z - min_z) / z > filter_tolerance ? 0 : *(rgb_data + c_off)',
                            '(false) ? 0 : *(rgb_data + c_off)'],
-  // Aimed at the threaded banding: a window straddling two threads' ranges written by neither, or twice.
+  // Aimed at the threaded banding: a window straddling two threads' ranges written by
+  // neither, or twice.
   'band-off-by-one': ['const int b = (s + span) < hi ? (s + span) : hi;',
                       'const int b = (s + span - 1) < hi ? (s + span - 1) : hi;'],
   'depth-one-mm': [
     'const float z = depth_data[index];\n    *undistorted_data = z;\n\n    // checking for invalid depth value',
     'float z = depth_data[index];\n    { static int _n = 0; if (z > 0.0f && ++_n == 1000) z += 1.0f; }\n    *undistorted_data = z;\n\n    // checking for invalid depth value'],
-  // One pixel, one least-significant bit - the comparator's sensitivity floor. It counts surviving pixels rather than flipping a fixed index, which can land in a dead zone.
+  // One pixel, one least-significant bit - the comparator's sensitivity floor. It counts surviving
+  // pixels rather than flipping a fixed index, which can land in a dead zone.
   'one-lsb': ['*registered_data = (z - min_z) / z > filter_tolerance ? 0 : *(rgb_data + c_off);',
               'unsigned int _v = (z - min_z) / z > filter_tolerance ? 0 : *(rgb_data + c_off); '
               + '{ static int _n = 0; if (_v != 0 && ++_n == 1000) _v ^= 1u; } *registered_data = _v;'],
@@ -99,14 +103,16 @@ function buildRunner(prefix, buildDir, label) {
 const V = join(ROOT, 'vendor');
 mkdirSync(V, { recursive: true });
 
-// The oracle: upstream's own registration.cpp dropped into the vendored tree. vendor-check asserts it still hashes to upstream's blob.
+// The oracle: upstream's own registration.cpp dropped into the vendored tree. vendor-check asserts
+// it still hashes to upstream's blob.
 const oracleSrc = join(V, 'oracle-src');
 rmSync(oracleSrc, { recursive: true, force: true });
 cpSync(join(ROOT, 'third_party', 'libfreenect2'), oracleSrc, { recursive: true });
 cpSync(join(ROOT, 'third_party', 'oracle', 'registration.cpp'), join(oracleSrc, 'src', 'registration.cpp'));
 buildPrefix(oracleSrc, join(V, 'prefix-oracle'), join(V, 'build-oracle'), 'oracle libfreenect2 (upstream v0.2.1 registration)');
 
-// The subject: our tree, optionally mutated into a copy so a falsification run never breaks the real one.
+// The subject: our tree, optionally mutated into a copy so a falsification run never
+// breaks the real one.
 let subjectSrc = join(ROOT, 'third_party', 'libfreenect2');
 if (mutation) {
   const [from, to] = MUTATIONS[mutation];
@@ -143,11 +149,13 @@ if (process.platform === 'darwin') {
 const oracleOut = join(V, 'oracle.planes');
 const subjectOut = join(V, 'subject.planes');
 const runOpts = has('--persistent-subject') ? ['--persistent'] : [];
-// The runner reports its timing on stderr. A non-zero exit is fatal here: an empty comparison reads as agreement.
+// The runner reports its timing on stderr. A non-zero exit is fatal here: an empty comparison
+// reads as agreement.
 const runCapture = (bin, args, label) => {
   const r = spawnSync(bin, args, { encoding: 'utf8' });
   if (r.status !== 0 || r.signal) {
-    // Exit 2, not 1: a runner that crashed produced no pixels, so "caught" would credit a detection never made.
+    // Exit 2, not 1: a runner that crashed produced no pixels, so "caught" would credit a
+    // detection never made.
     console.error(`\nRUNTIME FAILURE - the ${label} runner ${r.signal ? `died on ${r.signal}` : `exited ${r.status}`}.`);
     console.error('This is not a caught mutation; no comparison was performed.');
     console.error((r.stderr || '').trim());

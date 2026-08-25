@@ -148,7 +148,8 @@ const MUTATIONS = {
 
   /**
    * Reddens four rows, measured, all in section 9, and the third is the point: the fresh page comes
-   * back with no `__kinect` published, which a build that called the route and did nothing would not.
+   * back with no `__kinect` published, which a build that called the route and did
+   * nothing would not.
    */
   'a-link-failure-is-not-quarantined': {
     file: 'web/main.js',
@@ -221,8 +222,8 @@ const MUTATIONS = {
   },
 
   /**
-   * A separate spec rather than a second edit of `reads-need-not-agree`: only this half sees a change
-   * that is undone, where every rev in both listings is identical across the window.
+   * A separate spec rather than a second edit of `reads-need-not-agree`: only this half sees a
+   * change that is undone, where every rev in both listings is identical across the window.
    */
   'list-reads-need-not-agree-on-generation': {
     file: 'web/main.js',
@@ -257,7 +258,10 @@ const MUTATIONS = {
     edits: [['    if (listedSignature === refusedEffectSignature) return;\n', '']],
   },
 
-  /** Only the read-error pair at the end of section 9 may redden; a genuine refusal is still remembered. */
+  /**
+   * Only the read-error pair at the end of section 9 may redden; a genuine refusal is
+   * still remembered.
+   */
   'every-failure-is-final': {
     file: 'web/main.js',
     edits: [[
@@ -338,13 +342,17 @@ const MUTATIONS = {
     edits: [['    if (arrayed.length) {', '    if (false) {']],
   },
 
-  /** Reddens two rows of section 2, measured - the refusal and the residue, since the package lands. */
+  /**
+   * Reddens two rows of section 2, measured - the refusal and the residue, since the package lands.
+   */
   'hostdriven-takes-any-name': {
     file: 'server/effect-door.js',
     edits: [['    if (!HOST_DRIVEN_UNIFORMS.includes(u)) {', '    if (false) {']],
   },
 
-  /** Reddens two rows of section 2, measured - the refusal and the residue, since the package lands. */
+  /**
+   * Reddens two rows of section 2, measured - the refusal and the residue, since the package lands.
+   */
   'door-takes-any-manifest': {
     file: 'server/effect-door.js',
     edits: [['  if (manifestBytes > MAX_MANIFEST_BYTES) {', '  if (false) {']],
@@ -554,9 +562,9 @@ const bent = (edit) => {
 };
 
 /**
- * A package holding one uniform cell of each shape there is, and the fork that swaps them: a binding
- * writes either a bare number or, under `axisDeg`, `.value.set(sin, cos)`. Its own id and uniform
- * names, because section 7 primes state on top of what is left.
+ * A package holding one uniform cell of each shape there is, and the fork that swaps them: a
+ * binding writes either a bare number or, under `axisDeg`, `.value.set(sin, cos)`. Its own id and
+ * uniform names, because section 7 primes state on top of what is left.
  */
 const shapedProbe = () => ({
   manifest: {
@@ -628,7 +636,8 @@ const reshapedProbe = () => {
 
 /**
  * The same package at a new version with byte-identical chunks - a rev that moves and two programs
- * that do not. What the rebuild must therefore not do is warm, because the warm resets accumulators.
+ * that do not. What the rebuild must therefore not do is warm, because the warm
+ * resets accumulators.
  */
 const retunedProbe = () => {
   const pkg = probePackage();
@@ -675,7 +684,8 @@ const brokenProbe = () => {
 
 /**
  * A grade effect, because the pass the grade runs in is gated and the gate is a list computed off
- * the packages. Its group is `post`, one of this build's own, so this is about the pass not the panel.
+ * the packages. Its group is `post`, one of this build's own, so this is about the
+ * pass not the panel.
  */
 const gradeProbeManifest = () => ({
   format: 1,
@@ -704,9 +714,9 @@ const gradeProbePackage = () => ({
 });
 
 /**
- * A pinned run with no capture and no sensor: the wire's own frame payload, which `drive.pin` parses.
- * Colour is left at zero bytes because a JPEG decode is asynchronous. The surface leans so the picture
- * has depth in it, and the frames differ so three track positions have three images.
+ * A pinned run with no capture and no sensor: the wire's own frame payload, which `drive.pin`
+ * parses. Colour is left at zero bytes because a JPEG decode is asynchronous. The surface leans so
+ * the picture has depth in it, and the frames differ so three track positions have three images.
  */
 const DEPTH_W = 512;
 const DEPTH_H = 424;
@@ -830,8 +840,9 @@ try {
         + `generation ${beforeInstall.generation} against ${afterRemove.generation}`
       : 'the revisions moved, so this pair is not the change-and-undo the row is about');
 
-  // The shipped noise, whole, for the fork row: two earlier rules stand in front of the one this row
-  // is about and `noise` trips neither. Picking `rain` here produced a green row for the wrong reason.
+  // The shipped noise, whole, for the fork row: two earlier rules stand in front of the one this
+  // row is about and `noise` trips neither. Picking `rain` here produced a green row for
+  // the wrong reason.
   const noiseDir = join(BUILTIN_ROOT, 'noise');
   const noiseManifest = JSON.parse(readFileSync(join(noiseDir, 'manifest.json'), 'utf8'));
   const noiseChunks = Object.fromEntries((noiseManifest.chunks ?? []).map((c) => [c.file, readFileSync(join(noiseDir, c.file), 'utf8')]));
@@ -918,9 +929,10 @@ try {
         };
       }
     }), /carries a manifest of \d+ bytes/],
-    // A `gates` the gate can never read, in both shapes that reach it: one binds on the point cloud,
-    // which `gradeGatesOf` never collects, and one lands a `Vector2`, which is never strictly equal
-    // to zero. Neither reading of the comparison is wrong, which is why the pair is refused at the door.
+    // A `gates` the gate can never read, in both shapes that reach it: one binds on the point
+    // cloud, which `gradeGatesOf` never collects, and one lands a `Vector2`, which is never
+    // strictly equal to zero. Neither reading of the comparison is wrong, which is why the pair is
+    // refused at the door.
     ['a gating binding on a table the gate never reads', 'probe', bent((p) => {
       p.manifest.params.hue.bind.gates = true;
     }), /declares gates and binds on "points"/],
@@ -1220,9 +1232,10 @@ try {
     quiet.hidden === true && quiet.missing.length === 0 && quiet.entries === 0,
     `hidden=${quiet.hidden}, ${quiet.missing.length} missing, ${quiet.entries} entries drawn`);
 
-  // The install that succeeds on the server and cannot be adopted by this page. What must not happen
-  // is the page keeping the registry it just swapped in while its parked pool describes the build
-  // before last. Driven through the poll, because the note is asserted and the poll is what writes it.
+  // The install that succeeds on the server and cannot be adopted by this page. What must not
+  // happen is the page keeping the registry it just swapped in while its parked pool describes the
+  // build before last. Driven through the poll, because the note is asserted and the poll
+  // is what writes it.
   console.log('\n[effect] 6. an install this page cannot carry the open document onto');
 
   const readPage = async (positions) => {
@@ -1278,8 +1291,9 @@ try {
       && beforeFork.badgeHidden === false,
     `${Object.keys(beforeFork.pool.params).length} values and ${Object.keys(beforeFork.pool.tracks).length} tracks parked, `
     + `badge hidden=${beforeFork.badgeHidden}`);
-  // The control for the identity row below, cross-state rather than section 4's three-distinct-images
-  // row: parked, 0.6s and 1.2s both show the last frame. So these are held against the raised state.
+  // The control for the identity row below, cross-state rather than section 4's
+  // three-distinct-images row: parked, 0.6s and 1.2s both show the last frame. So these are held
+  // against the raised state.
   ok('and the parked picture is not the picture the installed effect drew, so these hashes read the look rather than the frame',
     JSON.stringify(beforeFork.hashes) !== JSON.stringify(authored.hashes),
     `${beforeFork.hashes.map((h) => h.slice(0, 8)).join(' ')} against ${authored.hashes.map((h) => h.slice(0, 8)).join(' ')}`);
@@ -1460,9 +1474,9 @@ try {
       && JSON.stringify([...unpicked.names].sort()) === JSON.stringify([...unpicked.lookNames].sort()),
     unpicked.threw ?? `${unpicked.names.length} boxes against ${unpicked.lookNames.length} look values, readout "${unpicked.count}"`);
 
-  // Four claims about the rebuild rather than about its result: the grade gate has to be re-derived,
-  // a package that changed no GLSL must not warm, one that did must release the program it replaced,
-  // and a rebuild must ask whether it may land at the moment it lands.
+  // Four claims about the rebuild rather than about its result: the grade gate has to be
+  // re-derived, a package that changed no GLSL must not warm, one that did must release the program
+  // it replaced, and a rebuild must ask whether it may land at the moment it lands.
   console.log('\n[effect] 8. the grade gate, the warm that must not happen, the program that must be let go, and the gesture that stands a rebuild down');
 
   const gradeInstall = await put('probegrade', gradeProbePackage());
@@ -1624,8 +1638,9 @@ try {
       && nonsense.names === nonsense.was.names,
     nonsense.threw ? `the poll threw: ${nonsense.threw.slice(0, 90)}` : `the page kept its ${nonsense.names} parameters and its signature`);
 
-  // Two ticks at once, with the list held open. The read in flight is waited for rather than started:
-  // the interval is still going, so `pollNow` can be answered by the very guard this row is about.
+  // Two ticks at once, with the list held open. The read in flight is waited for rather than
+  // started: the interval is still going, so `pollNow` can be answered by the very guard
+  // this row is about.
   let listCalls = 0;
   let releaseList;
   const listHeld = new Promise((resolve) => { releaseList = resolve; });
@@ -1635,7 +1650,8 @@ try {
     await route.continue();
   });
   const firstTick = page.evaluate(() => globalThis.__kinect.effects.pollNow()).catch(() => {});
-  // Up to one whole interval plus the read, since the tick being waited for may be the driver's own.
+  // Up to one whole interval plus the read, since the tick being waited for may be
+  // the driver's own.
   let inFlight = false;
   for (let waited = 0; waited < 9000 && !inFlight; waited += 100) {
     inFlight = listCalls >= 1;
@@ -1655,8 +1671,8 @@ try {
 
   await put('probe', recompiledProbe(5));
   // The closing read is the first listing after a package read, not "every second one": the page's
-  // interval shares this route, so parity shifts and this row reddens on a clean build. The marker is
-  // cleared as each closing read passes, so every attempt opens on an untouched listing.
+  // interval shares this route, so parity shifts and this row reddens on a clean build. The marker
+  // is cleared as each closing read passes, so every attempt opens on an untouched listing.
   let listReads = 0;
   let closingReads = 0;
   let listAfterPackages = false;
@@ -1695,9 +1711,10 @@ try {
   ok('and the same set read with nothing moving is adopted, so the rule above is a distinction rather than a refusal to read at all',
     coherent === true, coherent ? 'the fifth recompiled chunk reached the assembled program' : 'the page did not adopt it');
 
-  // A revision is a hash of bytes, so a change that is undone hashes back: both listings agree across
-  // a window the store answered as something else. What the store gained for it is a count of how
-  // many times it changed, staged here on every read, since the page's interval shifts any parity.
+  // A revision is a hash of bytes, so a change that is undone hashes back: both listings agree
+  // across a window the store answered as something else. What the store gained for it is a count
+  // of how many times it changed, staged here on every read, since the page's interval
+  // shifts any parity.
   let genReads = 0;
   const generationRoute = async (route) => {
     genReads += 1;
@@ -1953,9 +1970,9 @@ try {
   ok('and removing it lets the page rebuild again, so the refusal is a state to leave rather than one to be stuck in',
     afterOutside.threw === null, afterOutside.threw ?? `${afterOutside.names} parameters`);
 
-  // A rollback puts the old signature back, so the poll goes on saying the store moved - not a reason
-  // to try the same rebuild ten times a minute. Placed here rather than in section 6, measured: there
-  // `reinstall-leaves-it-parked` ended the run at 60 of 107 assertions.
+  // A rollback puts the old signature back, so the poll goes on saying the store moved - not a
+  // reason to try the same rebuild ten times a minute. Placed here rather than in section 6,
+  // measured: there `reinstall-leaves-it-parked` ended the run at 60 of 107 assertions.
   const refusedFork = await put('probe', forkedProbe());
   await page.evaluate(() => globalThis.__kinect.effects.pollNow());
   await page.waitForFunction(
@@ -1991,9 +2008,9 @@ try {
   ok('and a revision it has not refused is adopted, so the block is keyed to the set rather than latched on the page',
     unblocked === true, unblocked ? 'the page adopted the next revision' : 'the page never adopted it');
 
-  // A refusal is this build saying it cannot use what the store holds; a read that did not work says
-  // nothing about the other side. Planted on the package route and not on the listing, since the
-  // page's own interval would spend a one-shot failure planted there on a tick.
+  // A refusal is this build saying it cannot use what the store holds; a read that did not work
+  // says nothing about the other side. Planted on the package route and not on the listing, since
+  // the page's own interval would spend a one-shot failure planted there on a tick.
   const signatureNow = async () => {
     const listed = await getJson('/effects');
     return (listed.body.effects ?? []).map((e) => `${e.id} ${e.rev}`).join('\n');
@@ -2134,7 +2151,8 @@ try {
   browser = null;
 
   // The name rule stops a path in the request and says nothing about a path already on disk, so a
-  // link called `leak.txt` was a path the route would build, follow and serve from wherever it aimed.
+  // link called `leak.txt` was a path the route would build, follow and serve from
+  // wherever it aimed.
   const secret = join(WORK, 'not-a-package-file.txt');
   writeFileSync(secret, 'this text is outside both effect roots\n');
   const linkRoot = join(USER_ROOT, 'probelink');
@@ -2194,8 +2212,9 @@ try {
     `after the restart the store answers ${stillGone.status} for probe, `
     + `user root ${userRootHolds().join(', ') || 'empty'} (was ${goneAsides.join(', ') || 'empty'})`);
 
-  // A package gets through the door once, against the build running that day, and a fork outlives it.
-  // The gate is the install door asked a second time rather than a second gate, so nothing can drift.
+  // A package gets through the door once, against the build running that day, and a fork outlives
+  // it. The gate is the install door asked a second time rather than a second gate, so
+  // nothing can drift.
   console.log('\n[effect] 12. a fork from an earlier build, met at the next start');
 
   await stopAll();
@@ -2287,8 +2306,8 @@ try {
     (serverLog.split('\n').find((l) => /^effect thermal/.test(l))
       ?? `nothing about thermal in ${serverLog.length} bytes of server log`).slice(0, 160));
 
-  // The row the four above exist for: a store answering perfectly is beside the point if the surface
-  // it feeds does not come up, so the last thing asked is the first thing that broke.
+  // The row the four above exist for: a store answering perfectly is beside the point if the
+  // surface it feeds does not come up, so the last thing asked is the first thing that broke.
   browser = await chromium.launch();
   const bootPage = await browser.newPage({ viewport: { width: 800, height: 600 } });
   const bootErrors = [];
@@ -2303,8 +2322,9 @@ try {
       ? `no __kinect published: ${bootErrors[0]?.slice(0, 130) ?? 'nothing arrived on the page error channel'}`
       : `__kinect published, thermal.amount ${booted ? 'in' : 'missing from'} the registry`);
 
-  // The gate renames directories and used to do it at construction, before the port is held. The port
-  // is the lock: the gate runs inside `listen`'s callback and everything it does is synchronous `fs`.
+  // The gate renames directories and used to do it at construction, before the port is held. The
+  // port is the lock: the gate runs inside `listen`'s callback and everything it does is
+  // synchronous `fs`.
   console.log('\n[effect] 13. a second server on a held port renames nothing');
 
   const loserRoot = join(WORK, 'effects-loser');
@@ -2403,9 +2423,9 @@ try {
   await browser.close();
   browser = null;
 
-  // Section 12 asks whether the gate refuses a package this build cannot assemble; this asks the half
-  // that is not about the package at all - a `rain` fork with `vRain` gone that is correct about
-  // itself, while the builtin glyph goes on reading `vRain` with nothing declaring it.
+  // Section 12 asks whether the gate refuses a package this build cannot assemble; this asks the
+  // half that is not about the package at all - a `rain` fork with `vRain` gone that is correct
+  // about itself, while the builtin glyph goes on reading `vRain` with nothing declaring it.
   console.log('\n[effect] 15. a fork that is correct about itself and takes its neighbour down');
 
   await stopAll();
@@ -2482,7 +2502,8 @@ try {
 
   // This build has no GLSL compiler and the door is not one, so the only thing that ever learns a
   // package cannot be compiled is a page that tried. Section 9 is the page half; these rows are the
-  // route's own contract, driven over HTTP, since its skipped and refused answers have no other reader.
+  // route's own contract, driven over HTTP, since its skipped and refused answers have
+  // no other reader.
   console.log('\n[effect] 16. the route a page uses to say a package would not compile');
 
   const beforeRefuse = await getJson('/effects');
@@ -2563,8 +2584,9 @@ if (untested) {
 }
 /**
  * The count decides, and before the crash does: a mutation can leave the page half-adopted and a
- * driver reaching into it throws, so crash-first reports DID NOT RUN over assertions that had fired.
- * With no failures, crashed means DID NOT RUN and finishing means the mutation was not caught.
+ * driver reaching into it throws, so crash-first reports DID NOT RUN over assertions that had
+ * fired. With no failures, crashed means DID NOT RUN and finishing means the
+ * mutation was not caught.
  */
 if (MUTATE && failed > 0) {
   console.log(`[effect] caught, as required (${failed} assertion${failed === 1 ? '' : 's'} fired)`);

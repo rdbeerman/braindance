@@ -21,7 +21,8 @@ const flag = (name, fallback = null) => {
 };
 
 const URL_BASE = flag('--url', 'http://localhost:8080');
-// The live recorder, which `/` served until the main menu took that path. The menu defines no `__kinect`.
+// The live recorder, which `/` served until the main menu took that path. The menu
+// defines no `__kinect`.
 const RECORDER_PATH = '/record';
 const CAPTURE = flag('--capture', 'captures/sample.knct');
 const CLOCK = argv.includes('--clock');
@@ -29,7 +30,8 @@ const BEFORE_REV = flag('--before', 'HEAD');
 const HEADED = argv.includes('--headed');
 const SOURCE_FRAMES = Number(flag('--frames', '12'));
 const STRIDE = Number(flag('--stride', '4'));
-// Images per source frame. More than one is the point: it is where program time differs from display frames.
+// Images per source frame. More than one is the point: it is where program time differs
+// from display frames.
 const SUBSTEPS = Number(flag('--substeps', '4'));
 
 // The shipped Blackwall document, read rather than restated: a copy of these values typed in
@@ -38,7 +40,8 @@ const BLACKWALL_LOOK = JSON.parse(
   readFileSync(new URL('../presets-builtin/blackwall.json', import.meta.url), 'utf8'),
 ).values;
 
-// Playwright is a tool the proofs reach for rather than a dependency, so it is resolved wherever it sits.
+// Playwright is a tool the proofs reach for rather than a dependency, so it is resolved
+// wherever it sits.
 async function loadPlaywright() {
   const require = createRequire(import.meta.url);
   const roots = [];
@@ -54,7 +57,8 @@ async function loadPlaywright() {
   }
   for (const load of candidates) {
     try {
-      // Playwright is CommonJS and the named exports may not survive the ESM wrapper, so take either shape.
+      // Playwright is CommonJS and the named exports may not survive the ESM wrapper, so
+      // take either shape.
       const mod = await load();
       const pw = mod.chromium ? mod : mod.default;
       if (pw?.chromium) return pw;
@@ -63,7 +67,8 @@ async function loadPlaywright() {
   throw new Error('playwright not found - install it globally or in this project');
 }
 
-// A pinned run is capture frame payloads back to back, wire format unchanged apart from the dropped colour block.
+// A pinned run is capture frame payloads back to back, wire format unchanged apart from the
+// dropped colour block.
 function buildFixture(path) {
   const parser = new MessageParser();
   const frames = [];
@@ -167,7 +172,8 @@ async function clockCheck(context) {
   const before = execFileSync('git', ['show', `${BEFORE_REV}:web/main.js`], {
     encoding: 'utf8', maxBuffer: 1 << 26,
   });
-  // Once step 1 is committed, HEAD is the refactored page and this mode would compare it against itself.
+  // Once step 1 is committed, HEAD is the refactored page and this mode would compare
+  // it against itself.
   if (before.includes('LiveTransport')) {
     throw new Error(
       `${BEFORE_REV}:web/main.js already contains the transport - pass an earlier `
@@ -182,7 +188,8 @@ async function clockCheck(context) {
       // The frameless condition is enforced rather than hoped for: intercepting the socket without
       // connecting it upstream means no frame can reach the page whatever the server is serving.
       await page.routeWebSocket(/.*/, () => { /* accepted, never connected */ });
-      // The old page is served exactly as committed; instrumenting it would measure code that never shipped.
+      // The old page is served exactly as committed; instrumenting it would measure code
+      // that never shipped.
       if (source) {
         await page.route('**/main.js', (route) => route.fulfill({
           contentType: 'text/javascript; charset=utf-8', body: source,
@@ -191,8 +198,8 @@ async function clockCheck(context) {
       await page.goto(URL_BASE + RECORDER_PATH, { waitUntil: 'load' });
       await page.waitForFunction(() => !!globalThis.__kinect);
 
-      // Proof that the interception held, independent of the reading it protects: the sensor's hello
-      // carries fx as 366.031494 and both pages default the uniform to exactly 366.
+      // Proof that the interception held, independent of the reading it protects: the sensor's
+      // hello carries fx as 366.031494 and both pages default the uniform to exactly 366.
       const focal = await page.evaluate('globalThis.__kinect.uniforms.focal.value.x');
       if (focal !== 366) {
         throw new Error(`websocket interception failed - intrinsics arrived (focal.x=${focal})`);
@@ -216,7 +223,8 @@ async function clockCheck(context) {
   const oldPage = await sample(`before (${BEFORE_REV})`, before);
   const newPage = await sample('after  (worktree)  ', null);
 
-  // Distinct at the first mark says the value is not a property of the footage; movement between the marks says what it is.
+  // Distinct at the first mark says the value is not a property of the footage; movement between
+  // the marks says what it is.
   const distinct = new Set(oldPage.runs.map((r) => r[0].toFixed(6))).size === 3;
   const oldDrift = Math.min(...oldPage.drift);
   const newDrift = Math.max(...newPage.drift);
@@ -277,7 +285,8 @@ async function openPage() {
       globalThis.__kinect.drive.pin(buffer);
       return;
     }
-    // The pre-refactor page has no pair source to install, so the frames are split and pushed one at a time.
+    // The pre-refactor page has no pair source to install, so the frames are split and
+    // pushed one at a time.
     const view = new DataView(buffer);
     const frames = [];
     for (let off = 0; off + 16 <= buffer.byteLength;) {
@@ -308,7 +317,8 @@ const runB = await runOn(first.page);
 // produce a different image - otherwise the feedback paths are contributing nothing.
 const runD = await runOn(first.page, true);
 
-// A fresh page is a fresh GL context, fresh render targets and a fresh clock, so it catches a result that only held warm.
+// A fresh page is a fresh GL context, fresh render targets and a fresh clock, so it catches a
+// result that only held warm.
 const second = await openPage();
 const runC = await runOn(second.page);
 

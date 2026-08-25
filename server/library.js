@@ -235,7 +235,10 @@ export async function scanTakes(dir, recordingPath = null) {
 }
 
 
-/** A capture node (`--node http://host:port`). Plain HTTP, no auth; its hash only says what to fetch. */
+/**
+ * A capture node (`--node http://host:port`). Plain HTTP, no auth; its hash only
+ * says what to fetch.
+ */
 export class NodeLink {
   constructor(url, name) {
     this.url = url.replace(/\/$/, '');
@@ -285,7 +288,9 @@ export class NodeLink {
     }
   }
 
-  /** Whether the node is shooting, and which take. A fingerprint saying when to re-ask the library. */
+  /**
+   * Whether the node is shooting, and which take. A fingerprint saying when to re-ask the library.
+   */
   async recordState() {
     try {
       const body = await this.fetchJson('/record/state', { signal: AbortSignal.timeout(3000) });
@@ -366,7 +371,9 @@ export function durationLabel(sec) {
 /** What each download in flight has moved. Off the stream, not `stat`: the buffered write lags. */
 export const downloadsInFlight = new Map();
 
-/** The ids a download has claimed - a claim taken before any await, where the map above is a report. */
+/**
+ * The ids a download has claimed - a claim taken before any await, where the map above is a report.
+ */
 const downloadClaims = new Set();
 
 /** No-progress bound. A total timeout short enough to catch a dead node would kill a real copy. */
@@ -678,7 +685,9 @@ export const revealSupport = () => {
   return shape ? { supported: true, label: shape.label } : { supported: false, label: null };
 };
 
-/** Opens the file manager on a take - the only route that starts a process on the operator's behalf. */
+/**
+ * Opens the file manager on a take - the only route that starts a process on the operator's behalf.
+ */
 export async function revealTake(dir, id, { program = null } = {}) {
   if (!VALID_ID.test(id)) throw new Error(`unusable take id ${id}`);
   const shape = REVEAL[process.platform];

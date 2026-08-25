@@ -49,10 +49,12 @@ const DH = 424;
 
 const BOOT_DEFAULTS = { fx: 366, fy: 366, cx: 256, cy: 212 };
 
-// Floating point dust rather than a threshold: everything asserted here is an exact-arithmetic identity.
+// Floating point dust rather than a threshold: everything asserted here is an
+// exact-arithmetic identity.
 const DUST = 1e-9;
 
-// The one place the dust is not dust: an update taken while auto-orbit runs leaves most of that step.
+// The one place the dust is not dust: an update taken while auto-orbit runs leaves
+// most of that step.
 const ORBIT_RESIDUAL = 0.01;
 
 // Arm B moves the magnitude and holds the ratio; arm C moves the ratio, so `fx` and `fy` differ.
@@ -63,7 +65,8 @@ const ARMS = [
 ];
 
 const MUTATIONS = {
-  // The constant is right for this rig wherever the vertical binds, so only the synthetic arms see it.
+  // The constant is right for this rig wherever the vertical binds, so only the
+  // synthetic arms see it.
   'fov-hardcoded': {
     file: 'web/main.js',
     edits: [[
@@ -71,7 +74,8 @@ const MUTATIONS = {
       '  const fovV = THREE.MathUtils.degToRad(60.15756974606831);',
     ]],
   },
-  // Bit-identical on every take and on arm B, so this is the control that says arm C is load-bearing.
+  // Bit-identical on every take and on arm B, so this is the control that says arm C
+  // is load-bearing.
   'tanv-uses-fx': {
     file: 'web/main.js',
     edits: [[
@@ -87,7 +91,8 @@ const MUTATIONS = {
       '      const keyButton = makeKeyButton(name);',
     ]],
   },
-  // Anchored on the `controls.update()` pair, since two mutations sharing one text go stale together.
+  // Anchored on the `controls.update()` pair, since two mutations sharing one text
+  // go stale together.
   'no-repaint': {
     file: 'web/main.js',
     edits: [[
@@ -187,7 +192,8 @@ const DEG = 180 / Math.PI;
 let crashed = null;
 let untested = null;
 
-// Wrapped, because an unhandled `ECONNREFUSED` exits 1 - the code reserved for a claim having failed.
+// Wrapped, because an unhandled `ECONNREFUSED` exits 1 - the code reserved for a
+// claim having failed.
 let takes;
 try {
   takes = (await (await fetch(`${URL_BASE}/library/takes`)).json()).takes;
@@ -209,8 +215,8 @@ try {
 }
 
 /**
- * The half-tangents the sensor's own frame subtends, and where the fit has to bind. Comparing ratios
- * of tangents makes "contains" and "touches" one arithmetic instead of two.
+ * The half-tangents the sensor's own frame subtends, and where the fit has to bind. Comparing
+ * ratios of tangents makes "contains" and "touches" one arithmetic instead of two.
  */
 const frame = (fx, fy) => ({ tanH: (DW / 2) / fx, tanV: (DH / 2) / fy });
 
@@ -476,7 +482,8 @@ try {
 if (MUTATE) console.log(`[sensor-view] MUTATED BUILD: ${MUTATE} in ${mutation.file} - this run is expected to FAIL`);
 const mutatedJs = mutation?.file === 'web/main.js' ? mutation.body : null;
 const mutatedHtml = mutation?.file === 'web/index.html' ? mutation.body : null;
-// A mutation whose file is neither of the two this function serves is not delivered rather than not caught.
+// A mutation whose file is neither of the two this function serves is not delivered rather
+// than not caught.
 if (mutation && mutation.file !== 'web/main.js' && mutation.file !== 'web/index.html') {
   console.log(`[sensor-view] DID NOT RUN - ${MUTATE} edits ${mutation.file}, which this tool has no route `
     + 'for yet (only web/main.js and web/index.html) - it would never reach a page');
@@ -492,7 +499,8 @@ const pageErrors = [];
  * reliably take the renderer process down.
  */
 async function openPage({ path = EDITOR_PATH, take = TAKE, intrinsics = null, base = PRIVATE_BASE } = {}) {
-  // Local Network Access is off: a document served through `route.fulfill` has its WebSocket refused.
+  // Local Network Access is off: a document served through `route.fulfill` has its
+  // WebSocket refused.
   const browser = await chromium.launch({
     channel: 'chromium',
     headless: !HEADED,
@@ -533,7 +541,8 @@ async function openPage({ path = EDITOR_PATH, take = TAKE, intrinsics = null, ba
 
   let servedHello = false;
   if (intrinsics) {
-    // The take's own hello with two numbers replaced, so this arm differs from A in those two alone.
+    // The take's own hello with two numbers replaced, so this arm differs from A in
+    // those two alone.
     const body = { ...hello, ...intrinsics };
     await page.route(
       (url) => /^\/capture\/[^/]+\/hello$/.test(url.pathname),
@@ -574,9 +583,9 @@ async function openPage({ path = EDITOR_PATH, take = TAKE, intrinsics = null, ba
 }
 
 /**
- * Runs a block on a page of its own, retrying a destroyed execution context - Playwright and the GPU
- * process rather than anything under test. No assertion fires inside the block: an attempt that died
- * having failed three rows and then succeeded would leave those three in the totals.
+ * Runs a block on a page of its own, retrying a destroyed execution context - Playwright and the
+ * GPU process rather than anything under test. No assertion fires inside the block: an attempt that
+ * died having failed three rows and then succeeded would leave those three in the totals.
  */
 async function onFreshPage(what, open, work, attempts = 3) {
   for (let attempt = 1; ; attempt++) {
@@ -812,7 +821,8 @@ try {
     const before = await page.evaluate('globalThis.__sv.document()');
     await clickSensorView(page);
     await page.evaluate('globalThis.__sv.settled()');
-    // The auto-save is fire-and-forget, so a read taken as the click resolves records a pending absence.
+    // The auto-save is fire-and-forget, so a read taken as the click resolves records a
+    // pending absence.
     await page.waitForTimeout(1500);
     const after = await page.evaluate('globalThis.__sv.document()');
     const pose = await page.evaluate('globalThis.__sv.pose()');
@@ -849,7 +859,8 @@ try {
     await page.waitForFunction('globalThis.__kinect.uniforms.focal.value.x !== 366', null, { timeout: HELLO_MS });
     const surface = await page.evaluate('globalThis.__sv.surface()');
     const displaced = await page.evaluate('globalThis.__sv.displace({})');
-    // This arm runs against the shooting server, so "it wrote nothing" cannot compare that server's stores.
+    // This arm runs against the shooting server, so "it wrote nothing" cannot compare that
+    // server's stores.
     const before = await page.evaluate('globalThis.__sv.document()');
     await clickSensorView(page);
     const after = await page.evaluate('globalThis.__sv.document()');
@@ -923,8 +934,9 @@ try {
       hidden: seen.hidden.map((t) => t.tab),
     };
   };
-  // A package group is built only for an effect somebody has added, so both arms add every installed
-  // effect through the rack dialog first: the rows below ask about reachability, not rack membership.
+  // A package group is built only for an effect somebody has added, so both arms add every
+  // installed effect through the rack dialog first: the rows below ask about reachability, not
+  // rack membership.
   const rackEveryEffect = async (page) => {
     const racked = [];
     for (let guard = 0; guard <= 40; guard += 1) {
@@ -952,7 +964,8 @@ try {
   const panelRun = await onFreshPage('the panel arms', { }, async ({ page }) => {
     // Which groups the panel leaves open derives from the clip, so an ungraded take derives every
     // collapsible group shut and the row below has nothing left to ask about. One look parameter is
-    // written off its default first and put back after, and the nudge is asserted rather than trusted.
+    // written off its default first and put back after, and the nudge is asserted
+    // rather than trusted.
     const nudge = await page.evaluate(`(() => {
       const name = __kinect.params.names('look')[0];
       const was = __kinect.params.get(name);
@@ -973,9 +986,9 @@ try {
     const recStates = recPanelRun.value.states;
     const recTabs = recPanelRun.value.tabs;
     /**
-     * What a surface reaches, which is the union over the tabs it shows. The tab a surface happens to
-     * open on is not the surface: reading one was how four rows came to describe a panel that had
-     * stopped existing, measured on the one tab holding neither thing they claimed was absent.
+     * What a surface reaches, which is the union over the tabs it shows. The tab a surface happens
+     * to open on is not the surface: reading one was how four rows came to describe a panel that
+     * had stopped existing, measured on the one tab holding neither thing they claimed was absent.
      */
     const across = (states) => {
       const each = Object.values(states);
@@ -1024,9 +1037,10 @@ try {
       'and both surfaces are built from one registry and one panel',
       `${ed.lookNames}/${rec.lookNames} parameters, ${ed.blocks.length}/${rec.blocks.length} blocks`);
 
-    // These were two lists of ids and the lists went stale twice. The mechanism they approximated is
-    // one sentence: each surface hides exactly one inspector tab outright, and what it cannot reach is
-    // exactly what lives on that tab - both halves measured, so a group added later is asked by existing.
+    // These were two lists of ids and the lists went stale twice. The mechanism they approximated
+    // is one sentence: each surface hides exactly one inspector tab outright, and what it cannot
+    // reach is exactly what lives on that tab - both halves measured, so a group added later is
+    // asked by existing.
     const listed = (blocks) => blocks.map((b) => b.key);
     const cannotReach = (surface) => listed(surface.blocks.filter((b) => !b.visible));
     const onlyUnder = (states, tab) => listed(Object.values(states)[0].blocks).filter((key) => {
@@ -1057,17 +1071,19 @@ try {
       'and what the editor cannot reach is exactly what lives on the tab it hides',
       `unreachable on the editor [${edCannot.join(' ') || 'none'}], `
       + `on the recorder's ${edHides[0]} tab alone [${edShould.join(' ') || 'none'}]`);
-    // Counted in controls as well as in headings: a group's node stays visible when the collapse rule
-    // shuts it, so "9 look groups, all 9 visible" was true of a panel with four showing nothing
-    // gradeable. The look groups are split by the `shut` class the panel itself sets and both halves
-    // are asserted, so marking everything shut fails the floor and everything open fails the controls.
+    // Counted in controls as well as in headings: a group's node stays visible when the collapse
+    // rule shuts it, so "9 look groups, all 9 visible" was true of a panel with four showing
+    // nothing gradeable. The look groups are split by the `shut` class the panel itself sets and
+    // both halves are asserted, so marking everything shut fails the floor and everything open
+    // fails the controls.
     const sum = (list, key) => list.reduce((n, b) => n + b[key], 0);
     const hiddenTabBlocks = new Set([...recShould, ...edShould]);
     const recLook = rec.blocks.filter((b) => b.look && !hiddenTabBlocks.has(b.key));
     const edLook = ed.blocks.filter((b) => b.look && !hiddenTabBlocks.has(b.key));
     const edOpen = edLook.filter((b) => !b.shut);
     const edShut = edLook.filter((b) => b.shut);
-    // This row said the grade was hidden on the recorder and now says the opposite - a claim inverted.
+    // This row said the grade was hidden on the recorder and now says the opposite -
+    // a claim inverted.
     check(recLook.length > 0 && recLook.every((b) => b.visible),
       'the grade is reachable on the recorder too, through the tab the rework put it on',
       `${recLook.length} look groups off the hidden tab, ${recLook.filter((b) => b.visible).length} reachable, `
@@ -1099,8 +1115,8 @@ try {
       'no inspector tab on the recorder builds a keyframe control, because there is still no clip',
       `${recTabs.length} tabs walked (${recTabs.join(' ')}), `
       + `keyframe controls under [${kfTabs.join(' ') || 'none'}]`);
-    // The row above passes on a page where every click silently did nothing, so this is the companion
-    // that makes the walk itself the thing under test.
+    // The row above passes on a page where every click silently did nothing, so this is the
+    // companion that makes the walk itself the thing under test.
     const lookVisible = recTabs.filter((id) => recStates[id].blocks.some((b) => b.look && b.visible));
     check(lookVisible.length > 0 && lookVisible.length < recTabs.length,
       '  and the walk moved the surface, so that count is a measurement rather than a page that ignored every click',
@@ -1127,8 +1143,9 @@ try {
     const ctrlB = await page.screenshot({ clip });
 
     const displaced = await page.evaluate('globalThis.__sv.displace({})');
-    // Rendered, and load-bearing: `displace` asks for no image, so without this `before` is still the
-    // boot camera's picture and the row below compares the default pose rather than the displaced one.
+    // Rendered, and load-bearing: `displace` asks for no image, so without this `before` is still
+    // the boot camera's picture and the row below compares the default pose rather than
+    // the displaced one.
     await page.evaluate('globalThis.__sv.forceSeek()');
     const before = await page.screenshot({ clip });
     const rendersBefore = await page.evaluate('globalThis.__sv.renders()');

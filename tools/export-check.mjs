@@ -104,7 +104,8 @@ const MUTATIONS = {
     'gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);',
     'gl_PointSize = clamp(pointSize * (1.0 / max(0.15, -mv.z)), 1.0, 64.0);',
   ]] },
-  // The additive normalisation reads the drawn size, so the look sums four times too bright at twice the resolution.
+  // The additive normalisation reads the drawn size, so the look sums four times too bright at
+  // twice the resolution.
   'vsize-framebuffer': { file: 'web/cloud-shader.js', edits: [[
     'vSize = gl_PointSize / k;',
     'vSize = gl_PointSize;',
@@ -116,13 +117,15 @@ const MUTATIONS = {
     `      float k = 1.0;
       vec2 ref = resolution;`,
   ]] },
-  // The bloom chain sized against the drawing buffer again, where its halo halves in width every time the buffer doubles.
+  // The bloom chain sized against the drawing buffer again, where its halo halves in width every
+  // time the buffer doubles.
   'bloom-buffer-sized': { file: 'web/bloom-pass.js', edits: [[
     `  const refWidth = (bufferWidth / bufferHeight) * 600;
   return { width: Math.max(1, refWidth / 2), height: 300 };`,
     '  return { width: Math.max(1, bufferWidth / 2), height: Math.max(1, bufferHeight / 2) };',
   ]] },
-  // The chain frozen against 1080 rather than the height the look was graded at, so every output size gets the same halo.
+  // The chain frozen against 1080 rather than the height the look was graded at, so every output
+  // size gets the same halo.
   'bloom-reference-1080': { file: 'web/bloom-pass.js', edits: [[
     `  const refWidth = (bufferWidth / bufferHeight) * 600;
   return { width: Math.max(1, refWidth / 2), height: 300 };`,
@@ -134,7 +137,8 @@ const MUTATIONS = {
     '  const blocking = missing.filter((m) => !suppress.has(m.id));',
     '  const blocking = [];',
   ]] },
-  // The door answers a per-effect question globally, letting the second missing effect through on a decision about the first.
+  // The door answers a per-effect question globally, letting the second missing effect through on a
+  // decision about the first.
   'suppress-is-global': { file: 'web/main.js', edits: [[
     '  const blocking = missing.filter((m) => !suppress.has(m.id));',
     '  const blocking = suppress.size ? [] : missing;',
@@ -144,7 +148,8 @@ const MUTATIONS = {
     '      project: serialiseProjectBody(suppressed.length ? { suppressed } : {}),',
     '      project: serialiseProjectBody(),',
   ]] },
-  // The click handler stops handing the door what the badge holds, so an operator can suppress an effect and still be refused.
+  // The click handler stops handing the door what the badge holds, so an operator can suppress an
+  // effect and still be refused.
   'export-button-drops-the-suppression': { file: 'web/main.js', edits: [[
     '      suppressEffects: [...suppressedEffects],',
     '      suppressEffects: [],',
@@ -171,12 +176,14 @@ const MUTATIONS = {
     + '  if (cropOn == 1.0 && (pos.x < cropL * cropScale || pos.x > cropR * cropScale\n'
     + '   || pos.y < cropB * cropScale || pos.y > cropT * cropScale)) {',
   ]] },
-  // The faint pass answers to the button alone, so a crop box left on puts the cut points into the exported file.
+  // The faint pass answers to the button alone, so a crop box left on puts the cut points into
+  // the exported file.
   'cropoutside-reaches-the-export': { file: 'web/main.js', edits: [[
     '  uniforms.cropOutside.value = chromeOn && showCropBox ? CROP_FAINT : 0;',
     '  uniforms.cropOutside.value = showCropBox ? CROP_FAINT : 0;',
   ]] },
-  // Both early returns go, so a point outside the box survives to the fragment stage and goes on writing depth.
+  // Both early returns go, so a point outside the box survives to the fragment stage and goes
+  // on writing depth.
   'faint-survives-at-zero': { file: 'web/cloud-shader.js', edits: [
     [
       '  if (outsideCrop && cropOutside <= 0.0) {\n'
@@ -256,7 +263,8 @@ const MUTATIONS = {
     resize();`,
     '    /* mutation: the output size is not applied */',
   ]] },
-  // The reference is the drawing buffer's width over 1728 rather than its height over 1080, and every term follows it.
+  // The reference is the drawing buffer's width over 1728 rather than its height over 1080, and
+  // every term follows it.
   'scale-by-width': { file: 'web/main.js', edits: [
     [
       '  uniforms.bufferHeight.value = buf.y;',
@@ -270,7 +278,8 @@ const MUTATIONS = {
   ] },
   // The failure path reaches back to the output it did not write, which is the shape that shipped.
   'export-fail-unlinks-output': { file: 'server/export.js', edits: [
-    // Make every export to the same name target the same directory, so a failed run can reach the previous artifact at all.
+    // Make every export to the same name target the same directory, so a failed run can reach the
+    // previous artifact at all.
     [
       `    const dirName = \`\${msg.name}.\${process.pid}-\${++sequence}\`;\n    const outputDir = join(outDir, dirName);\n    const output = join(outputDir, \`\${msg.name}.\${ext}\`);\n    const frameBytes = width * height * 4;\n    const temp = join(outDir, \`\${dirName}.part\`);`,
       `    const outputDir = join(outDir, msg.name);\n    const output = join(outputDir, \`\${msg.name}.\${ext}\`);\n    const frameBytes = width * height * 4;\n    const temp = join(outDir, \`\${msg.name}.part\`);`,
@@ -731,9 +740,9 @@ const pageMutants = (mutation ?? []).filter((m) => inBrowser(m.file));
 const mutatedBody = pageMutants.find((m) => m.file === 'web/main.js')?.body ?? null;
 const otherMutants = pageMutants.filter((m) => m.file !== 'web/main.js');
 const mutantPath = mutatedBody !== null ? servedAt('web/main.js') : null;
-// Counted rather than assumed, across every page this file opens on the current tree: any one
-// of them failing to request the mutated module would leave the others carrying a run that
-// never happened.
+// Counted rather than assumed, across every page this file opens on the current tree: any one of
+// them failing to request the mutated module would leave the others carrying a run
+// that never happened.
 const mutantServedBy = new Map(pageMutants.map((m) => [m.file, 0]));
 let mutantServed = 0;
 if (MUTATE) {
@@ -937,9 +946,8 @@ const asOldBuild = (look) => {
 };
 
 /**
- * Whether two arms rendered through the same chain of post passes. Handing two builds the same
- * look does not put them in the same pipeline, because every pass decides for itself whether
- * it runs.
+ * Whether two arms rendered through the same chain of post passes. Handing two builds the same look
+ * does not put them in the same pipeline, because every pass decides for itself whether it runs.
  */
 const chainOf = (arm) => (arm.passes ?? [])
   .filter((p) => p.endsWith(':on'))

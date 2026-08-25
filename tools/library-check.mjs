@@ -124,8 +124,8 @@ const MUTATIONS = {
     "      recorder.split().catch((err) => console.error(`[recorder] ${err.message}`));",
     '      /* mutation: the take runs across the restart */',
   ]] },
-  // A take starts however little room is left, so it dies partway through instead of never
-  // starting.
+  // A take starts however little room is left, so it dies partway through instead
+  // of never starting.
   'recorder-ignores-space': { file: 'server/recorder.js', edits: [[
     '    if (left.secondsLeft < MIN_TAKE_SEC) {',
     '    if (false) {',
@@ -222,8 +222,8 @@ const MUTATIONS = {
     '\n    const program = retime.programSecAt(mark.sourceMs / 1000);\n',
     '\n    const program = mark.sourceMs / 1000;\n',
   ]] },
-  // The gallery skims a remote take at full resolution, promising a smoothness the link does
-  // not have.
+  // The gallery skims a remote take at full resolution, promising a smoothness the
+  // link does not have.
   'writes-take-any-method': { file: 'server/index.js', edits: [
     ['    if (!reading && r.write) {', '    if (r.write) {'],
     ['      if (!requireMutation(req, res, r.write.methods)) return true;',
@@ -246,8 +246,7 @@ const MUTATIONS = {
     + '      .then(() => sendJson(res, { planted: true }), (err) => sendJson(res, { error: err.message }, 500));\n'
     + '  } },',
   ]] },
-  // The plant a contents comparison cannot see, and the reason the write count is a row of its
-  // own.
+  // The plant a contents comparison cannot see, and the reason the write count is a row of its own.
   'read-route-restores': { file: 'server/index.js', edits: [[
     "  { path: '/library/writes', pattern: /^\\/library\\/writes$/, read: serveWriteCounts },",
     "  { path: '/library/writes', pattern: /^\\/library\\/writes$/, read: serveWriteCounts },\n"
@@ -343,8 +342,8 @@ const MUTATIONS = {
     '}, believedFromLibrary());', '});',
   ]] },
 
-  // The poll goes back to recording a tick as seen before the caller has managed to do anything
-  // with it.
+  // The poll goes back to recording a tick as seen before the caller has managed to do
+  // anything with it.
   'listing-never-times-out': { file: 'web/library.js', edits: [[
     'signal: bound ? AbortSignal.timeout(LISTING_TIMEOUT_MS) : undefined,',
     'signal: undefined,',
@@ -604,8 +603,7 @@ const MUTATIONS = {
   'manifest-scans-open-take': { file: 'server/library.js', edits: [[
     '  if (recording) {\n', '  if (false) {\n',
   ]] },
-  // The boot stops making the captures directory, which is the state a reflashed node comes up
-  // in.
+  // The boot stops making the captures directory, which is the state a reflashed node comes up in.
   'boot-without-captures-dir': { file: 'server/index.js', edits: [[
     '  mkdirSync(CAPTURES_DIR, { recursive: true });',
     '  /* mutation: the captures directory is assumed */',
@@ -663,8 +661,8 @@ const MUTATIONS = {
     tile.querySelector('.meta').appendChild(row);
   }`,
   ]] },
-  // The poster's height goes back into JavaScript, assigned once from the width it measured on
-  // the first fit.
+  // The poster's height goes back into JavaScript, assigned once from the width it measured
+  // on the first fit.
   'poster-height-in-js': { file: 'web/library.js', edits: [[
     `  const fit = () => {
     const r = surface.getBoundingClientRect();`,
@@ -686,8 +684,8 @@ const MUTATIONS = {
     '    <a class="appback" id="toMenu" href="/"><span class="arrow">&lt;</span><span aria-current="page">Gallery</span></a>',
     '    <!-- mutation: no way back -->',
   ]] },
-  // The falsification control for the enumeration, and the only mutation here that is not a bug
-  // being put back.
+  // The falsification control for the enumeration, and the only mutation here that is not a
+  // bug being put back.
   'plant-unswept-menu-item': { file: 'web/library.js', edits: [[
     "      item: 'reclaim',",
     `      item: 'planted',
@@ -700,8 +698,8 @@ const MUTATIONS = {
       item: 'reclaim',`,
   ]] },
 
-  // The hash gate and the marks are separate rows for the reason the grade terms are in
-  // `export-check`.
+  // The hash gate and the marks are separate rows for the reason the grade terms are
+  // in `export-check`.
   'rename-ignores-hash': { file: 'server/library.js', edits: [[
     '  if (index.hash !== hash) {',
     '  if (false) {',
@@ -898,8 +896,7 @@ const numbersIn = (src) => {
   const stack = [];
   const inTemplate = () => stack[stack.length - 1]?.kind === 'template';
   let depth = 0;
-  // The last significant character and the last identifier, which together decide the `/`
-  // question.
+  // The last significant character and the last identifier, which together decide the `/` question.
   let prev = '';
   let prevWord = '';
   let i = 0;
@@ -992,8 +989,8 @@ const numbersIn = (src) => {
       i++;
       continue;
     }
-    // A number, in either of the two shapes one can start in: a digit, or a dot with a digit
-    // behind it.
+    // A number, in either of the two shapes one can start in: a digit, or a dot with a
+    // digit behind it.
     if (/\d/.test(c) || (c === '.' && /\d/.test(src[i + 1] ?? ''))) {
       const [token] = NUM.exec(src.slice(i));
   // Legacy octal, read as octal: `01000` is 512 to a browser and 1000 to `Number`.
@@ -1010,8 +1007,8 @@ const numbersIn = (src) => {
   return values;
 };
 
-// Every take here is built rather than downloaded, so its shape is a decision this file makes
-// and can name.
+// Every take here is built rather than downloaded, so its shape is a decision this file
+// makes and can name.
 function sampleMessages() {
   const parser = new MessageParser();
   const frames = [];
@@ -1144,8 +1141,7 @@ function buildFixture() {
   // sentences apart, and the take nobody planted.
   writeTake(macCaps, 'hello-no-frames', { frames: 1, truncate: true });
   writeBadLengthTake(macCaps, 'bad-length-take');
-  // Three warnings at once, which is the tile the height rows need and none of the takes above
-  // is.
+  // Three warnings at once, which is the tile the height rows need and none of the takes above is.
   writeTake(macCaps, 'three-warning-take', { frames: 1, withHello: false, truncate: true });
 
   // Both ends of the capture format's band, and the second one is why there are two.
@@ -1179,8 +1175,7 @@ function stageServer() {
   cpSync(join(REPO, 'server'), join(root, 'server'), { recursive: true });
   // `web` is copied where the other two are symlinked.
   cpSync(join(REPO, 'web'), join(root, 'web'), { recursive: true });
-  // The looks that ship, inside the staged tree where the default `presets-builtin` resolves
-  // to.
+  // The looks that ship, inside the staged tree where the default `presets-builtin` resolves to.
   cpSync(join(REPO, 'presets-builtin'), join(root, 'presets-builtin'), { recursive: true });
 // The effects that ship. The effect store refuses to BOOT on a missing builtin root rather
 // than answering an empty list, so a broken install cannot read as a tree with no effects.
@@ -1359,8 +1354,8 @@ async function liveFrame(url, timeoutMs = 20000) {
   return Date.now() - began;
 }
 
-// A real filesystem with a few megabytes on it, or null where this tool does not know how to
-// make one.
+// A real filesystem with a few megabytes on it, or null where this tool does not know
+// how to make one.
 async function smallFilesystem() {
   if (process.platform !== 'darwin') return null;
   const image = join(WORK, 'nearly-full.dmg');
@@ -1876,8 +1871,8 @@ async function runChecks() {
         ahead.srv.close();
       }
 
-  // The manifest gate asks `/library/takes` about its build, which a contents comparison
-  // cannot see.
+  // The manifest gate asks `/library/takes` about its build, which a contents
+  // comparison cannot see.
       const twoRoute = (recordState) => new Promise((done) => {
         const srv = createServer((req, res) => {
           res.writeHead(200, { 'content-type': 'application/json' });

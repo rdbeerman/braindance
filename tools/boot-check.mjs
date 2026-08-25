@@ -24,11 +24,14 @@ const PORT = Number(flag('--port', '8391'));
 const HEADED = argv.includes('--headed');
 const MUTATE = argv.includes('--mutate') ? flag('--mutate') : null;
 
-// Identity tests against `server/index.js`'s own routing rather than a suffix rule: "ends in .html, so serve it as the page" hands `web/menu.html` over as the recorder's document, and every row below then asserts against a page nobody wrote.
+// Identity tests against `server/index.js`'s own routing rather than a suffix rule: "ends in .html,
+// so serve it as the page" hands `web/menu.html` over as the recorder's document, and every row
+// below then asserts against a page nobody wrote.
 const RECORDER_PATH = '/record';
 
-// `reset-before-the-panel-generator` is the shipped fault itself, put back by lifting `buildPanel()` from above the value walk to below it.
-// It has to boot: a mutation that throws during module evaluation publishes no `globalThis.__kinect`, every tool in the suite reports DID
+// `reset-before-the-panel-generator` is the shipped fault itself, put back by lifting
+// `buildPanel()` from above the value walk to below it. It has to boot: a mutation that throws
+// during module evaluation publishes no `globalThis.__kinect`, every tool in the suite reports DID
 // NOT RUN, and an exit code with no assertion behind it is not a usable mutation.
 const MUTATIONS = {
   'reset-before-the-panel-generator': {
@@ -41,7 +44,8 @@ const MUTATIONS = {
       ],
     ],
   },
-  // Package rows exist because the registry owns them, but none belongs in a fresh sidebar. Must redden exactly the package-row visibility assertion below.
+  // Package rows exist because the registry owns them, but none belongs in a fresh sidebar. Must
+  // redden exactly the package-row visibility assertion below.
   'effect-rack-shows-every-effect': {
     file: 'web/main.js',
     edits: [[
@@ -117,17 +121,22 @@ const cleanup = () => {
 };
 
 async function main() {
-  // Asked before anything spawns: a tool answered by a stranger already on its port asserts against whatever fixture that process staged, which is a green run proving nothing. Exit 2 is the harness declining to run.
+  // Asked before anything spawns: a tool answered by a stranger already on its port asserts against
+  // whatever fixture that process staged, which is a green run proving nothing. Exit 2 is the
+  // harness declining to run.
   if (await portHeld(PORT)) {
     console.log(`[boot] DID NOT RUN - ${PORT} already has a listener, so this run would be answered by it`);
     console.log('[boot] pass --port a free one; another worktree is the usual cause');
     process.exit(2);
   }
 
-  // An empty captures directory rather than the repo's, so a fixture nobody controls cannot decide what boots - and the run stays off the take somebody else is shooting.
+  // An empty captures directory rather than the repo's, so a fixture nobody controls cannot decide
+  // what boots - and the run stays off the take somebody else is shooting.
   work = mkdtempSync(join(tmpdir(), 'boot-check-'));
-  // `--grabber` names a path that cannot exist, because with no flag at all the server falls back to `native/build/grabber` and on a machine
-  // where that is built "needs no sensor" quietly became "opens the Kinect". The path carries no spaces: the flag is space-split into a binary and its arguments.
+  // `--grabber` names a path that cannot exist, because with no flag at all the server falls back
+  // to `native/build/grabber` and on a machine where that is built "needs no sensor" quietly became
+  // "opens the Kinect". The path carries no spaces: the flag is space-split into a binary
+  // and its arguments.
   server = spawn(process.execPath, [
     join(ROOT, 'server/index.js'), '--port', String(PORT), '--captures', work,
     '--grabber', join(work, 'no-grabber-in-a-boot-check'),
@@ -140,7 +149,8 @@ async function main() {
   server.stderr.on('data', (d) => log.push(String(d)));
   server.on('exit', (code) => log.push(`\n[server exited ${code}]`));
 
-  // Polled until the route answers rather than waited out on a constant: `viewer on` prints inside `listen`'s callback, so a fixed wait sized against that questions a server that is not ready.
+  // Polled until the route answers rather than waited out on a constant: `viewer on` prints inside
+  // `listen`'s callback, so a fixed wait sized against that questions a server that is not ready.
   const deadline = Date.now() + 30000;
   let up = false;
   while (Date.now() < deadline) {
@@ -151,8 +161,10 @@ async function main() {
     } catch { /* not listening yet */ }
     await new Promise((r) => setTimeout(r, 150));
   }
-  // Thrown rather than exited: `process.exit` here walked past `cleanup()`, so a merely slow server kept running with the temporary captures
-  // directory under it and held 8391, which makes every retry refuse itself as a foreign listener. The outer `.catch` prints `err.message`, and that log tail is the whole diagnostic.
+  // Thrown rather than exited: `process.exit` here walked past `cleanup()`, so a merely slow server
+  // kept running with the temporary captures directory under it and held 8391, which makes every
+  // retry refuse itself as a foreign listener. The outer `.catch` prints `err.message`, and that
+  // log tail is the whole diagnostic.
   if (!up) {
     throw new Error(`the server did not answer on ${PORT} within 30s\n${
       log.join('').split('\n').slice(-8).join('\n')}`);
@@ -169,7 +181,8 @@ async function main() {
   page.on('pageerror', (err) => errors.push(String(err)));
   page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
 
-  // The count of requests the page actually made, kept independently of the delivery: a guard reading the same term the selection computed cannot see the failure of that selection.
+  // The count of requests the page actually made, kept independently of the delivery: a guard
+  // reading the same term the selection computed cannot see the failure of that selection.
   let served = 0;
   if (mutation) {
     const path = `/${mutation.file.slice('web/'.length)}`;
@@ -182,12 +195,15 @@ async function main() {
   await page.goto(`http://127.0.0.1:${PORT}${RECORDER_PATH}`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
 
-  // Thrown rather than exited for the reason above, and with a browser open by now there is a second resource to strand.
+  // Thrown rather than exited for the reason above, and with a browser open by now there is a
+  // second resource to strand.
   if (mutation && served === 0) {
     throw new Error(`${MUTATE} was staged for ${mutation.file} and the page never requested it`);
   }
 
-  // Read off the registry rather than off a list, so a parameter added next year is asked by existing. The has-a-control/is-a-pose split is derived from the registry's own `kind` for the same reason.
+  // Read off the registry rather than off a list, so a parameter added next year is asked by
+  // existing. The has-a-control/is-a-pose split is derived from the registry's own `kind` for
+  // the same reason.
   const state = await page.evaluate(`(() => {
     const k = globalThis.__kinect;
     const names = k.params.names();
@@ -237,7 +253,8 @@ async function main() {
   const missing = scalars.filter((r) => r.control === null);
   check(missing.length === 0, 'every parameter that is not a pose has a control the panel drew',
     missing.length ? `no control for ${missing.map((r) => r.name).join(', ')}` : `${scalars.length} controls`);
-  // The other direction, so a build that stopped declaring poses does not quietly satisfy the row above by having nothing left to exclude.
+  // The other direction, so a build that stopped declaring poses does not quietly satisfy the row
+  // above by having nothing left to exclude.
   const posedControls = poses.filter((r) => r.control !== null);
   check(posedControls.length === 0, 'and a pose is the only thing the panel does not draw a control for',
     `${poses.length} poses: ${poses.map((r) => r.name).join(', ') || 'none'}`);
@@ -261,14 +278,17 @@ async function main() {
         + disagree.slice(0, 6).map((r) => `${r.name} registry ${r.registry} vs control ${r.shown}`).join('; ')
       : `${scalars.length} of ${scalars.length} agree`);
 
-  // A parameter whose stored value happens to equal what its own unwritten control would read is invisible to the row above. Seven are on
-  // this build, and the names are printed rather than tolerated silently, so the day the count grows is a day somebody can see.
+  // A parameter whose stored value happens to equal what its own unwritten control would read is
+  // invisible to the row above. Seven are on this build, and the names are printed rather than
+  // tolerated silently, so the day the count grows is a day somebody can see.
   const blind = scalars.filter((r) => String(r.registry) === String(r.unwritten));
   check(blind.length < scalars.length / 2, 'and the diff is not mostly blind: a minority of parameters sit where an unwritten control would',
     `${blind.length} of ${scalars.length} indistinguishable at boot: ${blind.map((r) => r.name).join(', ')}`);
 
-  // A comparison that could not separate two states would pass on every build there is, so the row saying it can has to exist beside the one
-  // that uses it. Not a second copy of the row above: the fault is in the boot write, and by the time this runs the generator has filled `panelControls` either way.
+  // A comparison that could not separate two states would pass on every build there is, so the row
+  // saying it can has to exist beside the one that uses it. Not a second copy of the row above: the
+  // fault is in the boot write, and by the time this runs the generator has filled
+  // `panelControls` either way.
   const drive = await page.evaluate(`(() => {
     const k = globalThis.__kinect;
     const moved = [];
@@ -306,7 +326,8 @@ main()
     cleanup();
     console.log(`\n[boot] ${checked} assertions, ${failed} failed`);
     if (MUTATE) {
-      // Exit code alone cannot tell a caught mutation from a tool that fell over before it asserted anything; the verdict is the sentence and the code is 1 either way.
+      // Exit code alone cannot tell a caught mutation from a tool that fell over before it asserted
+      // anything; the verdict is the sentence and the code is 1 either way.
       if (failed === 0) {
         console.log('[boot] NOT CAUGHT - the check passed a build it should have rejected');
         process.exit(1);
@@ -322,7 +343,8 @@ main()
   .catch(async (err) => {
     if (browser) await browser.close().catch(() => {});
     cleanup();
-    // A throw is `crashed` rather than `failed`: a proof tool must never count its own crash as a finding in either direction.
+    // A throw is `crashed` rather than `failed`: a proof tool must never count its own crash as a
+    // finding in either direction.
     console.log(`\n[boot] ${checked} assertions, ${failed} failed`);
     console.log(`[boot] DID NOT RUN - ${err.message}. Nothing here is a finding: re-run it.`);
     process.exit(2);
