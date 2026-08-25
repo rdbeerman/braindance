@@ -82,10 +82,10 @@ export const CORE_PANEL_GROUP_KEYS = Object.freeze([
  * the client's order places, in that order, and then everything else.
  *
  * **The placed set is byte-stable and the appendix is where a package the order has
- * never heard of goes.** The order is a hand-written layout fact about the sixteen
+ * never heard of goes.** The order is a hand-written layout fact about the eighteen
  * shipped effects - the scramble coupling coupled to it, the panel builds a group's
  * rows in it - so it may not be regenerated, reordered or grown by a package
- * arriving at runtime. But a seventeenth effect has to land somewhere, and until
+ * arriving at runtime. But a nineteenth effect has to land somewhere, and until
  * this rule existed it landed in a refusal: `tableFromPackages` treated a declared
  * name the order did not place as a parameter the registry would silently skip, which
  * is the right answer for a manifest edit and the wrong one for an install.
@@ -106,7 +106,7 @@ export const CORE_PANEL_GROUP_KEYS = Object.freeze([
  * `trail`. Seating it would mean guessing which of the placed names it belongs after,
  * and a guess about layout is the thing the order exists to make somebody state.
  *
- * With the shipped sixteen installed the appendix is empty and this returns the
+ * With the shipped eighteen installed the appendix is empty and this returns the
  * order unchanged, which is what keeps every number downstream of it - the registry's
  * declaration order, the panel's rows, the scramble table - the bytes they were.
  *

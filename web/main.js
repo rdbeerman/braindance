@@ -52,7 +52,7 @@ import {
 } from './plan-geometry.js';
 import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
-// The forty-one effect parameters as data: which uniform each one writes, on which of the
+// The forty-nine effect parameters as data: which uniform each one writes, on which of the
 // two tables, and what conversion it takes on the way. It belongs to the block above rather
 // than to the render core below because it is the purest thing in that block - it imports
 // nothing at all, which is what lets a check pull an older revision of it out of `git show`
@@ -1310,14 +1310,16 @@ const EFFECT_PARAM_ORDER = [
   'rain.amount', 'rain.speed', 'rain.span', 'rain.trail',
   'rgbsplit.amount', 'raster.amount', 'raster.angle', 'raster.pitch',
   'raster.hard', 'grain.amount', 'streak.amount', 'streak.angle',
+  'halation.amount', 'halation.radius', 'halation.threshold', 'halation.tint',
+  'stock.amount', 'stock.balance', 'stock.split', 'stock.latitude',
   'vignette.amount',
 ];
 
 // **The list is the placement of the shipped set and never a census of what is
 // installed.** A package the list has never heard of is placed by `placeParams` rather
 // than refused - its parameters land contiguously after everything here, in manifest
-// order - so installing a seventeenth effect changes nothing about where any of the
-// forty-one above sit. That was a refusal until installs existed, and it had to stop
+// order - so installing a nineteenth effect changes nothing about where any of the
+// forty-nine above sit. That was a refusal until installs existed, and it had to stop
 // being one: `tableFromPackages` treated a declared name this list did not place as a
 // control the registry would silently skip, which is the right answer for somebody
 // editing a shipped manifest and the only possible answer to an install.
@@ -1329,7 +1331,7 @@ let EFFECT_PARAMS;
 // The names the list above does not place, which is where a newly installed package's
 // parameters are: `placeParams` puts them after every placed name, so this is the tail
 // of the assembled table and `PARAMS` spreads it in one run at the end of the effects.
-// Empty with the shipped sixteen installed, which is what keeps the registry's
+// Empty with the shipped eighteen installed, which is what keeps the registry's
 // declaration order the bytes it was.
 const effectAppendix = () => Object.keys(EFFECT_PARAMS).slice(EFFECT_PARAM_ORDER.length);
 
@@ -1462,8 +1464,8 @@ let PANEL_GROUPS;
 /**
  * The write one effect parameter's binding describes, as the closure the registry stores.
  *
- * Forty-one parameters do the same thing - one number into one uniform - and they used to
- * do it as forty-one hand-written closures, where the ordinary case could be got subtly
+ * Forty-nine parameters do the same thing - one number into one uniform - and they used to
+ * do it as forty-nine hand-written closures, where the ordinary case could be got subtly
  * wrong in a way nothing reads back and where a reader had to check every one to find out
  * which cases there were. the manifests declare them as data now, and this is the
  * one place that data becomes behaviour.
@@ -1525,15 +1527,15 @@ function effectApply(bind) {
 /**
  * One contiguous run of `EFFECT_PARAMS`, as registry entries ready to spread into `PARAMS`.
  *
- * The forty-one are interleaved with the core parameters in seven runs, because the panel
+ * The forty-nine are interleaved with the core parameters in seven runs, because the panel
  * builds a group's rows in registry order and the groups are stages of the pipeline rather
  * than subject headings. So the registry keeps the positions and the table keeps the
  * declarations, and a run is named by its two ends rather than by listing its members - one
  * effect parameter added to a manifest between two ends lands in `PARAMS` at
  * the right place by existing, which is the whole reason not to restate the names here.
  *
- * `tag: 'look'` is constant across all forty-one and is added here rather than repeated
- * forty-one times: an effect parameter that was not part of the clip would not be an effect
+ * `tag: 'look'` is constant across all forty-nine and is added here rather than repeated
+ * forty-nine times: an effect parameter that was not part of the clip would not be an effect
  * parameter. Everything else is the binding's own, in the key order the inline entries held.
  */
 const effectSlice = (first, last) => {
@@ -1837,7 +1839,7 @@ const buildParams = () => ({
   ...effectSlice('rain.amount', 'rain.trail'),
   // Each post pass costs a full-screen read and write whether or not it changes
   // anything, so a zero value switches its pass off rather than running it as a
-  // no-op. The five terms that gate the grade share one pass, so they gate it together -
+  // no-op. The seven terms that gate the grade share one pass, so they gate it together -
   // three when this was written, and the count is checkable in one place now that it is a
   // `gates` flag rather than a line repeated in each of their applies.
   bloom: { def: 0, min: 0, max: 6, step: 0.05, kind: 'scalar', tag: 'look',
@@ -1847,12 +1849,12 @@ const buildParams = () => ({
     group: 'motion', label: 'trails',
     apply: (v) => { afterimage.uniforms.damp.value = v; afterimage.enabled = v > 0; } },
   // Every term of the one combined grade pass except its toe, which is `crush` below and is
-  // the one of the nine that must not gate the pass. Five of these do gate it, and which
-  // five is a `gates` flag in the manifests rather than a line of wiring repeated
-  // five times here.
+  // the one of the eighteen that must not gate the pass. Seven of these do gate it, and
+  // which seven is a `gates` flag in the manifests rather than a line of wiring repeated
+  // seven times here.
   ...effectSlice('rgbsplit.amount', 'vignette.amount'),
   // The toe under the grade's Reinhard curve, and **the one term sharing that pass which
-  // deliberately does not gate it** - the five that do carry `gates` in
+  // deliberately does not gate it** - the seven that do carry `gates` in
   // the manifests, and this one is written out here with no such flag anywhere,
   // because it is a core parameter rather than an effect's. That is the whole of its wiring
   // and it is worth the paragraph, because the symmetry is the thing a reader will reach to
@@ -1897,7 +1899,7 @@ const buildParams = () => ({
   // therefore in the right group and at the end of it, which is a defined place; guessing
   // at a better one would be this file making a layout decision on a package's behalf.
   //
-  // Empty for the shipped sixteen, so this line contributes nothing at all to the
+  // Empty for the shipped eighteen, so this line contributes nothing at all to the
   // registry the presets and the scramble table are written against.
   ...(effectAppendix().length ? effectSlice(effectAppendix()[0], effectAppendix().at(-1)) : {}),
 
@@ -1972,7 +1974,7 @@ function missingReadings(values) {
  * **They ran at module scope until installs existed, and moving them is the whole reason
  * to bother saying so.** Each of the four is a claim about the registry and the packages
  * agreeing, and the moment a package can arrive at runtime, a check that only ever ran
- * while the module evaluated is a check about the sixteen this build shipped with. The
+ * while the module evaluated is a check about the eighteen this build shipped with. The
  * install that goes wrong is by definition the one that was not there at boot.
  *
  * Cheap enough to run per rebuild that the count is not worth thinking about: four walks
@@ -2912,7 +2914,7 @@ let refusedEffectSignature = null;
  * **The one thing a package cannot bring with it.** A manifest declares the GLSL that
  * reads a uniform and the parameter that writes it, and both of those travel; what does
  * not is the JavaScript cell three.js copies from - `uniforms` in `web/point-cloud.js` and
- * the grade pass's table are written out by hand, so a seventeenth effect's first slider
+ * the grade pass's table are written out by hand, so a nineteenth effect's first slider
  * move would be `undefined.value = v` and the page would throw inside the registry's
  * single write path. That is the failure this function exists for, and it is not
  * hypothetical: it is what every install did before this line was here.
@@ -3317,7 +3319,7 @@ async function reloadEffects() {
  * an install is a thing a person does a handful of times, the cost of noticing it a few
  * seconds late is that a second browser draws the old look for a few seconds, and the
  * cost of a socket message would be a second channel carrying state that the store
- * already answers for. `GET /effects` reads sixteen directories and hashes their files,
+ * already answers for. `GET /effects` reads eighteen directories and hashes their files,
  * which is the whole of what a tick costs when nothing has changed.
  *
  * **A tick stands down rather than queues while anything is mid-gesture.** A rebuild

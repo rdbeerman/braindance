@@ -17,19 +17,20 @@
 // **What the split costs is the pairing**, the same obligation `web/cloud-shader.js` names:
 // every `uniform` in the assembled program has to have a key in `GRADE_UNIFORMS` in
 // `web/post-chain.js`, and nothing enforces that in either direction at runtime - three.js
-// writes the keys it is given and reads zero for the rest. Measured across the split: 13
-// distinct uniforms in the assembled program, 13 keys there, and the two sets are equal both
-// ways - 8 declared in the segments below and 5 in the raster and streak packages' own
-// declaration chunks. `test/cloud-shader.test.mjs` asks it of both programs separately, so a
-// term arriving in a package is inside the question and a grade term that drifted into the
-// point cloud's table is outside both.
+// writes the keys it is given and reads zero for the rest. Measured across the split: 21
+// distinct uniforms in the assembled program, 21 keys there, and the two sets are equal both
+// ways - 8 declared in the segments below and 13 in the raster, streak, halation and stock
+// packages' own declaration chunks. `test/cloud-shader.test.mjs` asks it of both programs
+// separately, so a term arriving in a package is inside the question and a grade term that
+// drifted into the point cloud's table is outside both.
 //
 // **Three joints, and the run they sit in is the pass's order.** The order of the terms
 // below is the whole of this shader's opinion and is the same kind of decision the four
-// `addPass` calls in `web/post-chain.js` are: the streak is a thing that happened to the
-// light and sits above the tonemap, the raster and the grain are drawn over the picture, and
-// the vignette closes the corners down before any of it is rolled off. Each chunk carries
-// its own argument for where it sits.
+// `addPass` calls in `web/post-chain.js` are: the streak and the halation are things that
+// happened to the light and sit above the tonemap, the raster and the grain are drawn over
+// the picture, the stock is the colour of the emulsion carrying that grain, and the vignette
+// closes the corners down before any of it is rolled off. Each chunk carries its own
+// argument for where it sits.
 
 // Each entry frozen as well as the list, for the reason the cloud's spine gives: the spine
 // is read by the page's pass and by the gate, and a segment trimmed in place would move the
@@ -59,11 +60,13 @@ export const gradeSpine = Object.freeze({
     // `vignette`) and two of them core (`crush`, which is a sub-control inside the grade
     // rather than a term beside it, and `time`) - and splitting a comma-separated
     // declaration moves bytes, which is the one thing this whole split may not do. So four
-    // packages have their master declared in the spine, and the two that carry further terms
-    // - the raster's axis, pitch and hardness, and the streak's amount and axis - declare
-    // those here. That reads as an inconsistency and is a measurement: the alternative is a
-    // second declaration stage wrapped around a fragment of one line, bought for four names
-    // that cost nothing to leave where they are. The streak's own amount is here rather than
+    // packages have their master declared in the spine, and every package carrying terms
+    // that line does not name declares them here - the raster's axis, pitch and hardness,
+    // the streak's amount and axis, and the halation's and the stock's four each, masters
+    // included, because a master added to the stay-behind line is that line rewritten. That
+    // reads as an inconsistency and is a measurement: the alternative is a second
+    // declaration stage wrapped around a fragment of one line, bought for four names that
+    // cost nothing to leave where they are. The streak's own amount is here rather than
     // above only because that is where the monolith put it.
     { stage: 'g.decl' },
     { text: /* glsl */ `\
@@ -113,10 +116,11 @@ export const gradeSpine = Object.freeze({
 `,
     },
     // Everything drawn over the picture or done to the light, in the order the pass runs
-    // them: the streak at 100, the raster at 200, the grain at 300 and the vignette at 400.
-    // A stage rather than four slots because these compose - each one takes the colour the
-    // one above it produced and hands it on - and because a build with none of them
-    // installed should be the tonemap alone rather than four branches on four zeros.
+    // them: the streak at 100, the halation at 150, the raster at 200, the grain at 300, the
+    // stock at 350 and the vignette at 400. A stage rather than a run of slots because these
+    // compose - each one takes the colour the one above it produced and hands it on - and
+    // because a build with none of them installed should be the tonemap alone rather than
+    // six branches on six zeros.
     { stage: 'g.body' },
     { text: /* glsl */ `\
       // Roll highlights off per channel instead of letting additive accumulation

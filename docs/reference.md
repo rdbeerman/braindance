@@ -254,12 +254,13 @@ leak, so it is kept narrow and cyan. **`rim`** brightens depth discontinuities a
 subject its edge, but under additive blending plus bloom it washes broad surfaces white, so
 turn it down before turning down bloom.
 
-**The five Post terms share one pass, and the pass carries the tonemap.** `rgb split`,
-`raster.amount`, `grain.amount`, `streak.amount` and `vignette.amount` each switch it on, because a full-screen read and
+**The seven grade terms share one pass, and the pass carries the tonemap.** `rgb split`,
+`raster.amount`, `grain.amount`, `streak.amount`, `halation.amount`, `stock.amount` and
+`vignette.amount` each switch it on, because a full-screen read and
 write that changes nothing is worth skipping. What rides along with it is the highlight rolloff
-and the black-toe crush, so a look with all five at zero is not the same image without five
+and the black-toe crush, so a look with all seven at zero is not the same image without seven
 effects: it also has lifted blacks and no rolloff, and additive accumulation clips to flat
-white where it would otherwise keep its hue. Raising any one of the five brings the grade back.
+white where it would otherwise keep its hue. Raising any one of the seven brings the grade back.
 The vignette used to be part of that bundle and is now its own control, which is why a project
 saved before it existed loses its corner falloff until it names one.
 
@@ -277,6 +278,22 @@ sensor's own frame and has no square to mean it in. It is a gather over the curr
 than a buffer that accumulates across frames: a buffer would smear along whatever the camera did
 last, so an orbit would drag every streak sideways and a seek would arrive carrying the streak
 the scrub built rather than the one playback would have.
+
+**`halation.amount`** is the warm ring film puts around a highlight, with three settings under it
+in a `Halation` group of its own on the raster's precedent — a term that grows sub-controls gets
+a heading rather than crowding `Post`. What makes it worth having beside bloom is the colour. A bloom halo is the highlight's own colour spread
+outward, so a cold window blooms cold; on film the light goes through the emulsion, scatters off
+the base behind it and exposes it a second time, and what comes back is red-orange whatever
+colour went in. So what this gathers is a brightness and not a colour: sixteen taps on a disc
+around each pixel, each one counted by how far its luminance sits above `halation threshold` and
+by how far away it is, and the colour comes from `halation tint` alone — 0 is deep red, 1 is
+amber, and there is no hue control because a look asks how much of a ramp it wants rather than
+for a different ramp. `halation radius` is how wide the ring is, in pixels at the 1080p
+reference like every other screen-space term, and it widens the ring without dimming it: the
+taps are normalised by their own distance weights, so what the falloff decides is the ring's
+shape and not how much light is in it. Raise `halation threshold` and only the brightest things
+scatter; drop it and the whole frame starts to glow. The three settings are inert while the
+amount is at zero, which is what keeps them from switching the pass on by themselves.
 
 **`trails`** is the buffer that paragraph rules out, and the one look term whose length is
 counted in frames rather than in seconds. It hands its value straight to the afterimage pass's
@@ -586,10 +603,29 @@ through for the reason `contourWidth`'s two band edges are: taking the sine in t
 allowed to be a couple of thousandths off, and a raster meant to run along y then leaks a
 whisker of x.
 
+**`film stock`** is the emulsion's own colour, in a `Film stock` group of its own, and it keys
+on exposure rather than on distance. That is what separates it from the duotone above: the
+duotone is keyed to depth, replaces the colour outright and runs per point, where this biases
+the colour the assembled frame already has — so a point, the bloom halo around it and the
+halation ringing that halo are toned together, which nothing in the point program can do. It is
+built to leave exposure alone: the tint it applies is divided by its own luminance, so raising
+the master to 1 moves colour and not brightness (measured over three frames, mean luma 124.91 at
+one end of the balance against 125.06 at the other, a spread of 0.12%).
+
+`stock balance` is the axis between two stocks and **its two halves are different shapes**. At
+-1 it is a tungsten-balanced stock shot in daylight: shadows cool toward cyan-blue and highlights
+stay warm, which is the split most people mean by a film look. At +1 it is the mismatch the
+other way round and the whole frame sits warm, because both stocks put warm highlights up and
+what actually walks along the axis is the shadow. `stock split` is the luminance where cool
+becomes warm and `stock latitude` is how wide the crossover is either side of it — they go on
+deciding where and how wide across the whole axis, they simply stop straddling a hue boundary
+once the balance is past neutral. All three are settings of `stock.amount` and are inert while
+it is at zero.
+
 `crush` is the toe under the grade's Reinhard curve, promoted from a literal and defaulting to
-it. It is a sub-control of the grade pass rather than a fifth term gating it — raise it on its
-own and nothing happens, because the pass only runs when the split, the scanlines, the grain
-or the vignette asks for it. That asymmetry is deliberate: its default is not zero, so gating
+it. It is a sub-control of the grade pass rather than an eighth term gating it — raise it on its
+own and nothing happens, because the pass only runs when one of the seven terms above asks for
+it. That asymmetry is deliberate: its default is not zero, so gating
 on it would hold the pass open for every look there has ever been.
 
 The panel is generated from the registry at boot. A parameter is one entry naming its group

@@ -338,10 +338,10 @@ const MUTATIONS = {
   // the number at the uniform, so the landing row is the only thing that can fail here.
   //
   // **It anchors a branch of the shared applier now rather than this parameter's own
-  // closure, and that costs it nothing.** The forty-one effect parameters are declared as
+  // closure, and that costs it nothing.** The forty-nine effect parameters are declared as
   // data in the effect manifests and `effectApply` in `web/main.js` is what turns a
   // binding into a write, so there is no `duotoneHue` line left to anchor. `degToRad` is
-  // the transform of exactly one of the forty-one - this hue - so mutating the branch and
+  // the transform of exactly one of the forty-nine - this hue - so mutating the branch and
   // mutating the parameter are still the same act, and the row set below is unchanged.
   'duotone-hue-in-degrees': {
     file: 'web/main.js',
@@ -552,7 +552,7 @@ const MUTATIONS = {
   //
   // **This control got broader when the effect parameters became data, and the widening is
   // a real loss of resolution rather than a stronger check.** There is no `streakAxis` line
-  // left to anchor: the forty-one are declared in the effect manifests and `effectApply`
+  // left to anchor: the forty-nine are declared in the effect manifests and `effectApply`
   // in `web/main.js` builds the write, with `axisDeg` stated once for the two angles that
   // take it. So the anchor is that one branch, and mutating it feeds degrees to both
   // `streak.angle` and `raster.angle`. The name is kept because it is what
@@ -654,8 +654,8 @@ const MUTATIONS = {
     fails: 'seven rows: the pass-gate row for crush, all five reading rows of 1b (each at 6 of '
       + '6 frames and about three quarters of every frame), and the boot comparison, whose '
       + 'landing diff names rgbsplit.amount, raster.amount and grain.amount moving from '
-      + '[0,false] to [0,true]. **`GRADE_GATES` holds five terms and this line used to say '
-      + 'four** - grain, scanlines, rgbSplit, streak and vignette, derived from the packages\' '
+      + '[0,false] to [0,true]. **`GRADE_GATES` holds seven terms and this line used to say '
+      + 'four** - grain, scanlines, rgbSplit, streak, halation, stock and vignette, derived from the packages\' '
       + '`gates` bindings rather than counted by hand, which is the whole point of deriving '
       + 'them: the boot row names the three whose landing actually moves, and the number of '
       + 'gates is a fact about the installed set rather than about this comment',
@@ -1600,6 +1600,28 @@ const LANDING = {
   // rather than a term beside it, so switching the pass on to point a streak nobody raised
   // is the no-op the gate matrix refuses by name.
   'streak.angle': '[k.grade.uniforms.streakAxis.value.x, k.grade.uniforms.streakAxis.value.y].map((v) => Number(v.toFixed(9)))',
+  // The halation's master, which gates the pass on the streak's terms exactly, and its
+  // three settings, which do not - the same shape the raster's four have, and the absence
+  // of `k.grade.enabled` on the three is as much the assertion as its presence on the
+  // master: widening a ring nobody asked for has to leave the pass shut.
+  //
+  // The radius is reference pixels on both sides of this row. Nothing converts it on the
+  // way through, which is what the row says: the shader divides by `texel` to reach the
+  // frame it is drawn at, so an apply that scaled it here would be doing that twice and
+  // against a buffer size the document does not carry.
+  'halation.amount': '[k.grade.uniforms.halation.value, k.grade.enabled]',
+  'halation.radius': 'k.grade.uniforms.halationRadius.value',
+  'halation.threshold': 'k.grade.uniforms.halationThreshold.value',
+  'halation.tint': 'k.grade.uniforms.halationTint.value',
+  // The stock's four, on the same terms: the master carries the gate and the three under it
+  // do not. `stock.balance` is the one of the three that spans zero, and it lands as the
+  // signed value the slider holds rather than as the 0..1 the shader mixes on - the remap
+  // is arithmetic inside the block, so an apply that did it here would put a tungsten
+  // balance of -1 into a uniform reading 0 and the row would still look like a number.
+  'stock.amount': '[k.grade.uniforms.stock.value, k.grade.enabled]',
+  'stock.balance': 'k.grade.uniforms.stockBalance.value',
+  'stock.split': 'k.grade.uniforms.stockSplit.value',
+  'stock.latitude': 'k.grade.uniforms.stockLatitude.value',
   'vignette.amount': '[k.grade.uniforms.vignette.value, k.grade.enabled]',
   // The fifth term in that pass, and **the missing `k.grade.enabled` beside it is the
   // assertion**. The four above gate the pass and so each has to carry whether it is on;
@@ -1729,20 +1751,23 @@ const EXPECT = {
   'rain.trail': (v) => v,
   bloom: (v) => [v, v > 0],
   trails: (v) => [v, v > 0],
-  // The five that share one pass, so each one's landing carries whether the pass is on
-  // and every one of them has to name the other four. `vignette` joined them when it
-  // stopped being a literal applied whenever the pass happened to run, and `streak` joined
-  // by being written.
+  // The seven that share one pass, so each one's landing carries whether the pass is on
+  // and every one of them has to name the other six. `vignette` joined them when it
+  // stopped being a literal applied whenever the pass happened to run, `streak` joined by
+  // being written, and `halation` and `stock` joined the same way.
   //
-  // **Every row here gained `streak` and not only the new one.** The scrambled set happens
-  // to raise all five at once, so leaving the older four alone would have passed today and
-  // gone on passing - right up until a set that raised the streak alone, where four rows
+  // **Every row here gained `streak` and not only the new one, and every row gained the
+  // two after it for the same reason.** The scrambled set happens to raise all seven at
+  // once, so leaving the older rows alone would have passed today and gone on passing -
+  // right up until a set that raised one of the new terms alone, where the other six rows
   // would expect a shut pass against an open one and read as findings about terms that had
   // not changed. The gate is one condition and each row states the whole of it.
   'rgbsplit.amount': (v, all) => [v, v > 0 || all['raster.amount'] > 0 || all['grain.amount'] > 0
-    || all['vignette.amount'] > 0 || all['streak.amount'] > 0],
+    || all['vignette.amount'] > 0 || all['streak.amount'] > 0 || all['halation.amount'] > 0
+    || all['stock.amount'] > 0],
   'raster.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || v > 0 || all['grain.amount'] > 0
-    || all['vignette.amount'] > 0 || all['streak.amount'] > 0],
+    || all['vignette.amount'] > 0 || all['streak.amount'] > 0 || all['halation.amount'] > 0
+    || all['stock.amount'] > 0],
   // Same double arithmetic three's `degToRad` does, so the equality is exact rather than
   // near - and written out here rather than read back off the page, because a tool that
   // asked the page what conversion it used could never see a wrong one.
@@ -1759,9 +1784,11 @@ const EXPECT = {
   'raster.pitch': (v) => v,
   'raster.hard': (v) => v,
   'grain.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || all['raster.amount'] > 0 || v > 0
-    || all['vignette.amount'] > 0 || all['streak.amount'] > 0],
+    || all['vignette.amount'] > 0 || all['streak.amount'] > 0 || all['halation.amount'] > 0
+    || all['stock.amount'] > 0],
   'streak.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || all['raster.amount'] > 0
-    || all['grain.amount'] > 0 || all['vignette.amount'] > 0 || v > 0],
+    || all['grain.amount'] > 0 || all['vignette.amount'] > 0 || v > 0
+    || all['halation.amount'] > 0 || all['stock.amount'] > 0],
   // The same double arithmetic the registry does on the way through, written out here
   // rather than read back off the page for `raster.angle`'s reason two rows up: a tool that
   // asked the page which axis it built could never see a wrong one. Rounded on both sides,
@@ -1769,8 +1796,31 @@ const EXPECT = {
   // and a ULP apart is not a finding, where an axis built in degrees still is.
   'streak.angle': (v) => [Math.sin(v * (Math.PI / 180)), Math.cos(v * (Math.PI / 180))]
     .map((x) => Number(x.toFixed(9))),
+  // The halation's master on the terms of the six it shares the pass with, and its three
+  // settings straight through. The radius is reference pixels here and reference pixels at
+  // the uniform, which is the whole of what its row has to say - the conversion into the
+  // frame's own pixels happens in the shader against a buffer size no document carries, so
+  // an apply that scaled it here would be doing it twice.
+  'halation.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || all['raster.amount'] > 0
+    || all['grain.amount'] > 0 || all['vignette.amount'] > 0 || all['streak.amount'] > 0
+    || v > 0 || all['stock.amount'] > 0],
+  'halation.radius': (v) => v,
+  'halation.threshold': (v) => v,
+  'halation.tint': (v) => v,
+  // The stock's four, and `balance` is the one worth the sentence: it arrives signed and
+  // lands signed. The remap onto the 0..1 the two poles are mixed across is arithmetic
+  // inside the shader block, so a build that did it in the apply would land 0.5 for a
+  // balance the document says is 0 - a perfectly ordinary number in a perfectly ordinary
+  // cell, and a stock nobody chose.
+  'stock.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || all['raster.amount'] > 0
+    || all['grain.amount'] > 0 || all['vignette.amount'] > 0 || all['streak.amount'] > 0
+    || all['halation.amount'] > 0 || v > 0],
+  'stock.balance': (v) => v,
+  'stock.split': (v) => v,
+  'stock.latitude': (v) => v,
   'vignette.amount': (v, all) => [v, all['rgbsplit.amount'] > 0 || all['raster.amount'] > 0
-    || all['grain.amount'] > 0 || v > 0 || all['streak.amount'] > 0],
+    || all['grain.amount'] > 0 || v > 0 || all['streak.amount'] > 0
+    || all['halation.amount'] > 0 || all['stock.amount'] > 0],
   // Reads its own value and nothing else, because it shares the pass without gating it -
   // so unlike the four above it names none of the others and none of them name it.
   crush: (v) => v,
@@ -2044,6 +2094,49 @@ const SCRAMBLE = {
   // noise; a direction on a right angle would be one a build with four choices rather than
   // an angle would answer correctly.
   'streak.angle': 113,
+  // The halation well up, because the three under it are only observable through it - the
+  // argument the raster's three settings and the duotone's four are set on. At an amount of
+  // 0 the gather never runs, so the radius, the threshold and the tint would land in the
+  // no-pixel bucket together looking like parameters that do nothing.
+  'halation.amount': 0.58,
+  // Well clear of the 22 it defaults to and not a doubling of it, so a build that halved or
+  // rounded the radius draws a visibly different ring. The gather is a disc, so the number
+  // of pixels it reaches goes as the square of this - 55 reference pixels covers about six
+  // times the area the default does, which is a ring the drop-one sweep cannot mistake for
+  // sampling noise.
+  'halation.radius': 55,
+  // Well *below* its 0.55 default, and that direction is the whole of why the row is safe.
+  // The fixture is a point cloud on an empty background, so most of the frame is black and
+  // only the bloomed cores of the brighter points climb far up the range: a threshold
+  // scrambled upward could put every tap under the bar, which is a glow of exactly zero and
+  // three parameters landing in the no-pixel bucket for a reason about the fixture rather
+  // than about the build. At 0.21 there is real light above the bar and reverting the
+  // parameter takes most of it away.
+  'halation.threshold': 0.21,
+  // Near the amber pole and nowhere near the 0.35 it defaults to, so reverting it swings the
+  // ring back toward deep red across the whole of what the gather found. A tint a hair off
+  // its default would be a parameter the drop-one sweep could not separate from the grain.
+  'halation.tint': 0.86,
+  // The stock up for the reason the halation above it is: its three settings are inert while
+  // the master is at zero, so a master left at its default would take all three into the
+  // no-pixel bucket with it.
+  'stock.amount': 0.66,
+  // Hard toward the tungsten pole, where its default sits exactly between the two stocks.
+  // Reverting it therefore walks both poles half the distance to daylight at once rather
+  // than nudging one of them, which is what a drop-one sweep can see and what a value near
+  // the middle would not give.
+  'stock.balance': -0.74,
+  // Below the 0.45 it defaults to, and low for the same reason the halation's threshold is:
+  // the frame is mostly dark, so a crossover placed high in the range sits above nearly
+  // every pixel and both this and the latitude below it would be deciding where a boundary
+  // falls in a part of the picture that has no pixels in it. At 0.28 the crossover runs
+  // through the bloom haloes, which is where this fixture's luminance actually lives.
+  'stock.split': 0.28,
+  // Down to about half the default width, so the crossover is a visible edge through those
+  // haloes rather than a ramp spread across the whole range. Reverting it therefore softens
+  // an edge instead of nudging one, which is the same argument `duotone.span` two dozen rows
+  // up is set on and the same one `raster.pitch` is scrambled below its default for.
+  'stock.latitude': 0.14,
   'vignette.amount': 0.73,
   // Well above the 0.018 it defaults to, and the four terms above hold the pass open so
   // it is reachable at all - a toe inside a pass nothing switched on is the dead zone
@@ -2705,6 +2798,23 @@ const GOLDEN_ABSENT = new Set([
   // section 1b renders at parameter defaults, where a streak of 0 keeps the block shut
   // whichever way the axis points.
   'streak.angle',
+  // The halation's four and the stock's four, excused on the plainest version of these
+  // terms: neither package existed in any form at the pinned revision, so the earlier arm
+  // answers undefined for all eight and there is nothing to hold them to. Both masters
+  // default to zero and both blocks are guarded on their own master, so a build carrying
+  // them draws exactly what a build without them drew.
+  //
+  // **Section 1b covers the two masters and cannot vouch for the six keys under them**,
+  // which is the same warning `duotone.motion` and six of the glyph and rain keys carry and
+  // is worth repeating rather than inheriting. 1b renders at parameter defaults, where both
+  // masters are 0 and each gates its own block, so a term added *inside* one of them is
+  // unreached by that hash whichever way its own default behaves - the hole the glitch
+  // flare's compensating default fell through. What holds the six instead is the drop-one
+  // sweep at the foot of this file, where both masters are up and every one of them has to
+  // move the image when it is dropped, and `effect-conformance-check`, which raises each of
+  // the six under a master held at zero and requires the frame not to move.
+  'halation.amount', 'halation.radius', 'halation.threshold', 'halation.tint',
+  'stock.amount', 'stock.balance', 'stock.split', 'stock.latitude',
   // The program-out size, on the same terms and for the same reason: not a registry
   // parameter, no such control at the earlier revision, and its own bounds live in the
   // handler that parses it rather than in the markup. What it is held to is
@@ -3560,6 +3670,24 @@ console.log('\n[registry] the side effects that are not a uniform write');
     // pass shut. Gating it would switch a full-screen read and write on to aim an effect
     // whose amount is zero, which is precisely the no-op the gate exists to refuse.
     [{ 'streak.angle': 90 }, { bloom: false, trails: false, grade: false }],
+    // The halation and the stock, each of which has to bring the pass up on its own for the
+    // streak's plain reason: both default to zero, so a look that never asks for either pays
+    // nothing, and a term that could only be had by raising one of its neighbours is the
+    // failure the vignette row above was written for.
+    [{ 'halation.amount': 0.02 }, { bloom: false, trails: false, grade: true }],
+    [{ 'stock.amount': 0.02 }, { bloom: false, trails: false, grade: true }],
+    // And their six settings, on the raster angle's terms exactly. Two of these would fail
+    // loudest if they gated, and for the reason `raster.pitch` does: `halation.radius`
+    // defaults to 22 and `stock.split` to 0.45, so a build gating on non-zero would hold the
+    // pass open for every document there has ever been. The other four would merely switch a
+    // full-screen read and write on to shape an effect whose master is off, which is the
+    // no-op these rows exist to refuse.
+    [{ 'halation.radius': 80 }, { bloom: false, trails: false, grade: false }],
+    [{ 'halation.threshold': 0.9 }, { bloom: false, trails: false, grade: false }],
+    [{ 'halation.tint': 1 }, { bloom: false, trails: false, grade: false }],
+    [{ 'stock.balance': -1 }, { bloom: false, trails: false, grade: false }],
+    [{ 'stock.split': 0.9 }, { bloom: false, trails: false, grade: false }],
+    [{ 'stock.latitude': 1 }, { bloom: false, trails: false, grade: false }],
   ]) {
     const r = await setAndRead(values);
     const got = { bloom: r.bloom, trails: r.trails, grade: r.grade };

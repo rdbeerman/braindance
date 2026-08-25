@@ -1378,7 +1378,7 @@ const EXEMPTIONS = [
   {
     module: 'web/post-chain.js',
     binding: 'grade',
-    why: 'The one combined grade pass. Ten look parameters write their term into `uniforms` and five of them gate `enabled` on whether any term is up - which five read off the packages\' `gates` bindings rather than listed - and that is the reason the pass is one rather than four.',
+    why: 'The one combined grade pass. Eighteen look parameters write their term into `uniforms` and seven of them gate `enabled` on whether any term is up - which seven read off the packages\' `gates` bindings rather than listed - and that is the reason the pass is one rather than four.',
   },
   // The one entry in this table that is not a three.js object with a published interface,
   // and the only one that needed arguing rather than citing. A uniform is a cell the GPU

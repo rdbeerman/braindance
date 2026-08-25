@@ -138,6 +138,31 @@ const GRADE_UNIFORMS = {
   // reference pixel - so an angle here means what an angle means, and turning it 90
   // degrees turns the streak 90 degrees on the glass.
   streakAxis: { value: new THREE.Vector2(0, 1) },
+  // The halation's four. Light that reached the emulsion scatters off the base behind it
+  // and exposes it again, so a highlight rings whatever surrounds it - and the ring is
+  // warm whatever colour the highlight was, which is the one thing the bloom above cannot
+  // say: its halo is the highlight's own colour spread outward. The radius is in reference
+  // pixels at 1080p like every other screen-space term in that pass, the threshold is the
+  // luminance above which light scatters at all, and the tint walks one warm ramp from
+  // deep red to amber rather than offering a hue, on the terms the duotone's two poles are
+  // baked for.
+  halation: { value: 0 },
+  halationRadius: { value: 22 },
+  halationThreshold: { value: 0.55 },
+  halationTint: { value: 0.35 },
+  // The stock's four, which are the emulsion's colour rather than a thing that happened to
+  // the light. The balance is an axis between two stocks and its halves are different
+  // shapes: at the tungsten end the shadows go cool and the highlights warm, and at the
+  // daylight end the whole frame goes warm - which is the same film-under-the-wrong-light
+  // mismatch read from either side. **Keyed to luminance and deliberately not to
+  // depth** - the depth-keyed term is the duotone in `web/cloud-shader.js`, which replaces
+  // the colour outright a point at a time, where this biases the colour the whole
+  // assembled frame already has, halos and all. The split is the luminance where cool
+  // becomes warm and the latitude is how wide the crossover is either side of it.
+  stock: { value: 0 },
+  stockBalance: { value: 0 },
+  stockSplit: { value: 0.45 },
+  stockLatitude: { value: 0.3 },
   crush: { value: 0.018 },
   time: { value: 0 },
   resolution: { value: new THREE.Vector2(1, 1) },
