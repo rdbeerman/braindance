@@ -50,12 +50,12 @@ const MUTATIONS = {
     fails: 'the readRgb row of 1b, alone - the other four readings are untouched',
   },
   'ghost-alpha-term-dropped': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/ghost/ghost.frag.glsl',
     edits: [[
-      '    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * readGhost;',
-      '    alphaFactor += (0.25 + 0.75 * rim) * readGhost;',
+      '    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * ghost;',
+      '    alphaFactor += (0.25 + 0.75 * rim) * ghost;',
     ]],
-    fails: 'the readGhost row of 1b, alone - so 1b compares alpha and not just colour',
+    fails: 'the ghost.amount row of 1b, alone - so 1b compares alpha and not just colour',
   },
   'mix-ignores-normalisation': {
     file: 'web/cloud-shader.js',
@@ -66,12 +66,12 @@ const MUTATIONS = {
     fails: 'the scale-cancels row of 8b, with every row of 1b still passing',
   },
   'weight-ignored': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/ghost/ghost.frag.glsl',
     edits: [[
-      '  if (readGhost > 0.0) {',
+      '  if (ghost > 0.0) {',
       '  if (false) {',
     ]],
-    fails: 'readGhost, ghostRim and ghostFill in the drop-one sweep, plus readGhost\'s 1b row',
+    fails: 'ghost.amount, ghost.rim and ghost.fill in the drop-one sweep, plus ghost.amount\'s 1b row',
   },
   'duotone-ignored': {
     file: 'effects-builtin/duotone/tone.frag.glsl',

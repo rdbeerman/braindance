@@ -160,30 +160,16 @@ export function buildPointCloud(sourceCells, program) {
     // alone is the boot state.
     readRgb: { value: 1 },
     readDepth: { value: 0 },
-    readGhost: { value: 0 },
-    readContour: { value: 0 },
-    readBlackwall: { value: 0 },
-    // What each reading is made of, which used to be literals inside its branch. Every value is
-    // the literal it replaced, which is what makes `registry-check`'s equality against the
-    // pre-reading revision hold.
+    // What the RGB and Depth readings are made of. The ghost, contour and blackwall
+    // readings are now effect packages with their own uniform tables.
     rgbSaturation: { value: 1 },
     depthGamma: { value: 1 },
-    ghostRim: { value: 0.7 },
-    ghostFill: { value: 0.35 },
-    contourBands: { value: 12 },
-    // One parameter, two uniforms, and it is a rounding measurement rather than a preference:
-    // `f32(0.5) - f32(0.08)` is 0.42000001668930054 where the literal 0.42 it replaces is
-    // 0.41999998688697815. Done here in double, both edges land on the floats the literals did.
-    contourLo: { value: 0.42 },
-    contourHi: { value: 0.58 },
-    blackwallSweep: { value: 0.28 },
     denoise: { value: 1 },
     edgeTol: { value: 120 },
     // Whether there is a colour camera at all, and the same cell the colour door raises when a
     // JPEG binds, so the stream switching colour off and a frame arriving write one answer.
     hasColor: sourceCells.hasColor,
     softEdge: { value: 1 },
-    scanAmount: { value: 0 },
     rimAmount: { value: 0.55 },
     // Both apply on top of whichever reading is selected rather than inside one of its
     // branches, so they compose with every reading instead of being a sixth and seventh one.

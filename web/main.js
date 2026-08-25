@@ -455,6 +455,9 @@ async function fitCropToTake(id, near, far) {
 // Where each effect parameter lands in declaration order, which is the panel's layout.
 const EFFECT_PARAM_ORDER = [
   'glyph.amount', 'glyph.tone', 'glyph.hash', 'glyph.rain',
+  'ghost.amount', 'ghost.rim', 'ghost.fill',
+  'contour.amount', 'contour.bands', 'contour.width',
+  'blackwall.amount', 'blackwall.sweep', 'blackwall.scan',
   'noise.amount', 'noise.scale', 'noise.speed', 'lattice.amount',
   'glitch.amount', 'glitch.density', 'glitch.shove', 'glitch.tint',
   'glitch.bands', 'glitch.axis', 'glitch.rate', 'push.amount',
@@ -670,15 +673,11 @@ const buildParams = () => ({
   readDepth: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look', reading: true,
     group: 'colour', label: 'depth',
     apply: (v) => { uniforms.readDepth.value = v; } },
-  readGhost: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look', reading: true,
-    group: 'style', label: 'ghost',
-    apply: (v) => { uniforms.readGhost.value = v; } },
-  readContour: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look', reading: true,
-    group: 'style', label: 'contour',
-    apply: (v) => { uniforms.readContour.value = v; } },
-  readBlackwall: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look', reading: true,
-    group: 'style', label: 'blackwall',
-    apply: (v) => { uniforms.readBlackwall.value = v; } },
+  // The three reading effects: ghost, contour, blackwall. Each blends into the colour
+  // the same way RGB and Depth do above, and carries its own tuning parameters.
+  ...effectSlice('ghost.amount', 'ghost.fill'),
+  ...effectSlice('contour.amount', 'contour.width'),
+  ...effectSlice('blackwall.amount', 'blackwall.scan'),
 
   rgbSaturation: { def: 1, min: 0, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'colour', label: 'saturation',
@@ -686,29 +685,8 @@ const buildParams = () => ({
   depthGamma: { def: 1, min: 0.25, max: 4, step: 0.05, kind: 'scalar', tag: 'look',
     group: 'colour', label: 'gamma',
     apply: (v) => { uniforms.depthGamma.value = v; } },
-  ghostRim: { def: 0.7, min: 0.2, max: 3, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'ghost rim',
-    apply: (v) => { uniforms.ghostRim.value = v; } },
-  ghostFill: { def: 0.35, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'ghost fill',
-    apply: (v) => { uniforms.ghostFill.value = v; } },
-  // Bands per metre of depth, so the spacing is a distance rather than a stripe count.
-  contourBands: { def: 12, min: 1, max: 60, step: 1, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'bands /m',
-    apply: (v) => { uniforms.contourBands.value = v; } },
-  // Half the width of the drawn line. The band edges are computed from it, not passed in.
-  contourWidth: { def: 0.08, min: 0.01, max: 0.4, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'thickness',
-    apply: (v) => { uniforms.contourLo.value = 0.5 - v; uniforms.contourHi.value = 0.5 + v; } },
-  blackwallSweep: { def: 0.28, min: 0, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'wall sweep',
-    apply: (v) => { uniforms.blackwallSweep.value = v; } },
-
-  scan: { def: 0, min: 0, max: 1.5, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'scan',
-    apply: (v) => { uniforms.scanAmount.value = v; } },
   rim: { def: 0.55, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'rim',
+    group: 'colour', label: 'rim',
     apply: (v) => { uniforms.rimAmount.value = v; } },
   ...effectSlice('thermal.amount', 'duotone.motion'),
 
@@ -723,7 +701,7 @@ const buildParams = () => ({
   ...effectSlice('rgbsplit.amount', 'vignette.amount'),
   // The toe under the grade's Reinhard curve, and the one term that does not gate the pass.
   crush: { def: 0.018, min: 0, max: 0.2, step: 0.001, kind: 'scalar', tag: 'look',
-    group: 'post', label: 'crush',
+    group: 'colour', label: 'crush',
     apply: (v) => { grade.uniforms.crush.value = v; } },
 
   denoise: { def: true, kind: 'step', tag: 'look',
@@ -1103,6 +1081,12 @@ const panelGroupNodes = new Map();
 const panelGroupParams = new Map();
 const panelGroupElements = new Map();
 const panelEffectRows = new Map();
+// Rows whose visibility depends on a parent parameter being non-zero. Keyed by the
+// parent name (e.g. 'readGhost'), value is an array of row elements. When the parent
+// is 0 the rows are hidden; when it's positive they're shown. This is how reading
+// tuning parameters (ghostRim, contourBands, etc.) appear only when their reading is
+// active.
+const panelUnderRows = new Map();
 
 // One head per group, whether or not the group can be shut.
 function panelHead(group) {
@@ -1138,6 +1122,7 @@ function buildPanel() {
   panelGroupParams.clear();
   panelGroupElements.clear();
   panelEffectRows.clear();
+  panelUnderRows.clear();
   panelTail.clear();
   groupDefaults.clear();
   // `refreshGroups` skips a group whose state string has not moved, so this clears with it.
@@ -1199,6 +1184,12 @@ function buildPanel() {
     if (owner) {
       if (!panelEffectRows.has(owner)) panelEffectRows.set(owner, []);
       panelEffectRows.get(owner).push(mountedRow);
+    }
+    // A row that depends on another parameter being non-zero. The reading tuning params
+    // are hidden until their reading is active, so ghostRim only appears when readGhost > 0.
+    if (spec.under) {
+      if (!panelUnderRows.has(spec.under)) panelUnderRows.set(spec.under, []);
+      panelUnderRows.get(spec.under).push(mountedRow);
     }
     names.push(name);
   }
@@ -1810,6 +1801,15 @@ function effectRackEntry(id) {
   return { names, moved, keys };
 }
 
+// Reading tuning rows appear only when their parent reading is active. Called whenever
+// the readings change, which is every look write that touches one of them.
+function refreshUnderRows() {
+  for (const [parent, rows] of panelUnderRows) {
+    const visible = params.get(parent) > 0;
+    for (const row of rows) row.hidden = !visible;
+  }
+}
+
 let effectRackConfirming = null;
 
 function addEffectToRack(id) {
@@ -1988,6 +1988,7 @@ function toggleGroup(key) {
 
 function refreshPanel() {
   refreshEffectRack();
+  refreshUnderRows();
   refreshGroups();
 }
 

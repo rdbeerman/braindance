@@ -1,0 +1,82 @@
+{
+  "format": 1,
+  "id": "ghost",
+  "version": "1.0.0",
+  "title": "Ghost",
+  "params": {
+    "amount": {
+      "def": 0,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "ghost",
+      "panel": {
+        "group": "ghost",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "ghost"
+      },
+      "role": "master"
+    },
+    "rim": {
+      "def": 0.7,
+      "min": 0.2,
+      "max": 3,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "rim",
+      "panel": {
+        "group": "ghost",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "ghostRim"
+      },
+      "under": "amount"
+    },
+    "fill": {
+      "def": 0.35,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "kind": "scalar",
+      "label": "fill",
+      "panel": {
+        "group": "ghost",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "points",
+        "uniform": "ghostFill"
+      },
+      "under": "amount"
+    }
+  },
+  "panelGroups": [
+    {
+      "key": "ghost",
+      "label": "Ghost",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "style",
+      "order": 110
+    }
+  ],
+  "chunks": [
+    {
+      "stage": "f.decl",
+      "order": 100,
+      "file": "decl.frag.glsl"
+    },
+    {
+      "stage": "f.reading",
+      "order": 100,
+      "file": "ghost.frag.glsl"
+    }
+  ]
+}
