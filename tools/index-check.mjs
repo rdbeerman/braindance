@@ -1,21 +1,8 @@
 // Proves the sidecar index, the content hash and the HTTP frame API.
-//
-// Three claims are worth separating, because they fail for different reasons.
-// The scan has to build an index and a hash without ever holding the file, which
-// only a capture past the 2 GiB whole-file ceiling can demonstrate. The index has
-// to agree with what the stream parser finds, which is checked against
-// `MessageParser` - the same code the live server frames with - rather than
-// against a second copy of the scanner's own logic. And a frame pulled over HTTP
-// has to be the bytes that are in the file, which is checked by an independent
-// positioned read at offsets the parser produced, not at offsets the index did.
-//
-//   node server/index.js --port 8123 --replay captures/sample.knct &
-//   node tools/index-check.mjs --url http://localhost:8123
-//
-// Latency is interleaved rather than run in blocks: there is no before-arm for an
-// endpoint that did not exist, so what is measured instead is the comparison the
-// editor actually cares about - a random interior seek against a sequential walk,
-// alternated sample by sample so any drift on the machine lands on both arms.
+// Proves the sidecar index, the content hash and the HTTP frame API. The scan builds an index
+// and a hash without ever holding the file, the index is checked against `MessageParser` rather
+// than against a second copy of the scanner's own logic, and a frame pulled over HTTP is
+// checked by an independent positioned read at offsets the parser produced.
 
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -52,10 +39,7 @@ const check = (ok, label) => {
   if (!ok) failures++;
 };
 
-// ---------------------------------------------------------------- scan the file
-//
 // A second walk of the same bytes, framed by the parser the live server uses.
-// Independent of the scanner under test, and streaming for the same reason it is.
 async function parserWalk(path) {
   const parser = new MessageParser();
   const frames = [];
@@ -77,7 +61,6 @@ async function parserWalk(path) {
   return { frames, hash: `sha256:${hash.digest('hex')}` };
 }
 
-// ------------------------------------------------------------------ scan timing
 
 async function scanCost(path) {
   const size = (await stat(path)).size;
@@ -89,21 +72,13 @@ async function scanCost(path) {
     index = await buildIndex(path);
     times.push(performance.now() - t0);
   }
-  // The first run is reported apart from the rest, but it is not a cold read and
-  // is not claimed as one: purging the page cache needs root, the machine holds
-  // all three fixtures at once, and the numbers say so - run 1 lands inside the
-  // spread of the others. So this measures the scan against a warm cache, which
-  // is the CPU-bound ceiling. A genuinely cold scan is bounded by the disk
-  // instead and would be slower by whatever the disk gives.
+  // Run 1 is reported apart from the rest but is not a cold read: this is the warm-cache ceiling.
   const rest = times.slice(1);
   // Resident set after the scan, so "the scan never holds the file" is enforced
-  // by the tool rather than asserted in a comment. A buildIndex that appended
-  // every chunk to an array would pass every other check here and fail only
-  // this one.
+  // rather than asserted.
   return { size, index, first: times[0], rest, restP50: pct(rest, 50), rss: process.memoryUsage().rss };
 }
 
-// -------------------------------------------------------------------- http side
 
 async function getBytes(url) {
   const res = await fetch(url);
@@ -118,7 +93,6 @@ async function timedGet(url) {
   return { dt: performance.now() - t0, bytes: buf.length };
 }
 
-// ------------------------------------------------------------------------- main
 
 console.log(`index-check  node ${process.version}  url ${URL_BASE}\n`);
 
@@ -143,11 +117,8 @@ for (const path of FIXTURES) {
 }
 
 {
-  // The claim is that the scan's working set does not track file size, so the
-  // check is the shape of the curve rather than any single number: a 32x range of
-  // captures must move resident memory by almost nothing, and the largest must
-  // stay far under its own file. Both thresholds are generous - an implementation
-  // that retained the file would miss them by gigabytes.
+  // The claim is that the working set does not track file size, so the check is the
+  // shape of the curve.
   const small = scans.get(FIXTURES[0]);
   const large = scans.get(FIXTURES[FIXTURES.length - 1]);
   const RSS_CEILING = 512e6;
@@ -175,9 +146,8 @@ for (const path of FIXTURES) {
 }
 
 {
-  // The byte is flipped in a copy, and inside a payload rather than in a framing
-  // header: moving a header byte would change what the scanner parses as well as
-  // what it hashes, which conflates the two things this checks.
+  // Flipped inside a payload rather than a framing header, which would move what the
+  // scanner parses too.
   const src = FIXTURES[0];
   const copy = `${SCRATCH}/index-check-flip.knct`;
   await copyFile(src, copy);
@@ -200,16 +170,13 @@ for (const path of FIXTURES) {
 }
 
 {
-  // A same-size substitution is the one staleness case byte length cannot see,
-  // and deferring it to the content hash would defer to the stale hash in this
-  // very sidecar. So mtime is checked beside the length, and this is what proves
-  // the sidecar is not reused across one.
+  // A same-size substitution is the one staleness case byte length cannot see, so mtime is
+  // checked beside it.
   const copy = `${SCRATCH}/index-check-stale.knct`;
   await copyFile(FIXTURES[0], copy);
   const before = await buildIndex(copy);
-  // Read the mtime back rather than assuming the one that was set: `Date` carries
-  // whole milliseconds where the filesystem carries nanoseconds, so the value
-  // that lands is a truncation of the value asked for.
+  // Read the mtime back rather than assuming the one set: Date carries milliseconds, the
+  // filesystem nanoseconds.
   const target = Math.floor((await stat(copy)).mtimeMs) + 5000;
   await utimes(copy, new Date(target), new Date(target));
   const landed = (await stat(copy)).mtimeMs;
@@ -224,10 +191,8 @@ for (const path of FIXTURES) {
 }
 
 {
-  // The sidecar's stated reason for existing over a footer is that a writer which
-  // died mid-take leaves a usable file, so cut one mid-frame and check that it
-  // does: every whole frame indexed, the partial one dropped rather than left
-  // pointing off the end, and the truncation reported rather than swallowed.
+  // The sidecar exists so a writer that died mid-take leaves a usable file, so cut one
+  // mid-frame and check.
   const src = FIXTURES[0];
   const whole = await loadIndex(src);
   const keep = 100;
@@ -276,14 +241,12 @@ const BIG = FIXTURES[FIXTURES.length - 1];
   check(served.hash === capture.hash, `${id}: /index serves the sidecar's hash`);
   check(served.frames.offset.length === n, `${id}: /index serves ${n} frames`);
 
-  // First, last, one at random, and one deliberately past the 2 GiB mark - the
-  // offset the whole-file read could not reach at all, so it is the one that has
-  // to be shown rather than assumed.
+  // One deliberately past the 2 GiB mark, which is the offset a whole-file read could
+  // not reach at all.
   const past2Gib = walk.frames.findIndex((f) => f.offset > 2 ** 31);
   const picks = [0, Math.floor(Math.random() * (n - 2)) + 1, past2Gib, n - 1];
   for (const k of picks) {
-    // Offsets come from the parser walk, so a wrong index cannot make a frame
-    // agree with itself.
+    // Offsets come from the parser walk, so a wrong index cannot make a frame agree with itself.
     const w = walk.frames[k];
     const onDisk = Buffer.alloc(w.length);
     await fh.read(onDisk, 0, w.length, w.offset);
@@ -294,8 +257,8 @@ const BIG = FIXTURES[FIXTURES.length - 1];
     );
   }
 
-  // A run comes back framed, so it has to parse back into exactly the payloads
-  // the single-frame endpoint serves.
+  // A run comes back framed, so it has to parse back into the payloads the single-frame
+  // endpoint serves.
   const a = Math.floor(n / 2);
   const b = a + 7;
   const run = await getBytes(`${URL_BASE}/capture/${id}/frames/${a}-${b}`);
@@ -313,9 +276,8 @@ const BIG = FIXTURES[FIXTURES.length - 1];
 
   check((await fetch(`${URL_BASE}/capture/${id}/frame/${n}`)).status === 404, 'a frame past the end is 404');
   check((await fetch(`${URL_BASE}/capture/${id}/frames/${n - 1}-${n - 4}`)).status === 404, 'a backwards range is 404');
-  // Encoded so the separators survive URL normalisation and the whole thing
-  // arrives as one path segment - which is what puts it in front of the id guard
-  // rather than having it collapsed into a static file request first.
+  // Encoded so the separators survive URL normalisation and the whole thing arrives as
+  // one path segment.
   const traversal = await fetch(`${URL_BASE}/capture/..%2f..%2fetc%2fpasswd/index`);
   check(traversal.status === 404, `a traversing id is refused by the id guard (${traversal.status})`);
   check((await fetch(`${URL_BASE}/capture/nosuch/index`)).status === 404, 'an unknown capture is 404');
@@ -325,12 +287,8 @@ const BIG = FIXTURES[FIXTURES.length - 1];
 
 console.log('\n== the run endpoint survives the file moving underneath it ==');
 {
-  // The run used to be reopened by path while every other call read a retained
-  // handle. Deleting the capture then asking for a run therefore threw ENOENT
-  // inside a stream after the headers were sent, which no catch was positioned
-  // for, and the whole process died - replay, socket fan-out and viewer with it.
-  // The same split had a quieter second face: after a re-record under the same
-  // name, one frame index had two different answers, both served with a 200.
+  // The run used to be reopened by path while everything else read a retained handle: ENOENT inside
+  // a stream, after the headers had gone out, killed the process.
   const id = `index-check-victim-${process.pid}`;
   const victim = `captures/${id}.knct`;
   const replacement = `${SCRATCH}/index-check-replacement.knct`;
@@ -338,8 +296,8 @@ console.log('\n== the run endpoint survives the file moving underneath it ==');
   const src = FIXTURES[0];
   const srcIndex = await loadIndex(src);
   await copyFile(src, victim);
-  // Same length, one byte different inside frame 0's payload, so every offset
-  // still lines up and a wrong answer can only mean the wrong file was read.
+  // Same length, one byte different inside frame 0's payload, so a wrong answer can only
+  // mean the wrong file.
   await copyFile(src, replacement);
   const rfh = await open(replacement, 'r+');
   const one = Buffer.alloc(1);
@@ -403,8 +361,8 @@ console.log('\n== per-frame fetch latency over loopback ==');
   console.log(`  random interior   p50 ${ms(pct(random, 50))}   p90 ${ms(pct(random, 90))}`);
   console.log(`  sequential walk   p50 ${ms(pct(sequential, 50))}   p90 ${ms(pct(sequential, 90))}`);
 
-  // A prefetch run is the reason the range endpoint exists, so it is worth the
-  // same treatment: eight frames one at a time against the same eight as a run.
+  // A prefetch run is why the range endpoint exists: eight frames one at a time against the
+  // same eight as a run.
   const RUN = 8;
   const perFrame = [];
   const asRun = [];

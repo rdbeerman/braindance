@@ -1,46 +1,6 @@
 // Proves the timeline transport: that a seek lands where playback would have, that
 // the pre-roll it costs is computed rather than assumed, and that an arbitrary
 // output rate interpolates the capture instead of repeating it.
-//
-// Four claims, separated because they fail for different reasons.
-//
-// **A seek reproduces a playback.** This is the property the whole design rests
-// on, and it is the one an easier check would pass by accident, so the arms are
-// arranged to make that impossible. The playback arm renders every output frame
-// from the start of the edit; the seek arm clears both accumulators and renders
-// only the computed pre-roll. Both are counted, not trusted - the tool reads how
-// many renders, state advances and resets each arm actually performed and refuses
-// a run where those numbers say the two arms did the same work. The control is a
-// seek with the pre-roll suppressed, which must land visibly elsewhere: without a
-// control that fails, an equality between two arms that both did nothing would
-// read as a pass.
-//
-// **The pre-roll is computed.** Not "the number looks plausible" - the number has
-// to *move* with damp and with output frame rate, and the length it computes has
-// to be the length that is actually needed. So the same equality is re-run at a
-// shortened pre-roll, and a shortened one has to break it. A pre-roll that was
-// merely generous would pass the first half of that and fail the second.
-//
-// **A draft is a draft.** Cheaper than an accurate seek, and - the part that
-// matters - independent of how the playhead got there, because that is what
-// "accumulators bypassed" means. Two drafts of the same position reached from
-// different histories must be identical pixels, and a draft must differ from the
-// accurate image at the same position or the bypass is not happening at all.
-//
-// **Program time maps to source time.** Checked against source times this tool
-// computes itself from the index it fetched itself, never against what the
-// transport reports - a transport asked to grade its own arithmetic agrees with
-// itself whatever the arithmetic is.
-//
-//   node server/index.js --port 8080 --replay captures/sample.knct &
-//   node tools/timeline-check.mjs --url http://localhost:8080
-//   node tools/timeline-check.mjs --mutate preroll-constant   # must FAIL
-//
-// The fixture is the sample capture and it is not a 30fps take: 284 frames over
-// 30.36s, median gap 64ms, p90 222ms, mean 9.32fps. Every rate and interpolation
-// figure below is against that cadence, which is stated with each of them rather
-// than rounded to "30fps" - a check that quietly assumed an even 33ms would be
-// measuring a take nobody recorded.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -67,75 +27,18 @@ const SAMPLES = Number(flag('--samples', '24'));
 const WARMUP = Number(flag('--warmup', '4'));
 const SHOTS = flag('--shots');
 
-// The stage is what gets hashed, so it is fixed at 640x360 - 16:9, a shape
-// `EXPORT_SIZES` actually offers a resolution for. This was 640x400 (8:5), which
-// `restoreProject` refuses: `keyframe-check` died mid-run with "this project is
-// framed at 8:5, which this build offers no resolution for" out of an undo
-// restoring a snapshot the tool had put the editor into. This file never restores
-// a project, so 8:5 never crashed it, but it was still measuring the transport in
-// a framing no document here can hold. The viewport is the stage plus the
-// timeline strip rather than the other way round.
 const STAGE = { width: 640, height: 360 };
-// The first guess only. The strip is measured off the page after load and the
-// viewport corrected - see the resize below the goto, and the assertion beside it.
 const TIMELINE_H_GUESS = 148;
 
-// ------------------------------------------------------------------- thresholds
-//
-// Two numbers with different jobs. The first is how far apart two images may be
-// and still count as the same landing: the afterimage pass is
-// `max(new, damp * old)` with everything under 0.1 zeroed, so a correct pre-roll
-// leaves exactly nothing behind and this should be 0 - it is a tolerance against
-// float scheduling on the GPU, not against the accumulators. The second is how
-// far apart the control has to be before its difference means anything; between
-// them is the band where a result proves nothing either way, and a run that lands
-// there fails rather than picking a side.
 const SAME_MAX = 2;
 const CONTROL_MIN = 16;
 const CONTROL_MIN_PCT = 1.0;
 
-// Section 6's own pair, taken on section 6's own look rather than inherited from
-// Blackwall's. Measured on three consecutive runs of an idle machine, identical to the
-// digit each time: a correct seek lands **0/255** from the playback, and a seek with the
-// pre-roll suppressed lands **170/255** away over 1.108% of pixels.
-//
-// The same band stays at 2 and the reason is that it is not a property of the look at all -
-// it is headroom against float scheduling on the GPU, which is the renderer's, and the
-// reading it covers here is exactly zero. The control band is `cascade`'s own: 64 sits 2.7
-// times inside the 170 that was measured and thirty-two times above the same band, so the
-// two verdicts cannot be confused for one another.
-//
-// **The percentage is deliberately not asserted here where section 1 asserts it.** Blackwall
-// misses 17.885% of the frame without its pre-roll and `cascade` misses 1.108%, because
-// `cascade` carries a fifth of Blackwall's trails and there is that much less accumulator
-// to have skipped - so section 1's floor of 1.0% would sit a tenth of a percent under this
-// look's reading, which is a band with no margin in it. What carries the separation here is
-// the max and the eight-fold gap below it.
 const RAIN_SAME_MAX = 2;
 const RAIN_CONTROL_MIN = 64;
-// **And the control is three numbers rather than one, because a maximum is satisfiable by a
-// pixel.** `apart.max >= 64` says some single fragment somewhere landed 64 apart, which a
-// frame that is otherwise identical satisfies - so the row asserting "the control lands
-// somewhere else" could have been held up by one hot pixel while the two pictures were the
-// same picture. The count and the mean are what make it a picture rather than a pixel.
-//
-// The two floors are this section's fixture's own and are deliberately not section 1's,
-// which is 1.0% against a Blackwall that misses 17.885% of its frame without a pre-roll.
-// Measured on the look below, on an idle machine: **122/255 at a mean of 0.2256 over 2.174%
-// of pixels.** The floors sit between two and three times under each of those, which is far
-// enough below the reading to survive a contended run and far enough above zero to refuse a
-// frame that did not move. The note above the look says what the fixture is and what each of
-// its two terms is worth, and those numbers are the ones to re-derive these against if it
-// ever changes again.
 const RAIN_CONTROL_MIN_PCT = 0.8;
 const RAIN_CONTROL_MIN_MEAN = 0.08;
 
-// ------------------------------------------------------------------- mutations
-//
-// Each one breaks exactly one claim, and the tool refuses to run a mutation whose
-// text it could not find - a replacement that silently matched nothing would run
-// the unmutated page and report the check as having missed a bug it was never
-// shown.
 const MUTATIONS = {
   // The pre-roll stops being a function of anything.
   'preroll-constant': { file: 'web/main.js', edits: [[
@@ -157,10 +60,6 @@ const MUTATIONS = {
   },`,
     '  sourceSecAt(programSec) { return programSec; },',
   ]] },
-  // The blend fraction snaps to a frame, so an output rate above the capture
-  // rate repeats frames instead of interpolating between them. Anchored on the
-  // line above it, because the pinned source ends in the same statement and a
-  // replacement that hit both would be mutating something this check never runs.
   'duplicate-frames': { file: 'web/main.js', edits: [[
     'const offset = Math.min(Math.max(sourceSec - times[i], 0), span);\n'
     + '    return { steps, mixT: offset / span, sinceFrameSec: offset, spanSec: span };',
@@ -172,11 +71,6 @@ const MUTATIONS = {
     '    params.apply(BYPASS_ZERO);',
     '    /* mutation: the bypass is skipped */',
   ]] },
-  // A draft rebuilds the pair it is already holding, so every frame of an orbit
-  // pays two depth expansions, two binds and two state advances to arrive back
-  // where it started. Nothing about the image changes, which is the point: this
-  // is a cost claim, and section 3c is the only thing that reads the counters
-  // that can see it.
   'draft-always-resets': { file: 'web/main.js', edits: [[
     'if (target !== this.frame || this.source.applied !== i + 1) {',
     'if (true) {',
@@ -189,11 +83,6 @@ const MUTATIONS = {
     + '  );',
     '  /* mutation: accumulator reset skipped */',
   ]] },
-  // The surface memory's age ceiling drops back under the longest life the
-  // sliders can ask for, so a ray that stops swapping sheds forever. The boot
-  // assertion is removed with it, because that is what the assertion is for -
-  // without removing it the page would refuse to start and the check would be
-  // proving that a throw happens rather than that the image is wrong.
   'age-clamp-low': { file: 'web/surface-memory.js', edits: [
     ['const MAX_AGE = 6.0;', 'const MAX_AGE = 4.0;'],
     ['  if (MAX_AGE < longestLife) {', '  if (false) {'],
@@ -206,87 +95,20 @@ const MUTATIONS = {
   ]] },
   // The mode stops asking for one, so selecting a reading of the footage that
   // writes no parameter leaves the previous one on screen.
-  // Anchored on the block that follows it, because `requestRepaint()` on its own
-  // appears twice and a replacement that hit the registry's call instead would be
-  // mutating a different claim.
-  // The control for "writing one reading rebuilds the image". It replaces
-  // `no-mode-repaint`, which anchored on the `#modes button` handler and went stale the
-  // moment the readings dissolved that block - `main.js` has not contained the string
-  // since, so the mutation matched nothing, the tool refused it, and `sweep-all` could
-  // not get past this file. A declared falsification control that cannot run is the
-  // shape this repo keeps writing down as a bug found.
-  //
-  // Aimed at the mechanism the row actually rests on rather than at a click: a reading
-  // is an ordinary registry parameter now, so what would break it is the registry
-  // declining to announce that one changed. Everything else still announces, so the
-  // whole-look rows below stay green - they write non-reading values too.
   'reading-write-skips-repaint': { file: 'web/main.js', edits: [[
     '    paramWritten(name, spec.tag);',
     '    if (!PARAMS[name].reading) paramWritten(name, spec.tag);',
   ]] },
-  // The rain integrated frame to frame instead of read off the program time, so where the
-  // wave stands becomes a function of how many frames were drawn on the way rather than of
-  // where the playhead is. That is the one claim in this whole feature that belongs to this
-  // file: everything else about the rain is a look value `registry-check` can hold, and
-  // "a seek lands where playback would have" is what a transport is for.
-  //
-  // **It has a line of its own to anchor on, and that is why the line exists.** The rain's
-  // clock is `uniforms.rainPhase`, written beside `uniforms.time` out of the same `t` -
-  // duplication that buys exactly this. Aimed at `uniforms.time` instead the mutation would
-  // redden the ripple, the glitch and the raster along with the rain, and a control that
-  // fails everything cannot say which claim is load-bearing.
-  //
-  // A thirtieth of a second per render rather than the real delta, because the defect is
-  // "the phase is a count of frames" and a wrong-by-a-constant integration is the honest
-  // shape of it: at 30fps out it accumulates real time exactly, so playback arrives at the
-  // right phase and only a seek - which renders a pre-roll and not a whole edit - does not.
-  //
-  // **Three rows, and the first of them is the one that says this was caught for its own
-  // reason.** Section 6 reads the phase at both ends of every arm and requires each arm to
-  // finish on the program time it was asked for, so the mutated run names the numbers -
-  // which is a different thing from the picture comparison underneath it going red, and it
-  // is the difference between "the rain accumulated" and "two frames disagree". The
-  // equality row and the separation row follow it, as they should.
   'rain-accumulates': { file: 'web/main.js', edits: [[
     '    uniforms.rainPhase.value = t;',
     '    uniforms.rainPhase.value += 1 / 30;',
   ]] },
-  // The clock written correctly and read by nothing, which is the state section 6's arms
-  // could not tell from a working build until they were asked to. Both arms agree
-  // perfectly on a rain that does not move - they agree on every frozen thing there is -
-  // and the uniform still holds the program time it was handed, so the per-arm clock row
-  // is satisfied as well. What goes is the one row that stands between those two: the
-  // picture moving when the clock alone is moved.
-  //
-  // Aimed at the shader rather than at the write, because the write is what
-  // `rain-accumulates` is about and two controls falsifying the same line would be two
-  // ways of saying one thing. Inert everywhere else in this file: sections 1 to 5 run
-  // looks carrying no rain and no characters, where the block this edits does not execute.
-  //
-  // **One row, and this comment said three.** The one it is for is the clock-reaches-pixels
-  // guard, which comes back `max 0/255, mean 0.0000, 0.000% of pixels differ` - the picture
-  // does not move when the clock alone is moved, which is exactly the claim. The two rows
-  // predicted beside it were the no-pre-roll control and the separation row under it, on the
-  // reading that most of what the accumulators hold over `cascade` is the wave moving through
-  // them, so a wave that does not move leaves a pre-roll with nothing to warm. Measured, both
-  // stay green: the pre-roll has plenty else to warm on this fixture, so that reading was
-  // wrong about the fixture rather than about the mechanism. It is corrected here rather than
-  // deleted, because a prediction that failed is the more useful half - a reader who counts
-  // three and finds one goes looking for two faults that were never there.
   'rain-phase-unread': { file: 'effects-builtin/rain/cell.vert.glsl', edits: [[
     '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
     '    vRain = (0.0 * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
   ]] },
 };
 
-// **The spec names the file it edits, and the interception is derived from that name.**
-// This used to read the literal `web/main.js` and serve it back over a hardcoded
-// `**/main.js` route, which was true of every entry and true by coincidence: the page
-// is built from more than one module, so an anchor that moves into a neighbouring one
-// leaves the route matching nothing, the browser loading the unmutated build, and the
-// run recorded as this tool having missed a bug it was never shown. That is the failure
-// direction `docs/instruments.md` keeps the case file for, and it is silent.
-//
 // Returned with its file rather than as a bare string so the caller can install the
 // route for the right URL and, below, refuse when that URL is never asked for.
 function mutatedSource() {
@@ -307,18 +129,9 @@ function mutatedSource() {
 
 /**
  * Where a file under `web/` is reached from a browser.
- *
- * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
- * on the basename is a claim about a filename where the server's rule is about a path -
- * two modules could end in the same name and the wrong one would be served without
- * anything failing.
  */
 function servedAt(file) {
   if (file.startsWith('effects-builtin/')) {
-    // The effects' own GLSL, which the page fetches out of `/effects/:id/file/:name` and
-    // `assembleShaders` splices into the cloud's material - so a mutation that edits a
-    // chunk is delivered at the fetch rather than at a module, which from Playwright's
-    // side is the same interception.
     const parts = file.split('/');
     if (parts.length !== 3) {
       throw new Error(`${file} is not an effect package file - a chunk is <id>/<name> under effects-builtin/`);
@@ -331,16 +144,10 @@ function servedAt(file) {
   return `/${file.slice('web/'.length)}`;
 }
 
-/**
- * What the server answers a file with, restated here because the interception has to
- * answer the same way: a chunk is `text/plain` in `server/index.js`, on the argument that
- * what the tools anchor and the client compiles is the file's own bytes.
- */
 function contentTypeFor(file) {
   return file.endsWith('.glsl') ? 'text/plain; charset=utf-8' : 'text/javascript; charset=utf-8';
 }
 
-// ------------------------------------------------------------------- playwright
 
 // Playwright is not a dependency of this project - it is a tool the proofs reach
 // for - so it is resolved from wherever it happens to be installed.
@@ -367,17 +174,19 @@ async function loadPlaywright() {
   throw new Error('playwright not found - install it globally or in this project');
 }
 
-// ------------------------------------------------------------------- the index
-//
-// Fetched by the tool, parsed by the tool, and every expected source time below
-// is computed from it. The page fetches the same index, which is the point: two
-// independent readers of one file agreeing is evidence, a transport confirming
-// its own arithmetic is not.
 
 const index = await (await fetch(`${URL_BASE}/capture/${TAKE}/index`)).json();
 const stamps = index.frames.stampMs;
 const TIMES = stamps.map((s) => (s - stamps[0]) / 1000);
 const DURATION = TIMES[TIMES.length - 1];
+const NEEDS_TAKE_SEC = 12;
+
+if (!(DURATION >= NEEDS_TAKE_SEC)) {
+  console.log(`\n[timeline] DID NOT RUN - the take "${TAKE}" holds ${DURATION.toFixed(2)}s of source and `
+    + `these rows need ${NEEDS_TAKE_SEC}s. Point --take at a longer capture `
+    + '(tools/make-fixture.js loops a short one).');
+  process.exit(2);
+}
 
 function bracketOf(sourceSec) {
   let lo = 0;
@@ -402,8 +211,6 @@ const check = (ok, label, detail = '') => {
   if (!ok) failures++;
 };
 
-// --------------------------------------------------------------- in-page helpers
-//
 // Pixels never cross back over the wire - a 640x360 frame is most of a megabyte
 // and there are dozens per run - so every comparison is made in the page and only
 // its summary comes back.
@@ -540,7 +347,6 @@ const ARM = `async (opts) => {
   };
 }`;
 
-// ------------------------------------------------------------------- the page
 
 const { chromium } = await loadPlaywright();
 // The full chromium build rather than the headless shell: the shell can land on
@@ -559,10 +365,6 @@ page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()
 page.on('response', (res) => { if (!res.ok()) errors.push(`${res.status()} ${res.url()}`); });
 await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
-// Counted rather than assumed, and read after the page has loaded. A route that matches
-// nothing fulfils nothing and throws no error - the page simply loads the tree's own
-// source - so the only way to tell a mutation that was delivered from one that was never
-// asked for is to watch the interception fire.
 let mutantServed = 0;
 let mutantPath = null;
 if (MUTATE) {
@@ -575,51 +377,16 @@ if (MUTATE) {
   console.log(`[timeline] MUTATED BUILD: ${MUTATE} in ${file} at ${mutantPath} - this run is expected to FAIL`);
 }
 
-// The editor, which `/?take=` opened until the main menu took `/`. The take stays in
-// the query and only the path moves - a page opened at the old root would land on the
-// menu, which defines no `__kinect`, so the wait below would spend thirty seconds
-// timing out on a page that was never going to answer.
 await page.goto(`${URL_BASE}/edit?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
 await page.waitForFunction(() => !!globalThis.__kinect);
 
-// **Exit 2, not a failed assertion.** A suite that fails one row on a mutation run reads
-// as a catch, so a mutation the page never asked for has to be the harness declining to
-// run rather than a claim going red - that is what 2 means everywhere else in this
-// suite, and `c507eb7` records the same refusal being added to `library-check` for the
-// same reason. The case it exists for is a module this page does not import: the route
-// is installed, nothing ever requests it, and every row below would pass on the tree's
-// own build while the output said MUTATED at the top.
 if (MUTATE && mutantServed === 0) {
   console.log(`\n[timeline] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
     + 'requested it, so this run would have measured the unmutated build');
   process.exit(2);
 }
-// **The page frames at the stage this tool asked for.** The editor letterboxes
-// itself to the export aspect now, so a viewport alone no longer decides the
-// drawing buffer - but 640x360 is 16:9, the menu's own default, so there is no
-// letterbox and no offset to carry: the buffer comes out exactly 640x360.
 await page.evaluate('globalThis.__kinect.setOutputSize?.("640x360")');
-// The transport first, and the furniture after it - which is the fix for an intermittent
-// this file used to die on rather than a reordering for tidiness.
-//
-// **The strip is hidden until the take opens.** `#timeline` carries `hidden` until the
-// transport exists, so furniture measured before this wait reads a strip of zero on any
-// run where the take opens a beat late, the viewport comes out `360 + 0 + shell`, and the
-// stage is short by exactly the strip. Recorded twice, with the arithmetic both times: a
-// run reading `338x190` is `398 - 208`, where 398 is `360 + 0 + 38` and 208 is the
-// furniture the run then actually had; a run reading `533x300` is `508 - 208`, where 508
-// is the *initial* `360 + TIMELINE_H_GUESS` viewport, so there the resize had not reached
-// the drawing buffer rather than the strip being absent. One guard, two ways for the
-// measurement and the take to race, and both of them are answered by waiting for the thing
-// that makes the strip appear before asking how tall it is.
 await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
-// And the viewport is sized to whatever fixed furniture actually surrounds the stage,
-// measured rather than assumed. `TIMELINE_H` was a constant that went stale the moment
-// the bar became two rows, and the Pencil shell adds the same risk at the top: every
-// image in this file is compared against another image from the same run, so a shorter
-// stage agrees with itself perfectly and the header quietly stops being true. The
-// buffer is then asserted, because a tool whose first line says "640x360" should be the
-// thing that enforces it.
 {
   const furniture = await page.evaluate(`(() => {
     const strip = document.getElementById('timeline');
@@ -633,13 +400,6 @@ await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), nul
     width: STAGE.width,
     height: STAGE.height + furniture.strip + furniture.shell,
   });
-  // **And then wait for the drawing buffer to follow, because `setViewportSize` returning
-  // is not the renderer having resized.** That is the second signature above: the viewport
-  // was right and the buffer had not caught up when it was read. The wait is an
-  // accommodation and the throw below is the guard, so a timeout here falls through to it
-  // rather than replacing it - a run that genuinely cannot reach this stage still dies
-  // loudly, naming the size it got.
-  //
   // The predicate answers *false* on a page with no renderer rather than throwing, because
   // a throw inside `waitForFunction` is not caught by it: the twenty seconds a wait is
   // given are never spent, and the failure arrives instantly wearing the shape of a
@@ -678,11 +438,6 @@ console.log(`[timeline] stage ${gpu.buffer.join('x')}, take ${TAKE}: ${TIMES.len
     return (g[g.length >> 1] * 1000).toFixed(0);
   })()}ms (${((TIMES.length - 1) / DURATION).toFixed(2)} fps mean)`);
 
-// Blackwall, read out of the document that ships it, so no look value is invented
-// here. It is the one look that switches both accumulators on at once, which is what
-// makes a pre-roll cost anything to begin with - and reaching for the crimson shading
-// alone would leave `trails`, `fade` and `wake` at their defaults, which is every term
-// that gives a pre-roll a cost to measure.
 const BLACKWALL_LOOK = JSON.parse(
   readFileSync(new URL('../presets-builtin/blackwall.json', import.meta.url), 'utf8'),
 ).values;
@@ -695,58 +450,11 @@ const RGB_LOOK = JSON.parse(
 ).values;
 const BLACKWALL = { look: BLACKWALL_LOOK };
 
-// The one look in this file with the rain switched on, and it has to exist rather than
-// being folded into an arm above. **Every other arm here renders the rain completely
-// inert**: `blackwall.json`, `depth.json` and `rgb.json` do not carry the rain effect at
-// all - a version 6 document sheds an effect wholly at its defaults, and the whole-look
-// apply resets what a document leaves unnamed - and a term behind a master at zero is not
-// a term a comparison can see. Run against any of them the rain
-// mutation below reddens nothing, the run exits 0, and this file has no NOT CAUGHT branch
-// to say so - a miss that reads as a clean pass, which is the worse of the two shapes.
-//
-// Read off the document that ships it when there is one, so no look value is invented here,
-// the way Blackwall is read above. The fallback is the same four numbers written down: it
-// is the tuning the probe arrived at, and it lives in the preset rather than here as soon as
-// the preset exists.
 const CASCADE_PATH = new URL('../presets-builtin/cascade.json', import.meta.url);
 const CASCADE_SHIPPED = existsSync(CASCADE_PATH)
   ? JSON.parse(readFileSync(CASCADE_PATH, 'utf8')).values
   : { ...BLACKWALL_LOOK, 'rain.amount': 0.8, 'rain.speed': 0.55, 'rain.span': 1.3, 'rain.trail': 0.45 };
 
-// **Two values are moved off that document, and the rain is not one of them.** What this
-// section claims is about the rain and what its control claims is about the pre-roll, and the
-// pre-roll costs nothing to skip unless fade, wake and trails are carrying something. That is
-// the reason section 1 renders Blackwall rather than anything prettier, and this is the same
-// reason arriving one section later.
-//
-// It only became necessary when the legibility crossfade moved into framebuffer pixels, and
-// the cause is a fact about this stage rather than about the look. Every other screen-space
-// term in this renderer is expressed against 1080p and scales with the buffer; the crossfade
-// deliberately does not, because it asks whether an 8x8 bitmask has enough texels under it to
-// resolve, and texels are what the framebuffer has. This stage is 360 tall, so `cascade`'s
-// 0.055m cell rasterises into about 7 pixels where the shipped grade gives it 22, and the mark
-// correctly falls back to the round splat it is supposed to fall back to. A splat sits still
-// frame to frame where a character's index scrambles as drops pass it, so `max(new, damp*old)`
-// returns the new frame and the accumulators stop holding anything a missing pre-roll could be
-// missing.
-//
-// Measured on this stage, all four in one sitting, because a repair with two terms in it
-// wants each of them priced:
-//
-//     shipped cascade                       6/255   mean 0.0001   0.001% of pixels
-//     + trails at Blackwall's 0.5          72/255   mean 0.0023   0.008%
-//     + the cell tripled                   63/255   mean 0.0246   0.145%
-//     + both                              122/255   mean 0.2256   2.174%
-//
-// against the 170/255 over 1.108% this section read while the crossfade was in reference
-// pixels. Neither term is enough on its own and the obvious one is the weaker: the trails buy
-// a peak and almost no area, the cell buys area and takes eight ninths of the marks away with
-// it, and together they read further apart than the reading they replace. The cell is tripled
-// rather than chosen, because the drawn sprite is the cell times the buffer height over 1080 -
-// a third of the height and three times the cell is the same number of pixels the shipped
-// grade gets, which is the only value here that reproduces rather than invents. The room is
-// coarser than the shipped look's and this section does not care: the rain rides these columns
-// whatever size they are.
 const CASCADE_LOOK = {
   ...CASCADE_SHIPPED,
   trails: BLACKWALL_LOOK.trails,
@@ -757,13 +465,9 @@ const arm = (opts) => page.evaluate(`(${ARM})(${JSON.stringify(opts)})`);
 const diff = (a, b) => page.evaluate(`globalThis.__tl.diff(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
 const show = (d) => `max ${d.max}/255, mean ${d.mean.toFixed(4)}, ${d.pct.toFixed(3)}% of pixels differ`;
 
-// =============================================== 1. a seek reproduces a playback
 
 console.log('\n== 1. the same program position, reached two ways ==');
-// Well inside the take on purpose. A target close enough to the head that the
-// pre-roll is clipped by it would prove the equality against a shorter warm-up
-// than the one under test, which is an easier claim wearing this one's name.
-const TARGET_SEC = 12.0;
+const TARGET_SEC = NEEDS_TAKE_SEC;
 {
   const config = { ...BLACKWALL, rate: 1, fps: 30, targetSec: TARGET_SEC, frames: null };
   const played = await arm({ ...config, kind: 'playback', label: 'played' });
@@ -808,14 +512,7 @@ const TARGET_SEC = 12.0;
     `control max ${apart.max} against ${same.max}`);
 }
 
-// ------------------------------- 1b. and the clearing it rests on really clears
 
-// The counter above says the seek called for a reset. It does not say the reset
-// did anything, and a reset that quietly cleared nothing would still reproduce a
-// playback in the arms above - the leftover state there *is* the state being
-// reproduced. So this is checked directly, and with its own control inside it:
-// the same render is taken before and after the clear, and the before-half has to
-// come out bright or the after-half proves nothing.
 console.log('\n== 1b. clearing the accumulators empties both of them ==');
 {
   const cleared = await page.evaluate(`(async () => {
@@ -855,52 +552,14 @@ console.log('\n== 1b. clearing the accumulators empties both of them ==');
   check(cleared.blank <= 16, 'and so is the afterimage', `${cleared.blank}/255`);
 }
 
-// ------------------------- 1c. the pixels belong to the frame the index names
 
-// Everything else here is a *relative* claim. Both arms of every comparison drive
-// the same lookup, so a systematic off-by-one in which frame `makeCurrent` binds
-// would move playback and seek together and agree, and section 4 checks the
-// transport's own bookkeeping rather than what reached the screen. Nothing so far
-// ties a rendered pixel to a named frame's bytes.
-//
-// This does. The frame number comes from this tool's own parse of the index; the
-// bytes are fetched by a bare request that goes nowhere near the frame cache, and
-// pushed straight into the texture; and the image that produces has to be the
-// image the transport arrives at by its own route. The control is the neighbouring
-// frame, which must produce a *different* image - without it, two frames that
-// happen to look alike would pass this as easily as a correct binding.
 console.log('\n== 1c. the image at a program position is the frame the index names ==');
 {
   // Depth mode with interpolation off, so the image is a function of the current
   // depth texture and nothing else - no colour, no blend against the previous
   // frame, no age term, no clock.
-  // The depth reading is part of FLAT now, and it has to be. This arm used to pass
-  // `mode: 1` beside the look and the reading came in through its own door; with the
-  // readings in the registry, a look that named every grade term and no reading would
-  // leave whatever the previous section selected - and the section before this one runs
-  // in Blackwall, whose scan plane sweeps with program time. Every "nothing left that
-  // can move the image" claim below would then be measuring a moving image.
-  // `vignette.amount` is named here for the same reason every other grade term is, and it is
-  // the one that says why this list cannot be shortened: FLAT spreads over a look that has the
-  // grade up, so a term it does not zero arrives from underneath. When the vignette stopped
-  // being a literal applied whenever the pass ran and became a parameter Blackwall names,
-  // this list went on zeroing the three it knew about and the fourth came through - a flat
-  // look with a corner falloff on it, which is 100% of pixels differing from the bytes.
-  // `duotone.amount` joins that list ahead of needing to. It is not time-varying, so seek
-  // still equals playback with it up - but it is a tonal transform after the blend, and
-  // this arm compares the rendered image against the frame bytes themselves, so the moment
-  // the shipped Blackwall look names a duotone it would arrive from underneath exactly the
-  // way the vignette did. The list is cheaper to extend than the failure is to diagnose.
   const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, scan: 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
   const look = { ...FLAT, interpolate: false };
-  // A source time sitting just inside a bracket, so which pair it names is not a
-  // rounding question. Which *half* of that pair the image comes from is the part
-  // worth being explicit about, and it is the easy thing to get backwards: the
-  // walk consumes through `bracket + 1`, so the current depth texture holds the
-  // upper frame and the lower one is the previous texture. With interpolation off
-  // the shader reads the current one alone, so the bytes to compare against are
-  // frame `bracket + 1` and the control is the lower frame it is blended from
-  // when interpolation is on.
   const PAIR = 100;
   const CURRENT = PAIR + 1;
   const sourceSec = TIMES[PAIR] + (TIMES[PAIR + 1] - TIMES[PAIR]) * 0.25;
@@ -942,7 +601,6 @@ console.log('\n== 1c. the image at a program position is the frame the index nam
     show(neighbour));
 }
 
-// -------------------------------------------- 1d. and colour actually reaches it
 
 console.log('\n== 1d. the timeline binds colour, not just depth ==');
 {
@@ -959,7 +617,6 @@ console.log('\n== 1d. the timeline binds colour, not just depth ==');
   check(state.hasColor === 1, 'a decoded colour frame is bound after a seek');
 }
 
-// ======================================= 2. the pre-roll is computed, not fixed
 
 console.log('\n== 2. pre-roll length is a function of fade, wake, damp and output fps ==');
 const PREROLL_CASES = [
@@ -1004,15 +661,7 @@ const plans = [];
     `${new Set(plans.map((p) => p.plan.frames)).size} distinct lengths`);
 }
 
-// ------------------------- and the computed length is the length that is needed
 
-// The shortest pre-roll that still reproduces the playback, found by bisection
-// and verified against the length one below it. This is the number that says
-// whether the computed one is doing anything, and it is a measurement rather than
-// an assertion because the answer depends on the footage: the fade-and-wake half
-// is a *bound* on how long the surface memory can still be carrying something,
-// not a claim that it is. Whether a shed point is actually alive at a given
-// second is a property of what moved in the room.
 async function smallestSufficient(config, played, ceiling) {
   const test = async (frames) => {
     await arm({ ...config, kind: 'seek', frames, label: 'bisect' });
@@ -1055,9 +704,6 @@ for (const c of [
     `${full.seek.plan.frames} computed against ${needed} needed`);
 }
 {
-  // The claim "computed, not constant" without reading the formula: a constant
-  // taken from the cheapest configuration is not enough for the dearest one, so
-  // no single number serves both.
   const cheapest = Math.min(...NEEDS.map((n) => n.computed.frames));
   const dearest = Math.max(...NEEDS.map((n) => n.needed));
   check(dearest > cheapest,
@@ -1066,21 +712,7 @@ for (const c of [
     + `against a computed ${cheapest} at the cheapest`);
 }
 
-// ---------------- 2c. the longest persistence the registry can ask for, and why
 
-// A ghost is drawn while `age < fadeTime + wakeTime * strength`, and the surface
-// memory clamps age at `MAX_AGE`. Let the clamp sit below the longest life the
-// sliders can request and a ray that stops swapping pins its age under its own
-// life and sheds forever - so playback keeps a wake that a seek cannot reproduce,
-// because the reset zeroed the ghost and no length of pre-roll puts an immortal
-// one back. That was the state at MAX_AGE 4.0 against a reachable 5500ms, and it
-// showed up first as seek residue and second as a wake that never expired in the
-// live viewer.
-//
-// So this is the equality at the registry's own maxima. It is the strongest form
-// of the claim in section 1 - the same property at the worst look the parameter
-// space allows - and it pins the boot assertion as a regression check, since
-// lowering the clamp back under the maxima breaks it.
 console.log('\n== 2c. the same equality at the longest persistence the sliders allow ==');
 {
   const config = { look: { ...BLACKWALL_LOOK, ...{ fade: 1500, wake: 4000, trails: 0 } }, rate: 1, fps: 30, targetSec: TARGET_SEC };
@@ -1102,15 +734,7 @@ console.log('\n== 2c. the same equality at the longest persistence the sliders a
     JSON.stringify({ clamped: seeked.seek.clamped, capped: seeked.seek.capped, shortfall: seeked.seek.shortfall }));
 }
 
-// ------------------- 2d. a pre-roll too long to hold is shortened, and says so
 
-// The trails half is a count of output frames whatever the speed, so its span
-// through the take is `frames * rate / outputFps` and a slow damp at a high speed
-// reaches back further than the frame cache holds. Fetching it anyway would evict
-// its own head before the render reached it and build the image out of whatever
-// survived - a wrong picture with nothing to attribute it to. The seek shortens
-// instead and records the shortfall, and this is the check that the ceiling is
-// reachable rather than theoretical.
 console.log('\n== 2d. a pre-roll wider than the frame cache ==');
 {
   const config = { look: { ...BLACKWALL_LOOK, ...{ trails: 0.97 } }, rate: 4, fps: 24, targetSec: 7.0 };
@@ -1128,7 +752,6 @@ console.log('\n== 2d. a pre-roll wider than the frame cache ==');
     'the seek completed rather than throwing', `${seeked.delta.renders} renders`);
 }
 
-// ================================================= 3. draft against accurate
 
 console.log('\n== 3. draft scrub against accurate seek ==');
 {
@@ -1197,11 +820,6 @@ console.log('\n== 3. draft scrub against accurate seek ==');
   check(pct(timings.draft, 50) < pct(timings.seek, 50),
     'a draft costs less than an accurate seek at the same position');
 
-  // The design document's 2.7ms is a sum of separately measured steps - fetch
-  // depth, fetch colour, decode, upload and render - not a whole-operation
-  // figure, so the two are only comparable step by step. These are the same real
-  // functions the transport calls, timed one at a time rather than a copy of them
-  // written here.
   const parts = await page.evaluate(`(async (positions) => {
     const k = globalThis.__kinect;
     const t = k.timeline.transport();
@@ -1246,7 +864,6 @@ console.log('\n== 3. draft scrub against accurate seek ==');
   console.log(`    one render + readback      p50 ${ms(pct(parts.render, 50))}   p90 ${ms(pct(parts.render, 90))}`);
 }
 
-// --------------------------------------- 3b. a draft carries nothing with it
 
 console.log('\n== 3b. a draft is independent of how the playhead got there ==');
 {
@@ -1311,17 +928,7 @@ console.log('\n== 3b. a draft is independent of how the playhead got there ==');
   console.log(`  (the accurate image there costs ${result.plan.frames} pre-roll frames)`);
 }
 
-// ------------------- 3c. and a draft that stayed put does no work to stay there
 
-// The orbit case, which is the one a hand spends the most frames in: the camera
-// moves and the playhead does not. The pair such a draft would rebuild is the pair
-// it is already holding, so it rebuilds nothing - and both halves of that have to be
-// stated, because "cheaper" and "the same image" fail in opposite directions and a
-// section that checked only one of them would bless either failure.
-//
-// The counters are the only witness to the first half. Timing it instead would pass
-// on a machine fast enough not to notice two texture uploads, which is every machine
-// this is likely to run on. `draft-always-resets` is the control.
 
 console.log('\n== 3c. a draft that did not move the playhead rebuilds nothing ==');
 {
@@ -1364,18 +971,12 @@ console.log('\n== 3c. a draft that did not move the playhead rebuilds nothing ==
     'and one that moved still rebuilds the pair, so the row above is a saving not a hole',
     `${result.moved.stateAdvances} advances, ${result.moved.resets} resets`);
 
-  // The other half, and the reason the saving is allowed to exist. Skipping the
-  // rebuild leaves the surface memory holding the seek's own history rather than
-  // zeroes, and the claim is that this cannot reach the image: a draft holds fade
-  // and wake at zero, which takes the ghost half out of the draw range and pins the
-  // live half's ramp at 1. That is an argument, and this is the measurement.
   const same = await diff('draft-stayed', 'draft-arrived');
   console.log(`  the two drafts of ${HERE}s, one that rebuilt the walk and one that skipped it: `
     + `${show(same)}`);
   check(same.max === 0, 'and it is the same image as one that did rebuild it', show(same));
 }
 
-// ================================ 4. program time maps to source time correctly
 
 console.log('\n== 4. playback at a rate lands on the source times it should ==');
 for (const rate of [0.5, 1.0, 2.0]) {
@@ -1420,32 +1021,9 @@ for (const rate of [0.5, 1.0, 2.0]) {
     `${probes.length} probes, worst frame error ${worstT}, worst mixT error ${worstMix.toExponential(1)}`);
 }
 
-// ------------------------- 4b. an output rate above the capture rate interpolates
 
 console.log('\n== 4b. 60 fps out of a capture whose median gap is 64ms ==');
 {
-  // Depth mode with every time-driven and history-driven term switched off, so
-  // the only thing that can differ between two output frames inside one source
-  // pair is the blend fraction. In Blackwall the scan sweep and the grain read
-  // the time uniform, and two consecutive frames would differ whatever the
-  // interpolation did - which would make this claim pass without testing it.
-  // The depth reading is part of FLAT now, and it has to be. This arm used to pass
-  // `mode: 1` beside the look and the reading came in through its own door; with the
-  // readings in the registry, a look that named every grade term and no reading would
-  // leave whatever the previous section selected - and the section before this one runs
-  // in Blackwall, whose scan plane sweeps with program time. Every "nothing left that
-  // can move the image" claim below would then be measuring a moving image.
-  // `vignette.amount` is named here for the same reason every other grade term is, and it is
-  // the one that says why this list cannot be shortened: FLAT spreads over a look that has the
-  // grade up, so a term it does not zero arrives from underneath. When the vignette stopped
-  // being a literal applied whenever the pass ran and became a parameter Blackwall names,
-  // this list went on zeroing the three it knew about and the fourth came through - a flat
-  // look with a corner falloff on it, which is 100% of pixels differing from the bytes.
-  // `duotone.amount` joins that list ahead of needing to. It is not time-varying, so seek
-  // still equals playback with it up - but it is a tonal transform after the blend, and
-  // this arm compares the rendered image against the frame bytes themselves, so the moment
-  // the shipped Blackwall look names a duotone it would arrive from underneath exactly the
-  // way the vignette did. The list is cheaper to extend than the failure is to diagnose.
   const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, scan: 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
   const walk = `(async (o) => {
     const k = globalThis.__kinect;
@@ -1497,18 +1075,7 @@ console.log('\n== 4b. 60 fps out of a capture whose median gap is 64ms ==');
     'the blend fraction takes interior values rather than snapping to a frame');
 }
 
-// ============== 5. a look change while paused reaches the image and the readout
 
-// The one thing this editor is for is grading, and grading means changing a look
-// with the playhead parked and seeing what it did. Both halves of that have to
-// happen without touching anything else: the image has to be rebuilt, and the
-// pre-roll readout has to be recomputed, because an operator reads it to decide
-// whether a seek is affordable and after a look change it would otherwise be
-// quoting the previous look's cost.
-//
-// Read back through screenshots rather than `readPixels`, which cannot see a
-// frame that has already been composited - and a repaint arriving on its own is
-// exactly a frame nothing here rendered.
 console.log('\n== 5. a look change while paused rebuilds the image and the estimate ==');
 {
   // `#stage` rather than `canvas`: step 5 put the camera path and the top-down on
@@ -1516,40 +1083,13 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
   // bare tag selector now matches both. This is the same element it always was.
   const canvas = page.locator('#stage');
   const image = async () => createHash('sha256').update(await canvas.screenshot()).digest('hex').slice(0, 16);
-  // **There is no pre-roll readout to read any more, and that is a decision rather
-  // than a gap.** The transport's second row used to carry four chips - pre-roll, last
-  // cost, undo depth, mark count - and the rework took the row away; `web/index.html`
-  // records the drop beside the row that replaced it. This section asked the estimate
-  // two questions, and only one of them survives that: *is it recomputed when a look
-  // changes* still has an object, because the plan is what a seek actually runs, while
-  // *does the number on screen agree with the plan* has no second surface left to
-  // disagree with. Reading the plan into both halves would have made the second row a
-  // tautology, which is worse than not asking - so it is gone and this is the note
-  // saying where it went.
   const planned = () => page.evaluate('globalThis.__kinect.timeline.transport().preroll()');
   const chip = async () => {
     const plan = await planned();
     return `${plan.frames} frames / ${plan.sec.toFixed(2)} s (surface ${plan.surface}, trails ${plan.trails})`;
   };
-  // Waited on rather than slept through: the page reports when every scheduled
-  // repaint has run and the transport's queue has drained, so a slow repaint is
-  // waited for and a fast one is not paid for.
   const settle = () => page.evaluate('globalThis.__kinect.timeline.settled()');
-  // The render counter is the primary signal here, not the screenshot. A canvas
-  // screenshot taken with no render in between does not reliably show the last
-  // rendered frame - the drawing buffer is not preserved, so the compositor can
-  // hand back something that differs for no reason anyone asked for. Measured
-  // rather than assumed: under a build with the repaint removed, zero renders
-  // happened across a mode change and the screenshot still changed. So a repaint
-  // has to be observed as work the transport actually did, and the image is the
-  // second half of the claim rather than the whole of it.
   const renders = () => page.evaluate('globalThis.__kinect.timeline.counters.renders');
-  // Both events, because a real slider fires both and the two now mean different
-  // things. `input` is the cheap half of a drag - the speed control drafts a frame
-  // there rather than paying for an accurate seek per pointer event - and `change`
-  // is the release that asks for the true image. Dispatching only `input` would
-  // leave the rate nudge below asserting against a draft, which is not what it
-  // claims to be about.
   const slide = (id, value) => page.evaluate(`(() => {
     const el = document.getElementById(${JSON.stringify(id)});
     el.value = ${JSON.stringify(String(value))};
@@ -1584,20 +1124,6 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
   const neutralChip = await chip();
 
   // (a) One registry write, and the image follows it.
-  //
-  // **This row is deliberately weaker than the one it replaces, and the strength it
-  // lost was the strength of a hazard that no longer exists.** It used to select Depth
-  // by clicking its button and assert that the image rebuilt anyway - because a mode
-  // changed clip state and *nothing the registry announced*, so the picture only
-  // followed if `setMode` remembered to ask for a repaint itself. It was the one write
-  // in the program that could change the image silently, and it needed watching.
-  //
-  // A reading is a registry parameter now, so it repaints through the same door as
-  // every slider and there is no separate thing to forget. What is left worth asserting
-  // is that the door works for a reading like it works for anything else, which is what
-  // this is. Re-pointing the old assertion at a click that no longer exists, or keeping
-  // its wording over a mechanism that cannot fail that way, would have been a green row
-  // about nothing.
   const beforeDepth = await renders();
   await page.evaluate("globalThis.__kinect.params.set('readDepth', 1)");
   await settle();
@@ -1635,8 +1161,6 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
   // (c) The control that makes the above mean something. Nudging the rate away
   // and back was what used to correct both surfaces, so if the repaint really
   // happened it has already done everything the nudge would do.
-  // 1.20x is outside the editor's intentional 1.00x detent. The old 1.05x arm was
-  // correctly snapped back to 1.00x and crashed this proof on an unchanged main.
   await slideRate(1.2);
   await settle();
   await slideRate(1);
@@ -1666,21 +1190,7 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
     `${blackwallPlan.frames} frames to ${wakePlan.frames}`);
 }
 
-// ================================ 6. and a wave that falls with the program clock
 
-// Section 1 with the rain up, and it is a section rather than a fourth arm of that one
-// because the two need different bands and a band copied across looks is a band nobody
-// measured. What it holds is the one sentence in the glyph field's design that is this
-// file's rather than `registry-check`'s: the rain is a pure function of program time and
-// world position, with no accumulated state anywhere in it, so a seek lands on exactly the
-// frame playback would have drawn there.
-//
-// The two arms reach 12.0s the two ways and have to agree. A rain integrated per render
-// cannot: playback renders every output frame from the head of the edit and a seek renders
-// a pre-roll and the target, so the two arrive at the same program time having drawn
-// wildly different numbers of frames - measured below, about three hundred and sixty
-// against about twenty - and a phase counted in frames is three hundred and forty frames
-// apart between them.
 console.log('\n== 6. the rain falls with the program clock, not with the frames drawn ==');
 {
   const config = { look: CASCADE_LOOK, rate: 1, fps: 30, targetSec: TARGET_SEC, frames: null };
@@ -1694,27 +1204,10 @@ console.log('\n== 6. the rain falls with the program clock, not with the frames 
     + `output frames, the seek ${seeked.delta.renders} (a ${plan.frames}-frame pre-roll), the `
     + `control ${control.delta.renders}.`);
 
-  // The rain has to be on the screen, or the three arms below are Blackwall with extra
-  // steps and the section is a second copy of section 1. Asserted through the registry
-  // rather than by reading the document, because what matters is the value that reached the
-  // uniform: a look applied through a build that had dropped the parameter would leave it
-  // at its default and every row here would go on passing.
   const raining = await page.evaluate('globalThis.__kinect.uniforms.rain.value');
   check(raining > 0.1, 'the look under this section actually has rain in it',
     `rain reads ${raining} at the uniform`);
 
-  // **A uniform holding a value is not a term reaching a pixel, and the row above is only
-  // the first of those.** Both arms could agree perfectly on a build whose rain never
-  // touched a fragment - two identical Blackwalls agree beautifully - so the equality below
-  // needs two things established first: that the clock the arms are about is the program
-  // time they were asked for, and that moving that clock moves this picture. The first is
-  // read per arm above; this is the second, and it is deliberately taken here, on the frame
-  // the equality is about, rather than argued from the look document.
-  //
-  // Rendered straight rather than through `renderProgramFrame`, because that function
-  // rewrites the phase off program time on its way past and would undo the nudge before
-  // drawing it. The seek afterwards puts the page back where the section found it, so the
-  // rows below are measured on the state they were measured on before this block existed.
   const reaches = await page.evaluate(`(async () => {
     const k = globalThis.__kinect;
     const tl = globalThis.__tl;
@@ -1734,16 +1227,6 @@ console.log('\n== 6. the rain falls with the program clock, not with the frames 
     'moving the rain clock and nothing else moves this picture, so the equality below is '
     + 'about a term that reaches pixels rather than about two identical frames', show(nudge));
 
-  // **The clock the two arms agree about is the program time they were asked for.** This is
-  // the other half of the row above and the two are not the same claim: that one says the
-  // phase reaches pixels, this one says the phase is the transport's reading of where the
-  // playhead is rather than a count of what has been drawn. A build integrating per render
-  // satisfies the first perfectly.
-  //
-  // Read per arm and asserted per arm, because the phase persists between them: the
-  // playback arm renders about 360 frames and the seek about 20, so on an integrating build
-  // the two arms end on wildly different numbers and neither is the target - and a single
-  // reading taken after all three would only be able to name the last one.
   const clocks = [['playback', played], ['seek', seeked], ['no pre-roll', control]];
   const off = clocks.filter(([, a]) => Math.abs(a.rainPhaseAfter - TARGET_SEC) > 1e-6);
   console.log(`  rain clock per arm: ${clocks.map(([n, a]) => `${n} ${a.rainPhaseBefore.toFixed(3)}`
@@ -1758,20 +1241,6 @@ console.log('\n== 6. the rain falls with the program clock, not with the frames 
   check(played.delta.renders > seeked.delta.renders * 4,
     'the two arms did substantially different amounts of work',
     `${played.delta.renders} renders against ${seeked.delta.renders}`);
-  // **Section 1's exact render count, which this section did not have.** The loose ratio
-  // above says the arms differ; it does not say the playback arm drew every output frame of
-  // the edit, and that matters here for a reason peculiar to this machine rather than to
-  // this claim: an intermittent used to land one extra render inside this arm about one run
-  // in five on a contended machine, and `docs/instruments.md` carries the measurement.
-  // Without this row that arrives as the rain equality failing, which reads exactly like a
-  // phase that accumulated - a finding about the feature, produced by the transport. With
-  // it, the run says which of the two happened in its own words.
-  //
-  // The row is kept now that the intermittent is fixed, and the reason is the correction
-  // rather than the fix. It was read as `runTo` overshooting its target, and it never was:
-  // `openTake`'s closing seek to the head of the take was arriving after this arm had
-  // started and landing behind it. This row is what made the difference visible at all, so
-  // it stays as the arm that would see the next one.
   check(played.delta.renders === seeked.seek.target + 1,
     'playback rendered every output frame from the start of the edit and no more',
     `${played.delta.renders} of ${seeked.seek.target + 1}`);
@@ -1786,12 +1255,6 @@ console.log('\n== 6. the rain falls with the program clock, not with the frames 
   console.log(`\n  playback vs seek        ${show(same)}${same.max === 0 ? '  (byte-identical)' : ''}`);
   console.log(`  playback vs no pre-roll ${show(apart)}`);
 
-  // The bands are this look's own, measured on it rather than inherited from Blackwall's.
-  // A rain-raised frame is brighter and busier than a Blackwall one, so both the residual a
-  // correct pre-roll leaves and the distance a missing one opens up are different numbers -
-  // and a band carried across from another look is the failure `docs/instruments.md` records
-  // for the gallery's decimation ratio, where a threshold calibrated at one pixel ratio ran
-  // one hundredth of a margin from missing its own mutation.
   check(same.max <= RAIN_SAME_MAX,
     `a seek lands within ${RAIN_SAME_MAX}/255 of the playback with the rain falling`, show(same));
   check(apart.max >= RAIN_CONTROL_MIN && apart.pct >= RAIN_CONTROL_MIN_PCT
@@ -1802,7 +1265,6 @@ console.log('\n== 6. the rain falls with the program clock, not with the frames 
     `control max ${apart.max} against ${same.max}`);
 }
 
-// ------------------------------------------------------------------- screenshots
 
 if (SHOTS) {
   await page.evaluate(`(async () => {
@@ -1814,7 +1276,6 @@ if (SHOTS) {
   console.log(`\n[timeline] screenshot written to ${join(SHOTS, 'timeline-check.png')}`);
 }
 
-// ------------------------------------------------------------------- the verdict
 
 if (errors.length) console.log(`\n[timeline] page errors:\n  ${errors.join('\n  ')}`);
 check(errors.length === 0, 'the page logged no errors');

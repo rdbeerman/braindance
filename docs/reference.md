@@ -173,7 +173,7 @@ draws a cell-sized character at its own unquantised position — that is authori
 defect, and nothing gates one control on the other.
 
 **Three keys decide which character a cell draws, and they add and wrap rather than mixing.**
-`tone key` reads the luminance the cell is about to draw at, `hash key` reads a hash of the
+`tone key` reads where the cell sits between the clip planes, `hash key` reads a hash of the
 cell itself, and `rain key` reads the falling counter passing through it; the three weights
 sum into one index into a table of sixty-four 8x8 bitmasks and wrap. They sum rather than
 blend the way the five readings do because character indices do not average — character 3
@@ -186,9 +186,36 @@ is 0.
 **The table is sorted by ink**, punctuation at the sparse end and dense kana at the other, so
 the tone key reads it as a tone ramp and the hash key reads the same table as noise with
 neither having to choose. What that costs is a latin ramp: a luminance sweep runs through
-kana, so the picture is ASCII art drawn in an alphabet that is not ASCII. There is no depth
-key because the readings already have one — put `readDepth` up and the colour ramp is
-distance, which the tone key then reads as a depth band.
+kana, so the picture is ASCII art drawn in an alphabet that is not ASCII.
+
+**The tone key is a fact about the cell and not about the point, and that is what stops the
+lattice turning it into noise.** It reads a range and not a colour, and the difference only shows
+where a cell holds sources that disagree: collapse a few hundred depth texels onto one cell and a
+key reading each point's own colour picks a different character for each of them, drawn at the
+same snapped position, so the cell paints the union of several characters. On a `cascade`-shaped
+fixture that is 30.65% of the frame inked against 8.66% — three and a half times the ink, and none
+of it the character anybody asked for. There is no cell-constant reading of the drawn colour to
+key on instead: the colour is built per fragment out of five readings and everything the tone
+stage adds, and inside one cell it still varies through the camera texel, through the raw sample
+depth, and through the rain's own lift. So the key reads the range. For `cascade` the two are the
+same thing — it is `readDepth` alone, so its colour *is* the depth ramp read at that range — and
+they part company furthest under `readRgb`, where a white shirt and the black wall behind it sit
+at one depth and take one character.
+
+**It only bites where the characters actually resolve, which bounds the whole thing and is the
+first place a re-measurement goes wrong.** Below the legibility band `glyphMix` is 0, the mark is
+a round splat, and the tone key reaches no pixel at all — so a build with the defect and a build
+without it draw identical frames for a reason that has nothing to do with the key. On a 1080p
+export `cascade`'s 5.5cm cell falls under the band past about four metres; on a 360-tall stage it
+happens at about 1.2m, because at 4.1m that cell rasterises to 4.6 framebuffer pixels against
+17.3 at 1.1m. Measured there, interleaved over three rounds against a build carrying the shipped
+per-point key, every arm repeating its mask and its pixel count identically: a wall ramped ±120mm
+about 2500mm inked 106,282 pixels against 114,537, and a flat wall at the same depth 36,340
+against 40,207. The flat wall is the honest reading of the *meaning* change alone, since a
+homogeneous cell has no occupants that can disagree; the ramped one carries the union defect on
+top of it. Both arms had `fade` and `wake` forced to 0, which changes nothing about the character
+— they scale alpha and never reach the index — and without which a point born on an injected
+frame carries a fade of exactly 0 and the whole frame comes back black.
 
 **The mark crossfades back to the round splat at whichever floor it hits first: the look's own,
 between sixteen and eight reference pixels, or what the buffer can actually resolve**, so the
@@ -196,6 +223,8 @@ near room is text and the far room is texture. At full `glyph.amount` on `cascad
 look's band is 4.0 to 8.0 metres out, the same metres at 1080p and in a 4K export; a buffer
 shorter than 1080 pulls the boundary nearer because eight framebuffer pixels stop existing
 sooner, which is the buffer being honest about what it can draw rather than the look changing.
+Cut-away geometry is outside all of this and falls back to the round mask outright, because a
+piece of scaffolding that is still legible is still reading as surface.
 The reason the floor exists at all is that an 8x8 bitmask sampled
 across eight pixels is a different random set of bits every time the camera moves rather than a
 small character, which bloom then amplifies. Clamping the
@@ -404,7 +433,8 @@ queue to two different machines, and only one of them is about the job.
 
 ### Installing an effect, and taking one away
 
-`PUT /effects/<id>` installs a package and `DELETE /effects/<id>` removes one. The body is
+`PUT /effects/<id>` installs a package, `DELETE /effects/<id>` removes one, and
+`POST /effect-refusals` sets aside a package a page could not compile. The body is
 `{manifest, chunks}` — the manifest as JSON and a map of file name to GLSL text — and the id in
 the path is the namespace its parameters carry, so a manifest declaring a different one is
 refused rather than guessed at. An id is lowercase letters and digits, up to 64 of them: it is a
@@ -420,6 +450,36 @@ forking is refused by name rather than silently doing nothing. Deleting a packag
 in `effects/` uninstalls it, at which point every open document's values under it park exactly as
 they would on a machine that never had it.
 
+**Nothing here compiles GLSL, so the page that discovers a package will not link is what
+quarantines it.** The door refuses a chunk naming something this build has not got and cannot
+refuse one whose GLSL is merely wrong — a missing brace, a `vec3` assigned to a `float` — because
+that is a shader that fails to link, which is a log line inside the driver rather than anything
+the server can see. `warmPrograms` collects those failures and throws, so the page rolls back onto
+the set it was holding; without somewhere to report it the store would go on serving the package
+and every *fresh* page load would compile it at boot and die there. So the page posts to
+`POST /effect-refusals` with the driver's own sentence, and `serveEffectRefusal` renames each user
+copy aside under `<id>.<seq>.incompatible` — the same rename the boot gate makes, so the package
+is still on disk to be repaired and the shipped one answers for that id again. The ids it names
+are the packages that *changed* in that adoption, because a link failure is about the assembled
+program and never says whose GLSL it was: the set the page was drawing with linked, so the culprit
+is among the ones that arrived or moved revision, and all of them are named in the reason when it
+is more than one. Only a link failure may do it. The same rollback catches a document this page
+could not carry onto the new manifest, and `setAsideUnlinkable` is called on a mark the throw
+carries rather than on the rollback having happened, because renaming a fork aside for a fault in
+one clip is a page destroying somebody's work to report its own. The reason is cut to 500
+characters and flattened to one line by both ends, and the flattening is of every control
+character rather than of whitespace alone: this rig's driver answers a `float` assigned to a
+`vec3` with 193 characters carrying two NUL bytes inside the sentence, and a NUL is not
+whitespace, so a collapse of `\s` alone put one into a line somebody reads in a terminal. It grants no
+authority the caller did not have, which is the first thing anybody asks about a route that
+renames a directory on a name off the wire: `PUT` and `DELETE` are on this same server behind this
+same guard and neither asks who is calling, and this does strictly less than either. An id with no
+copy in the user root is skipped rather than refused, per id, because a page that failed to link
+has the ids it was assembling from and no reason to know which root each came out of — the answer
+names what was set aside and what was not, with a reason for each. The store's generation moves
+when anything is set aside, so the page that just called it is handed the working set on its next
+poll.
+
 **A package that this build could not compile is refused at the door, and the refusal names the
 rule it broke.** That matters more than it sounds: a package is GLSL spliced into two shader
 programs and a table of parameters spliced into the registry, and both of those are assembled
@@ -431,16 +491,26 @@ name has to be a bare name in the package's own directory, at most one parameter
 master and its default has to be the value the effect is absent at, the kind and the binding have
 to be ones the registry implements, every uniform a parameter binds has to be declared by some
 program and every uniform the package declares has to be bound by one of its own parameters or
-listed under `hostDriven`, every joint a chunk names has to exist in a spine, and every identifier
-a chunk reaches for has to be something this build has. Four more rules are about the package as a
-whole rather than about one entry in it, because every rule above is satisfied as many times as a
-package repeats a correct entry: a package holds at most 64 files and 256 KiB of chunk text (the
-widest that ships holds eight files and under 17 kilobytes, and every read of the store hashes
-every file of every package), a binding has to be the *shape* of the uniform it writes — `axisDeg`
-needs a `vec2` and everything else a `float` — a step may not be finer than `1e-6`, which is a
-grid neither the rounding nor a 32-bit float can resolve, and a parameter may only name a panel
-group this build holds or one its own package declares, with a package group key that collides
-with either refused by name. A refused package leaves nothing behind.
+listed under `hostDriven`, which is not a list a package writes freely — it names the uniforms
+this build's own render loop drives, which is `rainPhase` and nothing else, because an exemption
+a package issues itself is the rule gone — every joint a chunk names has to exist in a spine, and
+every identifier a chunk reaches for has to be something this build has. Seven more rules are
+about the package as a whole rather than about one entry in it, because every rule above is
+satisfied as many times as a package repeats a correct entry: a package holds at most 64 files and
+256 KiB of chunk text (the widest that ships holds eight files and under 17 kilobytes, and every
+read of the store hashes every file of every package), its manifest holds at most 32 KiB (the
+widest that ships is the glitch's at 2,740 bytes over seven parameters, and a manifest is written
+to disk, hashed on every read and turned into a control per parameter on every open page — so
+twelve thousand correct parameters carrying one small chunk of GLSL passes every rule above it and
+fits inside a request body), a binding has to be the *shape* of the uniform it writes — `axisDeg`
+needs a `vec2` and everything else a `float` — and may not aim at an array at all, since every
+binding writes one cell and three.js takes its uploader off the declaration, a binding that
+declares `gates` has to be something the grade gate can read, so not `axisDeg`, whose
+two-component direction is never zero, and not a table the gate does not collect, a step may not
+be finer than `1e-6`, which is a grid neither the rounding nor a 32-bit float can resolve, and a
+parameter may only name a panel group this build holds or one its own package declares, with a
+package group key that collides with either refused by name. A refused package leaves nothing
+behind.
 
 **A page that is open when an install happens rebuilds itself.** Both shader programs are
 reassembled and swapped, the registry and the panel are rebuilt from the new set, and every value
@@ -609,9 +679,18 @@ on exposure rather than on distance. That is what separates it from the duotone 
 duotone is keyed to depth, replaces the colour outright and runs per point, where this biases
 the colour the assembled frame already has — so a point, the bloom halo around it and the
 halation ringing that halo are toned together, which nothing in the point program can do. It is
-built to leave exposure alone: the tint it applies is divided by its own luminance, so raising
-the master to 1 moves colour and not brightness (measured over three frames, mean luma 124.91 at
-one end of the balance against 125.06 at the other, a spread of 0.12%).
+built to leave exposure alone, and it now does it for every colour rather than for the greys. The
+tinted pixel is scaled back onto the luminance the pixel arrived with, so the outgoing luminance
+is the incoming one by construction whatever the hue. The line that stood here divided the *tint*
+by the tint's own luminance, which cancels only when every channel of the pixel is the same
+number: worked through the shipped poles in double precision — arithmetic over the shader's own
+literals rather than a rendered frame — the tungsten shadow pole took pure red to 0.8599 of its
+luminance and pure blue to 1.2793, with the tungsten highlight pole running the other way at
+1.1139 and 0.8067. Grey came back at exactly 1.0000 at all four poles, which is how a claim that
+wrong survived being looked at, and it is also why the whole-frame reading recorded here (three
+frames, mean luma 124.91 at one end of the balance against 125.06 at the other, 0.12%) could not
+see it: a mean over a frame averages a red that has been pushed down against a blue that has been
+pushed up, and a mostly-desaturated frame has little of either.
 
 `stock balance` is the axis between two stocks and **its two halves are different shapes**. At
 -1 it is a tungsten-balanced stock shot in daylight: shadows cool toward cyan-blue and highlights

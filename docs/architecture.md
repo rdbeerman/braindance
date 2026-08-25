@@ -91,6 +91,11 @@ GET    /effects/:id          one package: the parsed manifest, the file index, t
 GET    /effects/:id/file/:n  one file's bytes, as text/plain
 PUT    /effects/:id          { manifest, chunks: { <file>: <text> } }  installs into effects/
 DELETE /effects/:id          removes the user's copy only
+POST   /effect-refusals      { ids: [...], reason }  sets aside the user copies of packages a
+                             page could not compile, and answers which it set aside and which
+                             it skipped, with a reason for each. Deliberately not under
+                             /effects/, because a literal segment there outranks :id and an
+                             effect id is a directory name anybody can create
 ```
 
 A revision is a hash of the bytes: `sha256` per file, and the package's own over the sorted
@@ -107,8 +112,11 @@ that pair is identical while the store answered as something else in between. A 
 it passes the comparison by construction, assembles a program out of two revisions, and records
 the revision it opened with, so nothing later ever disagrees either. The counter is the store's
 own history rather than its contents, which is the axis that pair moves along; it is bumped by
-`install` and `remove` and by nothing else, and it is not durable, because a restart makes the
-two listings disagree and the client retries.
+`install`, by `remove` and by a package set aside through `POST /effect-refusals`, and by nothing
+else — the third is the same act as the first two from the store's point of view, a directory
+appearing or leaving under an id, and a page that has just quarantined something it could not
+compile has to be handed the working set on its next poll rather than the one it is blocked on. It
+is not durable, because a restart makes the two listings disagree and the client retries.
 
 **An install is atomic because a package is a directory.** The whole thing is written under
 `<id>.<seq>.tmp`, any existing copy is renamed to `<id>.<seq>.old`, the new one is renamed in and
@@ -226,6 +234,31 @@ restores the document it had, synchronously and without the network, because the
 nothing left to fall back to is the wrong moment to need a fetch. The corner where the rollback
 itself fails says to reload the page and repaints nothing, since a panel painted over a state no
 document describes is a page that looks well and is not.
+
+**The two failures that paragraph names roll back identically and are told apart afterwards,
+which is the one asymmetry in it.** A shader that will not link is a fact about a package: it is
+on disk, it is what the driver rejected, and the rollback leaves it exactly where it was — so the
+next page to open compiles it at boot, where `warmPrograms` runs outside any transaction and takes
+the module down with it, publishing no `__kinect` at all and leaving every tool in the suite
+reporting that it did not run. A document that could not be carried across is a fact about the
+pairing of one clip with one manifest, and the package may be perfectly good. So the throw out of
+`warmPrograms` carries a mark and `setAsideUnlinkable` is called on that mark alone: a build that
+quarantined on the other one would rename somebody's authored fork out of the way because a single
+clip on a single machine could not be opened onto it, and the operator's next move — opening a
+document that names the parameter the fork added — would have worked.
+
+**Which package to name is the hard half, because a link failure is a property of the assembled
+program.** Both programs are one text spliced out of every installed package and the driver's log
+is about a line number in that text, so nothing in it says whose GLSL that was. What the page does
+know is which packages *moved*: it is holding the set it was drawing with, whose programs linked,
+beside the set it just fetched. So the candidates are the ids that arrived and the ids whose
+revision changed — one when one changed, and all of them named in the reason when several did,
+since setting a package aside renames it rather than destroys it and it stays on disk to be
+repaired. An id in the old set and absent from the new one is not a candidate at all: its text is
+not in the program that failed to link. The sequence terminates because the store moves: the page
+is blocked on the signature it failed to adopt, quarantining changes what the next listing says,
+and the rebuild after it links. A store that set nothing aside leaves the signature where it was,
+the block stands, and nothing asks again.
 
 ### A document may name an effect this build has not got
 

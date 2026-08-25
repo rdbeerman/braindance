@@ -1,23 +1,6 @@
 #!/usr/bin/env node
-// Builds the two native artifacts the server needs: libfreenect2 out of
-// `third_party/libfreenect2` into the gitignored `vendor/prefix`, and the grabber out of
-// `native/` into `native/build`. Neither needs the network.
-//
-//   node tools/build-native.mjs [--preset macos|linux] [--jobs N] [--clean]
-//
-// This exists because the version of it that lived in README.md was thirteen lines of
-// cmake flags a reader had to retype correctly, with the platform differences described
-// in a paragraph underneath rather than applied. Two copies of a build - one in prose and
-// one in whatever people actually ran - is the drift this repo rejects everywhere else,
-// so the README now names this file and carries no flags of its own. The reasoning that
-// used to sit under that code block is here instead, beside the line it governs.
-//
-// **A build script that exits 0 without a working binary is the failure mode this whole
-// suite is about**, and "the file exists" does not rule it out - a grabber left over from
-// a previous checkout, or one linked against a prefix that is no longer there, both exist.
-// So the last thing this does is run the grabber it just built. dyld resolves the rpath
-// before `main`, so `--help` coming back clean is a statement about the library too: point
-// the rpath at nothing and it fails there rather than at the first sensor.
+// Builds libfreenect2 from third_party into the gitignored vendor/prefix and the grabber
+// into native/build, then runs the grabber, because a build can exit 0 with nothing usable.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import { cpus } from 'node:os';
@@ -39,28 +22,12 @@ if (argv.includes('--help') || argv.includes('-h')) {
   process.exit(0);
 }
 
-// Two presets rather than three, and the Pi rides with linux. The reason the Pi needs
-// OpenGL is that its V3D has no OpenCL at all - a fact about that GPU rather than about
-// Linux - so a desktop Linux box with a real OpenCL runtime arguably wants the macOS
-// arrangement instead. Nobody here has measured that, and the grabber's `--pipeline` is
-// guarded by whichever backend the library was actually compiled with rather than falling
-// through silently, so the wrong guess is a refusal rather than a slow build. An untested
-// third preset would still be a configuration this repo ships without having run it, so
-// the README's two are what this offers until somebody measures the third.
-//
-// `backend` is the pipeline token the built grabber must report back, and it is the whole
-// reason the probe below is an assertion rather than a print. `ENABLE_OPENGL=ON` is a
-// request, not a requirement: libfreenect2's own CMakeLists answers a missing GLFW3 or
-// OpenGL with `HAVE_OpenGL no` and carries on, so the configure succeeds, the build
-// succeeds, and what installs into vendor/prefix is a CPU-only library. The Pi is where
-// that lands, because the Debian dependency line below installs libusb and turbojpeg and
-// nothing that provides GLFW - the documented path produced the roughly half-rate CPU
-// depth processor and this script said OK over it.
+// Two presets, and the Pi rides with linux because its V3D has no OpenCL. ENABLE_OPENGL=ON
+// is only a request - a missing GLFW3 gives a successful CPU-only build - so `backend` is
+// what the built grabber must report back.
 const PRESETS = {
   macos: {
     cmake: ['-DENABLE_OPENCL=ON', '-DENABLE_OPENGL=OFF'],
-    // OpenGL is off deliberately rather than incidentally: it drives libfreenect2's own
-    // viewer, which nothing here uses, and it is the most deprecated path on the platform.
     why: 'depth on OpenCL, OpenGL off (it only drives libfreenect2\'s own viewer)',
     backend: 'cl',
     missing: 'OpenCL is a system framework here, so a build without it means the configure did not see it - check vendor/build/CMakeCache.txt',
@@ -90,20 +57,12 @@ if (!preset || !PRESETS[preset]) {
 
 const JOBS = Number(flag('--jobs')) || Math.min(cpus().length || 4, 8);
 
-// Where everything lands. `vendor` and `native/build` are both gitignored; the prefix is
-// what the grabber's rpath points at, so moving either of these means editing
-// native/CMakeLists.txt to match.
 const VENDOR_BUILD = join(REPO, 'vendor/build');
 const VENDOR_PREFIX = join(REPO, 'vendor/prefix');
 const NATIVE_BUILD = join(REPO, 'native/build');
 const GRABBER = join(NATIVE_BUILD, 'grabber');
 
-// **A missing dependency has to be named here rather than discovered in cmake's output.**
-// The one this bites on is TurboJPEG: cmake reports it as a package it could not find,
-// which reads as a problem with the source tree rather than as one `brew install` away.
-// `brew --prefix` rather than a literal `/opt/homebrew` because that path is
-// Apple-Silicon-only - Intel Macs put it at `/usr/local`, and a hardcoded prefix fails
-// with a message that never mentions the prefix.
+// brew --prefix rather than a literal /opt/homebrew, which is Apple-Silicon-only.
 const brewPrefix = (formula) => {
   const r = spawnSync('brew', ['--prefix', formula], { encoding: 'utf8' });
   if (r.status !== 0 || !r.stdout?.trim()) return null;
@@ -119,9 +78,7 @@ if (!have('cmake')) {
 }
 
 const vendorFlags = [
-  // CMake 4 dropped compatibility with pre-3.5 policies and libfreenect2 v0.2.1 predates
-  // that floor, so without this the configure step stops before it reports anything about
-  // the tree it was given.
+  // CMake 4 dropped pre-3.5 policies, and libfreenect2 v0.2.1 predates that floor.
   '-DCMAKE_POLICY_VERSION_MINIMUM=3.5',
   `-DCMAKE_INSTALL_PREFIX=${VENDOR_PREFIX}`,
   '-DENABLE_CXX11=ON',
@@ -135,8 +92,7 @@ if (preset === 'macos') {
     console.error(`missing Homebrew packages: ${missing.join(', ')} - brew install ${missing.join(' ')}`);
     process.exit(2);
   }
-  // Pointed at explicitly because libfreenect2's finder does not look inside Homebrew's
-  // opt paths. On Linux both flags come off entirely and pkg-config finds it.
+  // Pointed at explicitly because libfreenect2's finder does not look in Homebrew's opt paths.
   const jpeg = brewPrefix('jpeg-turbo');
   vendorFlags.push(
     `-DTurboJPEG_INCLUDE_DIRS=${join(jpeg, 'include')}`,
@@ -160,38 +116,17 @@ if (argv.includes('--clean')) {
 try {
   run('cmake', ['-S', 'third_party/libfreenect2', '-B', 'vendor/build', ...vendorFlags]);
   run('cmake', ['--build', 'vendor/build', '--target', 'install', `-j${JOBS}`]);
-  // **`FREENECT2_ROOT` is passed rather than defaulted, because a cache entry outlives the
-  // run that set it.** native/CMakeLists.txt declares it `CACHE PATH` with vendor/prefix as
-  // its default, and a default only applies to a cache that does not already hold the key -
-  // so anybody who once configured this tree with the documented `-DFREENECT2_ROOT=` override
-  // (the Pi's ~/freenect2 is the usual one) keeps that path on every later configure
-  // that does not name one. This command would then build the vendored library, install it,
-  // verify it, and link the grabber against the other prefix entirely - and the `--help` probe
-  // below would still pass, because the rpath points at whichever libdir was found and an
-  // external libfreenect2 0.2 runs the same. Reporting success about a library it did not
-  // build is precisely the stale-prefix failure `vendor-check --mutate stale-prefix` exists
-  // for, arriving through the build rather than through the check.
-  //
-  // Naming it here is half the fix and the smaller half: `find_library` caches its answer,
-  // so passing the root moves the hint and leaves the resolved path where it was.
-  // native/CMakeLists.txt drops the resolved pair whenever the root changes, which is what
-  // makes this argument do anything - measured, because the first version of this line was
-  // written on its own and the grabber's rpath did not move.
+  // Passed rather than defaulted: native/CMakeLists.txt declares FREENECT2_ROOT as a cache
+  // entry, and a cache already holding one from an earlier -D override keeps it.
   run('cmake', ['-S', 'native', '-B', 'native/build', `-DFREENECT2_ROOT=${VENDOR_PREFIX}`]);
   run('cmake', ['--build', 'native/build', `-j${JOBS}`]);
 } catch {
-  // execFileSync already put the compiler's own output on this terminal, so repeating the
-  // exception here would bury it. Exit 2 on the same reading the proof tools use: the
-  // build did not run to completion, which is a different answer from one that produced a
-  // binary this script then rejected.
+  // execFileSync already put the compiler's output on this terminal; repeating it buries it.
   console.error('[build-native] FAILED - the build did not complete; its output is above');
   process.exit(2);
 }
 
-// Everything above can succeed and still leave nothing usable, so the claim is closed by
-// running the artifact rather than by stat-ing it. `--help` returns before any device
-// enumeration, so this stays true on a machine with no sensor - which is most of them,
-// the library and the editor being documented to run on an editing station.
+// --help returns before device enumeration, so this stays true on a machine with no sensor.
 if (!existsSync(GRABBER)) {
   console.error(`[build-native] FAILED - cmake reported success but ${GRABBER} does not exist`);
   process.exit(1);
@@ -205,27 +140,12 @@ if (probe.status !== 0) {
   process.exit(1);
 }
 
-// Read back out of the binary's own usage text rather than out of the flags passed in,
-// because those two disagreeing is the whole point of asking. The grabber prints the
-// pipelines its libfreenect2 was compiled with, so a prefix built for the other preset -
-// or an older one still sitting in vendor/ - shows up here as a backend that is missing.
-//
-// Both streams, because the grabber writes its usage to *stderr* - reading stdout alone
-// matched nothing and reported `unknown` on a perfectly good build, which is this repo's
-// own rule about a counter grepping a phrase the system never emits, reproduced inside
-// the tool written to respect it. It survived the first run because the shell that
-// checked it merged the two streams with `2>&1`.
+// Read out of the binary's own usage rather than out of the flags passed in, because those
+// two disagreeing is the point of asking. Both streams: the grabber writes usage to stderr.
 const offers = /this build offers ([a-z ]+)/.exec(`${probe.stderr}${probe.stdout}`)?.[1]?.trim();
 console.log(`[build-native] grabber runs and reports depth pipelines: ${offers ?? 'unknown'}`);
 
-// **And the answer is checked rather than printed**, which for one commit it was not - the
-// string was read out of the binary for exactly the reason that makes it worth reading,
-// then logged beside an unconditional OK. Every build offers `cpu`, so the only thing that
-// line distinguishes is a build that lost the backend the preset asked for, and that is
-// the build it reported as fine.
-//
-// `offers` unparseable fails here rather than passing as `unknown`, on the reading the
-// proof tools use throughout: a claim that could not be tested is not a claim that held.
+// Checked rather than printed: every build offers `cpu`, so an unreadable `offers` fails here.
 const { backend, missing } = PRESETS[preset];
 if (!offers || !offers.split(/\s+/).includes(backend)) {
   console.error(`[build-native] FAILED - the ${preset} preset asks for ${backend} depth, and this build offers ${offers ? `only ${offers}` : 'a set this script could not read'}`);

@@ -1,40 +1,7 @@
-// The alphabet, as sixty-four 8x8 bitmasks held in the shader source.
-//
-// **There is no atlas, no texture and no fetch, and that is a decision about boot rather
-// than about memory.** This renderer loads no static image: every texture it binds is built
-// out of frame bytes in web/gpu-textures.js, so an atlas would be the first file the render
-// path ever went and got - a route on the server to serve it, a load order to get right, a
-// question about what the shader draws in the frames before it arrives, and the same
-// question again inside the headless browser tools/render-worker.mjs drives, where a missing
-// asset is a deliverable with no characters in it rather than a visible error. A table in
-// the source has none of those states, because it is there the moment the shader compiles.
-// The other thing it buys is that the alphabet is reviewable: a bitmask is a diff a person
-// can read, where an atlas is a binary nobody looks inside.
-//
-// 8x8 rather than the 5x6 the probe drew, and the size is the whole reason for it. 5x6
-// draws latin, digits and symbols and cannot draw kana, which would put the reference
-// look's own alphabet permanently out of reach. 8x8 is what the home computers of the
-// eighties drew kana at, so it is the smallest grid that keeps the option, and two
-// unsigned ints carry one character exactly.
-//
-// **Sorted by ink, sparsest first, which is what lets three keys share one table.** A
-// luminance ramp is ASCII art and only works if the index means ink, so that a bright cell
-// draws a dense character and a dark one draws a sparse one; a hash and a rain counter want
-// the index to mean nothing, because looking like noise is their whole job. Sorting by ink
-// dissolves that rather than resolving it - the tone key reads the table as tone and the
-// hash key reads the same table as noise, and both readings are true of it at once - so no
-// parameter has to choose between them, which matters because a chooser would be an enum
-// and this registry has refused those since the region's shape control, on the grounds that
-// an enum cannot keyframe and a slider can. What it costs is a latin tone ramp: a luminance
-// sweep now runs through kana, so the picture is ASCII art drawn in an alphabet that is not
-// ASCII.
-//
-// Packed with x holding rows 0 to 3 and y holding rows 4 to 7, row 0 at the top, and within
-// a word the bit at row * 8 + col with column 0 on the left. **Column 7 and row 7 are clear
-// in every one of the sixty-four**, and that is where the margin between neighbouring cells
-// comes from rather than from a parameter: an 8x8 character does not fill its own 8x8 box,
-// so cells tile while the marks inside them do not touch, which is how the reference frames
-// actually look - characters with dark between them rather than a solid wall of ink.
+// The alphabet: sixty-four 8x8 bitmasks, sorted by ink so the tone key reads the index as a
+// luminance ramp while the hash and rain keys read the same table as noise. x holds rows 0-3
+// and y rows 4-7, row 0 at the top, bit at row * 8 + col. Column 7 and row 7 are clear in
+// every one of them, which is where the margin between neighbouring cells comes from.
 const uvec2 GLYPHS[64] = uvec2[64](
   uvec2(0x00080800u, 0x00000000u), // '  apostrophe  ink 2
   uvec2(0x00000000u, 0x000c0c00u), // .  period  ink 4

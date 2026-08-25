@@ -1,59 +1,14 @@
 #!/usr/bin/env node
-// A capture, synthesised, so that a clone with no Kinect can run the suite.
+// A capture, synthesised, so a clone with no Kinect can run the suite. Written to the shape of the
+// capture this repo actually holds: a nine-key hello with no `format` (so it is a generation-zero
+// take) and no `startedAt` (so `describeTake` dates it by mtime), and a real JPEG in every frame,
+// because the decimation row needs the colour block to be more than 35% of a divisor-4 message. The
+// depth is synthesised geometry rather than noise - a back wall, a floor, a sphere crossing the
+// frame, and a band of zeroes, since `0 = no reading` is a value every reader has to handle. It is
+// written mirrored, because the wire format is.
 //
-// **The gap this closes is that a fresh clone cannot produce a capture at all.** Twelve
-// proof tools root at `captures/sample.knct`; `captures/` is gitignored, the sensor has not
-// been manufactured since 2017, and nothing in the tree generated one - so `make-fixture`,
-// which loops a capture into a longer capture, had nothing to loop. `docs/proof-tools.md`
-// already decided a synthetic stand-in is allowed and says which rows it would cost. This
-// is the thing that decision was waiting for.
-//
-//   node tools/make-sample.mjs captures/sample.knct
-//   node tools/make-sample.mjs captures/sample.knct --frames 284 --fps 30
-//   npm run fixtures                                  # this, then make-fixture
-//
-// **It is written to be the same *shape* as the capture this repo actually holds, not a
-// plausible file.** That was read off the real one rather than guessed, and three of its
-// properties are load-bearing:
-//
-//   - **Its hello carries nine keys and not thirteen** - `serial`, `firmware`, `width`,
-//     `height`, `fx`, `fy`, `cx`, `cy`, `color`. No `format`, so it is a generation-zero
-//     take, which is what every take shot before that field existed is and what
-//     `library-check`'s `generation-zero-take` fixture is about. A stand-in declaring
-//     `format: 1` would be a different generation from the file it stands in for.
-//   - **No `startedAt`**, so `describeTake` dates it by mtime and reports
-//     `dateSource: 'mtime'`. `docs/proof-tools.md` predicted a synthetic sample would fail
-//     the file-date fallback row for carrying one; omitting it is what makes that row pass,
-//     and the fixture depends on some takes having no wall clock.
-//   - **A real JPEG in every frame, around the size the real one carries.** The same page
-//     predicted a stand-in would fail the two decimation rows "by construction", because a
-//     sample with no colour block has no JPEG to carry through. One of those rows asserts
-//     `colorBytes / total > 0.35` at divisor 4, where the decimated depth is 27,136 bytes -
-//     so a colour block under about 15KB fails it however valid the file is. That is why
-//     this tool encodes a real image rather than emitting a colour-free capture, and why
-//     the encoder below exists at all.
-//
-// **The depth is synthesised geometry rather than noise**, because the readers unproject it
-// and a cloud of noise is a fixture nobody can look at to see whether a change was an
-// improvement. A back wall, a floor running away from the camera, and a sphere crossing the
-// frame - plus a band of zeroes, since `0 = no reading` is a value every reader has to
-// handle and a fixture with none of them tests the happy path only.
-//
-// **It is written mirrored, because the wire format is.** libfreenect2 delivers depth and
-// colour flipped left-for-right to match the Microsoft SDK's selfie-view convention, the
-// grabber `memcpy`s the buffer through untouched, and the correction is one sign in the
-// unprojection - `X = -(col + 0.5 - cx) / fx * z`. So a generator that placed the sphere at
-// the column arithmetic naively suggests would produce a file whose room is the mirror of
-// every real capture, and `level-check` section 8 exists because a rig built out of
-// reflection-invariant quantities cannot see that. The scene is placed by inverting that
-// same expression, so the sphere really is where this file says it is.
-//
-// **What it does not do**, said here rather than left to be discovered: it does not
-// simulate a sensor. There is no depth jitter, no confidence gate chattering on a flat
-// wall, no dropped frames and no colour camera halving its rate in dim light. Anything
-// measuring those needs the real capture, and a number taken against this file has to say
-// so - `docs/measurement.md`'s rule that a fixture is a term in the assertion applies to
-// this one hardest, because it is the one that looks most like footage.
+// It is a stand-in rather than footage: no depth jitter, no confidence gate chattering, no dropped
+// frames, no colour camera halving its rate. Say which sample a number came from.
 
 import { createWriteStream, existsSync, renameSync, rmSync, statSync } from 'node:fs';
 import { encodeMessage, TYPE_HELLO, TYPE_FRAME } from '../server/protocol.js';
@@ -61,17 +16,10 @@ import { DEPTH_W, DEPTH_H } from '../web/format.js';
 
 const argv = process.argv.slice(2);
 
-// **The option names are a table rather than five string literals scattered down the
-// file, because a name this parser does not know used to be worth nothing at all.**
-// `--framse 10` put `10` into the positional list, left `--frames` on its default, and
-// wrote a perfectly valid 284-frame capture that was not the one anybody asked for -
-// and then `--if-missing` on the next `npm run fixtures` kept it, so the wrong fixture
-// became the permanent one and twelve tools rooted at it. A misspelling that produces a
-// plausible artifact is worse than one that produces nothing.
-//
-// Splitting the two kinds is what makes the positional count honest as well: a value
-// like the `40` in `--frames 40` is not a positional and the old `startsWith('--')`
-// filter counted it as one, so there was no way to notice a second path had been given.
+// The option names are a table rather than string literals scattered down the file: `--framse 10`
+// put `10` into the positional list, left `--frames` on its default and wrote a perfectly valid
+// capture nobody asked for, which `--if-missing` then kept forever. Splitting the two kinds also
+// keeps the positional count honest.
 const VALUED = ['--frames', '--fps', '--quality'];
 const BOOLEAN = ['--force', '--if-missing'];
 
@@ -79,11 +27,9 @@ const positional = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (VALUED.includes(a)) {
-    // A valued option at the end of the line has no value, and skipping past it made
-    // `--frames` alone read as `--frames 284`: `flag()` finds no following token and
-    // hands back the default, so the tool wrote a plausible fixture nobody asked for
-    // and `--if-missing` kept it - the same class as the misspelling above, arriving
-    // with the name spelled right.
+    // A valued option at the end of the line has no value, and skipping past it made `--frames`
+    // alone read as `--frames 284` - the same class as a misspelling, arriving with the
+    // name spelled right.
     if (i + 1 >= argv.length) {
       console.error(`[make-sample] ${a} takes a value and none followed it. Nothing was written.`);
       process.exit(2);
@@ -119,28 +65,11 @@ if (!OUT) {
   process.exit(2);
 }
 
-// **It refuses to overwrite, and this is the one refusal in the file that is not about
-// correctness.** The path this tool is run at is `captures/sample.knct`, which on a machine
-// with a Kinect attached is real footage - and a capture is the one artifact in this program
-// that cannot be shot again, which is the sentence the wire format's own specification is
-// built around when it declines to rewrite a take to add a key. `npm run fixtures` names that
-// path, so without this the difference between a clone bootstrapping itself and a maintainer
-// destroying a shoot is one command that looks identical from the outside.
-//
-// Refusing by default rather than prompting, because the case that needs protecting is the
-// unattended one: a script, a CI job or an agent running `npm run fixtures` to get a suite
-// green has nobody at the keyboard to answer a prompt. The refusal prints the size and the
-// date of what it declined to write over, so an operator can tell 138MB of footage from a
-// stand-in they made this morning.
-//
-// **Three spellings, because there are three different things somebody means**, and
-// collapsing them is what made the first version of this guard break the thing it was added
-// to protect. `--force` is "replace it, I know what it is". `--if-missing` is "make sure one
-// exists" and is what `npm run fixtures` asks for - a machine holding real footage and no
-// `fixture-1g` needs the loop built and the capture left alone, and a bare refusal there
-// stopped the chain and left the contributor with neither. The default is neither of those:
-// a hand-typed `make-sample captures/sample.knct` over a real take is the case this whole
-// paragraph exists for, and it stops.
+// It refuses to overwrite, because the path this tool is run at is where a machine with a Kinect
+// keeps real footage, and a capture cannot be shot again. Refusing by default rather than
+// prompting: the case that needs protecting is the unattended one. Three spellings, because there
+// are three different things somebody means - `--force` replaces, `--if-missing` leaves an existing
+// capture alone so `npm run fixtures` still builds the loop, and the bare default stops.
 if (existsSync(OUT) && !argv.includes('--force')) {
   const st = statSync(OUT);
   if (argv.includes('--if-missing')) {
@@ -153,29 +82,18 @@ if (existsSync(OUT) && !argv.includes('--force')) {
   console.error('[make-sample] or --if-missing if you only wanted one to exist.');
   process.exit(2);
 }
-// 284 frames at 30fps, which is the frame count and the rate the capture in this tree
-// carries - 284 over 9.42s at 30.03fps. Sized by frame count rather than by duration for
-// the reason `docs/proof-tools.md` gives about the real sample: duration is the thing that
-// differs between two files nobody committed.
+// 284 frames at 30fps, the count and the rate the capture in this tree carries. Sized by frame
+// count rather than by duration, because duration is the thing that differs between two files
+// nobody committed.
 const FRAMES = Number(flag('--frames', '284'));
 const FPS = Number(flag('--fps', '30'));
 const QUALITY = Number(flag('--quality', '82'));
 
-// **Refused here rather than trusted to fail somewhere useful, because none of these fail
-// anywhere at all.** `Number('nope')` is NaN, `i < NaN` is false on the first test, and the
-// generation loop is skipped entirely - so `--frames nope` wrote a 162-byte file holding
-// only the hello, printed its ordinary success line and exited 0. Measured, on the shipped
-// build, before this was added.
-//
-// What makes that worth a refusal rather than a curiosity is the next command somebody
-// runs: `npm run fixtures` calls this with `--if-missing`, which leaves an existing capture
-// alone on purpose so a machine holding real footage keeps it. A zero-frame sample is an
-// existing capture, so the guard that protects footage protects this instead, and
-// `make-fixture` then loops nothing into a fixture and twelve tools root at it. The
-// failure surfaces as proof tools disagreeing about a build with nothing wrong with it.
-//
-// The output is not opened until this has passed, so a refused run leaves whatever was
-// already at that path untouched - which is the same promise the overwrite guard makes.
+// Refused here rather than trusted to fail somewhere useful, because none of these fail anywhere at
+// all: `Number('nope')` is NaN, `i < NaN` is false on the first test, and `--frames nope` wrote a
+// 162-byte file holding only the hello and exited 0. `npm run fixtures` then sees an existing
+// capture and adopts the wreck. The output is not opened until this has passed, so a refused run
+// leaves whatever was at that path untouched.
 for (const [name, value, ok, wants] of [
   ['--frames', FRAMES, Number.isInteger(FRAMES) && FRAMES > 0, 'a whole number of frames above zero'],
   ['--fps', FPS, Number.isFinite(FPS) && FPS > 0, 'a rate above zero'],
@@ -188,36 +106,26 @@ for (const [name, value, ok, wants] of [
   }
 }
 
-// The sensor's own intrinsics, taken from the capture this stands in for so that anything
-// reading `fx`/`cx` out of the hello gets numbers a real device produced. Hardcoded
-// intrinsics skew the cloud in a way that is hard to spot and hard to attribute, which is
-// the reason the hello carries them at all - so a stand-in inventing round ones would be
-// planting exactly that.
+// The sensor's own intrinsics, taken from the capture this stands in for. Hardcoded intrinsics skew
+// the cloud in a way that is hard to spot and hard to attribute, which is why the hello
+// carries them at all.
 const FX = 366.031494;
 const FY = 366.031494;
 const CX = 257.775909;
 const CY = 206.784195;
 
-// ---------------------------------------------------------------------------- the scene
-//
-// Depth in millimetres on the sensor's grid, `0` meaning no reading. Every surface is
-// analytic, so what the file contains is known rather than measured - which is the property
-// `level-check` gets out of planting planes and the reason its rows can grade a fit against
-// a normal it chose.
+// Depth in millimetres on the sensor's grid, `0` meaning no reading. Every surface is analytic, so
+// what the file contains is known rather than measured.
 
 /**
- * One frame of depth, at phase `t` in [0, 1).
- *
- * The column-to-world-X step is the mirrored one and it is the whole reason this function
- * is not the obvious loop: `worldX = -(col + 0.5 - CX) / FX * z`, so a positive world X is
- * a *low* column. Placing the sphere by solving that for `col` is what keeps the archive
- * single-valued - see the header.
+ * One frame of depth, at phase `t` in [0, 1). The column-to-world-X step is the mirrored one and it
+ * is the whole reason this is not the obvious loop: `worldX = -(col + 0.5 - CX) / FX * z`, so a
+ * positive world X is a low column, and the sphere is placed by solving that for `col`.
  */
 function depthFrame(t) {
   const depth = new Uint16Array(DEPTH_W * DEPTH_H);
-  // The sphere crosses from the room's left to its right and back, so a take carries motion
-  // in both directions and a check reading a signed displacement cannot pass on a fixture
-  // that only ever moves one way.
+  // The sphere crosses left to right and back, so a check reading a signed displacement cannot pass
+  // on a fixture that only ever moves one way.
   const sweep = Math.sin(t * Math.PI * 2);
   const ballX = sweep * 0.55;          // metres, world, +X is the room's right
   const ballY = 0.12 * Math.cos(t * Math.PI * 4);
@@ -230,15 +138,13 @@ function depthFrame(t) {
     const ny = -(row + 0.5 - CY) / FY;
     for (let col = 0; col < DEPTH_W; col++) {
       const nx = -(col + 0.5 - CX) / FX;
-      // The back wall at z = 3.2m, and the floor at y = -1.05m. A ray hits the floor when
-      // `ny * z = -1.05`, which only happens looking downwards.
       let z = 3.2;
       if (ny < -1e-6) {
         const floorZ = -1.05 / ny;
         if (floorZ < z) z = floorZ;
       }
-      // The sphere, solved along the ray rather than drawn as a disc, so its depth really
-      // is a curved surface and a normal fit over it means something.
+      // The sphere, solved along the ray rather than drawn as a disc, so its depth really is a
+      // curved surface and a normal fit over it means something.
       const dx = nx;
       const dy = ny;
       const len = Math.hypot(dx, dy, 1);
@@ -258,9 +164,8 @@ function depthFrame(t) {
           if (hz < z) z = hz;
         }
       }
-      // A band of no-reading, because `0 = no reading` is a value every reader has to
-      // handle and a fixture without any tests the happy path only. Placed on the wall
-      // rather than over the sphere so it cannot be confused with an occlusion.
+      // A band of no-reading, placed on the wall rather than over the sphere so it cannot be
+      // confused with an occlusion.
       const shadow = row > 70 && row < 96 && col > 300 && col < 470 && z > 3.0;
       depth[row * DEPTH_W + col] = shadow ? 0 : Math.round(Math.min(z, 8.0) * 1000);
     }
@@ -281,10 +186,8 @@ function colorFrame(depth, t) {
     if (mm === 0) {
       r = 10; g = 12; b = 16;
     } else if (mm > 3100) {
-      // The wall, with a slow vertical gradient and a stripe pattern, so the JPEG carries
-      // real high-frequency content rather than compressing to almost nothing. A flat
-      // image would encode to a couple of kilobytes and fail the decimation row this tool's
-      // header explains.
+      // A stripe pattern, so the JPEG carries real high-frequency content rather than compressing
+      // to almost nothing.
       const stripe = ((col >> 4) + (row >> 5)) & 1 ? 24 : 0;
       r = 96 + stripe + (row >> 3);
       g = 104 + stripe + (row >> 4);
@@ -293,29 +196,21 @@ function colorFrame(depth, t) {
       const check = ((col >> 5) ^ (row >> 5)) & 1 ? 30 : 0;
       r = 70 + check; g = 62 + check; b = 54 + check;
     } else {
-      // The sphere: lit from the upper left of the room, which after the mirror is the
-      // upper right of the buffer. Written with the same sign the depth used so the two
-      // cannot disagree about which side the light is on.
+      // Lit from the upper left of the room, which after the mirror is the upper right of the
+      // buffer. Same sign the depth used, so the two cannot disagree about which side
+      // the light is on.
       const shade = 1 - Math.min(1, (mm - 1200) / 900);
       r = Math.round(40 + 200 * shade);
       g = Math.round(60 + 150 * shade);
       b = Math.round(90 + 90 * shade);
     }
-    // **Fine texture, and it is here for the size rather than for the look.** A synthetic
-    // room made of flat regions encodes to almost nothing: measured at 13.7KB a frame
-    // without this, against the 58KB the real capture carries, and the decimation row
-    // needs the colour block to be more than 35% of a divisor-4 message - which is 27,136
-    // bytes of depth, so anything under about 14.6KB fails it however valid the file is.
-    // What a real photograph has that a gradient does not is high-frequency detail in
-    // every block, so that is what this adds.
-    //
-    // Deterministic rather than random: a hash of the pixel index, so two runs of this
-    // tool produce the same file. `Math.random()` here would make every checkout's fixture
-    // a different one, which is the failure this whole tool exists to stop being invisible.
+    // Fine texture, here for the size rather than the look: a room of flat regions encodes to
+    // 13.7KB a frame against the real capture's 58KB, and the decimation row fails under about
+    // 14.6KB. Deterministic rather than random, so two runs of this tool produce the same file.
     const h = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b);
     const grain = ((h >>> 24) & 31) - 16;
-    // A slow global drift so consecutive frames are not byte-identical - a take whose
-    // frames all hash the same cannot tell a reader that seeks from one that does not.
+    // A slow global drift so consecutive frames are not byte-identical - a take whose frames all
+    // hash the same cannot tell a reader that seeks from one that does not.
     const drift = Math.round(6 * Math.sin(t * Math.PI * 2));
     rgb[i * 3] = Math.max(0, Math.min(255, r + drift + grain));
     rgb[i * 3 + 1] = Math.max(0, Math.min(255, g + drift + grain));
@@ -324,19 +219,10 @@ function colorFrame(depth, t) {
   return rgb;
 }
 
-// ------------------------------------------------------------------- a baseline JPEG
-//
-// **Written here rather than shelled out to, and that is the point of it.** The alternative
-// was ffmpeg, and this tool is the bootstrap: a generator that needed a system package
-// installed would fail exactly the person it exists for, and a generator that used ffmpeg
-// *when present* would produce different bytes on different machines - which is
-// `docs/instruments.md`'s "a fixture that is gitignored is a term in the assertion" with
-// the term varying per host. Every machine gets the same file from the same arguments.
-//
-// Baseline sequential, 4:4:4, one Huffman table pair shared by all three components, which
-// the format permits and which halves the table data this file has to carry correctly.
-// The tables are JPEG Annex K's, which is the published set - reaching for it rather than
-// writing a plausible one is the rule `docs/instruments.md` states three times over.
+// Written here rather than shelled out to ffmpeg, because this tool is the bootstrap: a generator
+// needing a system package would fail exactly the person it exists for, and one that used ffmpeg
+// when present would produce different bytes on different machines. Baseline sequential, 4:4:4, one
+// Huffman table pair shared by all three components, with JPEG Annex K's published tables.
 
 const ZIGZAG = [
   0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5,
@@ -404,10 +290,8 @@ class BitWriter {
       this.bits++;
       if (this.bits === 8) {
         this.bytes.push(this.acc & 0xff);
-        // A literal 0xFF inside the scan would be read as the start of a marker, so the
-        // format requires a zero byte after it. Missing this produces a file that is valid
-        // for most images and corrupt for the ones that happen to emit the byte, which is
-        // the worst possible distribution of a bug.
+        // A literal 0xFF inside the scan would be read as the start of a marker, so the format
+        // requires a zero byte after it.
         if ((this.acc & 0xff) === 0xff) this.bytes.push(0x00);
         this.acc = 0;
         this.bits = 0;
@@ -426,8 +310,8 @@ function magnitude(v) {
   const a = Math.abs(v);
   let size = 0;
   while (size < 16 && a >= (1 << size)) size++;
-  // A negative coefficient is written as the one's complement of its magnitude in `size`
-  // bits, which is the format's own encoding and not a sign bit.
+  // A negative coefficient is written as the one's complement of its magnitude in `size` bits,
+  // which is the format's own encoding and not a sign bit.
   return [size, v < 0 ? v + (1 << size) - 1 : v];
 }
 
@@ -450,13 +334,9 @@ function fdct(block, out) {
 }
 
 /**
- * An RGB image to a baseline JPEG.
- *
- * Not subsampled. 4:2:0 would be the usual choice and is deliberately not taken: it halves
- * the chroma resolution and needs a second block geometry, and what this file is for is a
- * colour block of realistic size that decodes to the room the depth describes. 4:4:4 is
- * simpler to get right and produces the larger file, which is the direction that matters
- * here for the reason the header gives.
+ * An RGB image to a baseline JPEG. Not subsampled: 4:2:0 halves the chroma resolution and needs a
+ * second block geometry, and what this file is for is a colour block of realistic size that decodes
+ * to the room the depth describes.
  */
 function encodeJpeg(rgb, width, height, quality) {
   const quant = quantAt(quality);
@@ -466,9 +346,8 @@ function encodeJpeg(rgb, width, height, quality) {
   const marker = (m) => { u8(0xff); u8(m); };
 
   marker(0xd8);                                   // SOI
-  // A JFIF APP0, with no EXIF anywhere - which `docs/instruments.md` records mattering
-  // once already, when the mirror question was settled off a frame carrying JFIF and no
-  // orientation tag that anything downstream could have been applying.
+  // A JFIF APP0, with no EXIF anywhere - the mirror question was settled off a frame carrying JFIF
+  // and no orientation tag that anything downstream could have been applying.
   marker(0xe0); u16(16);
   u8(0x4a); u8(0x46); u8(0x49); u8(0x46); u8(0x00);
   u8(1); u8(1); u8(0); u16(1); u16(1); u8(0); u8(0);
@@ -491,8 +370,8 @@ function encodeJpeg(rgb, width, height, quality) {
   for (let c = 1; c <= 3; c++) { u8(c); u8(0x00); }
   u8(0); u8(63); u8(0);
 
-  // Colour conversion up front rather than per block, because a block straddling the right
-  // or bottom edge repeats the last real pixel and doing that on the planes keeps the edge
+  // Colour conversion up front rather than per block, because a block straddling the right or
+  // bottom edge repeats the last real pixel and doing that on the planes keeps the edge
   // rule in one place.
   const planes = [new Float64Array(width * height), new Float64Array(width * height), new Float64Array(width * height)];
   for (let i = 0; i < width * height; i++) {
@@ -533,9 +412,9 @@ function encodeJpeg(rgb, width, height, quality) {
         let run = 0;
         for (let i = 1; i < 64; i++) {
           if (q[i] === 0) { run++; continue; }
-          // A run of more than fifteen zeroes is written as ZRL blocks, because the run
-          // length in a coefficient symbol is four bits and silently truncating it
-          // produces a file that decodes to the wrong image rather than one that fails.
+          // A run of more than fifteen zeroes is written as ZRL blocks: the run length in a
+          // coefficient symbol is four bits, and truncating it silently produces a file that
+          // decodes to the wrong image.
           while (run > 15) { const [l, cc] = AC_TABLE.get(0xf0); bw.write(l, cc); run -= 16; }
           const [size, bits] = magnitude(q[i]);
           const [len, code] = AC_TABLE.get((run << 4) | size);
@@ -553,11 +432,8 @@ function encodeJpeg(rgb, width, height, quality) {
   return Buffer.concat([head, scan, Buffer.from([0xff, 0xd9])]);
 }
 
-// ---------------------------------------------------------------------------- the write
-
-// Nine keys, in the order the real capture carries them. `JSON.stringify` over a literal
-// rather than a hand-built string, because a hello that is not JSON is a take nothing can
-// parse and the grabber has its own paragraph about refusing to emit one.
+// Nine keys, in the order the real capture carries them. `JSON.stringify` over a literal rather
+// than a hand-built string, because a hello that is not JSON is a take nothing can parse.
 const hello = JSON.stringify({
   serial: '000000000000',
   firmware: 'synthetic',
@@ -570,36 +446,22 @@ const hello = JSON.stringify({
   color: true,
 });
 
-// **Generated beside the target and renamed onto it, so a run that dies leaves nothing
-// that looks like a capture.** Opening `OUT` directly truncates it at the first byte and
-// keeps it open for the whole generation, so an interrupt, a full disk or a throw out of
-// the encoder left a short but perfectly well-formed `.knct` at the path - and the next
-// `npm run fixtures` passes `--if-missing`, sees a file, exits 0 and adopts the wreck
-// permanently. The rename is atomic within a directory, so the path holds either what was
-// there before or a complete capture and never a prefix of one.
-//
-// It also makes `--force` honest. That flag used to destroy the old capture the moment
-// the stream opened, before a single frame had been encoded, so a `--force` run that then
-// failed had taken the footage and produced nothing to replace it.
+// Generated beside the target and renamed onto it, so a run that dies leaves nothing that looks
+// like a capture: opening `OUT` directly truncates it at the first byte, and the next `npm run
+// fixtures` sees a file, exits 0 and adopts the wreck permanently. It also makes `--force` honest,
+// which used to destroy the old capture before a single frame was encoded.
 const TEMP = `${OUT}.part`;
 const stream = createWriteStream(TEMP);
-// Removed on any failure, including the ones nothing here catches: an uncaught throw and
-// a SIGINT both leave the process without running another line of this file otherwise, and
-// a stray `.part` beside a real capture is the kind of litter somebody deletes the wrong
-// half of. `exit` covers the ordinary throw; the signals do not fire `exit` on their own.
+// Removed on any failure, including the ones nothing here catches: `exit` covers the ordinary
+// throw, and the signals do not fire `exit` on their own.
 const discard = () => { try { rmSync(TEMP, { force: true }); } catch { /* going away anyway */ } };
 let installed = false;
 process.on('exit', () => { if (!installed) discard(); });
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { discard(); process.exit(130); });
-// **One error handler for the stream rather than one per write.** A `once('error')` armed
-// inside `write` is only ever removed by an error, and the fast path resolves on
-// `stream.write` returning true without one arriving - so the default 284 frames armed 284
-// of them and node printed `MaxListenersExceededWarning` from the eleventh frame on. The
-// backpressured path leaks the same way, since only `drain` settles it. Latched here
-// instead: the failure is remembered, every write in flight is rejected, and every write
-// after it refuses before touching the stream. A plain `on('error')` with no rejection
-// would be worse than the leak it removes - it would turn a full disk from a loud failure
-// into a `drain` that never comes, which is this tool hanging with no output at all.
+// One error handler for the stream rather than one per write: a `once('error')` armed inside
+// `write` is only ever removed by an error, so 284 frames armed 284 of them. A plain `on('error')`
+// with no rejection would be worse than the leak - it would turn a full disk into a `drain`
+// that never comes.
 let writeFailure = null;
 const waiting = new Set();
 stream.on('error', (err) => {
@@ -608,9 +470,8 @@ stream.on('error', (err) => {
   waiting.clear();
 });
 const write = (buf) => new Promise((res, rej) => {
-  // Awaited rather than fired and forgotten: a 138MB file written without watching the
-  // drain buffers the whole thing in memory, and this tool is the one somebody runs on a
-  // machine they have not sized for it.
+  // Awaited rather than fired and forgotten: a 138MB file written without watching the drain
+  // buffers the whole thing in memory.
   if (writeFailure) { rej(writeFailure); return; }
   if (stream.write(buf)) { res(); return; }
   waiting.add(rej);
@@ -619,11 +480,9 @@ const write = (buf) => new Promise((res, rej) => {
 
 await write(encodeMessage(TYPE_HELLO, Buffer.from(hello, 'utf8')));
 
-// Stamps are monotonic milliseconds from an arbitrary origin, which is what the sensor's
-// `steady_clock` gives - they are not a wall clock and nothing may read them as one. The
-// origin is fixed rather than taken from `Date.now()`, so two runs of this tool with the
-// same arguments produce byte-identical files and a fixture cannot quietly differ between
-// two checkouts.
+// Monotonic milliseconds from an arbitrary origin, which is what the sensor's `steady_clock` gives;
+// they are not a wall clock. The origin is fixed rather than `Date.now()`, so two runs produce
+// byte-identical files.
 const STAMP_ORIGIN = 875_649_822;
 let colorTotal = 0;
 for (let i = 0; i < FRAMES; i++) {
@@ -644,22 +503,14 @@ for (let i = 0; i < FRAMES; i++) {
   }
 }
 
-// `end`'s callback receives the error when the final flush or close fails, and a
-// resolve that ignored it renamed a truncated `.part` onto `OUT` with a success
-// message over it - the exact artifact the atomic write exists to prevent, arriving
-// through its own last line. The latch below it is for the same failure arriving
-// earlier: an `error` that fired between the final `write` settling and this `end`
-// has already rejected every pending write, but nothing here was pending.
+// `end`'s callback receives the error when the final flush or close fails, and a resolve that
+// ignored it renamed a truncated `.part` onto `OUT` with a success message over it.
 await new Promise((res, rej) => stream.end((err) => (err ? rej(err) : res())));
 if (writeFailure) throw writeFailure;
-// The last thing that happens, and the only line that puts anything at `OUT`. Everything
-// above this point is reversible by deleting one temporary file.
 renameSync(TEMP, OUT);
 installed = true;
-// `FRAMES - 1` frame gaps, not `FRAMES`: the stamps run from index 0, so the span the
-// server and the editor read off the file is one frame period shorter than the count
-// times the rate - a one-frame file spans 0s. Reporting the naive quotient made every
-// number copied out of this line describe a fixture 33ms longer than the one written.
+// `FRAMES - 1` frame gaps, not `FRAMES`: the stamps run from index 0, so the span the server and
+// the editor read off the file is one frame period shorter than the count times the rate.
 console.log(`[make-sample] ${OUT}: ${FRAMES} frames at ${FPS}fps spanning `
   + `${((FRAMES - 1) / FPS).toFixed(2)}s, mean colour ${(colorTotal / FRAMES / 1024).toFixed(1)}KB a frame`);
 console.log('[make-sample] generation zero, no startedAt - a stand-in, not footage; say so when reporting a number from it');

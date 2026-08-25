@@ -1,149 +1,18 @@
 /**
- * The document format's version, in one place because two copies of a constant
- * that must agree is the drift this design keeps refusing.
+ * The document format's version, stamped by the page as it saves and by the server as it
+ * writes, so there is one number rather than two that agree.
  *
- * Both sides need it and they need the *same* one. The page stamps it on every
- * project and preset it saves and refuses to open anything else; the server stamps
- * it again as documents are written to disk, so a file that reached the store some
- * other way still carries it. A check that caught the two disagreeing would only be
- * proving they can, which is not the same as there being one number.
- *
- * It lives under `web/` because that is the side with a delivery constraint: the
- * browser can only import what the server serves, and `web/` is served. Node has no
- * such constraint and reaches for it by path.
- *
- * ---
- *
- * **Version 1 means every screen-space term is expressed against a 1080p
- * reference.** `pointSize` above all: it is pixels at 1080p now and was pixels at
- * the drawing buffer before step 6, so the same number means two different sizes
- * either side of that change, and both built-in presets were rebased by 1080/600 to
- * follow it. There are no documents older than version 1, which is exactly why the
- * field went in when it did - once files exist there is no way to add it
- * retroactively, and a document whose units cannot be recovered is one that renders
- * wrong with nothing to say why.
- *
- * A version rather than an authored buffer height, and the difference is what a
- * loader can *do* with it. An authored height answers one question - what to scale
- * `pointSize` by - and from here on would record 1080 in every file forever, a
- * constant that looks like data. A version answers "can this build faithfully
- * interpret this document", which is the question that recurs: the next thing to
- * move will be a track kind, an easing rule or an audio reference, and none of those
- * is a scale factor. So a file this build does not recognise is refused, naming the
- * version it found, rather than opened on a best guess.
- *
- * **Version 2 adds clip in/out points in program seconds.** They are composition,
- * not look, so they sit in the project and not in a preset. `in` defaults to 0 and
- * `out` defaults to null, meaning the end of the clip. The version is the same
- * "can this build faithfully interpret this document" signal as before.
- *
- * **Version 3 splits the document into look and composition.** Look holds the
- * mode, static params and keyed tracks for look parameters; composition holds the
- * retime curve and the camera track. Deliverables (in/out points, output fps,
- * output size and codec) now live in their own store, not inside the project.
- * Saved projects also carry an undo history (`history.stack` and
- * `history.baseline`) so a reload can restore it.
- *
- * **Version 4 dissolves the mode into five reading weights.** `look.mode` is gone
- * from the project and `mode` is gone from the preset; what replaces both is five
- * ordinary look parameters - `readRgb`, `readDepth`, `readGhost`, `readContour`,
- * `readBlackwall` - which travel with every other value and need no special case.
- *
- * This is the version that most needs to be a refusal rather than a best guess, and
- * for a reason the earlier ones did not have. A version 3 document read by this build
- * would parse: its `values` are all still parameters this registry knows, so
- * `params.apply` would write every one of them without complaint, and the reading
- * would simply be missing - leaving whatever the previous document happened to
- * select. A file that renders as somebody else's shading, silently, is worse than one
- * that fails to open. There is no way across: the conversion this repo used to ship was
- * deleted once every document it could act on had already been converted, so the gate is
- * a refusal and nothing else. A loader that could read both shapes was never on the table
- * either - that is the second implementation this design keeps refusing.
- *
- * **Version 5 makes an ease handle a list of control points.** A version 4 key carried
- * one pair per side - `easeOut: [0.42, 0]` - and a version 5 key carries a list of them,
- * `easeOut: [[0.42, 0]]`, which is the same cubic with its degree written down. What the
- * list buys is a segment that can be a quintic: two control points a side with ordinates
- * 0, 0, 1, 1 is exactly `6u^5 - 15u^4 + 10u^3`, the one shape whose *acceleration*
- * reaches zero at a key and not merely its rate, which is what a camera departing a
- * keyed pose needs and what no cubic pinned at both ends can express.
- *
- * This one has to be a refusal for the reason version 4 did and one more besides. The
- * two shapes are not distinguishable by inspection - `[0.42, 0]` is a two-element array
- * and so is `[[0.2, 0], [0.4, 0]]` - so a build that guessed would read a quintic's
- * first control point as an entire cubic and render a move nobody authored, silently and
- * at every key at once. There is no sniff that separates them and deliberately none is
- * attempted, and with the converter gone there is no way across either - a version 4
- * document is refused and stays refused.
- *
- * **Only a project changes shape here, and a preset is bumped without being rewritten.**
- * A preset is `{version, values}` and holds no keys at all - see `refusePresetBody` -
- * so its handles are not anywhere to convert. The version is shared between the two
- * document kinds, so it moves for both regardless, which is the same cost the comment
- * above `aspect` in `serialiseProjectBody` declines to pay for a field presets have
- * nothing to do with. It is paid here because the thing that moved is the *format* of
- * something both kinds could carry, rather than a field only one of them has.
- *
- * **Version 6 names the look's parameters by the effect they belong to.** A version 5
- * document said `glyphTone`; a version 6 document says `glyph.tone`, carries a
- * `requires` list naming the effects its values are built from, and leaves out every
- * effect it holds at inert defaults. The dot is load-bearing rather than cosmetic: it
- * is what lets a reader tell a typo from an effect this machine does not have, and
- * the `requires` list is what lets it say *which* effect is missing instead of
- * refusing the whole document for one unknown name. There is no way across, as ever -
- * the renames are one-to-one and a converter could exist, which is exactly why this
- * paragraph records that one deliberately does not: every document this project holds
- * was re-authored at 6, and a reader of both shapes is the second implementation this
- * design keeps refusing.
+ * A document from any other version is refused, naming the version it found, rather than
+ * opened on a best guess: this build ships no conversion and no reader of a second shape.
+ * Version 6 names a look parameter by the effect it belongs to - `glyph.tone` rather than
+ * `glyphTone` - and carries a `requires` list naming the effects its values are built from.
  */
 export const PROJECT_VERSION = 6;
 
 /**
- * The sentence a document from the wrong version gets, in one place because the two
- * doors were saying different things about the same file - and one of them was false.
- *
- * **This build carries no migration, and the refusal says so rather than sending anybody
- * looking for one.** There used to be a one-shot rewriter under `tools/` that converted
- * documents on disk, and four bands here that told a version 3 or 4 document which steps
- * stood between it and this one. Both are gone: every document this project holds is
- * re-authored at the current version, so the converter was a one-way rewriter of authored work that nothing
- * could exercise - the most dangerous shape a piece of untested code can have, since its
- * *successful* outcome is that the original is gone. Deleting it is the greenfield call,
- * and the cost is stated rather than hidden: a version 3 or 4 document, if one exists
- * anywhere, is now unopenable and stays that way.
- *
- * **The gate itself stays, and it is not the same question.** A version field is not
- * about old documents - it is about *any* document this build cannot faithfully read,
- * and the live case is a file from a *later* build, which is the one nobody can migrate
- * from in advance. A version 3 document read by a build that had no gate would parse
- * perfectly: its values are all still parameters this registry knows, `params.apply`
- * would write every one without complaint, and only the reading would be missing, leaving
- * whatever the previous document happened to select. A file that renders as somebody
- * else's shading, silently, is worse than one that fails to open. That argument does not
- * weaken when the converter goes; it is the whole reason the field exists.
- *
- * **Two bands rather than four, and the two that survive are the two that were never about
- * a conversion.** The four used to be a version 4 document, a version 3 document, versions
- * 1 and 2, and everything else - and the first three existed to name which migration steps
- * stood between the file and this build, so they went with the migration. What is left is
- * the distinction a reader can still *act* on: a document older than anything this build
- * reads is a file to leave alone, and a document from a later build is a build to upgrade
- * to. Those are different next steps, and collapsing them would be the failure the
- * paragraph above this one describes - a refusal that diagnoses the wrong thing is worse
- * than one that says only "no", because it is followed.
- *
- * **Three, once a malformed version is counted, and the third is here because the first
- * draft of this got it wrong.** A comparison is the natural way to split older from newer,
- * and `undefined > 5` is `false` - so a document with no version field at all, or one
- * carrying a string, falls to whichever side the comparison defaults to and is told
- * something specific and untrue about its age. That draft's own comment claimed it tested
- * for a number first; the code did not, which is the shape `docs/instruments.md` names as
- * worse than no comment, because the comment is the thing a reader checks instead of the
- * line. A version that is not a finite number is its own answer now, and it is the honest
- * one: the field is missing or is not a version, which says nothing about old or new.
- *
- * The version is quoted rather than described so that a file from a later build reports its
- * own number instead of being told something about a format that predates it.
+ * The sentence a document from the wrong version gets, in one place because two doors saying
+ * different things about one file is how one of them ends up false. A version that is not a
+ * finite number is its own band, because it says nothing about older or newer.
  */
 export function versionRefusal(what, version) {
   const across = !Number.isFinite(version)
@@ -158,90 +27,26 @@ export function versionRefusal(what, version) {
 }
 
 /**
- * The generation of the capture format this build writes and reads, in one place for
- * the same reason the document's version is - except that the artifact it stamps
- * cannot be re-authored.
+ * The generation of the capture format this build writes and reads. A take is the one thing
+ * in this program that cannot be made again, so a hello carrying a format this build does
+ * not know is refused rather than unprojected on assumptions that may not be its own. A
+ * hello with no `format` key at all is generation zero and opens - every take on disk today
+ * is one, and nothing here rewrites a capture.
  *
- * A project can be rebuilt from a look somebody still remembers and an index can be
- * rebuilt from the capture it indexes. The capture is the shoot: whatever the room
- * was doing at that moment exists as those bytes and nowhere else. So the argument
- * `PROJECT_VERSION` makes - a build that cannot faithfully interpret a file refuses
- * it rather than rendering somebody else's meaning silently - is the same argument
- * here with the stakes moved, because a document read wrong can be read again and a
- * take reprojected wrong is a take nobody will ever notice was reprojected wrong.
- *
- * The failure this exists for needs no adversary. Change the depth quantisation, or
- * move `registration.undistortDepth` on the no-colour path, and every take written
- * afterwards is byte-indistinguishable in *structure* from every take written before:
- * same magic, same two message types, same hello keys. One geometry model then runs
- * over two populations and the older half of the archive is quietly wrong, with
- * nothing on screen to attribute it to.
- *
- * ---
- *
- * **Version 1 is the format as it settled**: u16 millimetre depth on the sensor's own
- * 512x424 grid, colour registered into that grid, and the intrinsics in the hello. It
- * is `1` rather than a larger number because nothing has moved the depth quantisation
- * or the registration path since the format settled - a version field that lies is
- * worse than none, so if a geometry change ever turns out to already be in the
- * archive, this number is wrong and saying so is the only honest repair.
- *
- * **Three bands, and the first is the one that keeps the existing archive readable.**
- *
- * A hello carrying no `format` key at all is honestly generation zero and opens.
- * Every take on disk today is one, the field cannot be added to them retroactively -
- * nothing in this program rewrites a capture, deliberately - and `describeTake`
- * already reads `startedAt` by exactly this presence-sniff for exactly this reason.
- * Presence-sniffing works once, which is what this field is for: it is the last time
- * an absent key has to mean anything.
- *
- * A hello carrying `CAPTURE_FORMAT` opens, because this build wrote it.
- *
- * Anything else is refused - a later number, or a `format` that is not a number at
- * all. Refused rather than unprojected on this build's assumptions, and naming what
- * it found, because a take from a generation this build has never heard of is
- * geometry nobody can check, which is the same case the no-hello refusal covers one
- * band earlier.
- *
- * **Bumping this number is a decision about every earlier one, and the comparison below
- * is deliberately strict so that it cannot be made by default.** `format === CAPTURE_FORMAT`
- * means the day this becomes 2, every generation-1 take is refused unless the same commit
- * says what happens to them - an accept set, or a refusal somebody chose. That is the
- * right way round for the one artifact that cannot be made again: locking the archive out
- * should be something a person wrote down, never something that fell out of an increment.
+ * `native/grabber.cpp` stamps this number too, and `syntax-check` holds the two spellings to
+ * each other.
  */
 export const CAPTURE_FORMAT = 1;
 
 /**
- * The sentence a take from a format this build cannot read gets, and the predicate
- * behind it: empty when the take may be opened, the reason when it may not.
- *
- * One function rather than a comparison at each door, and `versionRefusal` above is
- * the precedent - two doors saying different things about one file is how one of them
- * ends up false. There are four doors here rather than two. `describeTake` decides
- * `openable`, the gallery's badge says why, its dead Open button says why, and
- * `openTake` refuses in the editor; the first three are cheap to satisfy by inlining
- * a comparison, and an inlined comparison drifts the first time the band gains a
- * member. It will gain one: recording HD colour into takes is a third message type,
- * which is a format change by any reading.
- *
- * `what` is a noun phrase the caller owns, because the gallery is talking about a
- * tile the reader is looking at and the editor is talking about an id in a URL.
+ * The sentence a take from a format this build cannot read gets, and the predicate behind
+ * it: empty when the take may be opened, the reason when it may not. One function rather
+ * than a comparison at each of the four doors, which drift as soon as the band gains a
+ * member.
  */
 export function captureFormatRefusal(what, format) {
-  // **Absent and an explicit null are one answer, and that is a choice rather than a
-  // constraint.** JSON distinguishes them perfectly well and `'format' in hello` would
-  // read the difference, so the honest statement is what the difference would cost and
-  // buy. Costs: a second channel through the listing, since `describeTake` ships a value
-  // and not the key's presence, so the browser would need a declared-flag or a sentinel
-  // beside it. Buys: protection against a writer broken twice over - one that learned
-  // the field, stamps a literal null instead of a number, *and* moved the geometry. A
-  // null-stamping writer whose geometry is unchanged is opened on this build's
-  // assumptions, which is exactly what generation zero gets anyway.
-  //
-  // Refusing the literal null is the defensible other reading and costs no take on disk
-  // today, since none of them carry the key at all. It is written down here rather than
-  // settled because the wire cost is real and the hazard needs both failures at once.
+  // Absent and an explicit null are one answer: `describeTake` ships a value rather than the
+  // key's presence, so reading the difference would cost a second channel through the listing.
   if (format === null || format === undefined) return '';
   if (format === CAPTURE_FORMAT) return '';
   return `${what} was written in capture format ${JSON.stringify(format)} and this build reads `
@@ -251,97 +56,31 @@ export function captureFormatRefusal(what, format) {
 }
 
 /**
- * What may be a take id, a document name, or anything else this program joins to a
- * path - and it is here, beside the version, for the same delivery reason.
- *
- * It began in `server/library.js` and was moved when the gallery grew a rename box.
- * A rename that only learns its name was refused after a round trip is a rename that
- * spells the rule out in an error message; a box that greys its own button says the
- * same thing before the request. Those are two statements of one rule, and the
- * failure mode of two copies is not that they disagree loudly - it is that the page
- * quietly accepts something the server refuses, or refuses something the server would
- * have taken, and the operator learns which by trying. So there is one regular
- * expression and both sides import it.
- *
- * **The page's copy is a courtesy and never a gate.** `server/library.js` asserts it
- * on every path it forms, because a request does not have to come from this page at
- * all - a node's manifest and a `curl` are both callers, and neither ran any
- * JavaScript this repo wrote.
- *
- * The leading character rules out `..` on its own; the rest rules out a separator. An
- * underscore is allowed so the editor's reserved auto-save name `__working__` is a
- * valid document name.
+ * What may be a take id, a document name, or anything else this program joins to a path.
+ * One expression, imported by both sides: the page's copy is a courtesy and the gate is
+ * `server/library.js`, because a request does not have to come from this page at all. The
+ * leading character rules out `..`, and an underscore is allowed for `__working__`.
  */
 export const VALID_ID = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
 
 /**
- * The sensor's depth grid, and it is filed here for the delivery reason above rather
- * than for the document-format one.
+ * The sensor's depth grid, here for the same delivery reason: the browser can only import
+ * what the server serves, and Node reaches for it by path.
  *
- * Nothing about 512x424 is a property of the document format, so a reader arriving at
- * the top of this file has every right to wonder what a sensor dimension is doing
- * beside a version number. The answer is the second half of the header's argument and
- * not the first: the browser can only import what the server serves, `web/` is what
- * gets served, and Node has no such constraint and reaches for it by path. That is the
- * whole of why this file exists as a shared home, and the grid needs exactly that home
- * for exactly that reason - `web/main.js` and `web/library.js` are pages,
- * `server/capture.js` is not, and all three have to mean the same grid.
- *
- * It was declared four times before this, twice inside `web/main.js` alone under two
- * different names 1,646 lines apart, and spelled out as bare literals a fifth time in
- * the monitor's cost line - under a comment promising the number was "stated from the
- * grid rather than from a table, so the number cannot drift from what the sender is
- * actually building". It was stated from two literals typed a third time, which is the
- * duplication having already started saying something untrue.
- *
- * **`native/grabber.cpp` declares the pair a second time and that one is correct.** No
- * JavaScript import reaches a C++ translation unit, so the grabber has no way to be a
- * reader of this and is the one honest second declaration. It is what the hello
- * carries, so a device with a different grid changes both files and nothing between
- * them.
- *
- * The proof tools keep their own copies too, and deliberately: a check that imported
- * the constant it asserts would be holding a `512` against itself.
+ * `native/grabber.cpp` declares the pair a second time and that one is correct, since no
+ * import reaches a C++ translation unit. `syntax-check` holds the two spellings to each
+ * other, so a device with a different grid changes both files and nothing between them.
  */
 export const DEPTH_W = 512;
 export const DEPTH_H = 424;
 
-/**
- * How many cells that grid has, which is here because its two readers have nothing else
- * in common.
- *
- * `web/main.js` measures an arriving frame's depth block against it and refuses one that
- * is not that many samples, and divides by it to turn a count of returns into a share of
- * the sensor; `web/point-cloud.js` allocates two vertices per cell and addresses every
- * point by it. The first is a statement about the wire and the second is a statement about
- * the renderer, so filing it under either one would have the other importing a module it
- * has no other business with - which is the same delivery argument the grid above it is
- * filed here on, one derivation further along.
- *
- * It is a declaration rather than `DEPTH_W * DEPTH_H` written at each site for the reason
- * that pair is one: a second spelling of a derived constant is the same drift as a second
- * spelling of what it derives from, and it takes a multiplication rather than a glance to
- * see. `server/capture.js` still writes the product out where it refuses a depth block,
- * and that is a third spelling this could absorb rather than a claim that it has.
- */
+/** How many cells that grid has, declared once rather than multiplied out at each site. */
 export const POINTS = DEPTH_W * DEPTH_H;
 
 /**
- * The effect a dotted look name belongs to, or null for a core parameter - and it is a
- * fact about the document format rather than about the registry, which is why it is here.
- *
- * The version 6 paragraph above is this function's whole specification: a version 5
- * document said `glyphTone` and a version 6 document says `glyph.tone`, and the dot is
- * what lets a reader tell a typo from an effect this machine has not got. Every consumer
- * of that distinction has to split a name the same way or the three-way refusal splits
- * differently at two doors - which is the drift this file exists to refuse, arriving in a
- * parser rather than in a constant.
- *
- * **Its second reader is the render queue, and that is what moved it out of
- * `web/main.js`.** `server/jobs.js` derives a job's `requires` from the namespaces its
- * project's own values and tracks carry, and the page derives the same list from the same
- * names on the way out; a server-side copy of `indexOf('.')` would be the second spelling
- * of the one rule both ends have to agree about.
+ * The effect a dotted look name belongs to, or null for a core parameter. The loader and the
+ * render queue in `server/jobs.js` both split names by it, so a copy would let the two doors
+ * refuse differently.
  */
 export const effectOf = (name) => {
   const dot = name.indexOf('.');
@@ -351,46 +90,17 @@ export const effectOf = (name) => {
 /** The effect ids a set of look names touches, in first-appearance order. */
 export const effectIdsIn = (names) => [...new Set(names.map(effectOf).filter(Boolean))];
 
-/**
- * The id shape a `requires` entry names, which is the same shape a package directory and a
- * parameter namespace carry.
- *
- * Module-local rather than exported, on the reasoning `server/effect-door.js` writes out
- * where it restates the store's two patterns: this is one door asked at one moment - is
- * this document's list readable - and the other spellings are different doors asked at
- * different moments of an id's life. What must not happen is two readers of *this* rule,
- * and there are two of those: the loader in `web/main.js` and the render queue in
- * `server/jobs.js`.
- */
+/** The id shape a `requires` entry names, which a package directory and a namespace share. */
 const REQUIRES_ID = /^[a-z][a-z0-9]*$/;
 
-/**
- * Whether a `requires` list is a list at all, as a sentence or null.
- *
- * Separate from the entry rule below because the two callers ask them at different
- * moments: the loader has already dealt with an absent list by the time it gets here, and
- * the queue has to allow an absent one and refuse a present one that is not a list.
- */
+/** Whether a `requires` list is a list at all, as a sentence or null. */
 export const requiresListRefusal = (what, requires) => (Array.isArray(requires) ? null
   : `${what} carries ${JSON.stringify(requires)} where its requires belong: a requires list is an array of { id, version } entries`);
 
 /**
- * One `requires` entry held to its shape, as a sentence or null.
- *
- * **Two doors read this list and only one of them used to check it.** `refuseRequires` in
- * `web/main.js` has asked these five questions since the list existed, on the machine that
- * opens the document; the render queue compared id *sets* and nothing else, so
- * `requires: [{}]`, an entry with no version, an id that could never name a package and a
- * stray key beside the two that belong were all queued without comment. What that costs is
- * the thing the queue's envelope exists to prevent: the worker's own door reads the
- * envelope, finds nothing missing in a claim nobody can read, resolves a take, launches a
- * browser and spends a minute of GPU before the loader refuses the same document from the
- * other end.
- *
- * A sentence rather than a throw because the two callers frame their own errors, and `what`
- * is a noun phrase the caller owns for the same reason `versionRefusal` takes one - the
- * loader is talking about a file somebody opened and the queue is talking about a job
- * somebody posted.
+ * One `requires` entry held to its shape, as a sentence or null. The render queue reads the
+ * list too and used to compare id sets alone, so a malformed entry cost a browser launch and
+ * a minute of GPU before the loader refused the same document from the other end.
  */
 export function requiresEntryRefusal(what, entry) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -414,26 +124,8 @@ export function requiresEntryRefusal(what, entry) {
 
 /**
  * How many decimal places a number is written to, which is how far the registry rounds a
- * value after snapping it onto its slider's grid.
- *
- * **It is here because `snapScalar` below needs it and because it is the half of that
- * arithmetic whose cases can be written out.** `test/param-grid.test.mjs` holds it to them
- * under bare node.
- *
- * **A dot in the decimal spelling was the whole of the rule and JavaScript stops writing
- * one.** `String(x)` switches to exponent notation below 1e-6, so `String(1e-7)` is
- * `"1e-7"` with no dot anywhere in it - which read as zero decimals, and a parameter
- * declaring that step had every value it ever held rounded to a whole number. The range
- * collapsed to its integer positions with every control still moving and every slider
- * still showing a number, which is the shape that gets found by somebody wondering why an
- * effect only has two settings. The exponent is read now, so the count is what the value
- * actually needs: `1e-7` is seven places, `1.5e-7` is eight, and `1e+21` is none because
- * there is nothing after the point.
- *
- * Capped at the 100 places `toFixed` will accept, because a step below 1e-100 would
- * otherwise turn a rounding into a `RangeError` on the first write. The install door
- * refuses a step finer than 1e-6 long before that, so the cap is for the values that do
- * not come through a door - a core parameter declared here in this repo.
+ * value after snapping it. The exponent is read because `String(1e-7)` has no dot in it,
+ * and a step read as zero decimals rounds every value of its parameter to a whole number.
  */
 export const decimalsOf = (x) => {
   const s = String(x);
@@ -449,27 +141,10 @@ export const decimalsOf = (x) => {
 };
 
 /**
- * Where a scalar actually lands: clamped into its own bounds, snapped onto the step grid
- * its `min` anchors, and rounded to the decimals `min` and `step` imply.
- *
- * **This used to live in `web/main.js` beside the registry, on the argument that the
- * registry is the only thing that performs it. It has a second performer now.** The
- * install door in `server/effect-door.js` refuses a manifest whose `def` or `max` this
- * arithmetic would move, and the only way to ask that question exactly is to run the
- * arithmetic: an epsilon on `(def - min) / step` is a *description* of where a value lands,
- * and a description is the thing that drifts from the line it describes. So the door
- * imports this, and "would the registry move it" is answered by moving it.
- *
- * The rounding is the half that is easy to leave out and the half that decides. A range
- * input hands back a value already snapped and already rounded to the decimals its own
- * attributes imply; a value set headlessly does not go through the DOM at all. Without the
- * round trip through `toFixed`, `0 + 55 * 0.01` is 0.5500000000000001 where the slider says
- * 0.55, and two runs of one project disagree by a hair with nothing recording why.
- *
- * The final clamp is what makes a `max` off its own grid the one case this cannot see:
- * the snap can step past `max` and the clamp puts it back, so the value at the top of the
- * range is always itself. The door asks that question by widening the ceiling rather than
- * by adding a tolerance here - see the grid refusals there.
+ * Where a scalar lands: clamped into its bounds, snapped onto the step grid its `min`
+ * anchors, and rounded to the decimals `min` and `step` imply. The install door runs this
+ * rather than describing it. Without the `toFixed` trip, `0 + 55 * 0.01` is
+ * 0.5500000000000001 where the slider says 0.55.
  */
 export const snapScalar = (spec, value) => {
   const clamped = Math.min(spec.max, Math.max(spec.min, value));

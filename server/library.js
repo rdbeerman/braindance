@@ -1,25 +1,5 @@
-// The library: one manifest over a captures directory, the marks that hang off
-// each take, the projects and presets beside them, and the reconciliation with a
-// capture node that makes "local", "remote" and "both" mean something.
-//
-// Three properties shape everything in this file.
-//
-// **Reconciliation is by content hash and never by filename, size or date.** That
-// is the payoff for hash-referencing captures in step 2: two machines holding the
-// same bytes under different names are holding the same take by definition, and
-// two different takes that happen to share a name are two takes. Nothing here
-// compares a name to decide identity.
-//
-// **Nothing is ever deleted automatically.** There is no eviction policy, no LRU
-// over footage, no reclaim-when-low. `reclaim` and `delete` are different actions
-// rather than one action with two buttons: reclaim removes a copy while a
-// hash-verified one survives elsewhere, and this file *verifies* that rather than
-// believing a manifest that said `both` a moment ago. Delete removes the last copy
-// and is the only irreversible action in the tool.
-//
-// **Nothing reads a capture whole.** `fs.readFileSync` refuses at 2 GiB and a take
-// is routinely larger, so the manifest reads indexes, the download streams, and
-// the hash of a downloaded take comes from the same streaming scan step 2 built.
+// The library: one manifest over a captures directory, the marks that hang off each take, the
+// projects and presets beside them, and the reconciliation with a capture node.
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -30,64 +10,26 @@ import { Readable, Transform } from 'node:stream';
 import { basename, dirname, join, resolve } from 'node:path';
 import { cachedIndex, forgetCapture, indexPathFor, captureIdFor, readHelloOnce } from './capture.js';
 
-// A capture is addressed by id, and an id arrives off a URL or out of a node's
-// manifest, so it is checked against this before it is ever joined to a path. The
-// rule itself lives in `web/format.js` beside the document version, because the
-// gallery's rename box has to hold a typed name to the same rule this file holds a
-// request to - see the comment there for why that is one constant rather than two.
-// Imported as well as re-exported: this file asserts it a dozen times itself, and
-// `export ... from` puts nothing in local scope.
 export { VALID_ID };
 
-// The shape a content hash has, and the reason it is checked at all: a node's
-// manifest is JSON from another machine, and `downloadTake` puts eight characters
-// of the hash it advertises into a filename whenever the plain name is taken. A
-// node offering `sha256:/../../x` therefore names a path outside the captures
-// directory and truncates whatever is at the other end of it - so the hash is held
-// to this before it can reach `join`, on the same reading as `VALID_ID` beside it
-// and through the same two doors: the manifest filters, and the one path-forming
-// function asserts.
+// A node's hash reaches a filename, so it is held to this before it can be joined to a path.
 export const VALID_HASH = /^sha256:[0-9a-f]{64}$/;
 
-// Two constants and one predicate, shared with the page rather than restated here. See
-// web/format.js for what version 1 means and why it is a version rather than an authored
-// buffer height; re-exported so callers on this side have one import to reach for.
-//
-// `captureFormatRefusal` is imported rather than the number it compares against, and
-// that is the whole point of it: what travels between the doors that decide whether a
-// take may be opened is the decision, rather than a constant each is free to compare its
-// own way. **There are two such doors now and there were four**, which is this branch's
-// subject - the gallery's badge and its dead Open button used to compare for themselves
-// and now quote `openRefusals`, leaving `OPEN_REFUSALS.format` below and the editor's
-// `openTake`, which is handed a hello and never a manifest.
 import { PROJECT_VERSION, VALID_ID, captureFormatRefusal } from '../web/format.js';
 import { POLLED_NODE_FIELDS } from '../web/record-poll.js';
 
 export { PROJECT_VERSION };
 
-// What a take costs to record, used for the remaining-time report. Measured on
-// this sensor: 424KB of depth plus 51KB of colour per frame at 30fps.
+// Measured on this sensor: 424KB of depth plus 51KB of colour per frame at 30fps.
 const FRAME_BYTES = 486 * 1024;
 const NOMINAL_FPS = 30;
-// A take that cannot fit this is refused before it starts. A take that never
-// started is a decision; a take that dies at eighty percent is a loss.
+// A take that never started is a decision; a take that dies at eighty percent is a loss.
 export const MIN_TAKE_SEC = 120;
 
 const isKnct = (name) => name.toLowerCase().endsWith('.knct');
 
-// ---------------------------------------------------------------------- marks
 
-/**
- * Marks live in an append-only sidecar beside the take, never inside it. The
- * capture stays byte-identical to what the grabber produced, and - the deciding
- * reason - a mark set while recording is the same object as a mark added while
- * editing, which an in-band marker could never be once the take is gigabytes long.
- *
- * Two machines can hold the same take and different marks, so the log is the merge
- * algorithm rather than needing one: concatenate both files and keep, per mark id,
- * the record with the highest `at`. A deletion is a tombstone record like any
- * other, so it cannot be resurrected by an older log arriving late.
- */
+/** The take's append-only marks sidecar, merged per mark id by the highest `at`. */
 export const marksPathFor = (capturePath) => `${capturePath.replace(/\.knct$/i, '')}.marks.jsonl`;
 
 export async function readMarkLog(capturePath) {
@@ -102,10 +44,6 @@ export async function readMarkLog(capturePath) {
     if (!line.trim()) continue;
     try {
       const rec = JSON.parse(line);
-      // A record with no id cannot participate in last-write-wins, and one with no
-      // `at` cannot be ordered against anything. Both are a writer this build does
-      // not know rather than a mark, and skipping them keeps a single bad line from
-      // costing every mark in the file.
       if (typeof rec?.id === 'string' && Number.isFinite(rec?.at)) out.push(rec);
     } catch { /* a torn final line from a writer that died mid-append */ }
   }
@@ -117,10 +55,7 @@ export function resolveMarks(log) {
   const byId = new Map();
   for (const rec of log) {
     const held = byId.get(rec.id);
-    // `>=` rather than `>`, so two records written in the same millisecond resolve
-    // to the later line. Concatenation order is the tiebreak and the local log is
-    // concatenated last, which makes the machine you are standing at win a tie it
-    // could not otherwise resolve.
+    // `>=` rather than `>`: the local log is concatenated last, so it wins a same-millisecond tie.
     if (!held || rec.at >= held.at) byId.set(rec.id, rec);
   }
   return [...byId.values()]
@@ -132,132 +67,31 @@ export async function readMarks(capturePath) {
   return resolveMarks(await readMarkLog(capturePath));
 }
 
-/**
- * How many times anything in this process has written a mark log, ever.
- *
- * **A counter, because contents can be put back and a counter cannot.** The route
- * sweep in `library-check` asserts that no route answering GET changes anything, and
- * it did that by reading the stores before and after - which a handler that writes and
- * restores inside the same request defeats by construction, since both readings are
- * taken outside it. Restoring the bytes is easy and restoring the modification time is
- * one `utimes` away. What no restore can undo is that the write happened, so the sweep
- * asserts on this and the snapshot becomes the second opinion rather than the only one.
- *
- * Monotonic and never reset. A counter something can set back is the contents problem
- * again with an extra step.
- */
+// Monotonic and never reset: a write-then-restore is invisible to a before-and-after read.
 let markWrites = 0;
 export const markWriteCount = () => markWrites;
 
-/**
- * Appends records. Append-only is what makes this safe without a lock: a crash
- * keeps every mark written before it, and two writers interleave into a log the
- * resolver can still read.
- */
 export async function appendMarks(capturePath, records) {
   const lines = records.map((rec) => `${JSON.stringify(rec)}\n`).join('');
-  // Counted before the await, so a write that fails partway still counts as having
-  // touched the log - which is the honest answer for an append that may have landed.
   if (lines) markWrites++;
   if (lines) await appendFile(marksPathFor(capturePath), lines);
 }
 
-// ------------------------------------------------------------------- manifest
 
-/**
- * Every reason this build can refuse to open a take, keyed, with the sentence each one
- * carries - and this is the only place any of them is written.
- *
- * A list on the take rather than one string, because a take can carry two blocking
- * facts at once and a single string cannot serve a tile that badges both. `openable` is
- * then "the list is empty" rather than a second expression of the same predicate, which
- * is what stops the two drifting.
- *
- * It is here rather than in the pages because it was in the pages, twice, twelve lines
- * apart, and they disagreed. A take with a hello and no whole frame was badged "the
- * scan found no whole frame in this take" and, on the button beside it, told it "needs
- * two frames to bracket a position" - a sentence about a take that has one, shown over
- * a take that has none. Measured on the shipped build before this moved, with the
- * `hello-no-frames` fixture `library-check` now plants: nothing had ever reached that
- * shape, because the take with zero frames carried no hello and answered on the
- * recording branch, and the take with a hello had a frame.
- *
- * Zero frames and one frame are different facts and the sentence says which, which is
- * the distinction the gallery's badge already drew and the button did not.
- *
- * **A table rather than three pushes with their sentences inline, because the keys have
- * a second reader.** `web/library.js` keeps its own table of what each key is badged as
- * over a 228px poster, and the two have to cover the same keys or a refusal arrives
- * with no badge. A check comparing the page's table against the refusals that happen to
- * be in a fixture library cannot see a key no fixture take produces; comparing it
- * against this object can, which is why the enumeration is a value here and not a shape
- * to be recovered from the branches below.
- */
+/** Every reason this build can refuse to open a take. `web/library.js` badges these same keys. */
 export const OPEN_REFUSALS = {
   recording: () => 'this take is still being written, so it has no settled hash and nothing may open it until the recorder closes it',
   'no-hello': () => 'this take carries no sensor hello, so its intrinsics are unknown and it cannot be unprojected',
-  // **The one entry that does not write its own sentence, and the delegation is the
-  // point.** `captureFormatRefusal` is read by a door this table cannot reach - the
-  // editor's `openTake` is handed a hello and never a take manifest - so the band has a
-  // reader outside the library and the sentence has to live where both can see it.
-  // Spelling it again here would be the two-copies failure this table exists to end,
-  // one file further out. What this table owns is that the format band is *a refusal
-  // like the others*: keyed, badged, and counted by `openable`.
   format: (format) => captureFormatRefusal('this take', format),
   short: (frames) => (frames === 0
     ? 'the scan found no whole frame in this take, so there is nothing here to draw or to open'
     : 'a take needs two frames to bracket a position, so there is nothing here to play'),
 };
 
-/** One refusal, so a key that is not in the table above is a throw rather than a tile. */
 const refusal = (key, ...args) => ({ key, why: OPEN_REFUSALS[key](...args) });
 
-/**
- * Whether a take from somewhere else carries refusals this build can render.
- *
- * The shape and not the vocabulary. A *newer* node may send a key this build has never
- * heard of, and the gallery is built for that - an unmapped key is badged as itself,
- * because visibly unmapped beats confidently wrong - so rejecting on an unknown key
- * would refuse a node whose takes are perfectly listable. What cannot be rendered is a
- * take with no refusals at all, which is what an *older* node sends: it carried
- * `openable`, `hasHello` and `frames` and left every surface to derive the sentence,
- * which is the derivation this design removed.
- */
-/**
- * Whether a take from another machine is one this one will put on a shelf, and why not.
- *
- * **The link is plain HTTP with no authentication, so a node's manifest is the widest
- * thing this program trusts and it was checked on two fields.** `id` and `hash` were
- * filtered because those two reach a *path* on this side; every other field was spread
- * verbatim into `/library/all` and drawn. Two of them reach the gallery's markup without
- * passing through the numeric coercion their neighbours get - `${take.frames}` and
- * `take.marks.length` - so a machine answering in the node's place on a shoot network
- * gets script running inside the editing station's own page origin, which can drive every
- * mutating route the origin gate exists to protect, the loopback-only reveal included.
- *
- * Refused at the boundary rather than escaped at the sink, and the whole manifest rather
- * than take by take, for the reason `takes()` already gives about an older build: a shelf
- * that quietly drops the unreadable ones looks complete, and "some of that node's takes
- * are missing" is the failure a link is supposed to make impossible to have silently.
- * There is one place a manifest from another machine arrives, so it is the one place that
- * can say so.
- *
- * Written against `describeTake`'s two returns - the settled take and the one being shot -
- * because those are what a node of this build actually sends. A field this rejects that
- * a later build starts emitting is a refusal naming the field, which is the version gate
- * `takes()` already has working in the other direction.
- */
-// A refusal key as a *shape* rather than as a member of this build's table, so a node one
-// build ahead keeps badging. Short and identifier-like is all a badge needs it to be.
-//
-// **A leading underscore is admitted on purpose, and the first version of this refused
-// it.** `__proto__` is a key this suite plants deliberately - `badges-inherit-from-object`
-// is the control for a build that reads a refusal list off `Object.prototype` instead of
-// off the manifest, and the whole point of that fixture is that the key reaches the page
-// and badges as itself. A schema that refused it would have closed a hole by breaking the
-// test for a different one, which is why this is a character class rather than a table.
-// What it still excludes is what a badge cannot be: markup, quotes, whitespace, and
-// anything long enough to be a sentence.
+// A shape rather than a member of this build's table, so a node one build ahead keeps badging. A
+// leading underscore is admitted on purpose: `__proto__` is planted as a control and must badge.
 const REFUSAL_KEY = /^[A-Za-z_][A-Za-z0-9_-]{0,40}$/;
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
 const nonNeg = (v) => num(v) && v >= 0;
@@ -276,12 +110,6 @@ function manifestRefusal(take) {
   if (take.hasHello !== null && typeof take.hasHello !== 'boolean') {
     return `has hasHello ${JSON.stringify(take.hasHello)}`;
   }
-  // **Absent is the version gate's business and wrong-type is this one's**, which is the
-  // line this schema is drawn on. `format` arrived after the refusal list did, so a node
-  // that carries `openRefusals` and no `format` is a build in between - and refusing it
-  // here would be a second version gate, sitting beside `carriesRefusals` below and
-  // disagreeing with it about which builds are admissible. What must not pass is a
-  // `format` that is *there* and is not a generation number.
   if (take.format !== undefined && !count(take.format)) return `has format ${JSON.stringify(take.format)}`;
   if (take.hello !== null) {
     const h = take.hello;
@@ -291,40 +119,12 @@ function manifestRefusal(take) {
   }
   if (typeof take.openable !== 'boolean') return `has openable ${JSON.stringify(take.openable)}`;
   if (typeof take.recording !== 'boolean') return `has recording ${JSON.stringify(take.recording)}`;
-  // **The hash and `recording` are one claim rather than two fields**, and checked here
-  // rather than in the filter above because what is wrong with a settled take carrying no
-  // hash is not that it reaches a path - it is that the manifest contradicts itself. The
-  // filter is about `id` and `hash` being safe to put in a filename, which is why it lets
-  // null through; this is about the pair meaning what the gallery draws from it.
-  //
-  // Without it a take arriving as `recording: false, hash: null` listed as an ordinary
-  // remote take, `availability` gave it an enabled Download - that button is gated on
-  // `state === 'remote' && !recording` and on nothing else - and the press then failed in
-  // `downloadTake`, which asserts `VALID_HASH` before it opens anything. An action offered
-  // that cannot succeed is worse than one that is missing, because the operator reads the
-  // failure as the node being down.
-  //
-  // The rule is `describeTake`'s own, mirrored rather than invented: a take still being
-  // written reports null because its bytes are still moving, and every settled take
-  // carries the hash the streaming scan produced. So this refuses a manifest no build of
-  // this program emits, which is what keeps it a shape check and not a version gate.
+  // The hash and `recording` are one claim: a settled take with no hash was offered a Download
+  // that could only fail in `downloadTake`.
   if (take.recording ? take.hash !== null : !VALID_HASH.test(take.hash ?? '')) {
     return `has hash ${JSON.stringify(take.hash)} on a take that is ${
       take.recording ? 'still recording, which has no settled hash to advertise' : 'settled, which must have one'}`;
   }
-  // **The refusal list is checked for being one and never for what is in it**, and that
-  // restraint is the design rather than a gap. A node one build *ahead* sends a key this
-  // build has never heard of, and the gallery deliberately badges it with the key itself -
-  // `badges-inherit-from-object` is the control that keeps that working. A schema that
-  // held the key to this build's own table would turn a node that is merely newer into a
-  // node whose whole library vanishes, which is the failure the version gate below exists
-  // to make legible rather than one to add.
-  //
-  // So what is asked is only what the page needs in order to print it safely: an entry is
-  // an object, its key is a short identifier rather than a sentence or markup, and its
-  // reason is a string of a length a badge can hold. Absent altogether is the version
-  // gate's business, exactly as `format` above is - `carriesRefusals` reads that and says
-  // so by name, and reaching it requires not throwing here first.
   if (take.openRefusals !== undefined) {
     if (!Array.isArray(take.openRefusals)) return 'has an open-refusal list that is not a list';
     for (const r of take.openRefusals) {
@@ -334,19 +134,8 @@ function manifestRefusal(take) {
       }
     }
   }
-  // **Checked per record rather than for being a list**, because the list is not what
-  // the gallery dereferences - `paintMarks` reads `m.sourceMs` off every entry to place a
-  // tick and `m.label ?? m.id` to title it, so a node answering `marks: [null]` throws
-  // inside the loop that paints the shelf and takes the whole library page down with it.
-  // A shelf is drawn from every node at once, so that is one peer costing every take its
-  // tile rather than costing itself one.
-  //
-  // The shape asked for is the one `resolveMarks` guarantees on this machine - a string
-  // id, a finite `at` to order by, a finite `sourceMs` to place, and no tombstone - so the
-  // manifest boundary admits exactly what a local read produces and there is one rule for
-  // a mark rather than one per origin. A label is optional and stays unchecked for what it
-  // says: `paintMarks` writes it through `textContent`, which is text from outside this
-  // page never becoming markup, and that is the door it goes through either way.
+  // Per record: `paintMarks` reads `sourceMs` off every entry, so one peer's `marks: [null]`
+  // throws inside the loop and takes the whole shelf down.
   if (!Array.isArray(take.marks)) return `has marks ${JSON.stringify(take.marks).slice(0, 40)}`;
   for (const m of take.marks) {
     if (!m || typeof m !== 'object' || Array.isArray(m) || typeof m.id !== 'string'
@@ -360,38 +149,14 @@ function manifestRefusal(take) {
 const carriesRefusals = (take) => Array.isArray(take.openRefusals)
   && take.openRefusals.every((r) => r && typeof r.key === 'string' && typeof r.why === 'string' && r.why !== '');
 
-/**
- * One take as the gallery sees it. Read through `cachedIndex`, which holds no
- * descriptor, so a directory of two hundred takes costs two hundred sidecar reads
- * and nothing that stays open.
- */
 async function describeTake(dir, file, recording) {
   const path = join(dir, file);
   const id = captureIdFor(path);
   const st = await stat(path);
 
-  // **The take being written is described without being scanned.** Its size and its
-  // modification time move continuously, which is exactly the staleness test
-  // `cachedIndex` uses - so every `/library/*` request re-ran a full read plus
-  // sha256 over the in-progress take, and the gallery on the node's own panel is the
-  // caller. On a 4.4 GB take that is minutes of disk contention against the
-  // recorder's own writes, which is what turns a slow card into dropped frames.
-  //
-  // What is left out is everything a scan produces. A hash over a file still growing
-  // would name bytes that no longer describe it a moment later, and a frame count
-  // taken mid-write is a number that was true once - so this reports null rather
-  // than a figure that reads like a fact, and says the take is recording, which is
-  // what the tile actually has to draw.
+  // The take being written is described without being scanned: its size and mtime move, so the
+  // cache always misses and every `/library/*` request re-hashed a growing multi-gigabyte file.
   if (recording) {
-    // **Hoisted so `openable` is derived here too, and it was not.** This branch used to
-    // carry the list and a hardcoded `openable: false` beside it, which is precisely the
-    // second expression of one predicate that the table above exists to remove - written
-    // into the branch by the commit that wrote the argument against it. Nothing caught it:
-    // both said the take cannot be opened, so they agreed until the day one moved, and the
-    // failure they would have produced is the quiet one - a disabled Open button whose
-    // reason is the empty string, because `cannotOpen` quotes the list and the list is
-    // what would have gone. The two-table rows cannot see this either, since they skip
-    // `recording` on purpose.
     const openRefusals = [refusal('recording')];
     return {
       id,
@@ -404,24 +169,11 @@ async function describeTake(dir, file, recording) {
       dateSource: 'mtime',
       truncated: false,
       hasHello: null,
-      // Null with the rest of them, and for the same reason: the hello is at the head
-      // of a file this is deliberately not reading, so a take mid-write has no answer
-      // here rather than an answer that happens to be the current generation.
       format: null,
       hello: null,
-      // The same authority answering a case it already knows, rather than a second
-      // derivation: a take still being written has no settled hash, so nothing may
-      // open it whatever its frames turn out to be. The gallery's *warning* about a
-      // recording take is a wider statement - it names stopping before opening,
-      // downloading, renaming or removing - and stays a page concern for that reason,
-      // because an action list does not belong in a library scanner.
       openRefusals,
       openable: openRefusals.length === 0,
       recording: true,
-      // Cheap and it is the one thing that is true mid-take: marks pressed in the
-      // room land in the sidecar, and the sidecar is beside the take rather than in
-      // it. Held marks are still on the recorder until it closes, so this is the
-      // ones already flushed.
       marks: await readMarks(path),
     };
   }
@@ -431,33 +183,12 @@ async function describeTake(dir, file, recording) {
   const hello = await readHelloOnce(path, index);
   const marks = await readMarks(path);
 
-  // The wall-clock capture date. The frame stamps are `steady_clock`, monotonic
-  // since boot, which is the right choice for frame spacing and useless for
-  // sorting a library - so the grabber puts a wall clock in its hello and this
-  // reads it. A take recorded before that field existed falls back to the file's
-  // own modification time, and says which it used rather than presenting a guess
-  // as a record.
   const fromHello = Number.isFinite(hello?.startedAt) && hello.startedAt > 0;
-  // What generation of the format wrote this take, carried up to the gallery as it was
-  // found rather than coerced into a number. A hello saying `"format": "banana"` is a
-  // writer this build has no idea about, and reporting that as null would file it with
-  // the takes that honestly declare nothing - which is the one band that opens.
   const format = hello?.format ?? null;
 
-  // Why this take cannot be opened, drawn from the one table above. **The push order
-  // is the badge order**, since the gallery renders these in the order they arrive and
-  // `cannotOpen` quotes the first. Decided here rather than sorted there, because two
-  // files agreeing about an order is the same shape as two files agreeing about a
-  // sentence.
-  //
-  // **The format band is asked whether before it is asked what, and both questions go to
-  // the same function**, so they cannot answer differently. It has to be a gate rather
-  // than an unconditional push because `captureFormatRefusal` returns the empty string
-  // for a take that opens - and an entry whose `why` is empty is not a refusal, it is a
-  // refusal-shaped hole. Every ordinary take would carry one, `openable` would go false
-  // across the whole library, and a node serving them fails `carriesRefusals` at the
-  // link, so the far end lists nothing at all. That cascade is not hypothetical: it is
-  // what `--mutate refusals-must-be-nonempty` plants on purpose.
+  // Push order is badge order, since `cannotOpen` quotes the first. The format band is a gate
+  // because `captureFormatRefusal` answers the empty string for a take that opens, and an empty
+  // `why` would take `openable` false across the whole library.
   const openRefusals = [];
   if (!index.hello) openRefusals.push(refusal('no-hello'));
   if (captureFormatRefusal('this take', format) !== '') openRefusals.push(refusal('format', format));
@@ -469,34 +200,13 @@ async function describeTake(dir, file, recording) {
     bytes: st.size,
     hash: index.hash,
     frames: stamps.length,
-    // Zero for a take with fewer than two frames, which is a real state: a take
-    // stopped immediately after starting is a file the library still has to list.
     durationSec: stamps.length > 1 ? (stamps[stamps.length - 1] - stamps[0]) / 1000 : 0,
     capturedAt: fromHello ? hello.startedAt : st.mtimeMs,
     dateSource: fromHello ? 'hello' : 'mtime',
-    // Computed by the scan since step 2 and read by nobody until now. A take whose
-    // writer died mid-frame is perfectly usable up to the cut, and the gallery
-    // saying so is the difference between a known short take and a mystery.
     truncated: Boolean(index.truncated),
-    // A take with no hello cannot be opened for editing at all - its intrinsics
-    // are unknown, and unprojecting on the boot defaults is an error nothing on
-    // screen can show. The tile has to say that rather than offering an Open
-    // button that throws.
     hasHello: Boolean(index.hello),
-    // Beside `hasHello` and `dateSource` rather than inside the four-value `hello`
-    // subset below, because it is a fact about the file and not one of the intrinsics -
-    // and because that subset carries its own argument for shipping four values and no
-    // more, which this would quietly widen.
     format,
-    // The intrinsics, so a poster can unproject the take rather than draw a picture
-    // of the sensor's grid. Only these four: a gallery has no use for the serial or
-    // the firmware, and shipping a node's whole hello to every browser that lists a
-    // directory is more of that node's record than the listing needs.
     hello: hello ? { fx: hello.fx, fy: hello.fy, cx: hello.cx, cy: hello.cy } : null,
-    // Two frames is the floor for a pair source, so a shorter take lists and refuses to
-    // open. Named here rather than discovered in the editor - and the format band is one
-    // of the names rather than a term in a second expression, so a gallery that offers
-    // Open and an editor that throws on it cannot come apart.
     openRefusals,
     openable: openRefusals.length === 0,
     recording: false,
@@ -504,11 +214,6 @@ async function describeTake(dir, file, recording) {
   };
 }
 
-/**
- * Every take in a directory. Failures are per take rather than per listing: one
- * capture with a desynced stream must not take the gallery down with it, because
- * the gallery is where you would go to delete it.
- */
 export async function scanTakes(dir, recordingPath = null) {
   let files;
   try {
@@ -529,34 +234,16 @@ export async function scanTakes(dir, recordingPath = null) {
   return { takes, unreadable };
 }
 
-// --------------------------------------------------------------- the node link
 
 /**
- * A capture node, named on the command line as `--node http://host:port`.
- *
- * The link is plain HTTP, always initiated by this side, and the node runs the
- * identical server with no `--node` of its own - so a node has no idea it is being
- * read and holds no state about whoever is reading it. What this side asks for is
- * a manifest, a marks log, and a take's bytes; what it can ask the node to do is
- * remove a copy it has verified survives here.
- *
- * What is trusted, stated rather than assumed. The node's hash is trusted only to
- * decide *what to fetch* - never that a fetched file is what it claimed. A
- * download is re-scanned locally with the same streaming hash step 2 built, and a
- * mismatch discards the file rather than filing it under the hash the node named.
- * The node's ids are checked against `VALID_ID` before they reach a path on this
- * side. There is no authentication and no transport security: this is a link
- * between two machines on one network, and saying so is better than implying a
- * boundary that is not there.
+ * A capture node (`--node http://host:port`). Plain HTTP, no auth; its hash only
+ * says what to fetch.
  */
 export class NodeLink {
   constructor(url, name) {
     this.url = url.replace(/\/$/, '');
     this.name = name;
     this.lastError = null;
-    // Null until the poll has spoken to the node once. A link that has answered
-    // nothing yet is not a link that has failed, so the first listing goes out and is
-    // refused by its own gate if the manifest is the half that is old.
     this.buildRefusal = null;
   }
 
@@ -567,61 +254,17 @@ export class NodeLink {
   }
 
   /**
-   * The node's own takes, or null if it cannot be read. Never throws upward.
-   *
-   * **Two machines on one network are two builds**, and the one that gets upgraded
-   * first is whichever the operator was standing at. A node still running the build
-   * before the refusals moved off the pages answers `/library/takes` with `openable`,
-   * `hasHello` and `frames` and no `openRefusals` at all - a manifest that parses,
-   * passes the id and hash filters below, and reconciles into the listing looking like
-   * any other take. The gallery then iterates a field that is not there while painting
-   * the first remote tile, and the whole shelf goes blank on a `TypeError` with nothing
-   * on screen saying why.
-   *
-   * Refused here, at the boundary, rather than guarded at each of the surfaces that
-   * read a take. A `?? []` on the page would draw a tile claiming a take is fine, which
-   * is a second implementation wearing a fallback and the fallback is the half that
-   * would be believed; and there are three surfaces, so the guard would be three
-   * guesses about one wire format. This is the one place a manifest from another build
-   * arrives, so it is the one place that can say the build is the problem.
-   *
-   * The whole manifest and never take by take. Admitting the readable ones would hide
-   * the rest behind a shelf that looks complete, and "some of that node's takes are
-   * missing" is the failure a link is supposed to make impossible to have silently.
-   *
-   * **`signal` is the caller's request going away, and it is a signal rather than a
-   * timeout on purpose.** This crosses the network to have a directory walked and an
-   * index built per take, and a cold node measured 7m30s over 200 unindexed takes - so
-   * any bound short enough to catch a dead link is short enough to refuse the case the
-   * link exists for. What the caller does know is whether anybody is still waiting: a
-   * route hands in its own request's abort, and a node that accepts the connection and
-   * then says nothing is dropped the moment the browser gives up rather than held until
-   * it eventually settles. Without it the gallery's fifteen-second retry left one more
-   * handler and one more outbound socket parked on this machine every five seconds, for
-   * as long as the page stayed open.
+   * The node's own takes, or null if it cannot be read. The whole manifest is refused rather than
+   * take by take, because a shelf that drops the unreadable ones looks complete.
    */
   async takes(signal = null) {
-    // The poll's refusal, read here because this is the request that draws something.
-    // `recordState` is the only caller that learns the node's build is too old to be
-    // followed and it paints nothing itself, so a refusal left where it was found is
-    // one the operator never sees - the gallery would go on listing that node's takes
-    // beside a recorder state frozen at the first tick. Refused before the fetch rather
-    // than after it, because there is nothing to ask a node whose answers cannot be
-    // followed, and the reason lands in `lastError` where the shelf already prints it.
     if (this.buildRefusal) {
       this.lastError = this.buildRefusal;
       return null;
     }
     try {
       const body = await this.fetchJson('/library/takes', signal ? { signal } : undefined);
-      // The hash is filtered beside the id because it is the other field of a node's
-      // that reaches a path here. **A take still being shot advertises no hash at
-      // all** - `describeTake` reports null on purpose, and `reconcile` keys those by
-      // side and name - so null is a take the gallery has to be able to list and
-      // refuse to download. What must not pass is a string that is not a hash.
       const takes = body.takes.filter((t) => VALID_ID.test(t.id) && (t.hash === null || VALID_HASH.test(t.hash)));
-      // Ahead of the build gate below, because a manifest that is not this shape is not a
-      // manifest whose *version* can be judged - `carriesRefusals` reads a field off it.
       for (const t of takes) {
         const why = manifestRefusal(t);
         if (why) {
@@ -646,60 +289,14 @@ export class NodeLink {
   }
 
   /**
-   * Whether the node is shooting, and which take. Null when it cannot be reached.
-   *
-   * **The gallery on this machine is a view of both libraries and was following only
-   * one recorder.** `/library/all` reconciles the node's takes into the grid, so a
-   * take being written over there draws a tile here that says so and disables Open,
-   * Download, Rename and Remove behind it - but the only thing this machine polled to
-   * decide whether any of that had changed was its own `/record/state`, which on an
-   * editing station with no sensor never moves. The remote tile then went on refusing
-   * a take that finished minutes ago for as long as the page stayed open, which is the
-   * exact staleness the poll was added to end, surviving on the one machine the
-   * gallery is actually used from.
-   *
-   * **Two fields and not the node's whole state**, because this is a fingerprint
-   * rather than a readout: what is drawn about the node's takes comes from
-   * `/library/all`, and all this has to do is say when that answer is worth asking for
-   * again. Shipping the node's monitors and free space here would be a second copy of
-   * a record only that machine's own panel has a use for.
-   *
-   * **Bounded where `takes()` is not, and the cadence is the reason.** This one sits
-   * on a five-second poll, so a node that accepts a connection and then says nothing -
-   * a machine mid-reboot, a link that dropped without a reset - would stall every tick
-   * behind it and the gallery would stop following the recorder it can still reach.
-   * The others are one-shots an operator asked for and can see waiting. Three seconds
-   * is well past a LAN request that is going to answer and well under one tick.
+   * Whether the node is shooting, and which take. A fingerprint saying when to re-ask the library.
    */
   async recordState() {
     try {
       const body = await this.fetchJson('/record/state', { signal: AbortSignal.timeout(3000) });
-      // **The same "two machines are two builds" refusal `takes()` makes, arriving at
-      // the second route.** The manifest gate up there is passed by the build
-      // immediately before this one, whose `/record/state` predates `writingId` and
-      // omits the key entirely - and `?? null` below would read that as a node that
-      // owns no take. It is a legal value for a recorder sitting idle, so nothing
-      // would look wrong: the fingerprint the poll computes is constant from the first
-      // tick, no remote start or stop can ever change it, and the gallery quietly
-      // stops rereading the library for the machine it is drawing half its grid from.
-      // Absent and "not writing" are two different facts and only one of them may be
-      // spelled `null`.
-      //
-      // Asked of `POLLED_NODE_FIELDS` rather than of `writingId` by name, because the
-      // poll is what decides which fields matter: a field added to that fingerprint
-      // tightens this by existing, where a name written out here is a second list to
-      // keep in step and the copy that goes stale is this one - the far side is the
-      // half nobody tests on a single machine.
+      // Absent and not-writing are two facts and only one may be spelled `null`, or the
+      // fingerprint never moves. Asked of `POLLED_NODE_FIELDS`, so a field added there tightens it.
       const missing = POLLED_NODE_FIELDS.filter((f) => body[f] === undefined);
-      // **Its own field rather than `lastError`, and the reason is which way each one
-      // has to move.** `lastError` is written per listing and cleared by the next one
-      // that succeeds, so a refusal parked in it would either be wiped by the very next
-      // `/library/all` - which is what it has to survive to be read - or, if `takes()`
-      // returned early on it, would latch: nothing would fetch again, so nothing would
-      // clear it, and a node upgraded ten minutes later would stay refused until this
-      // process restarted. Set and cleared on every tick of the poll instead, so the
-      // refusal lasts exactly as long as the build that earns it and an upgrade heals
-      // the link within one cadence with nobody doing anything.
       this.buildRefusal = missing.length === 0 ? null
         : 'it is running an older build whose recorder state carries no '
           + `${missing.join(', ')} - the gallery cannot follow a recorder it cannot ask, `
@@ -712,37 +309,18 @@ export class NodeLink {
         reachable: true,
         recording: Boolean(body.recording),
         takeId: body.takeId ?? null,
-        // The node's own answer to "which take do you still own", carried across
-        // unchanged. The gallery on this machine draws that node's takes, so the
-        // window in which a tile may not offer Open is the node's window and not
-        // this one's - reading it off `recording` here would end the remote tile's
-        // refusal the moment the node's writing stopped, several seconds before its
-        // index existed.
         writingId: body.writingId ?? null,
       };
     } catch {
-      // Deliberately not written to `lastError`. That field is what the gallery prints
-      // beside "unreachable", and it is set by the listing this side actually draws
-      // from - overwriting it here would let a poll's timeout replace the reason the
-      // library failed with a reason nothing on screen is about.
       return { name: this.name, reachable: false, recording: false, takeId: null, writingId: null };
     }
   }
 }
 
-/**
- * The one library, spanning both machines. Joined by hash, which is what lets this
- * say exactly what is only over there with no guessing from names, sizes or dates -
- * and what makes a take downloaded under a different filename resolve to one entry
- * rather than two.
- */
 export function reconcile(localTakes, nodeTakes) {
   const byHash = new Map();
-  // A take still being written has no hash yet, on purpose - see `describeTake`.
-  // Two of those would collide onto one key and become one entry, so an unhashed
-  // take is keyed by where it is and what it is called. That is not identity and it
-  // is not meant to be: a take mid-write cannot be reconciled with anything, because
-  // the bytes it would be reconciled on do not exist yet.
+  // A take mid-write has no hash, so it is keyed by side and name. That is not identity: a take
+  // still being written cannot be reconciled with anything.
   const keyOf = (take, side) => take.hash ?? `${side}:${take.id}`;
   for (const take of localTakes) {
     byHash.set(keyOf(take, 'local'), { ...take, state: 'local', local: take, remote: null });
@@ -761,25 +339,12 @@ export function reconcile(localTakes, nodeTakes) {
   return out;
 }
 
-// ------------------------------------------------------------- remaining time
 
-/**
- * How much recording time is left, reported as time rather than as bytes.
- * "1h 47m left at current settings" is actionable where "94 GB free" is
- * arithmetic the operator has to do under pressure, and time is the honest unit
- * anyway since the rate depends on capture rate and compression.
- */
 export async function remaining(dir, bytesPerSec = FRAME_BYTES * NOMINAL_FPS) {
   let fs;
   try {
     fs = await statfs(dir);
   } catch (err) {
-    // A directory that is not there answers `ENOENT: no such file or directory,
-    // statfs '/...'`, and that used to reach the operator raw through
-    // `/record/state` and `/library/all` - so a node whose captures directory is
-    // missing booted disarmed with nothing on screen saying why. The boot creates
-    // the directory now; this is what is left when it could not, and it says the
-    // thing rather than the errno.
     return {
       freeBytes: 0,
       bytesPerSec,
@@ -802,91 +367,20 @@ export function durationLabel(sec) {
   return `${Math.floor(sec)}s`;
 }
 
-// -------------------------------------------------------- download and removal
 
-/**
- * Pulls a take from the node into `dir`, then proves it arrived intact.
- *
- * The verification is the point rather than a courtesy. Written to a temporary
- * name and renamed only once the local streaming scan agrees with the hash the
- * node advertised, so a truncated transfer or a take that changed underneath the
- * node's manifest never lands in the library at all - and never lands under a hash
- * that would then reconcile against a project file.
- */
-/**
- * What each download in flight has moved so far, keyed by take id.
- *
- * A take is gigabytes and the link is a room's wifi, so this is minutes of work
- * behind a single POST that answers when it is finished. Without this the gallery
- * can only print the word "downloading" for four minutes, which is the same thing
- * it would print if the node had silently stopped sending - and an operator who
- * cannot tell those apart restarts a transfer that was working.
- *
- * The count comes off the stream rather than off `stat` of the `.part` file: the
- * write is buffered, so the file lags what has actually arrived, and the verifying
- * phase has no file growth at all while still taking real time on a 2.5 GB take.
- */
+/** What each download in flight has moved. Off the stream, not `stat`: the buffered write lags. */
 export const downloadsInFlight = new Map();
 
 /**
- * The ids a download has claimed, which is a different question from the one
- * `downloadsInFlight` answers.
- *
- * **Two structures because they are two facts, not one fact written twice.** The map
- * above is a *report*: what to tell the gallery about a transfer the node has actually
- * answered, which is why it is filled in after the fetch rather than before - a
- * request the node refused should never appear as one stalled at zero. This set is a
- * *claim*, taken before anything is awaited, and it exists because the report cannot
- * do a guard's job: by the time the map has an entry there have been two awaits, and a
- * second request arriving in that gap finds it empty and proceeds.
- *
- * Guarding at all is what the surface could not do. The page held down whichever
- * surface the press came from, which is right for that surface and says nothing about
- * the other one - close the viewer mid-transfer and the grid tile behind it is live,
- * and a duplicate is one tap away. Both requests would then write one `${target}.part`
- * and overwrite one progress entry, so the two verifications race over bytes neither
- * wrote alone. A rule that has to hold across every surface belongs on the one thing
- * every surface goes through.
+ * The ids a download has claimed - a claim taken before any await, where the map above is a report.
  */
 const downloadClaims = new Set();
 
-/**
- * How long a transfer may make no progress before it is given up on.
- *
- * **A stall bound rather than a total timeout, and the difference is the whole reason
- * this can exist at all.** A take is gigabytes over a link that is sometimes wifi, and
- * `docs/measurement.md` records a cold node taking 7m30s just to answer a listing - so
- * any total bound short enough to catch a dead node is short enough to kill the case the
- * link exists for. What can be stated safely is the shape of the actual failure: a node
- * that accepts the connection and then goes quiet, mid-reboot or on a link that dropped,
- * moves no bytes at all. That is a question about progress rather than about elapsed
- * time, and progress is already being counted for the readout.
- *
- * Not the caller's own `close` either, which is the other obvious bound and is wrong
- * here: the browser holds one request open for the whole transfer, so tying the download
- * to it means closing the gallery tab three gigabytes into a four-gigabyte copy discards
- * all of it. The listing routes take the caller-left signal because they are seconds
- * long and nobody is served by finishing one; this one is minutes long and the operator
- * walking away is not a reason to throw the work out.
- */
+/** No-progress bound. A total timeout short enough to catch a dead node would kill a real copy. */
 const STALL_MS = 30_000;
 
-/**
- * The bound on the marks log, which is small enough for elapsed time to mean something.
- * Generous against a node that is busy writing a take rather than tight against a fast
- * one, because the take is already installed by the time this runs and losing its marks
- * to an impatient bound would be trading the whole reason for the round trip.
- */
 const MARKS_MS = 20_000;
 
-/**
- * A signal that aborts once `readSoFar` has answered the same number twice in a row.
- *
- * Detection therefore lands somewhere between one and two intervals, which is stated
- * rather than tuned away: the alternative is a timestamp per chunk on a path that takes
- * a chunk every few milliseconds for several minutes, to sharpen a bound whose whole
- * purpose is to be far longer than any real pause.
- */
 function untilItStalls(readSoFar) {
   const ctl = new AbortController();
   let last = readSoFar();
@@ -898,38 +392,17 @@ function untilItStalls(readSoFar) {
     }
     last = now;
   }, STALL_MS);
-  // Unreferenced, so a transfer that somehow outlives its own guard cannot be the
-  // reason this process refuses to exit.
   timer.unref?.();
   return { signal: ctl.signal, stop: () => clearInterval(timer) };
 }
 
 export async function downloadTake(node, take, dir) {
   if (!VALID_ID.test(take.id)) throw new Error(`the node offered an unusable id: ${take.id}`);
-  // Asserted here rather than filtered, unlike the manifest's: the hash goes into a
-  // filename on the collision branch below, and a download with nothing to verify
-  // against is not a download this function can perform at all - the verification is
-  // the whole of it.
   if (!VALID_HASH.test(take.hash ?? '')) {
     throw new Error(`the node offered ${take.id} with an unusable hash: ${JSON.stringify(take.hash ?? null)}`);
   }
-  // Claimed here, with nothing awaited between the reading and the taking, which is
-  // the only placement that makes this a guard - see `downloadClaims` above.
-  //
-  // **Case-folded, because what has to be exclusive is the pathname and not the id.**
-  // `Take-1` and `take-1` are two ids and one file on a case-insensitive volume, which
-  // is the default on APFS and on NTFS - so two downloads keyed by exact id both pass
-  // this, then unlink, open, write, hash and install against one `.part` and one
-  // target. One can verify and link its inode while the other is still writing
-  // through it, and the take that lands no longer hashes to what it advertised.
-  //
-  // This over-serialises on a case-sensitive volume: two genuinely different takes
-  // whose names differ only by case cannot download at once, and the second is asked
-  // to wait rather than refused outright. That is the direction to be wrong in - the
-  // cost is a retry, where the other way round the cost is a corrupted take that
-  // still lists at full size. Folding rather than probing the volume, because a probe
-  // is a fact about the filesystem at one moment and this needs to hold for the ones
-  // already in flight.
+  // Claimed with nothing awaited between the reading and the taking, which makes it a guard.
+  // Case-folded because `Take-1` and `take-1` are two ids and one file on APFS and on NTFS.
   const claim = take.id.toLowerCase();
   if (downloadClaims.has(claim)) {
     throw new Error(`${take.id} is already downloading: wait for that transfer rather than starting a second one`);
@@ -943,28 +416,13 @@ export async function downloadTake(node, take, dir) {
 }
 
 async function downloadClaimed(node, take, dir) {
-  // A filename is not an identity, and this is where that stops being a slogan.
-  // Two machines can hold genuinely different takes under one name - the library
-  // already lists them as two entries, because it joins on the hash - and writing
-  // the node's at the local one's name would destroy footage to satisfy a
-  // convention this design does not use. So a collision takes the hash into the
-  // name and the two coexist, which is what the reconciliation was already saying.
   let target = join(dir, `${take.id}.knct`);
   try {
     const local = await cachedIndex(target);
     if (local.hash !== take.hash) target = join(dir, `${take.id}-${take.hash.slice(7, 15)}.knct`);
   } catch { /* nothing at that name, or nothing readable: the plain name is free */ }
-  // **The pathname is claimed as well as the id, because the id does not determine
-  // it.** The line above rewrites `target` when the plain name is occupied, so a take
-  // called `foo` can end up writing `foo-1a2b3c4d.knct.part` - which is exactly the
-  // `.part` a *different* remote take whose literal id is `foo-1a2b3c4d` uses. Two
-  // different ids, two granted claims, one temporary file: the writers share an inode
-  // and one can verify and install what the other is still writing. Folding the id was
-  // right and insufficient; what has to be exclusive is the path.
-  //
-  // Taken here with nothing awaited between resolving `target` and adding it, which is
-  // what makes it a claim rather than a reading - the same placement rule as the id
-  // claim, applied at the point the real answer is finally known.
+  // The path as well as the id, because the line above rewrites `target`: a take called foo can
+  // write `foo-1a2b3c4d.knct.part`, which is a different take's literal `.part`.
   const pathClaim = `path:${target.toLowerCase()}`;
   if (downloadClaims.has(pathClaim)) {
     throw new Error(
@@ -983,27 +441,14 @@ async function downloadClaimed(node, take, dir) {
 async function downloadToPath(node, take, dir, targetIn) {
   let target = targetIn;
   const temp = `${target}.part`;
-  // **Refused against the volume before a byte moves, because the byte ceiling below
-  // only holds the node to its claim.** A node telling the truth about a take larger
-  // than the free space walked straight past every guard here: the transfer wrote
-  // until `ENOSPC`, tidied its own `.part` away - and the recorder writing the current
-  // shoot to the same volume is the thing that actually broke, before this copy ever
-  // failed. The margin is a minute of recording at the rate `remaining` already
-  // reports space in, because the disk this must not fill is the one a take may be
-  // landing on right now, and a transfer that fits to the last byte fills it just as
-  // surely as one that does not fit at all.
+  // Refused against the volume before a byte moves, because the ceiling below only holds the node
+  // to its claim. The margin is a minute of recording: a take may be landing on this disk now.
   const space = await remaining(dir);
   if (take.bytes > space.freeBytes - space.bytesPerSec * 60) {
     throw new Error(`downloading ${take.id}: it advertises ${take.bytes} bytes and the volume under `
       + `${dir} has ${space.freeBytes} free - refused before a byte moved, keeping a minute of `
       + 'recording headroom for the shoot this disk may be carrying');
   }
-  // Declared before the fetch, because the first thing that can hang is the fetch: a
-  // node that completes the TCP handshake and never sends a status line leaves this
-  // `await` parked forever, and with it the handler, the socket, and both entries in
-  // `downloadClaims` - which are released in `finally` blocks a hung await never
-  // reaches, so every later download of this take is refused until the server restarts.
-  // Zero bytes twice running is exactly that state.
   const progress = { id: take.id, phase: 'transferring', received: 0, bytes: take.bytes, startedAt: Date.now() };
   const stall = untilItStalls(() => progress.received);
   let res;
@@ -1018,27 +463,13 @@ async function downloadToPath(node, take, dir, targetIn) {
     throw new Error(`downloading ${take.id}: ${res.status} ${res.statusText}`);
   }
 
-  // Registered only once the node has actually answered, so a transfer that was
-  // refused never appears as one that stalled at zero.
   downloadsInFlight.set(take.id, progress);
   try {
     const counted = new Transform({
       transform(chunk, _enc, done) {
         progress.received += chunk.length;
-        // **Bounded on the size the node advertised**, which is the same number the
-        // claim, the progress readout and the disk-space refusal are all written
-        // against. Without it a node answering a chunked stream that never ends writes
-        // until the volume is full, and the take being copied is not the thing that
-        // breaks - the recorder writing the current shoot to the same disk is. The
-        // hash check below would reject the file eventually; this rejects it before it
-        // costs somebody else their footage.
-        // **Zero is a bound like any other and used not to be**, which put the guard's
-        // own off switch on the wire: `manifestRefusal` admits `bytes: 0` because
-        // `nonNeg` does, so a node advertising a completed take at zero bytes disabled
-        // this comparison entirely and could then write until the volume was full. A
-        // take with nothing in it has nothing to send, so the first byte past zero is
-        // already past what it advertised and refusing there is the same rule, not a
-        // special case for it.
+        // Bounded on the size the node advertised, so an endless stream cannot fill the volume the
+        // recorder is writing to. Zero is a bound like any other and used to disable this entirely.
         if (progress.received > take.bytes) {
           done(new Error(`${take.id} is still sending past the ${take.bytes} bytes it advertised`
             + ' - discarded rather than written on past the size the transfer was checked against'));
@@ -1047,28 +478,9 @@ async function downloadToPath(node, take, dir, targetIn) {
         done(null, chunk);
       },
     });
-    // **The `.part` is unlinked before it is opened, and that is about an inode rather
-    // than about tidiness.** The install below claims its name with `link` and then
-    // drops `temp`, so a process killed between those two calls leaves `.part` and a
-    // perfectly good installed take as two names for one inode. `createWriteStream`
-    // truncates by default, so the next attempt at this download would open `.part`
-    // and take the installed take to zero with it - and then, if the transfer dropped,
-    // the cleanup below would remove only `.part` and leave the library holding a
-    // corrupted file it still lists at full size. Unlinking first breaks the shared
-    // inode instead of writing through it: the installed take keeps its own link and
-    // all of its bytes, and this download starts on a genuinely new file.
-    //
-    // `renameTake` admits the same two-step window on purpose, and its answer is right
-    // for it - a take under both names is two entries with one hash, which the
-    // reconciliation folds and an operator can see and remove. This one is not
-    // visible: `scanTakes` filters on `.knct`, so nothing lists a `.part` and nothing
-    // offers to remove it, which is why it needs closing here rather than reporting.
-    // **Only an absent file is safe to carry on past.** The whole point of this unlink
-    // is that `temp` may be a second name for a take already in the library, so a
-    // failure to remove it and then opening it anyway is precisely the truncation this
-    // is here to prevent - a swallowed error would have made the guard cosmetic under
-    // exactly the conditions it exists for. ENOENT is the normal case and means the
-    // name was free.
+    // Unlinked before it is opened, and that is about an inode: the install claims its name with
+    // `link` and then drops `temp`, so a kill between them leaves `.part` and a good take sharing
+    // one inode that `createWriteStream` would truncate.
     try {
       await unlink(temp);
     } catch (err) {
@@ -1081,10 +493,6 @@ async function downloadToPath(node, take, dir, targetIn) {
     }
     await pipeline(Readable.fromWeb(res.body), counted, createWriteStream(temp));
 
-    // The same streaming scan step 2 built, against the file that actually landed.
-    // Re-deriving the hash from the node's answer would only be restating it.
-    // Named as its own phase because it is not instant at this size and a progress
-    // readout stuck at 100% is the same silence this was built to remove.
     progress.phase = 'verifying';
     const got = await hashFile(temp);
     if (got !== take.hash) {
@@ -1093,29 +501,9 @@ async function downloadToPath(node, take, dir, targetIn) {
         + 'discarded rather than filed under a hash it does not have',
       );
     }
-    // **Linked and unlinked rather than renamed, for the reason `renameTake` states
-    // fifty lines down and this call did not honour.** `rename(2)` replaces an
-    // existing file without a word, and the name this is about to claim was chosen
-    // minutes ago, before a transfer long enough for the directory to have moved
-    // underneath it. A local take renamed onto this name in that window - which the
-    // gallery now offers, because a node-only name is correctly not a local clash -
-    // was replaced by the arriving remote take and lost its only directory entry.
-    // Footage destroyed by a transfer nobody would think of as a write to another
-    // take.
-    //
-    // EEXIST is not a refusal, because refusing here would throw away a download that
-    // has already succeeded. It is the same answer the collision check at the top of
-    // this function gives, arrived at from the other side: the two takes coexist, and
-    // the one that turned up second wears the hash in its name.
-    //
-    // **A list rather than one fallback, because the first version of this had a
-    // fallback that could be the name that just failed.** If the plain name was taken
-    // before the download began, the collision check at the top already moved `target`
-    // to the hashed one - so a rename onto *that* during the transfer gave EEXIST, and
-    // reassigning the hashed name retried the identical `link` and discarded gigabytes
-    // that had arrived and verified. Every candidate here is tried with `link`, which
-    // is the same atomic claim used above, so the loop cannot be a check-then-act
-    // however many names it walks.
+    // Linked and unlinked rather than renamed: `rename(2)` replaces an existing file without a
+    // word, and this name was chosen minutes ago. A list rather than one fallback, because the
+    // fallback could be the name that just failed.
     const suffixed = join(dir, `${take.id}-${take.hash.slice(7, 15)}.knct`);
     const candidates = [target, suffixed].filter((p, i, all) => all.indexOf(p) === i);
     for (let n = 2; n <= 9; n++) candidates.push(join(dir, `${take.id}-${take.hash.slice(7, 15)}-${n}.knct`));
@@ -1139,56 +527,17 @@ async function downloadToPath(node, take, dir, targetIn) {
     await unlink(temp);
     forgetCapture(target);
   } catch (err) {
-    // **Every failure takes the `.part` with it, not only the hash mismatch.** A
-    // transfer that dropped mid-stream left gigabytes at a name nothing in the tool
-    // can see or act on: `scanTakes` filters on `.knct`, so no tile lists it and no
-    // removal offers to remove it, while `remaining` counts the space as gone - and
-    // the recorder divides that by the capture rate and starts refusing takes over a
-    // file no surface mentions. The mismatch was cleaned up because it was the one
-    // failure somebody had in mind; the link going away mid-download is the ordinary
-    // one, since the link is a room's wifi and the take is minutes of it.
     await unlink(temp).catch(() => {});
     throw err;
   } finally {
-    // In a `finally` because a failed download must not leave the gallery showing a
-    // transfer that is no longer happening - and the hash mismatch above throws.
     downloadsInFlight.delete(take.id);
-    // And the guard goes with it. An interval left running would keep reading a counter
-    // nothing moves any more and abort a signal nobody is listening to, once, forever -
-    // untidy on its own and a leak per download over a shoot.
     stall.stop();
   }
 
-  // Marks come with the take. They are outside the hash by design - mutable, and
-  // editable from either machine - so they are merged rather than compared, and
-  // the merge is the same union the sync below performs.
-  //
-  // **The path is checked again before it is written to, because fetching the log is a
-  // network round trip and `target` is a name rather than a file.** The capture is
-  // installed and visible by the time this runs, so another tab can rename it - and a
-  // rename that happens now finds no sidecar to move, completes cleanly, and leaves this
-  // append creating `<old>.marks.jsonl` beside a take that no longer answers to that
-  // name. The download would report success with every downloaded mark orphaned.
-  //
-  // The inode rather than the name, for the reason `serveMarkWrite` gives: a rename
-  // frees the old id and a later take can be renamed into it, so a path that still
-  // exists is not a path that still holds this take, and marks landing on the wrong
-  // footage resolve cleanly onto frames that exist.
-  //
-  // Skipped rather than chased, because the marks are not lost by skipping: they are
-  // still on the node, and `/library/sync-marks/:id` is the operation that brings them
-  // across. Following the take to its new name would mean guessing which rename
-  // happened, and guessing which file to write somebody's annotations into is the one
-  // thing this path must not do.
+  // Checked again because fetching the log is a round trip and `target` is a name: a rename in that
+  // window would leave this appending beside a take that moved. The inode rather than the name.
   const installed = await stat(target).catch(() => null);
   try {
-    // **A flat timeout here, where the take's bytes get a stall bound, and the two are
-    // different questions rather than an inconsistency.** A marks log is a few kilobytes
-    // of JSON off an open file: a node that can answer it answers it immediately, so
-    // elapsed time is a fair statement about this request in a way it is not about a
-    // four-gigabyte copy. Without one, the take is already installed and verified and
-    // this hangs anyway, holding the handler and both claims open on the one call that
-    // is not carrying any of the footage.
     const log = await node.fetchJson(`/capture/${encodeURIComponent(take.id)}/marks/log`,
       { signal: AbortSignal.timeout(MARKS_MS) });
     const stillThere = await stat(target).catch(() => null);
@@ -1214,25 +563,8 @@ export async function hashFile(path) {
 }
 
 /**
- * Removes a copy of a take from this machine.
- *
- * `verifiedElsewhere` decides which of the two actions this is, and it is a hash
- * rather than a flag on purpose. A reclaim that trusted a manifest saying `both`
- * would remove footage on the strength of a listing taken some time ago, against a
- * copy that may since have been truncated - which is the one failure this tool
- * cannot afford. So the caller hands in the hash the surviving copy actually
- * reported, and this compares it to the take's own.
- *
- * **The take's own hash is re-derived here rather than read off the sidecar.** It
- * used to come from `cachedIndex`, which is the manifest's cache - and the reclaim
- * path above already re-hashes for the exact reason this one did not, that a listing
- * may since have been truncated. So the irreversible action was carrying the weaker
- * check: a same-size, same-modification-time substitution is invisible to the
- * sidecar, the listing keeps reporting the old hash, and a delete built on that
- * listing removed a file whose bytes nobody had looked at. That substitution is what
- * `library-check` already constructs as the falsification control for reclaim, so
- * the technique that would have caught this was sitting in the tool. Delete is the
- * one thing here that cannot be undone; it pays for the read.
+ * Removes a copy of a take. Both hashes are read rather than trusted - `verifiedElsewhere` is what
+ * the surviving copy reported, and this take's own is re-derived, because delete cannot be undone.
  */
 export async function removeTake(dir, id, { hash, verifiedElsewhere = null }) {
   if (!VALID_ID.test(id)) throw new Error(`unusable take id ${id}`);
@@ -1252,58 +584,18 @@ export async function removeTake(dir, id, { hash, verifiedElsewhere = null }) {
     );
   }
   await unlink(path);
-  // The sidecars go with it, except the marks. A take deleted here may still exist
-  // on the node, and marks are the one thing that is genuinely shared and genuinely
-  // editable from either side - so throwing the log away would silently undo a
-  // correction someone made on this machine.
   await unlink(indexPathFor(path)).catch(() => {});
   forgetCapture(path);
   return { removed: `${id}.knct`, hash: actual };
 }
 
 /**
- * Renames a take, and everything filed beside it.
- *
- * **A take's id is its filename, so renaming one is the only operation here that
- * changes a take's identity to a reader that goes by name.** Nothing in this program
- * does: projects reference their footage by content hash, the reconciliation joins on
- * the hash, and the menu resumes on the hash - all of which is what makes this safe to
- * offer at all. What moves is the label an operator reads on a tile, which is the one
- * thing a hash cannot be.
- *
- * **The hash is checked against the sidecar rather than re-derived, and that is the
- * opposite of what `removeTake` does one function up.** Delete pays for a full
- * streaming sha256 because it is irreversible: a same-size, same-modification-time
- * substitution is invisible to the sidecar, and a delete built on a listing that had
- * gone stale removes a file whose bytes nobody looked at. A rename undone is a rename
- * back. So this pays the cheap check that catches the case that actually happens - the
- * library moved between the tile being drawn and the button being pressed, which
- * changes size or modification time and therefore fails the sidecar's own staleness
- * test - and does not read four gigabytes off a card to relabel a file.
- *
- * **The take being recorded is refused, and that refusal is load-bearing rather than
- * tidy.** `scanTakes` decides which take is open by comparing paths against
- * `recorder.openPath`, so a take renamed mid-shoot stops matching: `describeTake`
- * drops out of the unscanned branch and starts a full read plus sha256 of a file the
- * recorder is still writing to, on the disk it is writing to, on every `/library/*`
- * request. That is exactly the contention section 11 of `library-check` exists to
- * keep closed, reached by a door the caller cannot see from the rename's own answer -
- * which is why the refusal is asserted here as well as at the route.
- *
- * The three files move in an order chosen for what a failure partway leaves behind.
- * Marks first and the capture second, with the marks put back if the capture will not
- * move, because marks are the one artifact here that cannot be regenerated - they are
- * what somebody pressed in the room. The index last and its failure swallowed, because
- * a `.idx` is a cache of a scan and the next reader rebuilds it; the stale one at the
- * old name is unlinked rather than left to be found beside some later take.
+ * Renames a take and everything filed beside it. Safe because nothing here goes by name: projects,
+ * the reconciliation and the menu all reference footage by content hash. The take being recorded is
+ * refused, because `scanTakes` decides which take is open by path and a renamed one stops matching.
  */
 export async function renameTake(dir, id, requested, { hash, recordingPath = null }) {
   if (!VALID_ID.test(id)) throw new Error(`unusable take id ${id}`);
-  // Somebody who typed the extension meant the take rather than a file called
-  // `x.knct.knct`, so the suffix is taken off rather than refused. It is the one
-  // transformation applied to a typed name: every other character is held to the rule
-  // and reported back, because a name silently corrected is a name the operator did
-  // not choose.
   const to = String(requested ?? '').trim().replace(/\.knct$/i, '');
   if (!VALID_ID.test(to)) {
     throw new Error(
@@ -1315,9 +607,6 @@ export async function renameTake(dir, id, requested, { hash, recordingPath = nul
 
   const from = join(dir, `${id}.knct`);
   const target = join(dir, `${to}.knct`);
-  // The second door. `VALID_ID` already forbids a separator and a leading dot, and
-  // the one path-forming function asserts anyway - the same reading as `VALID_HASH`'s
-  // and for the same reason: a filter somewhere else is a thing that can be moved.
   const root = resolve(dir);
   for (const path of [from, target]) {
     if (resolve(path) !== join(root, basename(path))) {
@@ -1336,9 +625,6 @@ export async function renameTake(dir, id, requested, { hash, recordingPath = nul
     );
   }
 
-  // Every name the new id would claim, not only the capture's. A stray marks log at
-  // the target with no take beside it is somebody's footage annotations waiting for a
-  // take to come back, and renaming over it would destroy them to satisfy a name.
   for (const path of [target, marksPathFor(target), indexPathFor(target)]) {
     try {
       await stat(path);
@@ -1348,20 +634,9 @@ export async function renameTake(dir, id, requested, { hash, recordingPath = nul
     }
   }
 
-  // **Linked and then unlinked, never renamed, and that is the difference between a
-  // refusal and destroyed footage.** The `stat` loop above is check-then-act: two
-  // renames onto one name both pass it, and `rename(2)` replaces an existing file
-  // without a word, so the second one silently overwrites a take. Reachable from two
-  // tabs. `link(2)` fails with EEXIST atomically instead, so the loser is refused by
-  // the kernel rather than by a reading taken a moment earlier - the stat stays
-  // because it is what produces a sentence naming the file in the way, where EEXIST
-  // alone would only produce an errno.
-  //
-  // What the two-step admits is a window where the take has both names, if this
-  // process dies between the link and the unlink. That is two library entries with
-  // one hash, which the reconciliation already treats as one take and an operator can
-  // see and remove - the opposite kind of failure from the one being closed, and the
-  // right way round.
+  // Linked then unlinked, never renamed: the `stat` loop above is check-then-act and `rename(2)`
+  // replaces silently, where `link(2)` fails EEXIST atomically. The window it admits is a take
+  // under both names, which the reconciliation folds by hash.
   const linkInto = async (source, dest) => {
     try {
       await link(source, dest);
@@ -1382,39 +657,15 @@ export async function renameTake(dir, id, requested, { hash, recordingPath = nul
   try {
     await unlink(from);
   } catch (err) {
-    // **ENOENT is not a failure to undo, it is the old name already being gone - and
-    // undoing it here destroys the take.** The link above returning true proves `from`
-    // existed at that moment, so the only way it can be missing now is a concurrent
-    // operation having removed it, and `removeTake` is the one that does: it streams a
-    // sha256 of the whole capture before unlinking, which is a window long enough to
-    // hold this entire rename. Delete unlinks the old name, this unlink reports ENOENT,
-    // and the rollback below then unlinks `target` - which by then is the capture's last
-    // directory entry, so two individually safe actions destroy the footage between
-    // them. The take is already where this rename wanted it, so there is nothing to put
-    // back: the operation has succeeded and says so.
-    //
-    // This is the reading the block above already argues for. Its answer to the process
-    // dying mid-rename is that a capture reachable under two names is "the opposite kind
-    // of failure from the one being closed, and the right way round", and the same
-    // ordering holds here: a delete that returns while the take survives under its new
-    // name is a surprising answer, and a rollback that unlinks the only remaining entry
-    // is unrecoverable. Two concurrent renames of one take land in the same place, both
-    // linking their own target and the loser finding the source gone - which now leaves
-    // two names for one capture that the reconciliation joins by hash, rather than one
-    // rename silently deleting the other's result.
+    // ENOENT is the old name already being gone rather than a failure to undo: `removeTake`
+    // unlinks `from` during its sha256, and the rollback below would unlink the last entry.
     if (err.code !== 'ENOENT') {
-      // Every other errno does mean the capture has both names and this could not drop
-      // the old one, so the rename is undone rather than left half-done: a second entry
-      // nobody asked for is worse than a name that did not change.
       await unlink(target).catch(() => {});
       if (marksMoved) await unlink(marksPathFor(target)).catch(() => {});
       throw err;
     }
   }
   if (marksMoved) await unlink(marksPathFor(from)).catch(() => {});
-  // The sidecar validates on the capture's size and modification time, both of which
-  // `rename` preserves, so moving it is what stops the next reader re-scanning the
-  // whole take for a fact that was already on disk.
   await rename(indexPathFor(from), indexPathFor(target))
     .catch(() => unlink(indexPathFor(from)).catch(() => {}));
   forgetCapture(from);
@@ -1422,22 +673,9 @@ export async function renameTake(dir, id, requested, { hash, recordingPath = nul
   return { renamed: `${id}.knct`, id: to, file: `${to}.knct`, hash: index.hash, marks: marksMoved };
 }
 
-// ------------------------------------------------------------ showing a take in situ
 
-/**
- * How each platform is asked to show a file where it lives.
- *
- * One entry per platform rather than a chain of `process.platform ===`, so a platform
- * this does not know is a sentence rather than a spawn of something that is not there.
- * The argument shape is the platform's, and `--reveal-with` substitutes **only the
- * program** - a proof tool pointing this at a script that records its argv is then
- * measuring the arguments the real file manager would have received, rather than a
- * second code path written to be measurable.
- */
 export const REVEAL = {
   darwin: { program: 'open', label: 'Finder', args: (path) => ['-R', path] },
-  // No `-R` equivalent exists across the desktops `xdg-open` fronts, so the
-  // containing directory is opened and the take is one glance rather than selected.
   linux: { program: 'xdg-open', label: 'the file manager', args: (path) => [dirname(path)] },
   win32: { program: 'explorer', label: 'Explorer', args: (path) => [`/select,${path}`] },
 };
@@ -1448,23 +686,7 @@ export const revealSupport = () => {
 };
 
 /**
- * Opens the platform's file manager on a take.
- *
- * **This is the only route in the program that starts a process on the operator's
- * behalf, so what bounds it is written here rather than assumed from the caller.** The
- * id is held to `VALID_ID` and the path is asserted to be a direct child of the
- * captures directory, so nothing a caller types decides what is opened; the program is
- * a fixed string per platform or the one `--reveal-with` names, so nothing a caller
- * types decides what is run; and `spawn` is given an argument array with no shell, so
- * a filename cannot be a command however it is spelt. Who may ask at all - a browser
- * on this machine and not one across the link - is the route's question rather than
- * this function's, because the answer is about the socket the request arrived on.
- *
- * Resolved on the spawn rather than on the exit. `open -R` returns immediately and
- * `xdg-open` may not return until the file manager closes, so waiting for an exit code
- * would hang one platform to learn nothing on another - and the failure worth
- * reporting, a file manager that is not installed, arrives as an `error` event either
- * way.
+ * Opens the file manager on a take - the only route that starts a process on the operator's behalf.
  */
 export async function revealTake(dir, id, { program = null } = {}) {
   if (!VALID_ID.test(id)) throw new Error(`unusable take id ${id}`);
@@ -1482,41 +704,21 @@ export async function revealTake(dir, id, { program = null } = {}) {
     const child = spawn(bin, args, { stdio: 'ignore', detached: true });
     child.on('error', (err) => fail(new Error(`${bin} could not be started: ${err.message}`)));
     child.on('spawn', () => {
-      // Detached and unreferenced, so a file manager left open does not keep this
-      // process alive - the server outliving a request is the point, the request
-      // outliving the file manager is not.
       child.unref();
       settle({ revealed: `${id}.knct`, path, program: bin, args, label: shape.label });
     });
   });
 }
 
-// ------------------------------------------------- projects and the preset library
 
 /**
- * The JSON documents in a directory, by name, sorted - and **the one place that
- * decides a missing directory may read as an empty one.**
- *
- * Only `ENOENT` is an absence. Every other reason `readdir` can fail is a directory
- * that exists and holds documents this process could not enumerate: `EACCES` on a
- * volume mounted without search permission, `ENOTDIR` from a path that names a file,
- * an I/O error. Turned into `[]` those answer 200 with a shorter library and nothing
- * anywhere to say why - a picker that has lost every fork looks exactly like a fresh
- * install, and the render queue with an unreadable directory looks exactly like a
- * queue that has drained.
- *
- * Shared rather than copied, because the copy is how this got out of step in the
- * first place: `readPathFor` was taught the ENOENT rule and `DocumentStore.list` was
- * not, so a store whose fork lookup refused an unsearchable directory went on
- * listing past it. One implementation means the *next* caller inherits the rule by
- * calling this rather than by being remembered.
+ * The JSON documents in a directory, and the one place that decides a missing directory may read as
+ * an empty one. Only `ENOENT` is an absence: `EACCES` turned into `[]` answers 200 with no reason.
  */
 export async function listJsonNames(dir, { required = false, what = 'directory' } = {}) {
   try {
     return (await readdir(dir)).filter((f) => f.endsWith('.json')).sort();
   } catch (err) {
-    // `required` is for a root that was configured on purpose and has no fallback
-    // behind it, where even absence is a broken deployment rather than a fresh one.
     if (required || err?.code !== 'ENOENT') {
       throw new Error(`the ${what} ${dir} cannot be read: ${err.message}`);
     }
@@ -1524,35 +726,13 @@ export async function listJsonNames(dir, { required = false, what = 'directory' 
   }
 }
 
-/**
- * A directory of JSON documents with a version on every one. Projects and presets
- * are the same storage problem - small JSON, named by the user, content-hashed so
- * a provenance stamp can point at a revision - so they are one class rather than
- * two that drift.
- */
 export class DocumentStore {
-  /**
-   * `builtinDir` is a second root the store *reads* and never writes, and it is a
-   * search path rather than a second implementation.
-   *
-   * The five looks that ship live there. What makes one root enough machinery is that
-   * a built-in is an ordinary document in the ordinary format - the same
-   * `{ version, values }` a user's own preset is, hashed the same way, applied through
-   * the same door - so the only thing that distinguishes it is which directory it came
-   * out of. Reads prefer the user's copy and fall back to the shipped one; writes only
-   * ever land in the user's directory, which is what makes "saving over a built-in
-   * forks it" fall out of the lookup rather than needing a rule of its own. Removing
-   * the fork brings the shipped look back, which is the same fact read the other way.
-   */
+  /** `builtinDir` is read and never written, which is what makes saving over a built-in fork it. */
   constructor(dir, kind, version = PROJECT_VERSION, builtinDir = null) {
     this.dir = dir;
     this.kind = kind;
     this.version = version;
     this.builtinDir = builtinDir;
-    // Every write and every removal this store has ever done. Monotonic, never
-    // reset, and the reason it exists is `markWriteCount` above: a handler that
-    // writes and puts the bytes back is invisible to a before-and-after reading of
-    // the contents, and this is the quantity no restore can undo.
     this.writes = 0;
   }
 
@@ -1561,11 +741,6 @@ export class DocumentStore {
     return join(this.dir, `${name}.json`);
   }
 
-  /**
-   * Where a name is read from: the user's copy if there is one, the shipped one
-   * otherwise. The name is validated first for the same reason `pathFor` validates
-   * it - a name that cannot name a document must not be joined onto either root.
-   */
   async readPathFor(name) {
     const own = this.pathFor(name);
     if (!this.builtinDir) return { path: own, builtin: false };
@@ -1573,39 +748,17 @@ export class DocumentStore {
       await stat(own);
       return { path: own, builtin: false };
     } catch (err) {
-      // **Only "there is no fork" falls back.** A bare catch here treats every reason
-      // `stat` can fail as an absence, and the ones that are not absences are exactly
-      // the ones where a fork does exist - an unsearchable directory, an I/O error on
-      // the volume the user's library lives on. The read then succeeds against the
-      // shipped document and serves it under the forked name, so somebody gets the
-      // starting point where they saved their grade and nothing anywhere says so.
-      // That is the same failure the fork rule exists to prevent, arriving from the
-      // other direction, and it is worse than an error because it looks like a look.
+      // Only there-is-no-fork falls back. Any other `stat` failure is a case where a fork does
+      // exist, and serving the shipped document under the forked name loses a grade silently.
       if (err?.code !== 'ENOENT') throw err;
       return { path: join(this.builtinDir, `${name}.json`), builtin: true };
     }
   }
 
   async list() {
-    /**
-     * **The two roots fail differently, and collapsing them into one empty list is how
-     * the five shipped looks can go missing without anybody being told.**
-     *
-     * The user's own directory not existing is the ordinary state of a fresh node: it
-     * is made on the first write and an empty shelf is the honest report until then.
-     * The built-in root is the opposite - it is only ever consulted because somebody
-     * configured it, it is the sole source of the looks that ship, and the picker has
-     * no fallback behind it. A deployment that omitted `presets-builtin/`, or a
-     * `--builtin-presets` pointing one directory too high, used to answer 200 with an
-     * empty library, which reads as "this node has no presets" rather than as "this
-     * node is broken". Required where it is configured, optional where it is the
-     * user's - and optional means *absent*, which is `listJsonNames`'s whole subject.
-     */
+    // The two roots fail differently: the user's directory is made on the first write, where the
+    // built-in root is only consulted because somebody configured it and has no fallback behind it.
     const own = await listJsonNames(this.dir, { what: `${this.kind} directory` });
-    // The user's own names win, so a fork shadows the look it was forked from rather
-    // than appearing beside it under the same name. Built-ins that have not been forked
-    // come first, because they are the starting points and a library that opened with
-    // somebody's twelve experiments buries them.
     const owned = new Set(own);
     const shipped = this.builtinDir
       ? (await listJsonNames(this.builtinDir, { required: true, what: `shipped ${this.kind} directory` }))
@@ -1620,16 +773,9 @@ export class DocumentStore {
         const st = await stat(path);
         out.push({
           name: basename(file, '.json'),
-          // Hashed over **the bytes on disk**, never over a re-serialisation. Key
-          // order in JSON is insertion order, so a document parsed and stringified
-          // again can hash differently while meaning the same thing - and a
-          // provenance stamp that drifted on a round-trip would report a look as
-          // having changed when nothing did.
           rev: `sha256:${createHash('sha256').update(text).digest('hex')}`,
           bytes: st.size,
           savedAt: st.mtimeMs,
-          // Which root it came out of, so the picker can say which looks ship and a
-          // check can assert that saving over one forked it rather than overwrote it.
           builtin,
           body: JSON.parse(text),
         });
@@ -1645,27 +791,9 @@ export class DocumentStore {
   }
 
   /**
-   * Writes a document, after checking this build can interpret it.
-   *
-   * **A version that is present and is not this one is refused, never restamped.**
-   * This used to spread `{ ...body, version: PROJECT_VERSION }`, which took a
-   * `version: 2` document, wrote `version: 1` over the top and kept every v2 field
-   * underneath - so a project from a future build landed in the store looking like
-   * one this build authored, and the loader that refuses four kinds of bad version
-   * never saw a wrong one. That is precisely the failure the version field was
-   * chosen over an authored buffer height to prevent: a version answers "can this
-   * build faithfully interpret this document", and a writer that answers it by
-   * overwriting the question is not answering it.
-   *
-   * An **absent** version is stamped rather than refused, because for a document
-   * this build authored the store is the writer of record - a preset is saved as a
-   * mode and a set of values and gets its version here. What that admits is an
-   * unversioned blob becoming a version 1 document, and the load path is the second
-   * gate on that: it refuses seventeen malformed shapes field by field.
-   *
-   * Written aside and renamed, for the same reason step 2's sidecar is: a crash
-   * partway through a write must not leave a file that parses and describes
-   * something that was never saved.
+   * Writes a document, after checking this build can interpret it. A version that is present and is
+   * not this one is refused, never restamped: spreading `PROJECT_VERSION` over a v2 document kept
+   * every v2 field under a v1 stamp, and the loader never saw a wrong version.
    */
   async write(name, body) {
     if (body?.version !== undefined && body.version !== this.version) {
@@ -1675,29 +803,15 @@ export class DocumentStore {
         + 'cannot faithfully interpret is exactly what the version field exists to catch',
       );
     }
-    // Counted past both refusals and before anything touches the disk. A version this
-    // build cannot interpret and a name that is not a name both wrote nothing, so
-    // neither counts; a write that fails partway may well have landed, so it does.
-    // `pathFor` moved above the `mkdir` for the same reason it moved above the count -
-    // an unusable name should not leave a directory behind either.
     const path = this.pathFor(name);
     // Captured here, on the same tick as the increment. Reading `this.writes` again
-    // further down would be reading it across an await, where another request has
-    // already incremented it - two writers then compute the same scratch name and the
-    // race this number exists to prevent comes straight back. Measured: 2 of 12
-    // concurrent puts still failed with the read moved below the mkdir.
+    // Reading `this.writes` again below would read it across an await, and two writers would then
+    // compute the same scratch name.
     const seq = ++this.writes;
     await mkdir(this.dir, { recursive: true });
     const text = `${JSON.stringify({ ...body, version: this.version }, null, 2)}\n`;
-    // The scratch name carries the write's own number, and that is load-bearing rather
-    // than tidy. With a fixed `${path}.tmp` two overlapping writes to one document share
-    // the file: the first rename moves it away and the second finds nothing, so the
-    // later write fails with an ENOENT the route reports as a 409. Auto-save made that
-    // reachable from ordinary use - it fires on every committed interaction, and a
-    // handful of quick ones overlap - and measured here it was 4 of 8 concurrent puts.
-    // `seq` is the write's own number, taken on the tick it was counted, so every
-    // in-flight write in this process holds a distinct one; nothing here needs a clock
-    // or a random suffix to get it.
+    // The scratch name carries the write's own number: a fixed `.tmp` is shared by two overlapping
+    // writes, and the first rename moves it out from under the second.
     const scratch = `${path}.${seq}.tmp`;
     await writeFile(scratch, text);
     await rename(scratch, path);
@@ -1705,8 +819,6 @@ export class DocumentStore {
   }
 
   async remove(name) {
-    // Below `pathFor` for the reason `write` is: a name that cannot name a document
-    // removed nothing, so it must not count as a write.
     const path = this.pathFor(name);
     this.writes++;
     await unlink(path);

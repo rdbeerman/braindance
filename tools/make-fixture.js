@@ -1,17 +1,6 @@
-// Builds an arbitrarily long .knct fixture out of a short real capture.
-//
-// The repo's only capture is 284 frames — about 9.4 seconds — which proves a
-// renderer but cannot prove anything the index and the frame API exist for. The
-// spec sizes those against a five-minute take (4.4GB at the measured 14.6 MB/s),
-// so a fixture of that order has to come from somewhere, and synthesising depth
-// planes would test the reader against data no sensor ever produced.
-//
-// So the sample is looped. Every frame carries real depth and a real JPEG; only
-// the timestamps are rewritten, advancing monotonically across the seam by the
-// median gap so the loop point is not a discontinuity the index would trip on.
-//
-//   node tools/make-fixture.js <source.knct> <out.knct> [--loops 32]
-//   node tools/make-fixture.js <source.knct> <out.knct> [--minutes 5]
+// Builds an arbitrarily long .knct fixture by looping a short real capture. Every frame
+// carries real depth and a real JPEG; only the timestamps are rewritten, advancing across
+// the seam by the median gap so the loop point is not a discontinuity the index trips on.
 
 import { createWriteStream, openSync, readSync, closeSync, statSync } from 'node:fs';
 import { MessageParser, encodeMessage, TYPE_HELLO, TYPE_FRAME } from '../server/protocol.js';
@@ -29,8 +18,6 @@ if (!SRC || !OUT) {
   process.exit(1);
 }
 
-// Read the source once into frame records. The source is small by construction —
-// this tool exists precisely because the interesting file is the one it writes.
 function readSource(path) {
   const size = statSync(path).size;
   const fd = openSync(path, 'r');
@@ -57,8 +44,7 @@ const { hello, frames } = readSource(SRC);
 if (!hello) throw new Error(`${SRC} has no hello message`);
 if (frames.length === 0) throw new Error(`${SRC} has no frames`);
 
-// Gaps come from the source's own stamps, so the fixture inherits the sensor's
-// real arrival spacing rather than a uniform 33ms that never happens.
+// Gaps come from the source's own stamps, so the fixture inherits the sensor's real spacing.
 const stamps = frames.map((f) => Number(f.readBigUInt64LE(8)));
 const gaps = stamps.slice(1).map((t, i) => t - stamps[i]).filter((g) => g > 0 && g < 2000);
 const median = gaps.length ? gaps.slice().sort((a, b) => a - b)[gaps.length >> 1] : 33;
@@ -77,8 +63,7 @@ const write = (chunk) => new Promise((resolve) => {
 
 await write(encodeMessage(TYPE_HELLO, hello));
 
-// One scratch buffer per frame, rewritten in place: the payload is identical to
-// the source apart from its u64 stamp at offset 8.
+// The payload is identical to the source apart from its u64 stamp at offset 8.
 let written = 0;
 let t = 0;
 for (let loop = 0; loop < loops; loop++) {

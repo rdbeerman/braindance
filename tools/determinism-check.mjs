@@ -1,33 +1,11 @@
-// Proves that the same program time produces the same image.
+// Proves that the same program time produces the same image. Every input is pinned - a fixed
+// run of real capture frames, a fixed camera pose, colour off - with both feedback paths left
+// switched on, since they are the only things that could carry state between two runs. The
+// frames are sampled every fourth frame, because a static scene makes the afterimage converge
+// to its own input and return the same hash whether the accumulator ran or not.
 //
-// The claim step 1 makes is reproducibility, not speed, so an interleaved A/B is
-// the wrong instrument: what discriminates is whether a rendered sequence can be
-// replayed. So every input is pinned - a fixed run of real capture frames read
-// out of a .knct, a fixed camera pose, colour off - and both feedback paths are
-// left switched on, because they are the only things that could carry state
-// between two runs. The Blackwall preset supplies that: fade and wake drive the
-// surface memory, trails drive the afterimage, and glitch, scan, scanlines and
-// grain all read the time uniform, so a clock that moved would show up in a hash.
-//
-// The input has to move across the run. A static scene makes the afterimage
-// converge to its own input and return the same hash whether the accumulator ran
-// or not, which is arithmetic rather than evidence - so the frames are sampled
-// every fourth frame of the capture, about 130ms apart, where a hand crossing the
-// sensor genuinely changes the depth plane.
-//
-//   node tools/determinism-check.mjs [--url http://localhost:8080]
-//   node tools/determinism-check.mjs --clock [--before HEAD]
-//
-// --clock is the before-half, and it is a clock reading rather than a pixel hash.
-// The pre-refactor page offers no way to ask for an image at a position and no
-// readback inside its loop, so a hash comparison against it can only be had by
-// instrumenting it - and instrumented code is not the code that shipped. What can
-// be read without touching it is the quantity that actually differs: `uniforms.time`
-// was `clock.getElapsedTime()`, wall clock since the page loaded. So --clock serves
-// an untouched `git show <rev>:web/main.js` into the running server, loads it three
-// times, and reads the time uniform at the same animation frame each load. Three
-// different values is the before-evidence, and the same three reads against the
-// working tree are the after.
+// --clock is the before-half. It reads `uniforms.time` off an untouched `git show <rev>` page,
+// because instrumenting the old page to read pixels back would measure code that never shipped.
 
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -43,9 +21,8 @@ const flag = (name, fallback = null) => {
 };
 
 const URL_BASE = flag('--url', 'http://localhost:8080');
-// The live recorder, which `/` served until the main menu took that path. Both
-// arms open it, and a page that landed on the menu instead would sit waiting for
-// a `__kinect` that page never defines - a wrong URL arriving as a timeout.
+// The live recorder, which `/` served until the main menu took that path. The menu
+// defines no `__kinect`.
 const RECORDER_PATH = '/record';
 const CAPTURE = flag('--capture', 'captures/sample.knct');
 const CLOCK = argv.includes('--clock');
@@ -53,22 +30,18 @@ const BEFORE_REV = flag('--before', 'HEAD');
 const HEADED = argv.includes('--headed');
 const SOURCE_FRAMES = Number(flag('--frames', '12'));
 const STRIDE = Number(flag('--stride', '4'));
-// Images per source frame. More than one is the point: it is where a renderer
-// driven by program time differs from one driven by however many display frames
-// happened to fit between two arrivals.
+// Images per source frame. More than one is the point: it is where program time differs
+// from display frames.
 const SUBSTEPS = Number(flag('--substeps', '4'));
 
-// The shipped Blackwall document, read rather than restated. A copy of these values
-// typed into this file would be a second source of truth for a look, which is exactly
-// what having them as `const BLACKWALL` inside `web/main.js` was - and it is the reason
-// a tool sweeping constants the product does not ship is a hole this repo has already
-// recorded twice. If the shipped look is re-graded, this follows it.
+// The shipped Blackwall document, read rather than restated: a copy of these values typed in
+// here would be a second source of truth for a look.
 const BLACKWALL_LOOK = JSON.parse(
   readFileSync(new URL('../presets-builtin/blackwall.json', import.meta.url), 'utf8'),
 ).values;
 
-// Playwright is not a dependency of this project - it is a tool the proofs reach
-// for - so it is resolved from wherever it happens to be installed.
+// Playwright is a tool the proofs reach for rather than a dependency, so it is resolved
+// wherever it sits.
 async function loadPlaywright() {
   const require = createRequire(import.meta.url);
   const roots = [];
@@ -84,8 +57,8 @@ async function loadPlaywright() {
   }
   for (const load of candidates) {
     try {
-      // Playwright is CommonJS, and whether the named exports survive the ESM
-      // wrapper depends on how it was resolved, so take either shape.
+      // Playwright is CommonJS and the named exports may not survive the ESM wrapper, so
+      // take either shape.
       const mod = await load();
       const pw = mod.chromium ? mod : mod.default;
       if (pw?.chromium) return pw;
@@ -94,12 +67,8 @@ async function loadPlaywright() {
   throw new Error('playwright not found - install it globally or in this project');
 }
 
-// ------------------------------------------------------------------- fixture
-
-// A pinned run is just capture frame payloads back to back, wire format unchanged
-// apart from the colour block being dropped. Keeping the format means the page
-// parses it with the same field offsets the socket path uses, and the payload is
-// real sensor depth rather than a synthetic plane.
+// A pinned run is capture frame payloads back to back, wire format unchanged apart from the
+// dropped colour block.
 function buildFixture(path) {
   const parser = new MessageParser();
   const frames = [];
@@ -124,11 +93,7 @@ function buildFixture(path) {
   return Buffer.concat(out);
 }
 
-// --------------------------------------------------------------- in-page runs
-
-// Everything below runs in the browser. Pixels never cross back over the wire -
-// only their digests - because a 640x400 frame is a megabyte and there are
-// dozens of them per run.
+// Everything below runs in the browser. Only digests cross back: a 640x400 frame is a megabyte.
 const PAGE_HELPERS = `
   const sha256 = async (bytes) => {
     const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -189,14 +154,8 @@ const runAfter = `async ({ substeps, tailOnly }) => {
 }`;
 
 
-// ------------------------------------------------------------- the clock check
-
-// Two readings per load, at fixed animation frames, so nothing about when the
-// reading was taken varies between loads. The early one shows the value is not a
-// property of the footage - it is different on every load. The late one shows why
-// that matters: with no frame having arrived in between, the old clock has moved
-// anyway, so the same position in a take renders differently depending only on
-// how long the tab has been open.
+// Two readings per load, at fixed animation frames. The early one shows the value is not a
+// property of the footage; the late one shows the old clock moves with no frame having arrived.
 const READ_AT = [120, 480];
 
 const readClock = `(async () => {
@@ -213,9 +172,8 @@ async function clockCheck(context) {
   const before = execFileSync('git', ['show', `${BEFORE_REV}:web/main.js`], {
     encoding: 'utf8', maxBuffer: 1 << 26,
   });
-  // Once step 1 is committed, HEAD is the refactored page and this mode would be
-  // comparing it against itself. Refusing beats printing two matching columns
-  // under a heading that says they should differ.
+  // Once step 1 is committed, HEAD is the refactored page and this mode would compare
+  // it against itself.
   if (before.includes('LiveTransport')) {
     throw new Error(
       `${BEFORE_REV}:web/main.js already contains the transport - pass an earlier `
@@ -227,16 +185,11 @@ async function clockCheck(context) {
     const runs = [];
     for (let i = 0; i < 3; i++) {
       const page = await context.newPage();
-      // The frameless condition is enforced rather than hoped for. An earlier
-      // version of this check only asserted "no frame ever arriving" in its own
-      // header while leaving the socket to whatever the server happened to be
-      // doing, and running it against a live --replay flipped its verdict between
-      // consecutive runs on an unchanged tree. Intercepting the socket without
-      // connecting it upstream means the page opens one, as it always does, and
-      // no frame can reach it whatever the server is serving.
+      // The frameless condition is enforced rather than hoped for: intercepting the socket without
+      // connecting it upstream means no frame can reach the page whatever the server is serving.
       await page.routeWebSocket(/.*/, () => { /* accepted, never connected */ });
-      // The old page is served exactly as it was committed. Instrumenting it to
-      // read pixels back would mean measuring code that never shipped.
+      // The old page is served exactly as committed; instrumenting it would measure code
+      // that never shipped.
       if (source) {
         await page.route('**/main.js', (route) => route.fulfill({
           contentType: 'text/javascript; charset=utf-8', body: source,
@@ -245,12 +198,8 @@ async function clockCheck(context) {
       await page.goto(URL_BASE + RECORDER_PATH, { waitUntil: 'load' });
       await page.waitForFunction(() => !!globalThis.__kinect);
 
-      // Proof that the interception held, independent of the reading it protects.
-      // The sensor's hello carries fx as 366.031494 and both pages default the
-      // uniform to exactly 366, so the default still standing means nothing came
-      // over the socket. Without this the check would quietly go back to measuring
-      // the server the day the pattern stops matching, which is the failure it was
-      // just repaired for - and it would look like a pass.
+      // Proof that the interception held, independent of the reading it protects: the sensor's
+      // hello carries fx as 366.031494 and both pages default the uniform to exactly 366.
       const focal = await page.evaluate('globalThis.__kinect.uniforms.focal.value.x');
       if (focal !== 366) {
         throw new Error(`websocket interception failed - intrinsics arrived (focal.x=${focal})`);
@@ -274,9 +223,8 @@ async function clockCheck(context) {
   const oldPage = await sample(`before (${BEFORE_REV})`, before);
   const newPage = await sample('after  (worktree)  ', null);
 
-  // Every load distinct at the first mark says the value is not a property of the
-  // footage. Movement between the two marks, with no frame having arrived, says
-  // what it is a property of instead.
+  // Distinct at the first mark says the value is not a property of the footage; movement between
+  // the marks says what it is.
   const distinct = new Set(oldPage.runs.map((r) => r[0].toFixed(6))).size === 3;
   const oldDrift = Math.min(...oldPage.drift);
   const newDrift = Math.max(...newPage.drift);
@@ -292,12 +240,9 @@ async function clockCheck(context) {
   return pass;
 }
 
-// ------------------------------------------------------------------ the check
-
 const { chromium } = await loadPlaywright();
-// The full chromium build rather than the headless shell: the shell can land on
-// SwiftShader, which has no EXT_color_buffer_float, and a run that silently fell
-// back to a software rasteriser would agree with itself for the wrong reason.
+// The full chromium build rather than the headless shell: the shell can land on SwiftShader,
+// which has no EXT_color_buffer_float, so the run would agree with itself for the wrong reason.
 const browser = await chromium.launch({ channel: 'chromium', headless: !HEADED });
 const context = await browser.newContext({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
 
@@ -330,19 +275,8 @@ async function openPage() {
   }
   if (!gpu.colorBufferFloat) throw new Error('no EXT_color_buffer_float: the surface memory is not running at float');
 
-  // Blackwall, read out of the document that ships it rather than clicked or typed in
-  // here, so no look value is invented by this file. It is the one preset that switches
-  // on both accumulators at once, which is the only reason this section names a look at
-  // all - `trails` drives the afterimage buffer and `fade`/`wake` drive the surface
-  // memory, and a determinism claim that exercised neither would be about a simpler
-  // renderer than the one that ships.
-  //
-  // It used to be a click on `#modes button[data-mode="4"]`, and the button is gone: the
-  // reading is five weights in the registry now. Reaching for `readBlackwall` alone would
-  // have been the mechanical translation and the wrong one - it selects the crimson
-  // shading and leaves bloom, trails, rgbSplit, scanlines, grain and glitch at zero, so
-  // the two accumulators this section exists to drive would both be switched off while
-  // the line above still claimed they were on.
+  // Blackwall, read out of the document that ships it rather than typed in here. It is the one
+  // preset that switches on both accumulators at once, which is why this section names a look.
   await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(BLACKWALL_LOOK)})`);
 
   await page.evaluate(async () => {
@@ -351,8 +285,8 @@ async function openPage() {
       globalThis.__kinect.drive.pin(buffer);
       return;
     }
-    // The pre-refactor page has no pair source to install, so the frames are
-    // split here and pushed in one at a time instead.
+    // The pre-refactor page has no pair source to install, so the frames are split and
+    // pushed one at a time.
     const view = new DataView(buffer);
     const frames = [];
     for (let off = 0; off + 16 <= buffer.byteLength;) {
@@ -366,8 +300,7 @@ async function openPage() {
   return { page, errors, gpu };
 }
 
-// Called immediately rather than handed over as a function: playwright evaluates
-// a string as an expression, so a bare arrow would come back as undefined.
+// Called immediately rather than handed over: playwright evaluates a string as an expression.
 const runOn = (page, tailOnly = false) => page.evaluate(
   `(${runAfter})(${JSON.stringify({ substeps: SUBSTEPS, tailOnly })})`,
 );
@@ -380,23 +313,16 @@ console.log(`[determinism] buffer ${first.gpu.buffer.join('x')}  `
 const runA = await runOn(first.page);
 const runB = await runOn(first.page);
 
-// The control. The same program position, reached without rendering the frames
-// before it, must produce a different image - otherwise the feedback paths are
-// contributing nothing and the agreement above is agreement about an easier
-// problem. Repeating the run without a reset would be the more obvious control
-// and is now a contract violation the pinned source refuses, correctly: there is
-// no way to walk the accumulators backwards.
+// The control. The same program position, reached without rendering the frames before it, must
+// produce a different image - otherwise the feedback paths are contributing nothing.
 const runD = await runOn(first.page, true);
 
-// A fresh page is a fresh GL context, fresh render targets and a fresh clock, so
-// it is the run that would catch a result that only held because the page had
-// been left sitting in the state a previous run put it in.
+// A fresh page is a fresh GL context, fresh render targets and a fresh clock, so it catches a
+// result that only held warm.
 const second = await openPage();
 const runC = await runOn(second.page);
 
 await browser.close();
-
-// ------------------------------------------------------------------- verdict
 
 const hashes = (r) => r.out.map((f) => f.hash);
 const compare = (x, y) => {

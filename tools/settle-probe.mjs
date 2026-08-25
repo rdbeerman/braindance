@@ -1,15 +1,6 @@
-// Does settle()'s drain scale with the take rather than with the buffer ceiling?
-//
-// The comment above it says the queue "only holds frames not yet durable, so it is
-// bounded by the buffer ceiling above rather than by the length of the take". This
-// reproduces the drain against the real shape - a monotonic list of frame end
-// offsets, drained with shift() - at four take lengths, interleaved rather than in
-// increasing order, because a sequential ramp on this rig has produced a wrong
-// number before and a growing array is exactly where allocator warmup would show up.
-//
-// Falsification control: the same lengths drained through a head index instead of
-// shift(). If the shift figures are quadratic and the index figures are linear, the
-// cost is the drain rather than the loop or the measurement.
+// Does settle()'s drain scale with the take rather than with the buffer ceiling? Reproduces
+// the drain against the real shape at four take lengths, interleaved rather than in
+// increasing order. Control: the same lengths drained through a head index instead of shift().
 
 const FRAME = 486 * 1024;
 const LENGTHS = [27_000, 54_000, 108_000, 216_000];
@@ -21,7 +12,7 @@ function buildQueue(n) {
   return q;
 }
 
-// The drain exactly as server/recorder.js:88 has it.
+// The drain exactly as server/recorder.js has it.
 function drainByShift(inFlight, written) {
   let frames = 0;
   while (inFlight.length && inFlight[0] <= written) {
@@ -45,8 +36,7 @@ function drainByIndex(inFlight, written) {
 const results = new Map();
 for (const n of LENGTHS) results.set(n, { shift: [], index: [] });
 
-// Interleaved: every repetition visits every length, and the two implementations
-// alternate within it, so allocator state and GC pressure land on both arms alike.
+// Interleaved, so allocator state and GC pressure land on both arms alike.
 for (let rep = 0; rep < REPS; rep++) {
   for (const n of LENGTHS) {
     const written = n * FRAME;

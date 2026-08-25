@@ -106,15 +106,15 @@ node tools/registry-check.mjs --mutate margins-confined-to-glyphs # ... the same
                                                                   #     wrong fix the character section cannot refuse
 node tools/registry-check.mjs --mutate margins-miss-the-newborn   # ... and narrowed the other way, to the disc's rim and not
                                                                   #     the point that has not faded in yet
-node tools/timeline-check.mjs --url http://localhost:8080 # step 4: seek equals playback
-node tools/timeline-check.mjs --mutate preroll-constant   # ... and must FAIL mutated
-node tools/timeline-check.mjs --mutate draft-always-resets # ... and must FAIL mutated
-node tools/timeline-check.mjs --mutate reading-write-skips-repaint # ... and must FAIL mutated
-node tools/timeline-check.mjs --mutate rain-accumulates   # ... the rain integrated frame to frame, so a seek lands
+node tools/timeline-check.mjs --url http://localhost:8080 --take fixture-1g # step 4: seek equals playback
+node tools/timeline-check.mjs --take fixture-1g --mutate preroll-constant   # ... and must FAIL mutated
+node tools/timeline-check.mjs --take fixture-1g --mutate draft-always-resets # ... and must FAIL mutated
+node tools/timeline-check.mjs --take fixture-1g --mutate reading-write-skips-repaint # ... and must FAIL mutated
+node tools/timeline-check.mjs --take fixture-1g --mutate rain-accumulates   # ... the rain integrated frame to frame, so a seek lands
                                                           #     where playback never would. Its section applies a
                                                           #     rain-raised look of its own, because every other arm
                                                           #     in that file renders the term completely inert
-node tools/timeline-check.mjs --mutate rain-phase-unread  # ... and the same clock written correctly and read by
+node tools/timeline-check.mjs --take fixture-1g --mutate rain-phase-unread  # ... and the same clock written correctly and read by
                                                           #     nothing, which both arms agree about perfectly. It is
                                                           #     the control for the guard rather than for the claim:
                                                           #     what reddens is the row that moves the clock alone
@@ -663,7 +663,34 @@ node tools/effect-check.mjs --mutate adopt-outside-the-transaction # ... the ado
 node tools/effect-check.mjs --mutate a-broken-shader-is-warm # ... the throw dropped from the end of the warm, leaving a link
                                                           #     failure where three.js puts it: a console line. The install
                                                           #     succeeds, the poll announces success, and the cloud draws
-                                                          #     nothing. Reddens two rows of section 9
+                                                          #     nothing. Reddens **six** rows, measured, all in
+                                                          #     section 9: the two the mutation is about - the rebuild
+                                                          #     reporting success and the broken line reaching the
+                                                          #     assembled program - and the four under them, which are
+                                                          #     the quarantine not happening because there is no longer
+                                                          #     a link failure to mark
+node tools/effect-check.mjs --mutate a-link-failure-is-not-quarantined # ... the throw and its mark left exactly where
+                                                          #     they are and the one call that acts on them dropped,
+                                                          #     which is the build this replaced. The page still
+                                                          #     refuses the package, still rolls back and still says
+                                                          #     which shader did not compile - and the package sits in
+                                                          #     the store afterwards, so the next browser to open
+                                                          #     compiles it at boot, outside any transaction, and dies
+                                                          #     there. Reddens **four** rows, measured, all in section
+                                                          #     9, and the third is the point: the fresh page comes
+                                                          #     back `no __kinect published`
+node tools/effect-check.mjs --mutate any-failure-is-quarantined # ... the mark test dropped and the call kept, so every
+                                                          #     failure the rollback catches reaches the refusal route.
+                                                          #     This is the direction the fix does damage in rather
+                                                          #     than merely fails in, and the page reads correctly
+                                                          #     through all of it - the refusal is right, the sentence
+                                                          #     is right, the rollback is right, and a package nothing
+                                                          #     is wrong with has been renamed out of the way behind
+                                                          #     them. Reddens **three** rows, measured, and only the
+                                                          #     first is a finding: section 6 asks the store whether
+                                                          #     the fork the completeness rule refused is still
+                                                          #     installed, and it answers 404. The two under it are
+                                                          #     section 9's aside count seeing two where it expects one
 node tools/effect-check.mjs --mutate the-sweep-eats-the-last-copy # ... the sweep removing every aside it finds and the recovery
                                                           #     pass removed with it, so a crash between an install's two
                                                           #     renames loses the package to the next install of that id.
@@ -762,6 +789,17 @@ node tools/monitor-check.mjs --mutate colour-off-keeps-the-texture # ... the clo
 node tools/sensor-view-check.mjs                          # the intrinsics a take was shot with, against a build that assumes them
 node tools/sensor-view-check.mjs --mutate fov-hardcoded   # ... and must FAIL mutated
 node tools/sensor-view-check.mjs --mutate no-repaint      # ... and must FAIL mutated
+node tools/sensor-view-check.mjs --mutate tanv-uses-fx    # ... the vertical half-angle taken off `fx` rather than
+                                                          #     `fy`, which is the one substitution a square sensor
+                                                          #     would hide. Bit-identical on every take and on arm B,
+                                                          #     so it is the control saying arm C is load-bearing
+node tools/sensor-view-check.mjs --mutate sensor-view-keys-camera # ... the sensor-view button writing a camera key as
+                                                          #     well as moving the view, so a look at the intrinsics
+                                                          #     becomes an edit to the clip
+node tools/sensor-view-check.mjs --mutate keyframes-on-every-surface # ... the key button built whether or not the
+                                                          #     surface is the editor. It must redden the recorder
+                                                          #     rows and leave the editor's alone, or it cannot say
+                                                          #     which of the two broke
 node tools/level-check.mjs                                # levelling: the room turns, and the crop, the top-down and the sensor view keep their meaning
 node tools/level-check.mjs --mutate tilt-ignored          # ... and must FAIL mutated
 node tools/level-check.mjs --mutate crop-follows-tilt     # ... and must FAIL mutated
@@ -1659,6 +1697,58 @@ and charge every proof tool in this repo for its own localhost connection. Forci
 `return this.describe()` reddens three rows — the section 1 one by name, and the two in section
 3 that need a take to start with a loopback webcam attached.
 
+**`monitor-check`** spawns its own server on 8341 and needs none running, but it needs a
+capture at `captures/sample.knct` to stream and a GPU browser for its renderer sections
+(`--no-browser` drops them and says `UNTESTED` rather than passing quietly). Read its three
+`....  waited Nms after load for ...` lines before you read its rows: each is what one
+browser section waited for its page to publish before driving anything, printed rather than
+asserted because there is no threshold here worth gating on, and the number is the headroom
+a slower machine has left. On an idle Mac they run 15 to 18ms, 92 to 94ms and 60 to 68ms.
+**A wait that runs out there is not a row.** The two decimation sections let it throw, so the
+run ends `DID NOT RUN` naming what never arrived — which is what stops a `--mutate` run
+counting a viewer that never came up as the mutation being caught. Only the colour section
+turns it into a failed row, because there "the page never booted" and "colour never arrived"
+are different findings and it is the one place that can tell them apart.
+
+**Its renderer section rebuilds the capture index every run, and that is deliberate**: it
+symlinks the sample into its own staged tree, so the sidecar the first open builds lands
+there and is deleted with it. Warming `captures/sample.idx` therefore does not reach that
+section — it reaches the `--replay` server in the section above, which serves the repo's own
+capture. So a red `the frame API served frame 7 of the sample at every divisor this compares`
+is a server still indexing 138MB rather than a finding about decimation, and it is the row to
+suspect first on a contended machine now that the boot sleep no longer stands between the
+page load and that fetch. Stated rather than measured: that row passed on all six runs behind
+this paragraph, and every one of them was on an idle machine.
+
+**`export-check` has the same shape and a bigger number: 10 of its 66 rows are red on the
+synthetic sample and none of them is about the build.** Nine are the resolution-invariance
+family — `trails`, `rgbsplit`, `scanlines`, `grain`, `bloom`, `nobloom`, `full`, `regionpush`
+and `regionmask` each asking that 1920x1200 is 960x600 at twice the size — and the tenth is the
+crop's cull row. They compare fine structure and coarse means between two renders of the same
+look at two sizes, and `make-sample`'s three surfaces carry no depth jitter and no sensor noise,
+so the structure those rows correlate is aliasing rather than anything in the room. Measured
+against a clean checkout of the merge commit `3b7ab90` and again on the effects branch: **the
+same ten rows, at identical numbers to four figures** — `trails` at a coarse mean of 2.732 on
+both, the crop row at 110 revealed and 314,021 lit against 410,577 released on both. That
+identity is the useful part rather than the count: a change that moved any screen-space term
+would move these numbers, so reading them as equal is a stronger statement than reading them as
+red. Take the baseline before believing this tool has found something, and compare the numbers
+rather than the pass count.
+
+**`registry-check`'s crop and snap rows are placed against a capture, and `make-sample`'s is
+not that capture.** The scrambled set authors `near` 0.35 and `far` 4.2 and places the four
+lateral faces against a cloud running x [-2.31, 2.97] and y [-2.26, 1.63], while
+`tools/make-sample.mjs` builds its back wall at z = 3.2m and its sphere at 1.55m with a 0.28m
+radius — so the whole synthetic cloud sits inside the depth pair and there is nothing for it
+to cut. Run against the synthetic sample the tool therefore comes back **FAIL (3)** on a tree
+with nothing wrong with it: the drop-one sweep reports `unexplained: bottom snapDelta`, the
+count lands at `92 of 97 parameters are proven to reach the pixels`, and the crop's second row
+reports `identical with only near/far authored`. All three are the fixture rather than the
+build, and `snapDelta` at 410 is the same shape — a threshold the synthetic motion never
+crosses. Measured on a clean checkout of the merge commit `3b7ab90`, so a run of this tool
+that reports three reds and these three sentences has found nothing. A machine holding real
+footage sees them pass, and a change that takes the count past three has moved something.
+
 **`guard-check`** spawns its own servers and needs none running. It exits 2 when the machine has
 no non-internal IPv4, because "not listening on the network" is only a claim if there is a
 second address a client could have arrived on. Every refusal it asserts has a positive twin, so
@@ -2495,8 +2585,8 @@ property key is, so a keyword at column zero that depth calls nested reddens a r
 file. The arm is planted rather than argued about, and it uses the one case the lexer leaves
 ambiguous on purpose — a `/` after `}`, read as division, which scans the pattern's body as code
 and counts the `{` inside it. Probed by deleting the `depth--` from the closing brace: the row
-names `web/curve.js:194` and `web/scene.js:152`, which are the two `export { … }` lists that
-would otherwise have vanished.
+names the trailing `export { … }` lists in `web/curve.js` and `web/scene.js`, which are the two
+that would otherwise have vanished.
 
 **The exemption table cannot rot, and both halves of that needed an arm.** Every entry has to
 still name something this tree exports *and* still cover something a rule flagged — an entry
@@ -2651,7 +2741,7 @@ tree it fails, and telling a definition from a reference needs a scope analysis 
 search.
 
 **Its first catch was real, and it arrived one commit late.** On the tree as it stood after the
-six imports came off, the export half reddened `web/curve.js:66`: `easeSlopeAt` was let out
+six imports came off, the export half reddened `easeSlopeAt` in `web/curve.js`: it was let out
 through the trailing export list, its last importer was the dead import in `main.js`, and removing
 that one left an export with no consumer anywhere in the checkout. Fixed by taking the name off
 the list — `scalarSlopeAt` calls the function four lines down, so it is a name coming off a
@@ -2677,6 +2767,8 @@ with anything. The names are enumerated and the tools are not. The ten that are 
 need something
 the sweep does not currently arrange - a private server, a GPU browser, a built prefix - so
 wiring them is real work rather than a longer array.
+Replay runs use `fixture-1g`; set `SWEEP_TAKE` when the server names another take that satisfies
+both tools' duration floors.
 
 ## `editor-check` is three rows red at `7cb273d`, and they are not yours
 
@@ -2815,29 +2907,30 @@ than 30.** So size fixtures by *frame count*, not duration: five minutes of its 
 rewritten monotonic stamps — real depth and real JPEGs, only the u64 at payload offset 8 moves.
 Say so whenever a number rests on one.
 
-**And no page can tell you which sample a checkout has, which is why two tools now refuse a
+**And no page can tell you which sample a checkout has, which is why three tools now refuse a
 take instead of assuming one.** `captures/` is gitignored, so every sentence written here about
 "the sample" describes a file the next machine may not hold — and they have already disagreed.
 The paragraph above says 9.3fps; `keyframe-check`'s header said 284 frames over 30.36s and its
 section 6d said 49.79s; the file in this tree is 284 frames over **9.42s at 30.03fps**. One
 frame count, four durations, all of them written down as facts.
 
-The damage is not the prose. `editor-check` seeks to 30s and `keyframe-check` retimes through
-source 20s, and on a 9.42s take every one of those clamps: **ten rows redden in `editor-check`
-and four in `keyframe-check` against a build with nothing wrong with it**, and — the half worth
-fearing — two more `keyframe-check` rows *pass*, because the key they drag has left the ruler
-and a gesture that never happened also never slid a key under its neighbour. Seven of the ten
-and all four of the four go green on a 75.6s fixture with nothing in `web/` changed.
+The damage is not the prose. `timeline-check` targets 12s, `editor-check` seeks to 30s and
+`keyframe-check` retimes through source 20s. On a 9.42s take every one clamps: one row reddens in
+`timeline-check`, ten in `editor-check` and four in `keyframe-check` against a build with nothing
+wrong with it. The quieter half is that two more `keyframe-check` rows *pass*, because the key they
+drag has left the ruler and a gesture that never happened also never slid a key under its
+neighbour. The long fixture makes those fixture failures go away with nothing in `web/` changed.
 
-So both declare a `NEEDS_TAKE_SEC` and exit 2 naming the shortfall, in the same direction and
+So all three declare a `NEEDS_TAKE_SEC` and exit 2 naming the shortfall, in the same direction and
 for the same reason as `requireMutationDelivered`: a red row reads as a catch, so a fixture
 that cannot hold the gesture has to be the harness declining. The declaration is held against
 the file's own literal seek targets by a scan of its own source, so a row added later that
-seeks deeper cannot quietly fall outside it. **The control for both is `--take sample`**: exit
+seeks deeper cannot quietly fall outside it. **The control for all three is `--take sample`**: exit
 2 with nothing asserted, where the same command used to run to the end and report failures.
 
 ```
 node tools/make-fixture.js captures/sample.knct captures/fixture-1g.knct --loops 8
+node tools/timeline-check.mjs --url http://localhost:8080 --take fixture-1g
 node tools/editor-check.mjs   --url http://localhost:8080 --take fixture-1g --no-render
 node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g
 ```

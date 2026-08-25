@@ -90,6 +90,12 @@
       "type": "float",
       "init": "0.0",
       "order": 100
+    },
+    {
+      "name": "vCellT",
+      "type": "float",
+      "init": "0.0",
+      "order": 101
     }
   ],
   "consumes": [

@@ -1,64 +1,6 @@
 // Proves the export: that the look is resolution-relative, that an exported frame
 // is the frame the editor showed, that no wall clock reaches the render, and that
 // the file ffmpeg produced is the one that was asked for.
-//
-// Six claims, separated because they fail for different reasons.
-//
-// **The take's intrinsics come from the take.** Cheapest, and first, because
-// everything below renders geometry. The tool reads the hello out of the capture
-// itself and asserts the page's uniforms carry it - and asserts they are *not* the
-// boot defaults, because an assertion that only compared two numbers would pass on
-// a page that had fetched nothing if the defaults happened to be right.
-//
-// **The look is resolution-relative, and was not.** The claim the whole step order
-// exists for. The same pinned scene is rendered at a 960x600 and a 1920x1200
-// drawing buffer - the document's own pair - the 2x arm is box-downsampled, and
-// both are reduced again to a common coarse grid so per-pixel rasterisation
-// aliasing is not mistaken for a look that moved. The control is the build at
-// HEAD, served into a second page and put through the identical measurement: it
-// has to differ, or an equality between two arms that both did nothing would read
-// as a pass. Measured per term rather than only on the finished frame, because
-// "the image is close enough" hides which term is wrong - and reverting any single
-// one of them inside a cumulative table moved that table by less than its own
-// sampling residual, so all three grade mutations passed until each term got a row
-// of its own.
-//
-// **An exported frame is the frame the editor showed.** Not "looks like": the
-// server hashes every frame that crosses the wire, the page hashes what its own
-// seek to the same program time put on screen, and the two hashes have to be
-// equal. Bit-exact rather than within a tolerance, because on this machine they
-// are - a seek, a playback walk and an export at the same position produce
-// byte-identical images, and asserting the weaker thing would leave room for a
-// second render path that nearly agrees.
-//
-// **Export needs no wall clock.** The same export run twice in two separate page
-// loads, compared on the hash of the raw RGBA stream the browser produced and on
-// the bytes of the file. Two page loads rather than two runs in one, because a
-// second run in the same page inherits module state the first left behind, and
-// the claim is about the render rather than about that.
-//
-// **The file has the frames, the duration and the rate.** Probed by decoding
-// rather than by reading the container's own header - `nb_frames` is a field the
-// muxer writes and may leave empty, so counting it is trusting the command line
-// one level further down. The lossless arm goes further and decodes every frame
-// back to raw RGBA to compare against the hashes of what the browser sent, which
-// makes orientation, channel order, frame order and frame count one assertion
-// instead of four proxies.
-//
-// **A failed export leaves the last good one alone.** The only claim that does not
-// go through a browser, because the failure path it is about lives in the server
-// and a served page cannot reach it: the module is imported into a WebSocket server
-// of this tool's own and driven from Node. Two ways of failing, an encoder that
-// dies mid-write and one that never starts, because the code this replaced deleted
-// the previous export's file on both of them.
-//
-//   node server/index.js --port 8080 --replay captures/sample.knct &
-//   node tools/export-check.mjs --url http://localhost:8080
-//   node tools/export-check.mjs --mutate pointsize-absolute   # must FAIL
-//
-// The fixture is the sample capture: 284 frames over 30.36s, median gap 64ms,
-// mean 9.32fps. Every figure below is against that cadence rather than against a
-// 30fps take nobody recorded.
 
 import { readFileSync, readdirSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -79,32 +21,17 @@ const flag = (name, fallback = null) => {
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const URL_BASE = flag('--url', 'http://localhost:8080');
 
-// The shipped Blackwall look, read out of the document that ships it. Every arm below
-// that used to say `setMode(4)` needs these twelve values and not just the crimson
-// shading: bloom, trails, rgbSplit, scanlines and grain are the terms the grade rows
-// measure, and a row that selected the reading alone would be measuring all five at
-// zero while reporting on them by name. That is the dead-zone failure this file has
-// already recorded three of, so the look comes from the product rather than from a
-// list typed in here that could quietly stop matching it.
 const BLACKWALL_LOOK = JSON.parse(
   readFileSync(new URL('../presets-builtin/blackwall.json', import.meta.url), 'utf8'),
 ).values;
-// The editor, which `/?take=` opened until the main menu took `/`. Named once
-// because the page is opened at it and the cross-build arm's markup is
-// intercepted by it, and those two have to agree or the interception misses.
+// The editor. Named once because the page is opened at it and the cross-build arm's
+// markup is intercepted by it, and those two have to agree or the interception misses.
 const EDITOR_PATH = '/edit';
 const TAKE = flag('--take', 'sample');
 const HEADED = argv.includes('--headed');
 const MUTATE = flag('--mutate');
-// Not HEAD, for the same reason registry-check resolves one: the moment this step is
-// committed, HEAD contains the reference scaling and the control arm would be the same
-// build twice. The refusal below would catch it loudly, which is better than a silent
-// pass and worse than not needing catching.
-//
-// Not a literal hash either, which is what this was until preparing the repository for
-// release rewrote the history and every pinned SHA stopped resolving - see the longer
-// note in registry-check. A marker is content, so it survives the rewrite that identity
-// does not.
+// Not HEAD: the moment this step is committed HEAD contains the reference scaling and the
+// control arm would be the same build twice. A marker survives a history rewrite.
 const BEFORE = flag('--before') ?? revBeforeMarker('bufferHeight / 1080.0');
 
 function revBeforeMarker(marker) {
@@ -117,197 +44,57 @@ function revBeforeMarker(marker) {
   }
   return `${introduced}^`;
 }
-// Bare names, resolved through PATH, because an absolute Homebrew default is a macOS
-// path on a project that also ships to Linux and the Pi - and `jobs-check` two files
-// over has always spawned a bare `ffprobe`, so the pair disagreed about where ffmpeg
-// lives while claiming to test the same pipeline. The flags stay for the case the
-// default cannot serve: a second ffmpeg, or one deliberately off the path.
+// Bare names, resolved through PATH, because an absolute Homebrew default is a macOS path
+// on a project that also ships to Linux and the Pi, and `jobs-check` spawns a bare ffprobe.
 const FFMPEG = flag('--ffmpeg', 'ffmpeg');
 const FFPROBE = flag('--ffprobe', 'ffprobe');
 const SHOTS = flag('--shots');
 
-// The editor's stage for every claim that is not about resolution, and it is the
-// export's output size too - so the arm that exports and the arm that seeks are
-// rendering into the same drawing buffer and no resize sits between them.
-// 16:9, and the shape is the part that matters. This was 640x400 - 8:5, a shape
-// `EXPORT_SIZES` offers no resolution for - so this file framed its editor at something
-// `restoreProject` now refuses, and passed only because it never restores a project. That
-// is a fact about this file rather than a safe state: `keyframe-check` had the same line,
-// did restore one, and died mid-run on its own snapshot. All four tools that wanted a cheap
-// small stage ask for a shape the product offers now.
+// The editor's stage for every claim that is not about resolution, and the export's output
+// size too, so no resize sits between the arm that exports and the arm that seeks. 16:9,
+// which is a shape `EXPORT_SIZES` offers a resolution for.
 const STAGE = { width: 640, height: 360 };
-// A starting guess at the timeline strip's height, and only a guess - `setStage`
-// measures the real one off the page and corrects the viewport.
-//
-// **It used to be a constant, and that is the third time a strip-height change has
-// arrived in a tool as a ten-second timeout that names nothing about the strip.** The
-// bar became two rows, `--timeline-h` went 104 to 148, and this file - which never
-// mentions the timeline except here - hung in `setStage` waiting for a buffer height
-// the fit had made 44px shorter. `docs/instruments.md` records the same shape when
-// the stage was first letterboxed and four tools found out one at a time. Measuring
-// closes it: the next change to the strip is absorbed instead of discovered. It is
-// deliberately not asserted against `--timeline-h` either - a tool that had to be
-// edited whenever the strip grew is the copy that went stale here once already.
+// A starting guess at the timeline strip's height, and only a guess - `setStage` measures
+// the real one off the page and corrects the viewport.
 const TIMELINE_H_GUESS = 148;
 
-// The document's own pair. Same 1.6 aspect, an exact 2x so the downsample is a
-// clean box filter, and a 960x704 viewport at deviceScaleFactor 1 gives exactly
-// the 960x600 buffer the resolution finding was measured at.
 const SMALL = { width: 960, height: 600 };
 const BIG = { width: 1920, height: 1200 };
-// The reference height itself, at the same 1.6 aspect, for the cross-build arms.
-// 1728x1080 rather than 1920x1080 because the arm it is compared against is
-// 960x600, and two images of different aspect are two different framings.
 const REF = { width: 1728, height: 1080 };
 
-// The one arm that is not 1.6, and the aspect is the whole reason it is here.
-// `bufferWidth / 1728` and `bufferHeight / 1080` are the same number at 1.6 - the
-// same number, not merely close - so every other arm in this file is blind by
-// construction to a reference taken from the width, while every size the export
-// menu offers (1920x1080, 1280x720, 960x540, 3840x2160) is 16:9, where the two
-// differ by 11.1%. This is the reference height itself at 16:9, so the correct k
-// is exactly 1 here and a width-referenced one is 1.1111, and it divides the 8x5
-// grid evenly - 240x216 tiles - so no tile straddles a pixel.
+// The one arm that is not 1.6, and the aspect is the whole reason it is here: at 1.6 a
+// reference taken from the width over 1728 and one taken from the height over 1080 are the
+// same number, so every other arm is blind by construction to the wrong one.
 const HD = { width: 1920, height: 1080 };
-// And the same question at a non-16:9 aspect, because the 16:9 arm does not cover
-// the delivery the export menu also offers. 1440x1080 is 4:3, still 1080 tall so
-// a height-referenced build has k=1 here too, but a width-referenced one has
-// k = 1440/1728 = 0.8333. The grid divides evenly: 180x216 tiles.
 const NON_169 = { width: 1440, height: 1080 };
-// Asked of both builds as one drawn size, which is what makes that arm a comparison
-// of two images rather than of two arithmetics: 8 reference pixels at k=1 on this
-// build against 8 framebuffer pixels on a build that has no k. A multiple of the old
-// build's 0.5 registry step as well as of this one's 0.1, so neither snaps it - and
-// the arm reads both back rather than trusting that.
-//
-// The value is where it is because the probe has to stand where an 11% error is
-// visible, and most of this scene's range is not that place. Splats overlap into a
-// surface, so past a certain size growing every one of them by 11% only moves the
-// silhouettes: measured under `scale-by-width` at this same buffer, 22px moves the
-// lit fraction by 0.4% and 13.5px by 2.2%, while 8px moves it by 10.8% - the error
-// itself, near enough. The floor is the point-size clamp, which bites at 5.6 here
-// (the farthest drawn point is 5.6 times the nearest), and 8 draws 1.43..3.8px with
-// the precondition below measuring both ends rather than assuming them.
 const HD_POINT_SIZE = 8;
 
-// Program seconds the resolution arms are rendered at, and the range the export
-// claims are made over. 4.0s is inside the take and past its head, so the pre-roll
-// is a computed one rather than one the start of the clip truncated.
 const AT_SEC = 4;
 // What `pointSize` was multiplied by when it became pixels at 1080p: the reference
 // height over the 600-tall buffer the two presets were graded against.
 const GRADED_HEIGHT = 600;
 const POINT_SIZE_REBASE = 1080 / GRADED_HEIGHT;
 
-// The look the cross-build arms compare, and neither value is a look choice. No
-// `pointSize`: each build keeps its own preset, which is the thing being compared.
-// `far` at 2.8 pulls the far cloud in until the *old* build clears the lower
-// point-size clamp at a 600 buffer - at 4.0 it draws 0.80px points there, and a
-// comparison partly about the clamp would say nothing about the rebase.
 const REBASE_LOOK = { far: 2.8, near: 0.05 };
 
-/**
- * The same look with the glow taken out, for the two arms that put the *whole* graded
- * look through both builds.
- *
- * **The two builds have not had the same bloom since `124a90b`.** That commit replaced
- * three's `UnrealBloomPass` with `BloomPass` in `web/bloom-pass.js` - ten draws against
- * thirteen, a progressive down-and-up resample against a Gaussian per mip - and the
- * pinned build these arms play imports three's and always will, because it is a
- * revision rather than a tree. So a `rebase-full` arm with the glow up is not one look
- * through two references, it is two different passes, and the number it reports is the
- * difference between them rather than anything about the rebase.
- *
- * Measured on this tree with both builds at the same 960x600 buffer, so that resolution
- * is out of the comparison entirely: at Blackwall's `bloom` of 0.5 the mean luminance is
- * 7.1614 here against 17.3797 there - a ratio of 0.41205 and a worst tile of 45.649/255 -
- * and at `bloom` 0 it is 5.0925 against 5.0581, a ratio of 1.00679 and a worst tile of
- * 0.337. The whole 2.4x is that one term. Dated by running this file at the two commits
- * on one machine with one capture: `124a90b^` reads 0.99312 and 0.99403 on the two rows
- * and `124a90b` reads 0.40978 and 0.40931.
- *
- * **What the exclusion costs, and what still holds it.** Bloom's resolution independence
- * is the `bloom` and `full` rows of the sweep above, which compare 960x600 against
- * 1920x1200 on this build alone at a 0.03 band, and `bloom-buffer-sized` fails both by
- * 6.5x and 8.1x - so the reference the chain is frozen at keeps its catcher and never
- * depended on these two rows. What nothing here can hold is bloom's *absolute*
- * appearance across the swap, which `docs/performance.md` already records as thin. So the
- * rows below take the bloom-up ratio as well and print it whether they pass or fail: an
- * object every observation skips is this file's most expensive habit, and a term left out
- * of a comparison has to leave a number behind rather than a sentence.
- */
 const REBASE_FULL_LOOK = { ...REBASE_LOOK, bloom: 0 };
 const EXPORT_FRAMES = 8;
 const EXPORT_FPS = 30;
 
-// The clip the resolution arms use. Neither value is a look choice. `far` at 4.0
-// bounds how far the drawn cloud reaches, and `pointSize` at 12 is what lifts the
-// farthest point above one pixel at the smaller of the two sizes: at Blackwall's
-// own 8.1 the frame measures 0.80..2.1px at a 600 buffer, so the far cloud sits on
-// the lower clamp and the comparison would be partly about the clamp. The
-// precondition below measures both ends of the drawn frame and fails rather than
-// assuming - it is what found the 0.80.
 const RES_LOOK = { far: 4.0, near: 0.05, pointSize: 12 };
 
-// ------------------------------------------------------------------- thresholds
-//
-// Measured rather than chosen, and stated per pass because the passes differ.
-// Every number is a mean absolute channel difference out of 255 on the coarse
-// grid, or a ratio of mean luminance between the two sizes.
-//
-// The residual that is left is sampling, not look: a 2x render box-downsampled is
-// a better estimate of the same continuous image than the 1x render is, so the two
-// cannot be bit-equal however correct the look is, and the smaller of the two sizes
-// is the aliased one. Measured on this pair, on this tree, with the pointSize 12
-// `RES_LOOK` below: the point pass lands at a fine mean of 1.013, a coarse mean of
-// 0.459 and a luminance ratio of 0.9999. One octave up - 1920x1200 against
-// 3840x2400, measured while this step was written and on the pinned Blackwall scene
-// rather than on this constant - the point pass alone came to 0.137, which is the
-// residual being sampling rather than look, said as a number.
-//
-// The two accumulating passes are looser and for a reason worth naming: the
-// afterimage is `max(new, damp * old)` and the tone map is `col / (1 + col)`, and
-// neither is linear, so the average of a 2x render is not the value either would
-// have produced from the average. That is arithmetic rather than a look that
-// drifted, and it is why the band widens as passes are added.
-// How far the control has to be outside the band, as a multiple of the tolerance
-// it is being held to. The control is not a second threshold - it is the *same*
-// predicate, required to be false - and this is only here so a control that failed
-// by a hair could not be recorded as the measurement working. HEAD lands at a
-// luminance ratio of 0.749 on the point pass and 0.160 on the full look against
-// tolerances of 0.02 and 0.04, so it is 12x and 21x outside.
+// Measured rather than chosen, and stated per pass because the passes differ. Every number is
+// a mean absolute channel difference out of 255 on the coarse grid, or a ratio of mean
+// luminance between the two sizes.
 const CONTROL_MARGIN = 5;
 
-// ------------------------------------------------------------------- mutations
-//
-// Each breaks exactly one claim. Most live under `web/` - nine in `web/main.js` and
-// ten across the modules split out of it - because that is what the page can be
-// served a different copy of, and two of those - the rate and the
-// flip - are about what the *file* ends up being, written as the browser lying to
-// the encoder rather than as the encoder misbehaving, which exercises the same
-// assertion from the only side a served page can reach.
-//
-// The last claim here is about the server's own failure path, which no served page
-// can reach at all, so each mutation names the file it edits and the claim that
-// needs a mutated server imports one instead of routing it through a browser. One
-// table rather than one per target: a mutation is a piece of source text and the
-// exactly-once refusal below is the whole safety property, so splitting the
-// namespace would only make it possible to have two rules about it.
 const MUTATIONS = {
-  // **The container kept and the stream swapped.** `prores` goes on writing a `.mov`,
-  // so the extension row and every path the sidecar builds are untouched, and only what
-  // is inside it moves - which is the half a row asking about the filename cannot see.
-  // Aimed at `server/export.js` rather than at the bundle because the codec table is the
-  // thing that decides, and the browser never sees it.
+  // The container kept and the stream swapped, so only what is inside the .mov moves.
   'prores-writes-h264': { file: 'server/export.js', edits: [[
     "    args: ['-c:v', 'prores_ks', '-profile:v', '3', '-pix_fmt', 'yuv422p10le'],",
     "    args: ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p'],",
   ]] },
-  // The sequence stops being a sequence: `frameExt` null is what `export.js` documents as
-  // the answer to "is this artifact a directory", so nulling it writes one animated file
-  // at the path the row expects a directory at. `readdirSync` then throws ENOTDIR, loudly,
-  // which is the direction this row is built to fail in - a PNG sequence that quietly
-  // became one file is the defect the count exists to refuse.
+  // The sequence stops being a directory: `frameExt` null writes one animated file at its path.
   'pngseq-writes-one-file': { file: 'server/export.js', edits: [[
     "    ext: 'pngseq',\n    frameExt: 'png',",
     "    ext: 'pngseq',\n    frameExt: null,",
@@ -317,10 +104,8 @@ const MUTATIONS = {
     'gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);',
     'gl_PointSize = clamp(pointSize * (1.0 / max(0.15, -mv.z)), 1.0, 64.0);',
   ]] },
-  // The additive normalisation reads the drawn size instead of the reference one,
-  // so the same look sums four times too bright at twice the resolution. Only the
-  // varying moves: the point size itself stays resolution-relative, which is what
-  // makes this a test of the normalisation rather than of the term above.
+  // The additive normalisation reads the drawn size, so the look sums four times too bright at
+  // twice the resolution.
   'vsize-framebuffer': { file: 'web/cloud-shader.js', edits: [[
     'vSize = gl_PointSize / k;',
     'vSize = gl_PointSize;',
@@ -332,112 +117,44 @@ const MUTATIONS = {
     `      float k = 1.0;
       vec2 ref = resolution;`,
   ]] },
-  // The bloom chain goes back to being sized against the drawing buffer, which is
-  // where the design had it and where its halo's width in frame-fractions halves
-  // every time the buffer doubles.
-  //
-  // **These two anchor in `web/bloom-pass.js` rather than in `resize`, and the text they
-  // patch is the arithmetic rather than the call.** The chain's size moved into
-  // `bloomChainSize` beside the pass whose baked tap count is the reason it is frozen at
-  // all; what each of these plants is what it always planted - a chain that follows the
-  // buffer, and a chain frozen at the wrong reference - written in that function's
-  // parameters instead of in `resize`'s local. The pair is the falsification control for
-  // the one number CLAUDE.md states twice, so it is named here rather than left to be
-  // inferred from a path.
+  // The bloom chain sized against the drawing buffer again, where its halo halves in width every
+  // time the buffer doubles.
   'bloom-buffer-sized': { file: 'web/bloom-pass.js', edits: [[
     `  const refWidth = (bufferWidth / bufferHeight) * 600;
   return { width: Math.max(1, refWidth / 2), height: 300 };`,
     '  return { width: Math.max(1, bufferWidth / 2), height: Math.max(1, bufferHeight / 2) };',
   ]] },
-  // The chain is frozen, but against 1080 rather than against the height the look
-  // was graded at. Resolution-independent and wrong: every output size gets the
-  // same halo, 1.8x tighter than Blackwall was ever tuned for. This is the one a
-  // per-size comparison cannot see, because both sizes agree about it.
+  // The chain frozen against 1080 rather than the height the look was graded at, so every output
+  // size gets the same halo.
   'bloom-reference-1080': { file: 'web/bloom-pass.js', edits: [[
     `  const refWidth = (bufferWidth / bufferHeight) * 600;
   return { width: Math.max(1, refWidth / 2), height: 300 };`,
     `  const refWidth = (bufferWidth / bufferHeight) * 1080;
   return { width: Math.max(1, refWidth / 2), height: 540 };`,
   ]] },
-  // There is no mutation here for the chain rows, and the attempt that was supposed to be
-  // one is worth naming so it is not re-derived.
-  //
-  // A control for `sameChain` has to diverge the two builds' chains *without* moving the
-  // picture, or the row it reddens cannot say which of its terms did the work. The
-  // candidate was `trail-gate-admits-zero`: the trail's gate is `damp > 0`, so admitting
-  // zero puts `AfterimagePass:on` in this build's chain and nowhere in the pinned build's,
-  // and three's `AfterimageShader` is `max(texelNew, texelOld * damp * when_gt(...))`,
-  // which at a damp of zero is algebraically `max(new, 0)` - the pass returning its input.
-  // The chain half worked exactly as designed, `RenderPass+AfterimagePass+OutputPass`
-  // against `RenderPass+OutputPass` on the three arms whose trail is zero. The picture
-  // half did not: the worst of forty tile means went from 0.602, 0.070 and 0.071 of 255
-  // to 42.502, 22.141 and 27.607, at a luminance ratio of 1.64. An enabled pass is another
-  // ping-pong through the composer's targets whatever its shader computes, so a pass that
-  // is an identity is still not free, and every one of those rows then failed on the
-  // tolerances as well as on the chain - a mutation caught twice over, proving nothing
-  // about either catcher.
-  //
-  // That generalises rather than being about the trail: **no product edit can diverge the
-  // chain and leave the pixels**, because the divergence is a pass appearing or
-  // disappearing and the composer charges for the pass rather than for what it computes.
-  // So the chain term's falsification is a probe at the readback instead, and
-  // `docs/instruments.md` carries both probes with what each measured. The one that
-  // matters found the tolerances moving by nothing at all under a divergent chain, which
-  // is the reading that says these rows have one guard rather than two.
-  //
-  // **The export door on a clip whose look this build cannot draw whole.** The refusal
-  // goes and everything else stays, so the parking, the badge and the record are all
-  // still correct - what is left is a render that writes a file with a layer of the look
-  // absent and nothing in the file saying so, which is the artifact this whole band
-  // exists to refuse. It must redden the refusal row and the still-refused-for-the-other
-  // row, and leave the suppress-proceeds, the record and the complete-document rows
-  // green: a mutation that reddened those too would be breaking the export rather than
-  // the door.
+  // The door stops refusing, so a clip renders without the effect it asked for.
   'export-ignores-missing-effects': { file: 'web/main.js', edits: [[
     '  const blocking = missing.filter((m) => !suppress.has(m.id));',
     '  const blocking = [];',
   ]] },
-  // And the same door answering a per-effect question globally, which is the reachable
-  // wrong implementation rather than an invented one: suppress reads naturally as a
-  // switch, and written as one it lets the *second* missing effect through on the
-  // strength of a decision somebody made about the first. Invisible with one effect
-  // missing - both implementations refuse nothing - so only the two-effect row can see
-  // it, and that is the row it must redden alone.
+  // The door answers a per-effect question globally, letting the second missing effect through on a
+  // decision about the first.
   'suppress-is-global': { file: 'web/main.js', edits: [[
     '  const blocking = missing.filter((m) => !suppress.has(m.id));',
     '  const blocking = suppress.size ? [] : missing;',
   ]] },
-  // The record's own half. The render still refuses and still proceeds in the right
-  // cases, and the file it writes carries no note that a layer was skipped - so the one
-  // artifact that leaves this machine stops being able to say what it is a render of.
-  // One row, the deliverable's record.
+  // The record loses the note that a layer was skipped.
   'deliverable-forgets-suppressed': { file: 'web/main.js', edits: [[
     '      project: serialiseProjectBody(suppressed.length ? { suppressed } : {}),',
     '      project: serialiseProjectBody(),',
   ]] },
-  // The wiring between the badge and the door, which every other row here steps over by
-  // calling `export.run` with a list of its own. The rule is unchanged and the badge is
-  // unchanged; what goes is the click handler handing over what the badge holds, so an
-  // operator can suppress an effect, watch the toggle light, press Export and be refused.
-  //
-  // Must redden two: the row that names it, and the `no page errors` sweep at the foot.
-  // The second is the refusal itself - `showTimelineError` writes every sentence it shows
-  // the operator to `console.error` as well - so it is noise this mutation creates rather
-  // than a second finding, and it exists only on the mutated build: the clean run reports
-  // no page errors at all, so there is nothing here to drain and nothing to exempt.
+  // The click handler stops handing the door what the badge holds, so an operator can suppress an
+  // effect and still be refused.
   'export-button-drops-the-suppression': { file: 'web/main.js', edits: [[
     '      suppressEffects: [...suppressedEffects],',
     '      suppressEffects: [],',
   ]] },
-  // **The suppression outliving the document it was made about**, which is how it shipped:
-  // `restoreProject` prunes the set to whatever is still parked, and two documents missing
-  // the same effect are indistinguishable to a prune. It is aimed at the *clear*, not at
-  // the prune, and that is the split the rows measure - the prune has to stay, because it
-  // is what lets a suppression survive the undo stack.
-  //
-  // Must redden the leak row and the refusal row beside it, and leave the keep row green.
-  // A mutation that also reddened the keep row would be removing both halves and could not
-  // say which of the two questions this section is asking.
+  // The suppression outlives the document it was made about: the clear goes, the prune stays.
   'suppression-outlives-its-document': { file: 'web/main.js', edits: [[
     '  if (suppressedEffects.size) {\n    suppressedEffects.clear();\n    paintMissingEffects();\n  }',
     '  // the clear this mutation removes',
@@ -447,41 +164,26 @@ const MUTATIONS = {
     'vec2 off = dir * rgbSplit * texel * 8.0;',
     'vec2 off = dir * rgbSplit * (1.0 / resolution) * 8.0;',
   ]] },
-  // The grain stops being quantised onto the reference grid, so four sub-pixels of
-  // a 2x render draw four unrelated values and average to a quarter of the
-  // variance.
-  // The region's falloff width stops being metres and becomes pixels-at-1080p, which is
-  // the one mistake the whole world-space family is built to avoid. It is the exact
-  // shape of `grade-absolute` and `pointsize-absolute` pointed at the new terms: the
-  // same slider then describes a different shape at every output size, and the two
-  // region rows must say so while `noise` and the eight terms above stay clean.
+  // The region's falloff width stops being metres and becomes pixels-at-1080p.
   'region-in-metres': { file: 'web/cloud-shader.js', edits: [[
     '  return 1.0 - smoothstep(0.0, max(1e-4, regionSoft), sd);',
     '  return 1.0 - smoothstep(0.0, max(1e-4, regionSoft * bufferHeight / 1080.0), sd);',
   ]] },
-  // The lateral crop planes stop being metres in the room and become a fraction of
-  // the frame - the same mistake `region-in-metres` plants one term over. Four numbers
-  // that named a box a subject stood in now name a different box at every output size,
-  // so the `crop` row must say so while `noise` and the two region rows stay clean.
+  // The lateral crop planes stop being metres in the room and become a fraction of the frame.
   'crop-in-pixels': { file: 'web/cloud-shader.js', edits: [[
     '  if (cropOn == 1.0 && (pos.x < cropL || pos.x > cropR || pos.y < cropB || pos.y > cropT)) {',
     '  float cropScale = bufferHeight / 1080.0;\n'
     + '  if (cropOn == 1.0 && (pos.x < cropL * cropScale || pos.x > cropR * cropScale\n'
     + '   || pos.y < cropB * cropScale || pos.y > cropT * cropScale)) {',
   ]] },
-  // The faint pass stops reading the chrome flag and answers to the button alone, so a
-  // box left on while somebody exports puts the cut points into the file. This is the
-  // whole reason the uniform is derived rather than assigned, and the edit is one term.
+  // The faint pass answers to the button alone, so a crop box left on puts the cut points into
+  // the exported file.
   'cropoutside-reaches-the-export': { file: 'web/main.js', edits: [[
     '  uniforms.cropOutside.value = chromeOn && showCropBox ? CROP_FAINT : 0;',
     '  uniforms.cropOutside.value = showCropBox ? CROP_FAINT : 0;',
   ]] },
-  // Both early returns go, so a point outside the box always survives to the fragment
-  // stage - invisible at `cropOutside` zero, because `vMask` multiplies its alpha to
-  // nothing, and still writing depth the whole time. Alpha does not stop a splat
-  // occluding: `depthWrite` is on, so the cut half of a room goes on hiding the half
-  // that was kept, and the picture with the box off quietly loses geometry that is not
-  // cropped at all.
+  // Both early returns go, so a point outside the box survives to the fragment stage and goes
+  // on writing depth.
   'faint-survives-at-zero': { file: 'web/cloud-shader.js', edits: [
     [
       '  if (outsideCrop && cropOutside <= 0.0) {\n'
@@ -512,9 +214,7 @@ const MUTATIONS = {
     'float n = hash(floor(vUv * ref) + fract(time) * 137.0);',
     'float n = hash(vUv * ref + fract(time) * 137.0);',
   ]] },
-  // The take renders on the boot intrinsics again. The fetch stays, so the route
-  // and the refusal are still exercised and only the write is gone - a mutation
-  // that removed the fetch would also be testing whether a take opens at all.
+  // The take renders on the boot intrinsics again. The fetch stays, so only the write is gone.
   'intrinsics-defaults': { file: 'web/main.js', edits: [[
     `  uniforms.focal.value.set(hello.fx, hello.fy);
   uniforms.center.value.set(hello.cx, hello.cy);`,
@@ -526,9 +226,7 @@ const MUTATIONS = {
     'const at = n / this.fps;',
     'const at = n / this.fps + (performance.now() % 1) * 1e-6;',
   ]] },
-  // The export renders through a look of its own: a second render path that
-  // nearly agrees, which is the failure the single-renderer decision exists to
-  // prevent.
+  // The export renders through a look of its own: a second render path that nearly agrees.
   'export-second-look': { file: 'web/main.js', edits: [[
     '    const gl = renderer.getContext();\n    if (gl.drawingBufferWidth !== width',
     '    grade.enabled = false;\n    const gl = renderer.getContext();\n    if (gl.drawingBufferWidth !== width',
@@ -565,26 +263,8 @@ const MUTATIONS = {
     resize();`,
     '    /* mutation: the output size is not applied */',
   ]] },
-  // The reference is the drawing buffer's *width* over 1728 rather than its height
-  // over 1080, and every screen-space term follows it: the point size through the
-  // `bufferHeight` uniform, the grade's grid through its own.
-  //
-  // This is the mutation the 16:9 arm below exists for, and it is worth being
-  // precise about how invisible it is without one. 1728x1080 is 1.6, so at that
-  // aspect the two references are the same number - not close, the same: 1080/1728
-  // is 0.625 exactly in binary, and 1920/1728 and 1200/1080 are both 10/9 rounded
-  // once. Every other arm in this tool is 1.6 (960x600, 1920x1200, 1728x1080, the
-  // 640x400 stage), so this mutation is bit-identical on all of them and leaves
-  // every one of their assertions passing - while every size the export menu
-  // offers is 16:9, where it draws 11.1% too large.
-  //
-  // **The two halves of it live in two files now, and that is what the third element on
-  // the second edit is for.** The point size's reference is written in `resize`, which is
-  // `web/main.js`; the grade's is the first line of the grade shader, which went to
-  // `web/post-chain.js` with the pass it belongs to. Splitting this into two mutations was
-  // rejected: the claim is that *every* screen-space term follows the same reference, and
-  // a pair of mutations each moving one term would leave every arm able to pass on the
-  // other term still being right, which is the claim asserted rather than enforced.
+  // The reference is the drawing buffer's width over 1728 rather than its height over 1080, and
+  // every term follows it.
   'scale-by-width': { file: 'web/main.js', edits: [
     [
       '  uniforms.bufferHeight.value = buf.y;',
@@ -596,22 +276,15 @@ const MUTATIONS = {
       'web/grade-shader.js',
     ],
   ] },
-  // The failure path reaches back to the output it did not write. This is the
-  // shape that shipped: ffmpeg opens the previous good file with `-y` and `fail`
-  // unlinks it, so an export that dies after a frame destroys the file the last
-  // good export left there and leaves that export's job.json describing a path
-  // with nothing at it.
+  // The failure path reaches back to the output it did not write, which is the shape that shipped.
   'export-fail-unlinks-output': { file: 'server/export.js', edits: [
-    // Make every export to the same name target the same directory, so a failed
-    // run is able to destroy the previous good artifact. Without this the unique
-    // per-attempt directory is a fresh path and `fail` cannot reach anything but
-    // its own scratch.
+    // Make every export to the same name target the same directory, so a failed run can reach the
+    // previous artifact at all.
     [
       `    const dirName = \`\${msg.name}.\${process.pid}-\${++sequence}\`;\n    const outputDir = join(outDir, dirName);\n    const output = join(outputDir, \`\${msg.name}.\${ext}\`);\n    const frameBytes = width * height * 4;\n    const temp = join(outDir, \`\${dirName}.part\`);`,
       `    const outputDir = join(outDir, msg.name);\n    const output = join(outputDir, \`\${msg.name}.\${ext}\`);\n    const frameBytes = width * height * 4;\n    const temp = join(outDir, \`\${msg.name}.part\`);`,
     ],
-    // The regression: a failed run removes the final directory rather than its own
-    // scratch directory, so it deletes the previous good video and sidecar.
+    // The regression: a failed run removes the final directory rather than its own scratch.
     [
       '    if (job) await rm(job.temp, { recursive: true, force: true }).catch(() => {});',
       '    if (job) await rm(job.outputDir, { recursive: true, force: true }).catch(() => {});',
@@ -620,27 +293,9 @@ const MUTATIONS = {
 };
 
 /**
- * The mutated source of every file the named mutation edits.
- *
- * The exactly-once refusal is the point of the function. A replacement that
- * silently matched nothing would run the unmutated build and be recorded as this
- * tool having missed a bug it was never shown - and because a mutation is a piece
- * of source text, it stops matching the moment the code it names is edited, which
- * is the only warning anyone gets that an anchor has gone stale.
- *
- * **An edit may name its own file as a third element, and `spec.file` is the default
- * for the ones that do not.** One mutation needs it: `scale-by-width` moves the
- * reference every screen-space term is expressed against, and those terms are no longer
- * in one file - the point size's is written in `resize` and the grade's is the first line
- * of a shader that now lives beside its pass. The alternative was a mutation per file,
- * which is a different and weaker claim, and the alternative to *that* was leaving an
- * anchor pointing at text that had moved, which `syntax-check` would redden and which
- * would take a falsification control off the run either way.
- *
- * Keyed by file so the exactly-once rule is asked per file rather than of a concatenation:
- * a `from` that matched once in each of two files would otherwise read as matching twice
- * and be refused, and one that matched twice in the file it names would read as matching
- * once against the other file's zero.
+ * The mutated source of every file the named mutation edits. Refused when an anchor is not
+ * found exactly once: a replacement that matched nothing would run the unmutated build and be
+ * recorded as the check having missed a bug it was never shown.
  */
 function mutatedSource(name) {
   const spec = MUTATIONS[name];
@@ -662,23 +317,11 @@ function mutatedSource(name) {
 }
 
 /**
- * Where a file under `web/` is reached from a browser.
- *
- * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
- * on the basename is a claim about a filename where the server's rule is about a path -
- * two modules could end in the same name and the wrong one would be served without
- * anything failing. A mutation whose `file` is not under `web/` - the two that patch
- * `server/export.js` - never reaches this function, because there is nothing for a
- * browser to request: those are proved against the render worker's own process, not
- * against a page.
+ * Where a file under `web/` is reached from a browser. Matched on the whole pathname rather
+ * than on the basename, because two modules could end in the same name.
  */
 function servedAt(file) {
   if (file.startsWith('effects-builtin/')) {
-    // The effects' own GLSL, which the page fetches out of `/effects/:id/file/:name` and
-    // `assembleShaders` splices into the cloud's material or the grade pass's shader - so a
-    // mutation that edits a chunk is delivered at the fetch rather than at a module, which
-    // from Playwright's side is the same interception. The route is the same for both
-    // programs, because a chunk names the joint it joins rather than the program it feeds.
     const parts = file.split('/');
     if (parts.length !== 3) {
       throw new Error(`${file} is not an effect package file - a chunk is <id>/<name> under effects-builtin/`);
@@ -692,15 +335,12 @@ function servedAt(file) {
 }
 
 /**
- * What the server answers a file with, restated here because the interception has to
- * answer the same way: a chunk is `text/plain` in `server/index.js`, on the argument that
- * what the tools anchor and the client compiles is the file's own bytes.
+ * What the server answers a file with, restated here because the interception has to answer
+ * the same way: a chunk is `text/plain` in `server/index.js`.
  */
 function contentTypeFor(file) {
   return file.endsWith('.glsl') ? 'text/plain; charset=utf-8' : 'text/javascript; charset=utf-8';
 }
-
-// ------------------------------------------------------------------- playwright
 
 async function loadPlaywright() {
   const require = createRequire(import.meta.url);
@@ -725,8 +365,6 @@ async function loadPlaywright() {
   throw new Error('playwright not found - install it globally or in this project');
 }
 
-// --------------------------------------------------------------------- reporting
-
 let failures = 0;
 let checks = 0;
 const check = (ok, label, detail = '') => {
@@ -737,26 +375,15 @@ const check = (ok, label, detail = '') => {
 const note = (label, detail = '') => console.log(`  ....  ${label}${detail ? `   ${detail}` : ''}`);
 const fixed = (x, n = 3) => (Number.isFinite(x) ? x.toFixed(n) : String(x));
 
-// ------------------------------------------------------------------- the capture
-//
-// Read by the tool, from the same routes the page reads, so the expectations below
-// are a second reader's rather than the transport confirming its own arithmetic.
-
 const hello = await (await fetch(`${URL_BASE}/capture/${TAKE}/hello`)).json();
 const index = await (await fetch(`${URL_BASE}/capture/${TAKE}/index`)).json();
 const stamps = index.frames.stampMs;
 const DURATION = (stamps[stamps.length - 1] - stamps[0]) / 1000;
 
-// What a page that fetched nothing would be rendering on - the uniform block in
-// `web/point-cloud.js`. The intrinsics claim needs these, because "the page has the right numbers"
-// is only evidence if the wrong numbers are different numbers.
 const BOOT_DEFAULTS = { fx: 366, fy: 366, cx: 256, cy: 212 };
 
-// --------------------------------------------------------------- in-page helpers
-//
-// Pixels never cross the wire - a 1920x1200 frame is nine megabytes and there are
-// a dozen of them per run - so every reduction and comparison happens in the page
-// and only the summary comes back.
+// Pixels never cross the wire - a 1920x1200 frame is nine megabytes and there are a dozen per
+// run - so every reduction happens in the page and only the summary comes back.
 const INSTALL = `(() => {
   const k = globalThis.__kinect;
   globalThis.__ex = {
@@ -1018,17 +645,11 @@ const INSTALL = `(() => {
   return true;
 })()`;
 
-// One resolution arm: pin everything, render at wherever the buffer currently is,
-// and measure the point sizes the frame actually asked for.
-//
-// Those sizes are the precondition rather than a curiosity. The comparison is only
-// about the reference scaling where neither clamp bound is active, and whether they
-// are is a property of the scene rather than of the look - the nearest and farthest
-// drawn point decide it. So the arm walks the depth frame that is bound, unprojects
-// it with the same intrinsics the shader uses, transforms it with the same camera,
-// and reports the extremes. Bounding it algebraically off the far clip was tried and
-// is wrong twice over: a point at the far clip can be half as far again off-axis, and
-// the 0.15 floor in the shader is a floor rather than the nearest point.
+/**
+ * One resolution arm: pin everything, render at wherever the buffer currently is, and measure
+ * the point sizes the frame asked for. Those sizes are the precondition rather than a
+ * curiosity: the comparison is only about the reference scaling where neither clamp binds.
+ */
 const RES_ARM = `async ({ label, look, at, resLook, camera }) => {
   const k = globalThis.__kinect;
   const ex = globalThis.__ex;
@@ -1112,48 +733,16 @@ const RES_ARM = `async ({ label, look, at, resLook, camera }) => {
   };
 }`;
 
-// --------------------------------------------------------------------- the pages
-
 const { chromium } = await loadPlaywright();
 const mutation = MUTATE ? mutatedSource(MUTATE) : null;
-// Only a page mutation is served into the browser. A server mutation leaves every
-// page on the tree's own build, because the claim it breaks is one no page can see -
-// `prores-writes-h264`, `pngseq-writes-one-file` and `export-fail-unlinks-output` all
-// patch `server/export.js`, which the render worker imports directly and no browser
-// ever requests.
-//
-// `main.js` is separated from the rest because it is the one file `openPage` already had a
-// parameter for: a cross-build arm passes its own older `main.js` and must not be handed
-// this run's mutated one, while every other staged module is a file that arm's build never
-// imports, so it can be routed on every page unconditionally.
-// **Reachable in a browser is no longer `web/` alone.** An effect package's chunk is
-// fetched out of `/effects/:id/file/:name` and assembled into the cloud's material, so a
-// mutation editing one is a page mutation in every sense that matters here - and a filter
-// that still read `web/` would drop it silently into the server-mutation bucket, where
-// nothing serves it and nothing counts it.
 const inBrowser = (file) => file.startsWith('web/') || file.startsWith('effects-builtin/');
 const pageMutants = (mutation ?? []).filter((m) => inBrowser(m.file));
 const mutatedBody = pageMutants.find((m) => m.file === 'web/main.js')?.body ?? null;
 const otherMutants = pageMutants.filter((m) => m.file !== 'web/main.js');
-// The path this mutation would arrive at if a browser asked for it, read off the
-// spec rather than assumed to be `main.js` - the assumption every mutation here has
-// satisfied so far, but coincidentally, the way `registry-check` and `keyframe-check`
-// record the same coincidence for the same reason. `openPage` below reuses this for
-// every page it opens on the current tree; the cross-build arms pass their own
-// explicit `source` and are routed at `web/main.js` regardless, because a cross-build
-// arm is always this tree's older `main.js` whatever mutation happens to be active.
 const mutantPath = mutatedBody !== null ? servedAt('web/main.js') : null;
-// Counted rather than assumed, across every page this file opens on the current
-// tree: `main`, the determinism arms and the resolution sweep all default to
-// `mutatedBody`, and any one of them failing to request the mutated module would
-// leave the others carrying a run that never happened.
-//
-// **Counted per staged file, because a mutation that edits two of them is delivered only
-// if both arrive.** A build patched in `main.js` alone, with the shader half sitting
-// unserved in this process, is a build nobody wrote being measured under the name of one
-// somebody did - `docs/instruments.md` carries the delivery hole this shape belongs to,
-// where a mutation staged and never requested reads as the tool missing a bug it was
-// never shown.
+// Counted rather than assumed, across every page this file opens on the current tree: any one of
+// them failing to request the mutated module would leave the others carrying a run
+// that never happened.
 const mutantServedBy = new Map(pageMutants.map((m) => [m.file, 0]));
 let mutantServed = 0;
 if (MUTATE) {
@@ -1164,27 +753,10 @@ if (MUTATE) {
 const pageErrors = [];
 
 /**
- * A page on the take, with its errors collected and its GPU vouched for.
- *
- * One browser per page rather than one browser with several pages, and it is not
- * tidiness. A second page in the same browser reliably loses its execution context
- * partway through an export here - two WebGL2 contexts with float render targets
- * and a 640x400 readback a frame is enough to take the renderer process down - and
- * that failure arrives as `Execution context was destroyed`, which is precisely the
- * shape this repo has already been burned by twice: a run that exits non-zero with
- * nothing having been tested. Separate browsers also make the determinism claim
- * stronger, since two exports that agree agree across two processes.
- *
- * `source` serves a different `web/main.js` into it: the mutated build, or the
- * build at HEAD for the resolution control. Anything else gets the tree's.
+ * A page on the take, with its errors collected and its GPU vouched for. One browser per page
+ * rather than one browser with several pages: a second page in the same browser reliably loses
+ * its execution context while an export is reading pixels back.
  */
-// `html` is served alongside `source` and is only ever passed by the cross-build arm.
-// The panel and the module are one pair: a build's `PARAMS` throws at boot if any
-// parameter it declares has no control in the markup, so an older module served against
-// today's index.html dies on the first parameter this tree has renamed - and it dies
-// before `__kinect` exists, which arrives as a 30-second timeout in `openPage` rather
-// than as anything naming a panel. That is exactly how the noise field's arrival was
-// first reported. `registry-check` has served the pair since step 3; this is the same fix.
 async function openPage(viewport, source = mutatedBody, html = null) {
   // The full chromium build rather than the headless shell: the shell can land on
   // SwiftShader, which has no EXT_color_buffer_float, and a run that silently fell
@@ -1205,21 +777,9 @@ async function openPage(viewport, source = mutatedBody, html = null) {
   await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
   let servedHtml = false;
   if (html) {
-    // The predicate and the `goto` below read one constant. They used to name `/`
-    // and `/index.html` while the page was opened at `/?take=`, and the editor has
-    // since moved to `/edit?take=` - two places spelling the same path separately
-    // is how the cross-build arm ends up loading today's markup and comparing this
-    // tree against itself.
     await page.route((url) => url.pathname === EDITOR_PATH,
       (route) => { servedHtml = true; return route.fulfill({ contentType: 'text/html; charset=utf-8', body: html }); });
   }
-  // Every staged module other than `main.js`, each at its own path. Installed before the
-  // `main.js` route and on every page including the cross-build arms, which is safe for
-  // the reason that separates them in the first place: an arm serving an older `main.js`
-  // is serving a build from before this tree had these modules, so it never asks for one
-  // and the route never fires. What it must not do is go uninstalled on a page that *does*
-  // ask, because that page would then run the tree's own module beside a mutated
-  // neighbour - half a mutation, measured under the whole one's name.
   for (const mutant of otherMutants) {
     const path = servedAt(mutant.file);
     await page.route((url) => url.pathname === path, (route) => {
@@ -1229,15 +789,6 @@ async function openPage(viewport, source = mutatedBody, html = null) {
     });
   }
   if (source) {
-    // `source === mutatedBody` for every call that did not pass its own explicit
-    // source, which is every page opened on the current tree under `--mutate` - so
-    // the path it is routed at is the one the active mutation actually names, and
-    // the counter below only ever counts requests for that mutation rather than
-    // requests a cross-build arm made for an unrelated reason. A cross-build arm
-    // always passes its own `src`: an older revision's text, which is not the string
-    // `mutatedBody` holds even on a run with no mutation active, so it falls through
-    // to the fixed path - it is always this tree's older `main.js`, whatever mutation
-    // happens to be active this run.
     const path = source === mutatedBody ? mutantPath : servedAt('web/main.js');
     await page.route((url) => url.pathname === path, (route) => {
       if (source === mutatedBody) {
@@ -1248,11 +799,6 @@ async function openPage(viewport, source = mutatedBody, html = null) {
     });
   }
   await page.goto(`${URL_BASE}${EDITOR_PATH}?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
-  // The interception, enforced rather than assumed - and this is the exact
-  // misdiagnosis the paragraph above records. A predicate that stops matching
-  // leaves the old module against today's index.html, which throws at boot before
-  // `__kinect` exists and surfaces as the 30-second timeout on the next line,
-  // naming a page that never loaded rather than a URL that never matched.
   if (html && !servedHtml) {
     throw new Error(`the page markup was never intercepted - landed on ${new URL(page.url()).pathname}, `
       + 'so the cross-build arm loaded the tree\'s own page');
@@ -1260,20 +806,6 @@ async function openPage(viewport, source = mutatedBody, html = null) {
   await page.waitForFunction(() => !!globalThis.__kinect);
   await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
   await page.evaluate(INSTALL);
-  // **Every page frames at the stage it was opened with**, and it gets there by
-  // measuring the strip rather than by believing `TIMELINE_H_GUESS`. The editor
-  // letterboxes itself to the export aspect, so a viewport alone no longer decides the
-  // buffer: `STAGE` is 640x400 and 1.6, the menu's default is 16:9, and without a
-  // correction the fit made the buffer 640x360 while the export beside it wrote
-  // 640x400. Nine of nine frames then differed, and the row that catches it is the one
-  // comparing the editor's own image against what crossed the wire.
-  //
-  // **It used to only set the target size, and the guess was the rest of the answer.**
-  // That made the constant a second copy of `--timeline-h`, and the copy went stale
-  // the first time the strip grew - a row of the overview took the strip from 148 to
-  // 170, the fit came out 22px short, and the same nine-of-nine mismatch came back on
-  // a build with nothing wrong with it. `keyframe-check` has measured-then-corrected
-  // since it was written, for exactly this reason; this is that, here.
   await setStage(page, viewport);
   const gpu = await page.evaluate(() => {
     const gl = globalThis.__kinect.renderer.getContext();
@@ -1292,28 +824,8 @@ async function openPage(viewport, source = mutatedBody, html = null) {
 }
 
 /**
- * Runs a block on a page of its own, retrying a destroyed execution context.
- *
- * That failure is Playwright and the GPU process rather than anything under test -
- * the server log shows the export it happened during completing normally, with all
- * its frames - and it has bitten this repo twice already, both times as a run that
- * exited non-zero having tested nothing. It is retried rather than absorbed: the
- * count is printed, and a block that never completes fails its claim like anything
- * else. Anything that is not that error propagates on the first attempt, because a
- * check that retried real failures would be a check that reports whichever attempt
- * it liked.
- *
- * **`Resulting promise was garbage collected` is the same failure wearing a third
- * name**, and it was added to the pattern on evidence rather than on the family
- * resemblance. Playwright says it when the execution context is disposed while an
- * evaluate's promise is still pending, which is the same renderer going away that
- * produces the other two - and the determinism section is where it lands, because
- * that is the one place three browsers render a full export back to back. Measured
- * across three consecutive runs on an otherwise unchanged tree: run 0 failed, then
- * run 1 failed and run 0 passed, then all 42 assertions passed. A failure that moves
- * between arms and then stops is not a defect in what is under test, and the row it
- * reddens - "both determinism runs completed" - is exactly the row that would have
- * caught a real one.
+ * Runs a block on a page of its own, retrying a destroyed execution context - that failure is
+ * Playwright and the GPU process rather than anything under test.
  */
 async function onFreshPage(what, work, attempts = 3) {
   for (let attempt = 1; ; attempt++) {
@@ -1324,16 +836,6 @@ async function onFreshPage(what, work, attempts = 3) {
       return { ok: true, value };
     } catch (err) {
       const message = String(err.message ?? err);
-      // `promise was garbage collected` is the same failure wearing a different message:
-      // a pending `page.evaluate` whose execution context went away. Seen twice in about
-      // ten runs of this file, both times in section 4 and both times passing on the very
-      // next run with nothing changed - which is the shape that teaches people to re-run a
-      // gating check until it goes green. Retried on the same terms as its sibling, with
-      // the count printed, so a genuine hang still fails rather than being absorbed.
-      //
-      // Both sides of this merge found it independently and wrote the same fix; the
-      // pattern here is the broader of the two, since the message arrives with and
-      // without its `Resulting` prefix.
       if (!/Execution context was destroyed|Target (page|closed)|crashed|promise was garbage collected/i.test(message)) {
         return { ok: false, error: message };
       }
@@ -1345,21 +847,10 @@ async function onFreshPage(what, work, attempts = 3) {
 }
 
 /**
- * Resizes the stage and waits for the drawing buffer to actually become it.
- *
- * **The target size goes with the viewport, because the editor is letterboxed now.**
- * The stage is fitted to the aspect the export menu is set to, so what you frame is
- * what you get - which means a viewport alone no longer decides the buffer. Asking
- * for a 960x600 stage against a 16:9 target used to hang here for ten seconds
- * waiting for a height of 600 that the fit had made 540. Saying both is the honest
- * request: this tool's arms are deliberately not all one aspect, and that is the
- * whole point of them.
+ * Resizes the stage and waits for the drawing buffer to actually become it. The target size
+ * goes with the viewport, because the editor is letterboxed to the export aspect.
  */
 async function setStage(page, size) {
-  // The fixed furniture's real height, off the page. The strip is `--timeline-h` plus
-  // a row per lane, and the Pencil shell adds its application bar above the stage. One
-  // measurement is normally exact; the second pass earns its keep if a lane appeared
-  // between the read and the resize, which changes the strip and therefore the stage.
   for (let attempt = 1; attempt <= 2; attempt++) {
     const furniture = await page.evaluate(`(() => {
       const strip = document.getElementById('timeline');
@@ -1373,10 +864,6 @@ async function setStage(page, size) {
       width: size.width,
       height: size.height + furniture.strip + furniture.shell,
     });
-    // Optional, because the cross-build arms load an older `main.js` on purpose and
-    // that build has no letterbox - its buffer is the viewport, which is exactly what
-    // the wait below already expects. Guarding here rather than branching at the call
-    // sites keeps one function that means "put the stage at this size" on both builds.
     await page.evaluate(`globalThis.__kinect.setOutputSize?.(${JSON.stringify(`${size.width}x${size.height}`)})`);
     try {
       await page.waitForFunction(
@@ -1394,17 +881,8 @@ async function setStage(page, size) {
 }
 
 const main = await openPage(STAGE);
-// **Exit 2, not a failed assertion.** A suite that fails a row on a mutation run reads
-// as a catch, so a mutation the page never asked for has to be the harness declining to
-// run rather than a claim going red - that is what 2 means everywhere else in this
-// suite, and `c507eb7` records the same refusal being added to `library-check` for the
-// same reason. `main` is the first page this file opens on the current tree, and every
-// later page installs the same route the same way, so if this one never asked for the
-// mutated module, none of them will either.
-//
-// **Asked of every staged file rather than of a total**, because a mutation spanning two
-// modules is delivered only if both of them arrive: a run where `main.js` was served and
-// the shader was not has a non-zero count and is measuring a build nobody wrote.
+// Exit 2 rather than a failed assertion: a suite that fails a row on a mutation run reads as a
+// catch, so a mutation the page never asked for has to be the harness declining to run.
 const unserved = [...mutantServedBy].filter(([, n]) => n === 0).map(([file]) => servedAt(file));
 if (MUTATE && pageMutants.length > 0 && unserved.length > 0) {
   console.log(`\n[export] DID NOT RUN - ${MUTATE} was staged for ${unserved.join(', ')} and the page never `
@@ -1415,13 +893,6 @@ console.log(`[export] ${main.gpu.renderer}`);
 console.log(`[export] take ${TAKE}: ${stamps.length} frames, ${DURATION.toFixed(2)}s source, `
   + `${index.hash}`);
 console.log(`[export] stage ${main.gpu.buffer.join('x')}, ffmpeg ${execFileSync(FFMPEG, ['-version'], { encoding: 'utf8' }).split('\n')[0].split(' ')[2]}`);
-
-// ---------------------------------------------------------- 1. the intrinsics
-//
-// First and cheapest, and the run stops if it fails: everything below renders
-// geometry, and geometry built on the wrong intrinsics is wrong in a way no later
-// comparison can see - both arms of every equality here would be wrong identically
-// and agree.
 
 console.log('\n[1] the take carries its own intrinsics');
 
@@ -1437,18 +908,12 @@ console.log('\n[1] the take carries its own intrinsics');
     'the page unprojects on the hello recorded in the capture',
     `page ${have.map((v) => v.toFixed(6)).join(', ')} want ${want.map((v) => v.toFixed(6)).join(', ')}`,
   );
-  // The falsification control for this claim. Without it the assertion above would
-  // pass on a page that fetched nothing, on any sensor whose intrinsics happen to
-  // be the nominal ones.
   const defaults = [BOOT_DEFAULTS.fx, BOOT_DEFAULTS.fy, BOOT_DEFAULTS.cx, BOOT_DEFAULTS.cy];
   check(
     want.some((v, i) => v !== defaults[i]),
     'and the fixture can tell the difference: its hello is not the boot defaults',
     `hello cx ${hello.cx}, cy ${hello.cy} against defaults ${BOOT_DEFAULTS.cx}, ${BOOT_DEFAULTS.cy}`,
   );
-  // What the old path was actually costing, computed rather than asserted: the
-  // centre offset is a pixel shift, and a pixel at the sensor's focal length is a
-  // fixed angle, so the error grows with depth.
   const dx = (hello.cx - BOOT_DEFAULTS.cx) / hello.fx;
   const dy = (hello.cy - BOOT_DEFAULTS.cy) / hello.fy;
   note('the defaults would have cost',
@@ -1461,127 +926,19 @@ console.log('\n[1] the take carries its own intrinsics');
   }
 }
 
-// ------------------------------------------------- 2. the look is resolution-relative
-
 console.log('\n[2] the look holds at a different output size, and did not before');
 
-// One row per term rather than one cumulative pipeline, and that is the difference
-// between a check that catches things and one that does not. Measured both ways: a
-// cumulative table put grain, scanlines and the split into a single "grade" row,
-// and reverting any one of them moved that row by less than the row's own sampling
-// residual, so all three mutations passed. Each term now has a row where its own
-// answer is the only thing in it.
-//
-// The near camera is the same rule applied to the additive normalisation. It is
-// clamped to 1 for every point beyond 0.83m, so at the default framing it is inert
-// on this fixture and a mutation of it changed nothing at all - the probe has to
-// stand where the term is actually doing something.
 const NEAR_CAMERA = { position: [0, 0.1, -0.2], quaternion: [0, 0, 0, 1], fov: 50 };
-// The four effects that make the region's eight geometry parameters mean anything. With
-// all of them at zero the region is inert whatever its extents say.
-//
-// **These belong in `OFF` itself, and that is the whole of what makes the region rows
-// safe to add.** An arm applies its look over whatever the previous arm left - nothing
-// resets - and the arms walk every row at 960x600 and then every row again at 1920x1200.
-// So a region row at the end of the first pass is still in force when the second pass
-// starts, and the mask it left on faded the cloud through every row of the larger size.
-// Measured that way: all nine pre-existing rows failed with luminance ratios of 0.52 to
-// 0.86 against a 0.005 band, while the region rows themselves passed at 1.0000 - a
-// result that reads exactly like the look having stopped holding across output size, and
-// was entirely the tool's own state. Zeroing them here costs nothing, because zero is
-// what they already default to.
 const REGION_OFF = { 'noise.amount': 0, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0 };
-// The crop planes wide open, and they are in `OFF` for the reason the region's
-// effects are: **an arm applies its look over whatever the previous one left.** The
-// sweep runs every pipeline at the small size and then every pipeline at the big one,
-// so the last row of the small pass is the state the first row of the big pass starts
-// from - and the crop row is last. Measured with these four absent from `OFF`: the
-// `crop` row itself passed at ratio 0.9999 while all eight rows above it failed, with
-// coarse means of 3.9 to 10.7, because their big arms were rendering a cropped cloud
-// against an uncropped small one. Asserted against the registry's own defaults below,
-// so "wide open" cannot drift from what the sliders mean by it.
+// The crop planes wide open, and they are in `OFF` because an arm applies its look over
+// whatever the previous one left - the sweep ends on the crop row.
 const CROP_OPEN = { left: -7, right: 7, bottom: -7, top: 7 };
 const OFF = {
   bloom: 0, trails: 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, ...REGION_OFF, ...CROP_OPEN,
 };
 
-/**
- * `OFF` with the vignette taken out too, for the arms that render the same look
- * through two different builds.
- *
- * **Whether the grade pass runs is derived, and the two builds derive it from
- * different sets.** `gradeNeeded()` here is true if any of `rgbSplit`, `scanlines`,
- * `grain`, `vignette` or `streak` is up; at the pinned rev it knows only the first
- * three, because the vignette was a baked `0.55` inside the pass rather than a
- * parameter. Blackwall carries `vignette: 0.55` and `OFF` names neither of the two
- * terms this build added - so an arm spreading `OFF` switched the whole pass off over
- * there and left it running over here, and the cross-build rows have been comparing a
- * graded image against an ungraded one for as long as they have existed.
- *
- * The grade is not a small difference: it adds the vignette, a Reinhard `col / (1 + col)`
- * and a toe subtracting 0.018 linear from every pixel, and the toe is the term the
- * numbers were about. It pushes the faint edge of every splat under the tool's own
- * `lum > 8` threshold, which is why the 16:9 and 4:3 arms reported **7.7% and 7.8% less
- * coverage at an identical drawn point size** - a reading a point-size reference cannot
- * produce, and the one that says the reference was never the cause.
- *
- * Measured by removal, one arm at a time, against unchanged old arms: 960x600 goes from
- * luminance ratio 1.06344 and a worst tile of 24.297/255 to **1.00258 and 0.602**; 16:9
- * from lit 0.92265 / lum 0.43720 / worst 6.997 to **1.00043 / 1.00079 / 0.070**; 4:3 from
- * 0.92220 / 0.55736 / 10.121 to **1.00043 / 1.00101 / 0.071**. Every band cleared with
- * margin. The control that says it is the pass rather than one term inside it: zeroing
- * `crush` alone with the grade still on moves the same row the *other* way, to lit
- * 1.22463 and worst 23.343, because the lift without the toe adds coverage.
- *
- * **It is deliberately not in `OFF`.** Eleven within-build rows spread `OFF`, and their
- * coarse-mean bands in `RES_TOLERANCE` were all measured with the grade running; putting
- * the zero there would silently re-baseline every one of them while looking like a fix
- * to three others. The two `rebase-full` rows do not spread `OFF` at all - they are
- * Blackwall entire, and Blackwall's own `rgbSplit`/`scanlines`/`grain` survive on both
- * sides, so both builds run the grade. That table came out that way rather than being
- * fitted, and it is the reason to believe this.
- *
- * **This paragraph called them the two cross-build rows that already pass, and they were
- * not** - they had been red since `124a90b` for a reason nothing here reaches, which
- * `REBASE_FULL_LOOK` carries. What that constant takes off those two arms is `bloom` and
- * nothing else, so the grade this paragraph is about still runs on both sides of them.
- *
- * `asOldBuild` needs nothing: the old module has never heard of `vignette`, so
- * `RES_ARM`'s drop-unknown filter takes it off that arm by itself.
- *
- * **`rgbSplit`, `scanlines` and `grain` are named twice, on purpose, and this is not
- * leftover from the rename.** `OFF` carries them dotted, because the eleven
- * within-build rows spread `OFF` straight into `main.page` and the sweep above
- * asserts `dropped` is empty there - a flat name would be an unknown parameter on
- * this build and redden that row for no reason about the pixels. But this constant
- * also feeds the pinned old build, through `asOldBuild`, and that build's registry
- * has never heard of a dotted name - it is the same "unknown parameter" gap
- * `vignette` opened above, one rename earlier. Unlike `vignette` there is something
- * on that side worth zeroing: `setMode(4)` on the old build sets these three exactly
- * as `BLACKWALL_LOOK` does on this one, so a spread that only carries the dotted
- * name would leave the old build's grade running while this build's grade is off,
- * which is the same silent chain divergence the `vignette` finding above already
- * paid for once. Carrying both spellings costs nothing on either side: whichever
- * name a build's registry does not have is dropped by the same filter that already
- * tolerates `vignette`, and `dropped` is only asserted empty for the eleven rows
- * that never reach this constant.
- */
 const CROSS_BUILD_OFF = { ...OFF, 'vignette.amount': 0, rgbSplit: 0, scanlines: 0, grain: 0 };
 
-/**
- * The same look with the crop planes taken out, for the arms that run against the
- * pinned older build.
- *
- * That build predates these four parameters and `specOf` throws on a name it has
- * never heard of, so `params.apply` aborts **partway through the object** - and what
- * survives depends on key order. `HD_LOOK` spreads `OFF` first and sets `pointSize`
- * last, so the old arm was rendering at the wrong point size and the cross-build
- * rebase rows failed at luminance ratios of 0.9548 and 0.9528 against a 0.02 band.
- * The rows were right and the look handed to them was not.
- *
- * `registry-check` has the same idea as `GOLDEN_ABSENT`: a build is only answerable
- * for parameters it declares.
- */
 const asOldBuild = (look) => {
   const out = { ...look };
   for (const name of Object.keys(CROP_OPEN)) delete out[name];
@@ -1589,57 +946,8 @@ const asOldBuild = (look) => {
 };
 
 /**
- * Whether two arms rendered through the same chain of post passes.
- *
- * **Closing the class the vignette opened rather than the instance.** Handing two builds
- * the same look does not put them in the same pipeline, because every pass here decides
- * for itself whether it is needed and decides it from a *set* of parameters - so a build
- * that adds one name to that set silently changes which arms are comparable, and the only
- * symptom is a ratio. The vignette did exactly that and the three rows it broke could
- * only report the size of the difference. Read the chain back off both pages and a row
- * says which pass, on which side, and does it for whatever gets a derived gate next.
- *
- * Compared as the ordered list of passes that actually ran, not as a count of them. A
- * count is what the vignette looked like from here - one pass on against one pass off -
- * so a count would catch that instance and miss a build that swapped one enabled pass for
- * another, which is the same defect wearing different names.
- *
- * **`UnrealBloomPass` is not `BloomPass`, and normalising the prefix away is what let the
- * two `rebase-full` rows sit red for a fortnight with nothing able to name why.** This
- * predicate used to strip a leading `Unreal`, on the reasoning that the change was a
- * rename inside the range these arms span and the pass was the same pass. It was a rename
- * in the source and a replacement in the picture: `124a90b` put our chain where three's
- * had been, and at Blackwall's `bloom` of 0.5 the two deliver light in a ratio of 0.412 at
- * one buffer. The single guard that existed to say "these are two different passes" was
- * the guard taught to call them one, and the rows it was guarding could then only report
- * the size of the difference - the exact failure this predicate was written after. So the
- * prefix is compared like every other part of the name now, and the arms that have to span
- * the swap take bloom out of the look instead; `REBASE_FULL_LOOK` carries the measurement.
- * No cross-build comparison in this file runs bloom on either side any more, so no correct
- * run meets this term; one that does gets a failure naming both passes.
- *
- * **An empty chain is a failed readback, not a match.** `chainOf` reads `arm.passes ?? []`
- * and joins, so an arm off a page that stopped publishing its composer answers `''` - and
- * two arms that both answer `''` compare equal, which is an assertion that has stopped
- * being able to fail while reading exactly like one that passes. That is this repo's most
- * frequently recorded defect.
- *
- * It is closed in two places on purpose, and the division of labour is the point rather
- * than belt and braces. **The class is closed at the readback**, by the row over `ARMS`
- * near the foot of this file: that one names the arm that came back silent, fires whether
- * the silence is ever compared or not, and covers a future row that reads `chainOf`
- * directly instead of going through this predicate - which is the hole a guard living only
- * here would still have, since a consumer that never calls `sameChain` never meets it. The
- * term below is the narrower job of stopping a *comparison* being believed on the strength
- * of two silences, so a run that somehow reaches a cross-build row with no chain to compare
- * reddens the row it would otherwise have passed rather than only the population row.
- *
- * Nothing legitimately renders through no passes: `RenderPass` and `OutputPass` are added
- * in `web/post-chain.js` and neither is ever disabled - only the afterimage, the bloom and
- * the grade are - so the floor for a healthy arm is two names, and requiring one is a
- * requirement no correct build can trip over. Measured on a clean run, the barest arms in
- * this file read `RenderPass+OutputPass` and the fullest `RenderPass+AfterimagePass+
- * BloomPass+ShaderPass+OutputPass`.
+ * Whether two arms rendered through the same chain of post passes. Handing two builds the same look
+ * does not put them in the same pipeline, because every pass decides for itself whether it runs.
  */
 const chainOf = (arm) => (arm.passes ?? [])
   .filter((p) => p.endsWith(':on'))
@@ -1647,10 +955,6 @@ const chainOf = (arm) => (arm.passes ?? [])
   .join('+');
 const sameChain = (a, b) => chainOf(a) !== '' && chainOf(a) === chainOf(b);
 
-// The region itself, on the subject. Everything here is metres in the sensor frame, and
-// that is the claim the two rows using it exist to enforce: not one of these is a
-// screen-space length, so the same numbers must draw the same shape at 600 and at 1200,
-// with no `bufferHeight / 1080` anywhere in the path. `region-in-metres` is the control.
 const REGION_AT_SUBJECT = {
   ...REGION_OFF,
   regionX: 0.05, regionY: 0.15, regionZ: -1.9,
@@ -1658,293 +962,45 @@ const REGION_AT_SUBJECT = {
   regionRound: 0.9, regionSoft: 0.6,
 };
 
-// The look the 16:9 arm compares, and the additive switch in it is the difference
-// between a comparison and a mistake. A splat's alpha is normalised against its own
-// size - 116.64/vSize^2 in reference pixels here, 36/vSize^2 in framebuffer pixels
-// at HEAD - so the two builds agree about that term only where the drawn size is
-// the graded one, which is a 600-tall buffer and nowhere else. Measured with it on
-// at 1080: 0.241 here against 0.0744 there, which lands as a 12.9% luminance ratio
-// and a 28.7/255 worst tile that say nothing at all about the reference the arm is
-// asking about. With additive off the alpha is a smoothstep on gl_PointCoord and
-// the point size is the only screen-space term left standing, which is the term the
-// mutation moves. The normalisation has its own mutation - `vsize-framebuffer` -
-// and the splat pipeline above is where that one lands.
 const HD_LOOK = { ...CROSS_BUILD_OFF, additive: false, pointSize: HD_POINT_SIZE };
 const PIPELINES = [
   ['points', { look: OFF }],
-  // **A smaller point than the default, and the clamp is the reason.** The shader
-  // draws `clamp(pointSize * bufferHeight / 1080 / max(0.15, -mv.z), 1.0, 64.0)`, and
-  // this arm stands the camera inside the cloud so the splats overlap - which puts its
-  // nearest points on the `0.15` floor, where the size is `pointSize * k / 0.15`. At
-  // the default that is 88.9px at 1200, over the ceiling, and the precondition below
-  // correctly refuses to compare two output sizes through a clamped tail. Seven keeps
-  // both arms inside the band by arithmetic rather than by luck: 51.9px at 1200 and
-  // 25.9px at 600 at the near end, and the far end stays over a pixel for anything
-  // inside the 6m clip. Additive blending is what this arm is about and a smaller
-  // point blends the same way.
   ['splat', { look: { ...OFF, additive: true, pointSize: 7 }, camera: NEAR_CAMERA }],
   ['trails', { look: { ...OFF, trails: 0.5 } }],
   ['rgbsplit', { look: { ...OFF, 'rgbsplit.amount': 1.6 } }],
-  // Both at full rather than at the preset's 0.35 and 0.22. At preset strength the
-  // grain is about one part in 255 and reverting it to framebuffer pixels moved
-  // every number here by 4%, which is a probe standing where the answer is the
-  // same either way. At full strength the same revert is unmissable.
   ['scanlines', { look: { ...OFF, 'raster.amount': 1 } }],
   ['grain', { look: { ...OFF, 'grain.amount': 1 } }],
-  // Bloom was the one term the design said needed nothing, on the grounds that it
-  // already runs at half the drawing buffer. Half the buffer makes its cost
-  // proportional and its appearance anything but - a fixed tap count per mip
-  // against a mip chain that scales - so it is sized against the reference now
-  // like everything else, and it is asserted here like everything else.
   ['bloom', { look: { ...OFF, bloom: 0.5 } }],
-  // Blackwall entire, and Blackwall with the one term the document is wrong about
-  // switched off. The second is the row the claim is asserted on, because the first
-  // cannot pass while bloom is what it is - and a tolerance loose enough to admit
-  // bloom would admit everything else too.
   ['nobloom', { look: { bloom: 0 } }],
   ['full', { look: {} }],
-  // The world-space terms, last on purpose. An arm applies its look over whatever the
-  // previous one left - the Blackwall look goes on and nothing resets the rest - so a
-  // region row placed higher up would leak its geometry into every row below it and
-  // move calibrations that were measured without it. At the end it can only inherit,
-  // and each of these names every term it depends on rather than relying on that.
-  //
-  // One row per term, because a cumulative row cannot say which one broke: step 6
-  // found three grade mutations surviving a combined comparison by less than its own
-  // sampling residual. `noise` is the field, `regionpush` the displacement and
-  // `regionmask` the fade, and the two region rows share the falloff that
-  // `region-in-metres` attacks.
-  //
-  // The region is placed where the points are rather than anywhere convenient: the
-  // sample capture's cloud runs z [-4.50, -0.50] with its median point at
-  // (0.021, 0.019, -1.893), so this sits on the subject with its surface passing
-  // through the cloud instead of enclosing it or missing it.
   ['noise', { look: { ...OFF, ...REGION_OFF, 'noise.amount': 0.06, 'noise.scale': 4, 'noise.speed': 0 } }],
   ['regionpush', { look: { ...OFF, ...REGION_AT_SUBJECT, 'push.amount': 0.35 } }],
   ['regionmask', { look: { ...OFF, ...REGION_AT_SUBJECT, 'mask.amount': 0.5 } }],
-  // The four lateral crop faces, and they belong in this family for the same reason
-  // the region does: they are metres in the sensor frame, so the same four numbers
-  // have to cut the same box out of the room at 600 and at 1200. `crop-in-pixels` is
-  // the control.
-  //
-  // The box is placed around the subject rather than at a convenient number - the
-  // cloud runs x [-2.31, 2.97] and y [-2.26, 1.63] with its median at (0.021, 0.019),
-  // so +/-0.8 sits inside the extent on all four sides and each face has something to
-  // cull. A box enclosing the whole cloud would leave this row measuring an uncropped
-  // image at two sizes, which is the `points` row again under a different name.
   ['crop', { look: { ...OFF, ...REGION_OFF, left: -0.8, right: 0.8, bottom: -0.8, top: 0.8 } }],
 ];
 
-// Which measurement each row is judged on, and it is per row because the terms live
-// at different spatial frequencies. Grain and scanlines are one-reference-pixel and
-// one-in-2.7-pixel structures, and the coarse grid averages both of them away - so
-// they are judged on the full-resolution comparison, where reverting them moves the
-// number by 5x and 3x. Everything else is judged coarse, where per-pixel
-// rasterisation aliasing is not mistaken for a look that moved.
-// Each mean is about twice what this build measures - 0.459 against 1.0 on the
-// point row, 1.043 against 2.6 on the full one - and the ratios are not, which is
-// what the number that used to sit here got wrong by about 5x. Measured on this
-// tree: seven of the nine rows depart from a ratio of 1 by 0.0009 or less against a
-// 0.005 band, and the two bloom-bearing rows depart by 0.0035 and 0.0046, which is
-// 70% and 92% of a band that size. A regression detector with 8% of its range left
-// is one GPU driver away from being a coin toss, so those two rows carry 0.01
-// instead - and the widening is one the mutations pay for rather than a shrug.
-// `bloom-buffer-sized` puts those rows at departures of 0.0648 and 0.0807, which is
-// 6.5x and 8.1x the wider band, and it fails their coarse means as well at 10.629
-// and 13.955 against 1.6 and 2.6. `bloom-reference-1080` departs by 0.0018 and
-// 0.0024 and is not caught on these rows at either band: a per-size comparison
-// cannot see a chain that is wrong by a constant factor, because both sizes agree
-// about it. Wider bands on the other seven were tried first and are what let three
-// of the mutations through, so those stay as tight as the sampling residual allows
-// rather than as wide as the result permits.
-//
-// **This paragraph used to end by saying the two cross-build rows further down catch
-// `bloom-reference-1080`, and they do not.** Measured on 2026-08-11, both arms against a
-// server replaying `fixture-1g`, once on the module split and once on `84084b0` before it
-// with the mutation still in `web/main.js`: 50 of 50 passed and 0 failed on both, and the
-// mutation is delivered rather than absent - the page's numbers move, the bloom row's
-// luminance ratio going 1.0006 to 1.0038 and the two `whole look rebases` rows going 0.410
-// to 0.382 and 0.371 to 0.345 on the worst of forty tile means, against a band those never
-// come close to. So the reference the chain is frozen at has no catcher in this file, on
-// either side of the split, and it is written down here rather than left as a claim
-// somebody trusts. What does catch it is `test/bloom-chain.test.mjs`, which asserts the
-// arithmetic directly and reddens four of its six rows on exactly this mutation - a cheaper
-// instrument reaching what a picture comparison structurally cannot, which is the same
-// division of labour the point-size rows and the cross-build arm already have. Closing it
-// here instead would want a coarse band re-baselined against a measured residual rather
-// than a threshold tightened until this one row goes red.
-//
-// **Half of that paragraph has since stopped being true and the conclusion has not.** The
-// two `whole look rebases` rows carry no bloom any more - `REBASE_FULL_LOOK` has why - so
-// the mutation cannot reach their judged numbers at all rather than reaching them and
-// falling short. It still moves the glow ratio those rows print beside the judged one,
-// 0.40978 to 0.40043 and 45.923 to 42.065 on the worst of forty tile means, which is the
-// same direction and the same nowhere-near. Re-measured on this tree: 51 of 51 and 0
-// failed under the mutation, so it is uncaught here for a second reason and caught by
-// `test/bloom-chain.test.mjs` for the same one.
-//
-// What the widening cost, since a threshold change that only reports what it bought
-// is half a measurement. Two mutations lose an assertion to it, and both lose the
-// same one: `grade-absolute` and `rgbsplit-absolute` used to fail the `full` row on
-// its ratio at departures of 0.0080 and 0.0079, which cleared 0.005 and sit inside
-// 0.01. Neither escapes - they still fail four and two other rows respectively,
-// including the per-term row that names what actually broke - so what was lost is a
-// duplicate verdict from the cumulative row rather than a catch. It was also a thin
-// one: against a clean residual of 0.0046 on that row, a departure of 0.0080 is 1.7x
-// the noise, which is the kind of margin this file refuses to call a detection when
-// it finds one anywhere else. The per-term rows are load-bearing here and `full` is
-// the integration row, which is the same conclusion the cumulative-table rule in
-// `docs/instruments.md` reached from the other direction.
-//
-// One bound this table does not cover, named here rather than left to be found:
-// both arms are 600 and 1200 and the export menu goes to 2160. Bloom's bright pass
-// reads the full-resolution frame into a chain frozen at 600 with one bilinear tap
-// per destination texel, so it point-samples a 2:1 region of the frame at 600, 4:1
-// at 1200 and 7.2:1 at 2160 - the undersampling grows with the output size while
-// the chain does not, and only the first two of those are measured. A 4K export
-// inherits the constancy claim by extrapolation, and closing that wants an arm at
-// 3840x2160 against 1920x1080 rather than an argument.
-// **The coarse means were re-baselined once, and the reason is dated rather than
-// guessed at.** Every band below used to sit against a residual floor of about 0.3 to
-// 0.5 of 255. At `40ab241` - the commit that split the glitch into a master and five
-// ceilings - that floor rose to about 0.8 to 2.5 and stayed there, which put five bands
-// underneath it and left those rows red on a clean tree. A row that is red clean catches
-// nothing, and that is the defect this re-baseline fixes; the terms themselves are fine,
-// which is the part that had to be established before touching a number.
-//
-// Bisected: 47 commits touch `web/main.js` on this branch, the arm and its bands were
-// both defined at `b56d101` which is in `main`, so the instrument is constant across the
-// range and only the page moves. `e1996bb`, the parent, is 47/47 clean at noise 0.304,
-// regionpush 0.423, regionmask 0.317. `40ab241` is 0.806, 1.262, 1.023 and ten rows red
-// at once.
-//
-// **Three things in that commit were reverted individually at HEAD and none of them
-// brings the floor back**, recorded so nobody spends the runs again: guarding the cyan
-// flare that the commit moved into the common path (0.826/1.251/1.024, unchanged);
-// putting the vignette back to the literal 0.55 it replaced (unchanged, and the reason is
-// that `gradeNeeded()` is false at these arms' values in both builds, so the line is
-// unreachable there); and putting the glitch block's five constants back as literals
-// (0.826/1.255/1.028, unchanged). What is left is the graphics driver arranging the
-// arithmetic around those lines differently, which `web/main.js` already records costing
-// three false regressions in `registry-check` when the flare was guarded - and that
-// surrounding code has moved across the 40 commits since, which is why reverting at HEAD
-// cannot undo it.
-//
-// So each band is set where the table's own rule says: between a measured clean number
-// and a measured mutant one, both taken on this tree, at 960x600 against 1920x1200.
-//
-//   row         clean   region-in-metres   pointsize-absolute   band
-//   points      1.040     -                    17.190            3.0
-//   splat       2.513     -                    37.855            6.0
-//   noise       0.826     0.826 (stays green)  16.789            2.0
-//   regionpush  1.251     2.445                23.701            1.8
-//   regionmask  1.024     1.135 (caught on the ratio)  16.773    1.5
-//
-// Two mutations rather than one, because no single one of them holds all five rows.
-// `region-in-metres` is the narrow control and reddens exactly the two rows that share
-// the falloff term; `pointsize-absolute` is the wide one and every row clears its band by
-// eight to twelve times, which is what says these bands are loose enough to stop being
-// red for nothing and nowhere near loose enough to stop catching.
-//
-// `noise` is the odd one and was already: `region-in-metres` leaves it untouched to the
-// last digit, because the noise field never reaches the falloff, so its job on *that*
-// mutation is to stay green and prove the mutation is localised - which is why it needed
-// the second column to have a positive control at all. Its band is a constancy claim and
-// keeps the ratio it had, 2.4x the clean floor where the old pair was 2.5x.
-// `regionmask` is the other: its mean barely separates (1.024 against 1.135) and never
-// did, so the band clears both ends deliberately and the ratio term carries that row,
-// failing at a departure of 0.0216 against a clean 0.0023 and a 0.005 bound.
-//
-// **Five cross-build rows are still red and are deliberately not re-baselined here.**
-// They went red in the same commit and are the same difference seen against a build that
-// predates it rather than against a second output size, so they read much larger - the
-// worst of forty tile means is 24.297/255, which is visible. Moving a 0.02 ratio band
-// past 1.03 would not be re-baselining an instrument, it would be deleting the claim.
-// `docs/proof-tools.md` carries what is known about them.
+// Which measurement each row is judged on, per row because the terms live at different spatial
+// frequencies. Grain and scanlines are one-pixel structures the coarse grid averages away, so
+// they are judged on the full-resolution comparison; everything else is judged coarse, where
+// per-pixel rasterisation differences do not count as the look having moved.
 const RES_TOLERANCE = {
   points: { on: 'coarse', mean: 3.0, ratio: 0.005 },
   splat: { on: 'coarse', mean: 6.0, ratio: 0.005 },
   trails: { on: 'coarse', mean: 1.6, ratio: 0.005 },
   rgbsplit: { on: 'coarse', mean: 2.2, ratio: 0.005 },
-  // These two are judged on the correlation rather than on a difference, and the
-  // difference is kept only as a second signal. Reverting the reference grid moves
-  // the scanline row's mean by 33% and the grain row's by 20% - both inside any
-  // tolerance the sampling residual leaves room for - while moving the correlation
-  // from 0.94 to 0.77 and from 0.78 to 0.59. A structure that has moved is as
-  // different from one that has not as it is from one that has thinned, which is
-  // exactly what a mean absolute difference cannot tell apart.
   scanlines: { on: 'fine', mean: 4.0, ratio: 0.005, corr: 0.88 },
   grain: { on: 'fine', mean: 4.0, ratio: 0.005, corr: 0.70 },
-  // The two rows the bloom residual lands in, and the only two whose ratio band is
-  // wider than 0.005. It was 0.01, set between measured departures of 0.0035 and
-  // 0.0046 and mutant departures of 0.0648 and 0.0807.
-  //
-  // **The clean end of that pair is a property of the room, not of the build, and on
-  // this tree it is three times what it was.** Bloom's chain is frozen at the 600-tall
-  // buffer the look was graded on while everything else is expressed against 1080p -
-  // CLAUDE.md's "both are correct and do not reconcile them" - so the halo really is
-  // tighter at 1200 than at 600, and how much luminance that costs depends on how much
-  // of the frame is bright enough to bloom. Measured here: 0.0108 and 0.0114 clean
-  // against 0.679 and 0.836 under `pointsize-absolute`, both arms, one run each at
-  // 960x600 against 1920x1200. So the band is 0.03, which the clean numbers sit at 38%
-  // of and the mutant numbers clear by twenty-three times. Widening it is not the same
-  // as admitting bloom: `nobloom` still carries the constancy claim at 0.005, which is
-  // why the two rows exist separately.
   bloom: { on: 'coarse', mean: 1.6, ratio: 0.03 },
   nobloom: { on: 'coarse', mean: 2.4, ratio: 0.005 },
   full: { on: 'coarse', mean: 2.6, ratio: 0.03 },
-  // The three world-space rows. Every band here sits between a measured clean number
-  // and a measured mutant one rather than being chosen to fit.
-  //
-  // **The figures in this paragraph are the ones taken before `40ab241`**, kept rather
-  // than overwritten because the shape of the argument is what they are here for and a
-  // correction that erases what it corrects leaves nobody able to check it. The floor
-  // they were measured against has since risen; the block above `RES_TOLERANCE` carries
-  // the current pairs and the bisect that dates the move. What has not changed is which
-  // measurement carries which row, which is the part the next person needs.
-  //
-  // Clean, coarse mean and luminance ratio: noise 0.319/1.0002, regionpush 0.489/1.0001,
-  // regionmask 0.388/1.0000. Those ratios are the tightest in the table by an order of
-  // magnitude, and they should be - not one of these terms is a screen-space length, so
-  // there is nothing for the output size to scale. The nine rows above sit at 0.9991 to
-  // 1.0046 because a rasterised sprite grid does not resample perfectly; these three
-  // move the *world*, which is the same world at either size.
-  //
-  // Under `region-in-metres`: regionpush 1.865/1.0028 and regionmask 0.510/0.9915, while
-  // noise stays at 0.319/1.0002 to the last digit because the noise field never touches
-  // the falloff. So the mutation names the two rows that share the term rather than
-  // reddening the file, which is the whole reason these are three rows and not one.
-  //
-  // Which measurement carries each row differs, and it is worth saying which. The push
-  // row is caught on the mean - 0.489 clean against 1.865 mutant, with the band at 1.0
-  // roughly twice the one and half the other. The mask row is caught on the ratio, at a
-  // departure of 0.0085 against a clean residual of 0.0002, which is 40x the noise; its
-  // mean barely moves (0.388 to 0.510), so the 0.9 band is deliberately loose rather
-  // than squeezed onto a difference that is not the signal.
   noise: { on: 'coarse', mean: 2.0, ratio: 0.005 },
   regionpush: { on: 'coarse', mean: 1.8, ratio: 0.005 },
   regionmask: { on: 'coarse', mean: 1.5, ratio: 0.005 },
-  // The crop is a cull rather than a shade, so the two sizes either keep the same
-  // points or they do not - there is no partial term to average away and no soft edge
-  // to alias. It gets the same band as its neighbours rather than a looser one,
-  // because a row whose signal is a hard yes or no should not be the row with room in
-  // it, and `crop-in-pixels` has to clear that band by a wide margin to count.
   crop: { on: 'coarse', mean: 0.9, ratio: 0.005 },
 };
 
-// Every arm this run captured, in capture order and under the label it was asked for.
-//
-// The chain rows below are built on a readback, and a readback is a thing that can
-// stop working. Keeping the arms lets that be asked as a question about the whole
-// population once, rather than inferred at each comparison from the fact that two
-// sides matched - which is the inference that cannot tell a match from two silences.
-// It is recorded here rather than at the call sites because this is the one funnel
-// every arm in the file goes through, so an arm added later is asked by existing.
 const ARMS = [];
 
-// One arm at whatever size the page is currently at, with the intrinsics pinned so
-// the hello fetch - which landed in the same commit as the resolution work - is not
-// part of any difference measured here.
 async function armAt(page, opts) {
   await page.evaluate(
     `globalThis.__ex.pinIntrinsics(${[hello.fx, hello.fy, hello.cx, hello.cy].join(', ')})`,
@@ -1963,10 +1019,6 @@ async function resolutionSweep(page, pipelines) {
       out.set(`${name}-${label}`, await armAt(page, opts));
     }
   }
-  // The 2x arm is box-downsampled to the 1x arm's size, and then both are reduced
-  // again to a common coarse grid. The second reduction is what stops per-pixel
-  // rasterisation aliasing - which is a sampling difference and not a look one -
-  // from being counted as the look having moved.
   const measured = new Map();
   for (const [name] of pipelines) {
     const m = await page.evaluate(`((n) => {
@@ -1988,11 +1040,6 @@ async function resolutionSweep(page, pipelines) {
   return measured;
 }
 
-// `CROP_OPEN` says what "no crop" is, and the registry is what decides it. Held
-// against each other rather than trusted, because the two only agree today: raise
-// `CROP_LIMIT` in `web/point-cloud.js` and this table would go on resetting the planes to
-// seven while the sliders opened to more, which would leave every row here rendering
-// a quietly cropped cloud and calling it the baseline.
 {
   const defs = await main.page.evaluate(`(() => {
     const k = globalThis.__kinect;
@@ -2006,30 +1053,8 @@ async function resolutionSweep(page, pipelines) {
 
 const after = await resolutionSweep(main.page, PIPELINES);
 
-// The sweep ends on the crop row, and an arm applies its look over whatever the
-// previous one left - so every arm below this that passes `look: {}` would go on
-// rendering a cloud cropped to +/-0.8m. Measured with this line absent: the two
-// cross-build rebase rows failed at luminance ratios of 0.9548 and 0.9528 against a
-// 0.02 band, with the numbers unchanged whichever old-build arm was corrected, which
-// is what said the leak was on this side rather than that one.
-//
-// Put back here rather than named in each arm below, because "the sweep leaves the
-// page as it found it" is one statement where the alternative is a list that has to
-// stay complete as arms are added.
 await main.page.evaluate(`globalThis.__kinect.params.apply(${JSON.stringify(CROP_OPEN)})`);
 
-// The other half of the drop-unknown rule in `RES_ARM`. Filtering a look to what the
-// page declares is only safe on the cross-build arm; on this build every name in every
-// row must land, or a row is silently measuring a term it never set - which is the
-// difference between a look holding across output sizes and a look that was never
-// applied. Reported here so the permission to drop cannot spread past the one arm
-// that needs it.
-//
-// **And it read nothing at all until now.** `resolutionSweep` returns a `Map`, and
-// `Object.entries` on a `Map` is `[]` - so `leaked` was empty on every run whatever the
-// arms had dropped, and the row printed a pass it could not have failed. `dropped` is
-// genuinely empty on every arm of this build, so nothing was hiding behind it; what was
-// broken is the only thing that would have said so. Spreading the entries is the repair.
 {
   const leaked = [...after.entries()].flatMap(([label, arm]) => (arm?.dropped ?? [])
     .map((p) => `${label}:${p}`));
@@ -2038,36 +1063,6 @@ await main.page.evaluate(`globalThis.__kinect.params.apply(${JSON.stringify(CROP
     leaked.length ? leaked.join(' ') : `${after.size} arms, none dropped a name`);
 }
 
-// This build's whole look at two sizes, against the graded look at 600 below.
-//
-// **Nothing is resampled, and that is the method rather than a shortcut.** The
-// comparison is on the mean luminance of each cell of an 8x5 grid, and a tile mean
-// is a frame-fraction: the grid lands on the same fractions of the frame at any
-// size, so the tile mean of a 1920x1200 render *is* the tile mean of its 2:1
-// downsample, exactly, with no filter in between. Every size here divides the grid
-// evenly - 960x600 gives 120x120 tiles, 1920x1200 gives 240x240, 1728x1080 gives
-// 216x216 - so no tile straddles a pixel either.
-//
-// Two sizes rather than one, and mutation testing says keep both. 1728x1080 is the
-// reference height itself, which is what the rebase claims in so many words, and it
-// is the arm whose label needs no explaining. 1920x1200 is twice the graded height,
-// so the point sizes come out at exactly 2x the old build's and a reader can check
-// the arithmetic in the printed range.
-//
-// **The reference arm is blind to the reference scaling, which is why the other one
-// is here.** At 1728x1080 the scale factor is exactly 1, so `pointsize-absolute` -
-// which deletes that factor - changes nothing at all there and the arm passes. It is
-// caught at 1920x1200. Each arm sees something the other cannot: the 1080 one
-// isolates whether the chain is frozen in the right place, the 1200 one whether the
-// scaling exists. Dropping either would leave a mutation uncaught, and this was found
-// by running one rather than by reading the code.
-//
-// **Bloom is out of the look these two arms compare, and the glow arm beside each one is
-// how that exclusion stays visible.** `REBASE_FULL_LOOK` has the mechanism and the
-// numbers: the pinned build's glow is three's pass and this one's is ours, so the term
-// cannot be part of a claim about references. The `rebase-glow-*` arms render the same
-// scene with it up and are judged by nothing - their ratio goes into the row's own
-// message, so the quantity that was taken out is reported on every run.
 const rebaseFullBig = await armAt(main.page, {
   label: 'rebase-full-big', look: {}, resLook: REBASE_FULL_LOOK,
 });
@@ -2082,9 +1077,6 @@ const rebaseGlowRef = await armAt(main.page, {
   label: 'rebase-glow-ref', look: {}, resLook: REBASE_LOOK,
 });
 
-// The precondition, measured rather than argued: with a clamp active the comparison
-// would be about the clamp instead of about the reference scaling, and the smaller
-// of the two sizes is where the lower bound bites.
 {
   const bad = [];
   for (const [name] of PIPELINES) {
@@ -2122,9 +1114,6 @@ for (const [name, tol] of Object.entries(RES_TOLERANCE)) {
     + (tol.corr ? `, fine structure correlates ${fixed(m.corr, 4)} >= ${tol.corr}` : ''));
 }
 
-// The control: the same measurement on the build at HEAD, which has to fail it,
-// and the one arm that compares the two builds against each other rather than each
-// against itself.
 let rebaseOld = null;
 let rebaseFullOld = null;
 let rebaseGlowOld = null;
@@ -2135,19 +1124,9 @@ let rebaseNon169Old = null;
   if (src.includes('bufferHeight / 1080.0')) {
     throw new Error(`${BEFORE} already has the resolution work: the control would be the same build twice`);
   }
-  // The pinned build is the old *point size*, not the old geometry. The unprojection's x
-  // sign changed after this rev - the sensor's frames arrive horizontally mirrored and this
-  // build undoes them, `unproject` in `web/cloud-shader.js` carries the reasoning - so left alone
-  // the old arm draws the room reflected and the cross-build rows below disagree for two
-  // reasons at once. They were already failing at this rev for the first reason, which is a
-  // separate finding recorded in `docs/instruments.md`; the point of normalising here is
-  // that whoever diagnoses them is not also chasing a mirror. Measured: with this in place
-  // the worst of forty tile means on the Blackwall arms returns to the 1.02/0.95 it reads
-  // at HEAD, from the 22.19/22.14 an un-normalised arm reports.
-  //
-  // Guarded exactly once, like `registry-check`'s copy of this and like the mutations: a rev
-  // where the text stopped matching would silently become a comparison against un-normalised
-  // geometry, reported as a finding about point size.
+  // The pinned build is the old point size, not the old geometry. The unprojection's x sign
+  // changed after this rev, so left alone the old arm draws the room reflected and the rows
+  // below disagree for two reasons at once.
   const OLD_UNPROJECT_X = '     (pixel.x + 0.5 - center.x) / focal.x * z,';
   const xHits = src.split(OLD_UNPROJECT_X).length - 1;
   if (xHits !== 1) {
@@ -2159,51 +1138,20 @@ let rebaseNon169Old = null;
   const before = await openPage(SMALL, src, beforeHtml);
   const measured = await resolutionSweep(before.page, PIPELINES.filter(([n]) => n === 'points' || n === 'nobloom'));
 
-  // The re-tune, measured across the two builds rather than argued from the factor.
-  //
-  // `pointSize` is pixels at 1080p now and was pixels at the buffer before, so the
-  // two builds are asked for the same *drawn* size at one buffer: 12 on the old
-  // build, and 12 x 1080/600 on this one, which is 21.6 reference pixels drawn at
-  // a 600-tall buffer as 12. If the rebase is right the two images are the same
-  // image, and both the sprite size and the additive normalisation say so - the
-  // alpha term is clamp(0.25 d^2, 0.05, 1) on both sides once 36 becomes 116.64,
-  // which is the unique constant that leaves it unchanged under a 1.8x rebase.
-  //
-  // Points only, because the grade and bloom legitimately changed at 600: their
-  // terms are 1080p-referred now, which is the whole point, and including them
-  // would be asking the re-tune to answer for something else.
   await setStage(before.page, SMALL);
   rebaseOld = await armAt(before.page, {
     label: 'rebase-old', look: asOldBuild({ ...CROSS_BUILD_OFF, pointSize: RES_LOOK.pointSize }),
   });
-  // And the same question asked of the whole look rather than of the point pass.
-  // The points-only arm above cannot see the grade or the bloom - deliberately,
-  // because both are 1080p-referred now and would confound the point size - which
-  // means it also cannot see a bloom rebased against the wrong reference. This one
-  // can: the graded look at the buffer it was graded at, against this build's look
-  // at twice that, which is where the whole rebase either holds or does not.
   rebaseFullOld = await armAt(before.page, {
     label: 'rebase-full-old', look: {}, resLook: REBASE_FULL_LOOK,
   });
-  // The other end of the glow pair. Taken here rather than derived, because the whole
-  // point of the number is that nobody can predict what three's pass does from what
-  // ours does - that is the fact the rows above stopped being able to state.
   rebaseGlowOld = await armAt(before.page, {
     label: 'rebase-glow-old', look: {}, resLook: REBASE_LOOK,
   });
-  // The other half of the 16:9 arm, and the reason it is taken here rather than
-  // computed: this build has no reference of any kind, so 22 is 22 drawn pixels at
-  // 1920x1080 whatever anyone believes about aspects. Anything the two builds
-  // disagree about at that buffer is this tree's reference reading the wrong
-  // dimension of it.
   await setStage(before.page, HD);
   rebaseHdOld = await armAt(before.page, {
     label: 'rebase-hd-old', look: asOldBuild(HD_LOOK),
   });
-  // And the same cross-build at a non-16:9 aspect, so the 16:9 arm is not the only
-  // aspect the product ships in. The old build is still the no-reference control;
-  // here a height-referenced build has k=1 because the height is 1080, but a
-  // width-referenced one has k = 1440/1728 = 0.8333.
   await setStage(before.page, NON_169);
   rebaseNon169Old = await armAt(before.page, {
     label: 'rebase-non169-old', look: asOldBuild(HD_LOOK),
@@ -2213,9 +1161,6 @@ let rebaseNon169Old = null;
     const m = measured.get(name);
     note(`${BEFORE} ${name.padEnd(8)} ${fixed(m.fine.mean).padStart(9)} ${fixed(m.coarse.mean).padStart(13)} ${fixed(m.ratio, 4).padStart(11)} ${fixed(m.texture, 4).padStart(9)}`);
   }
-  // The control is the same predicate rather than a second threshold, required to
-  // be false and required to be a long way from true - a control that failed by a
-  // hair would say the measurement is noisy rather than that it works.
   for (const name of ['points', 'nobloom']) {
     const m = measured.get(name);
     const tol = RES_TOLERANCE[name];
@@ -2228,43 +1173,17 @@ let rebaseNon169Old = null;
   }
 }
 
-// The whole look across the two builds, at both of this build's sizes. Every label
-// here names the buffers the arm actually rendered into, because a row that claims
-// 1080p while measuring 1200 is a label claiming coverage the instrument does not
-// have - which is the shape of the JSON.stringify case this repo already has a rule
-// about.
 for (const [label, arm, glow] of [
   ['1728x1080', rebaseFullRef, rebaseGlowRef],
   ['1920x1200', rebaseFullBig, rebaseGlowBig],
 ]) {
-  // The clamp precondition again, on both cross-build arms, because the old build
-  // draws its own preset's point size rather than the sweep's.
   const clear = [rebaseFullOld, arm].every((a) => a.sizes.smallest >= 1 && a.sizes.largest <= 64);
   const ends = `old at 960x600 ${rebaseFullOld.sizes.smallest.toFixed(2)}..`
     + `${rebaseFullOld.sizes.largest.toFixed(1)}px, new at ${label} `
     + `${arm.sizes.smallest.toFixed(2)}..${arm.sizes.largest.toFixed(1)}px`;
   const worstFull = Math.max(...arm.tiles.map((v, i) => Math.abs(v - rebaseFullOld.tiles[i])));
   const ratioFull = arm.lum.mean / rebaseFullOld.lum.mean;
-  // And the chain, which these two rows were the last cross-build comparisons in this
-  // file to be judged without.
-  //
-  // The argument for leaving them out was that they were green through the whole episode
-  // that produced `sameChain` - these arms spread nothing, so Blackwall's own `rgbSplit`,
-  // `scanlines` and `grain` survive on both sides and both builds run the grade, where the
-  // three arms that spread `OFF` had it switch off on one side only. That is a true
-  // statement about the builds this pair currently spans and a bad reason to exempt a row,
-  // because it is the *conclusion* of the investigation being used as a precondition of the
-  // next one: whether a pass runs is derived from a set of parameter names, and the defect
-  // is a future build changing that set. A row that judges only clamps and pixels then
-  // reports a chain divergence as a luminance ratio, which is the exact hour this tool
-  // already spent once. Green rows are where an exemption is cheapest to write and where it
-  // costs the most, since nothing draws attention to it until the build it was wrong about
-  // arrives.
   const chains = sameChain(arm, rebaseFullOld);
-  // The excluded term, reported beside the judged one on every run rather than left in
-  // a comment for somebody to go and read. It is not in the predicate on purpose: what
-  // it measures is the distance between two implementations of a pass, which is a fact
-  // about the pinned revision and not a property this build can be asked to hold.
   const worstGlow = Math.max(...glow.tiles.map((v, i) => Math.abs(v - rebaseGlowOld.tiles[i])));
   const ratioGlow = glow.lum.mean / rebaseGlowOld.lum.mean;
   check(clear && chains && Math.abs(ratioFull - 1) <= 0.02 && worstFull <= 2.0,
@@ -2284,10 +1203,6 @@ for (const [label, arm, glow] of [
   });
   const worst = Math.max(...newLook.tiles.map((v, i) => Math.abs(v - rebaseOld.tiles[i])));
   const ratio = newLook.lum.mean / rebaseOld.lum.mean;
-  // Read back off each page rather than taken from the constants above. Two arms
-  // that agree perfectly are evidence only if they were two arms: without this an
-  // equality between one image and itself would read exactly like a rebase that
-  // works, and it would keep reading that way forever.
   const twoBuilds = rebaseOld.kScale === 1 && newLook.kScale === SMALL.height / 1080
     && rebaseOld.pointSize === RES_LOOK.pointSize
     && newLook.pointSize === RES_LOOK.pointSize * POINT_SIZE_REBASE
@@ -2300,35 +1215,6 @@ for (const [label, arm, glow] of [
     + `${chainOf(rebaseOld)}`);
 }
 
-// And the same question at 16:9, which is the only arm here that can answer it.
-//
-// Every other comparison in this section is at aspect 1.6, and at 1.6 a reference
-// taken from the drawing buffer's width over 1728 and one taken from its height
-// over 1080 are the same number - so all of them pass on a build that references
-// the width, and all of them would keep passing. Every size the export menu offers
-// is 16:9, where the two differ by 11.1%, so the region this tool could not see was
-// exactly the region the product ships in. `scale-by-width` is the mutation that
-// says so: it fails this row and leaves every other assertion in this file passing.
-//
-// The shape is the one above, because it is the tightest one available: one buffer,
-// one drawn point size, two builds. Nothing is resampled and nothing is reframed -
-// the two arms render the same scene into the same 1920x1080 buffer - so what is
-// left is whether this build's k is 1 there, which is what "pixels at 1080p" means.
-// Like the 1728x1080 arm it is blind to `pointsize-absolute`, since k is 1 here and
-// deleting it changes nothing: the 1920x1200 arm is what catches that, and dropping
-// either of them would leave a mutation uncaught.
-//
-// The obvious way to do this does not work, and it is worth saying so because it is
-// the first thing anyone reaches for. Adding a 16:9 *pair* to the sweep above - two
-// sizes of one aspect, compared with each other the way 960x600 and 1920x1200 are -
-// reproduces the blindness in a new aspect rather than removing it. Under
-// `scale-by-width` a 960x540 and a 1920x1080 arm still differ by exactly 2, because
-// so do their widths, and the same holds for any reference linear in the buffer.
-// Self-consistency between two sizes of one aspect cannot see which length the
-// reference was taken from; only its *ratio* enters, and every candidate reference
-// gives the same ratio. What breaks the symmetry is a build that has no reference at
-// all, which is why this arm is cross-build at one buffer and why it costs a second
-// browser rather than a second render.
 {
   await setStage(main.page, HD);
   const hdNew = await armAt(main.page, {
@@ -2336,14 +1222,6 @@ for (const [label, arm, glow] of [
   });
   const worst = Math.max(...hdNew.tiles.map((v, i) => Math.abs(v - rebaseHdOld.tiles[i])));
   const ratio = hdNew.lum.mean / rebaseHdOld.lum.mean;
-  // How much of the frame is lit at all, which is the term that actually answers
-  // this. Point size is a coverage term before it is a brightness one: mean
-  // luminance is carried by the bright cores, which saturate and barely move, while
-  // the lit fraction is the splats' own footprint. Measured under the mutation at
-  // this buffer and this size, the lit fraction moves 10.8% - the size error itself
-  // - where the mean moves 2.1% and the worst tile 0.934/255, which would sit inside
-  // the band its sibling arm uses. Judging this row on the mean would have been a
-  // row that reported the right thing about the wrong number.
   const litRatio = hdNew.lum.litPct / rebaseHdOld.lum.litPct;
   // Both registries have to have taken the size they were asked for - the old
   // build's step is 0.5 and this one's 0.1 - or this is a comparison about a snap.
@@ -2362,10 +1240,6 @@ for (const [label, arm, glow] of [
     + `${chainOf(rebaseHdOld)}`);
 }
 
-// The same cross-build question at 4:3. The 16:9 arm is not enough on its own:
-// a width reference is wrong there by 11.1%, but at 4:3 with the same 1080 height it
-// is wrong by 16.7% in the other direction - and, more importantly, the export menu
-// also ships non-16:9 sizes. The grid is 180x216 tiles, so it still divides evenly.
 {
   await setStage(main.page, NON_169);
   const non169New = await armAt(main.page, {
@@ -2391,17 +1265,6 @@ for (const [label, arm, glow] of [
 
 console.log('\n[3] the crop box is editing furniture and cannot reach an exported pixel');
 
-// The box itself is drawn on a canvas of its own and could not reach `readPixels` if it
-// tried. What *can* is the pass that comes with it: while the box is on screen, points
-// the crop cuts draw faintly instead of vanishing, and that is a uniform on the same
-// shader every exported frame goes through. A viewer setting one edit away from being in
-// somebody's deliverable is the `hd-reaches-recorder` class, so it is asserted here in
-// the tool that owns the exported bytes.
-//
-// **The mechanism under test is that the uniform is derived rather than assigned.** It
-// reads the chrome flag the export already clears around its render, so the export does
-// not have to know the faint pass exists. `cropoutside-reaches-the-export` cuts that
-// dependency and must redden the first row.
 {
   const arm = async (label, { box, chrome, near = 0.05, crop = true, wide = false }) => main.page.evaluate(`(async () => {
     const k = globalThis.__kinect;
@@ -2430,9 +1293,6 @@ console.log('\n[3] the crop box is editing furniture and cannot reach an exporte
   console.log(`  ....  faint pass   shown ${shown.outside}, mid-export ${exporting.outside}, `
     + `box off ${hidden.outside}`);
 
-  // The control, and it comes first because the row below is an equality: two identical
-  // images prove nothing if the faint pass never reaches a pixel in the first place, and
-  // a build whose `cropOutside` was stuck at zero would pass the export row perfectly.
   check(shown.sha !== hidden.sha,
     'the faint pass reaches the rendered image while the editor is showing the box',
     `${shown.sha.slice(0, 12)} shown against ${hidden.sha.slice(0, 12)} with the box off`);
@@ -2440,20 +1300,6 @@ console.log('\n[3] the crop box is editing furniture and cannot reach an exporte
     'and an exported frame is byte-identical with the box shown and with it hidden',
     `${exporting.sha.slice(0, 12)} mid-export against ${hidden.sha.slice(0, 12)} with the box off`);
 
-  // **And with the box off the crop is a cull, not a fade to nothing.** A point kept
-  // alive at alpha zero is invisible and still writes depth, so the half of a room the
-  // crop removed goes on hiding the half it kept - which is a picture missing geometry
-  // that was never cropped, in the state every exported frame is rendered in.
-  //
-  // **Read as "cutting the front of the room shows you the back of it"**, which needs no
-  // brightness threshold tuned to a fixture and is exactly what an invisible occluder
-  // cannot do. A near plane at 1.5m removes the foreground; on a build that culls, the
-  // rays it was standing in front of come through and light pixels the uncropped picture
-  // has nothing on. On a build that keeps it at alpha zero, the foreground goes on
-  // occluding and those pixels stay dark - the picture is missing geometry the crop
-  // never touched, in the state every exported frame is rendered in.
-  //
-  // The two rows above cannot see this because both of their arms carry the same holes.
   const cut = await arm('cropCut', { box: false, chrome: true, near: 2.5, wide: true });
   const whole = await arm('cropWhole', { box: false, chrome: true, near: 2.5, crop: false, wide: true });
   const revealed = await main.page.evaluate(`(() => {
@@ -2476,15 +1322,6 @@ console.log('\n[3] the crop box is editing furniture and cannot reach an exporte
   note('cutting the first 2.5m of the room',
     `${revealed.seen} pixels the released picture has nothing on; `
     + `${revealed.litCut} lit with the near plane biting against ${revealed.litWhole} released`);
-  // Two thousand, sitting between two measurements rather than just under one: this
-  // fixture reveals 3776 pixels through the gap the cull leaves, and 993 with
-  // `faint-survives-at-zero` keeping the foreground alive to occlude. It is a ratio and
-  // not a presence, because a cloud is sprites rather than a surface and rays get
-  // through a stack of invisible points anyway - which is also why the lit-pixel counts
-  // beside it separate the two builds by 3% and are printed rather than asserted on. A
-  // near plane at 2.5m with the lateral faces wide open is what makes the ratio big
-  // enough to divide: it puts the bulk of the room in front of what survives, where
-  // 1.5m left too little foreground and the two builds came out 225 against 154.
   check(revealed.seen > 2000,
     'and with the box off the crop is a cull, so what it removes stops occluding what it kept',
     `${revealed.seen} revealed, ${revealed.litCut} lit against ${revealed.litWhole} released`);
@@ -2501,20 +1338,11 @@ await main.page.evaluate(`(() => {
   k.params.reset(['left', 'right', 'bottom', 'top', 'near', 'far', 'crop']);
 })()`);
 
-// The main page has said everything it has to say, and it is closed here. Every
-// claim below runs on a page of its own, one browser at a time: two live WebGL
-// pages while an export is reading pixels back is a renderer process this machine
-// will sometimes kill, and that arrives as `Execution context was destroyed`.
 if (SHOTS) await main.page.screenshot({ path: join(SHOTS, `export-check${MUTATE ? `-${MUTATE}` : ''}.png`) });
 await main.close();
 
-// ------------------------------------------- 3. an exported frame is the editor's
-
 console.log('\n[4] an exported frame is the frame the editor showed at that program time');
 
-// Both arms in one page and at the editor's own stage, so no resize and no second
-// page load sits between the two things being compared. The export's output size
-// is the editor's drawing buffer for the same reason.
 const EDITOR_ARM = `(async ({ frames, fps }) => {
   const k = globalThis.__kinect;
   const ex = globalThis.__ex;
@@ -2564,15 +1392,11 @@ if (shown.ok) {
   if (firstBad >= 0) {
     note('first mismatch', `frame ${firstBad}: export ${got[firstBad].slice(0, 16)} editor ${editorHashes[firstBad].slice(0, 16)}`);
   }
-  // The control for the equality above: the frames have to differ from each other,
-  // or an export of one image repeated would match an editor that also never moved.
   const distinct = new Set(got).size;
   check(distinct === got.length,
     'and the frames are not all the same image, so the equality is about position',
     `${distinct} distinct frames of ${got.length}`);
 }
-
-// ---------------------------------------------------- 4. no wall clock anywhere
 
 console.log('\n[5] the same export twice is the same bytes');
 
@@ -2581,34 +1405,6 @@ const RERUN = {
   from: 0, to: EXPORT_FRAMES, name: 'check-repeat', codec: 'h264',
 };
 
-// Deliberately neither the editor's stage nor its aspect: 4:3 against the stage's
-// 1.6, so a file that came out at the preview's size is wrong in two ways at once.
-//
-// Only its container is measured, never its pixels, and that is a decision rather
-// than an oversight. Bringing this export into the look comparison would need a
-// lossless arm at 800x600 so the decode is an equality rather than an argument
-// about codec loss, a tile reduction written a second time on the Node side because
-// the existing one lives in the page, and a fourth browser on the old build to have
-// anything to compare against - the graded look at 600 is the only reference this
-// tool has, and 800x600 is the one 4:3 size where the two builds' bloom chains
-// coincide. What that would buy is the aspect question, and the 16:9 arm in section
-// 2 answers the aspect question against two page renders for the cost of two arms
-// on browsers that are already open. So this stays a metadata claim, and its
-// pixels are covered indirectly: the lossless arm above proves export pixels are
-// the editor's at the stage size, and section 2 proves the look holds at a size and
-// an aspect the editor is not.
-// **800x450 rather than the 800x600 this was, and the change is the aspect and not the
-// size.** What this row asserts is metadata: that the size asked for is the size the file
-// comes out at, so an output size that never reached the renderer cannot look like one that
-// did. That needs a size the editor's buffer is not, and 800x450 is one - it is 16:9 like
-// the 640x360 stage and it is nowhere in `EXPORT_SIZES`, so it stays as unfamiliar as it
-// ever was.
-//
-// The 600 was chosen for a look comparison the comment above says was deliberately not
-// built, and it stopped being free when the letterbox became the project's shape: rendering
-// 4:3 out of an 8:5 edit is a reframe, `exportClip` refuses it at the press now, and this
-// row went red naming exactly that. The refusal is right and the fixture was carrying a
-// leftover - a picture at another shape is not this clip at another size.
 const ODD_SIZE = {
   width: 800, height: 450, fps: EXPORT_FPS,
   from: 0, to: 3, name: 'check-size', codec: 'h264',
@@ -2616,9 +1412,6 @@ const ODD_SIZE = {
 
 const twice = [];
 for (let i = 0; i < 2; i++) {
-  // A separate browser each time, and never two at once. A second run inside one
-  // page would inherit whatever module state the first left behind, and the claim
-  // is about the render rather than about that.
   const run = await onFreshPage(`determinism run ${i}`, async (page) => {
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
@@ -2648,8 +1441,6 @@ if (twice.every((r) => r.ok)) {
     twice.map((r, i) => (r.ok ? `run ${i} ok` : `run ${i}: ${r.error}`)).join(' | '));
 }
 
-// ------------------------------------------------------------- 5. the file
-
 console.log('\n[6] the file has the frames, the duration and the rate that were asked for');
 
 const probe = (path) => {
@@ -2664,9 +1455,6 @@ const probe = (path) => {
   return {
     width: s.width,
     height: s.height,
-    // Counted by decoding, not read off the container. `nb_frames` is a field the
-    // muxer writes and may leave empty, so trusting it would move "trusting the
-    // command line" one level down rather than removing it.
     frames: Number(s.nb_read_frames),
     fps: num / den,
     codec: s.codec_name,
@@ -2686,12 +1474,6 @@ if (lossless.ok && twice[0]?.ok) {
       `${p.fps}fps, ${p.duration.toFixed(3)}s, wanted ${EXPORT_FPS}fps and ${(wantFrames / EXPORT_FPS).toFixed(3)}s`);
   }
 
-  // The strongest form the claim can take, and the only one that can catch an
-  // upside-down file: decode every frame back to raw RGBA and hash it against what
-  // the browser sent. ffv1 is lossless, so this is an equality rather than an
-  // argument about how much codec loss is acceptable - and the vertical flip the
-  // encoder applies has to come back out for the bytes to match, which is what
-  // makes orientation part of the same assertion.
   const decoded = execFileSync(FFMPEG, [
     '-v', 'error', '-i', lossless.done.output, '-vf', 'vflip',
     '-f', 'rawvideo', '-pix_fmt', 'rgba', '-',
@@ -2706,28 +1488,11 @@ if (lossless.ok && twice[0]?.ok) {
     'decoded back, the file is byte-for-byte the frames the browser sent, right way up and in order',
     `${matched}/${lossless.done.frameHashes.length} frames matched`);
 
-  // **The two deliverables the dialog offers that nothing here encoded.** The format
-  // segments were proved as far as the document they write and no further, so `prores`
-  // and `pngseq` were two buttons whose whole journey past `setExportCodec` was
-  // untested - and they are the two entries in `CODECS` that differ from `h264` in the
-  // things that break: one changes the container, the other stops the artifact being a
-  // file at all.
-  //
-  // They are asserted differently on purpose. A ProRes deliverable is a `.mov` and the
-  // question is what stream is inside it, so `probe` answers. A PNG sequence is a
-  // **directory** - `server/export.js` says so in as many words, and `frameExt` is the
-  // field that decides it - so probing it as a file is not a weaker version of the same
-  // row, it is a row that cannot run. Counting what landed in the directory is the only
-  // form the claim has here, and the per-frame size still has to come from ffprobe
-  // because a file that exists is not a picture of the right shape.
   const movRun = await onFreshPage('the ProRes deliverable', async (page) =>
     page.evaluate(`globalThis.__kinect.export.run(${JSON.stringify({ ...LOSSLESS, name: 'check-mov', codec: 'prores' })})`));
   if (movRun.ok) {
     const p = probe(movRun.value.output);
     const wantFrames = EXPORT_FRAMES + 1;
-    // The codec name as well as the extension, because a `.mov` carrying h264 is exactly
-    // what a table that lost its `args` would write, and it is the shape a row asking
-    // only about the container passes.
     check(movRun.value.output.endsWith('.mov') && p.codec === 'prores'
       && p.frames === wantFrames && p.width === STAGE.width && p.height === STAGE.height,
       'prores: the deliverable is a .mov holding a ProRes stream of the frames that were asked for',
@@ -2741,9 +1506,6 @@ if (lossless.ok && twice[0]?.ok) {
     page.evaluate(`globalThis.__kinect.export.run(${JSON.stringify({ ...LOSSLESS, name: 'check-pngseq', codec: 'pngseq' })})`));
   if (seqRun.ok) {
     const dir = seqRun.value.output;
-    // `readdirSync` on a path that is not a directory throws ENOTDIR, which is the
-    // failure this row wants to be loud about rather than to catch: an artifact that
-    // stopped being a directory is the defect, not a condition to handle.
     const files = readdirSync(dir).filter((f) => f.endsWith('.png')).sort();
     const wantFrames = EXPORT_FRAMES + 1;
     check(files.length === wantFrames,
@@ -2760,12 +1522,6 @@ if (lossless.ok && twice[0]?.ok) {
     check(false, 'pngseq: the artifact is a directory holding one numbered PNG per frame', seqRun.error);
   }
 
-  // Output resolution is an ordinary export setting, which is the property the
-  // resolution work above exists to make true - so one export is asked for at a
-  // size the editor is not, and the file is measured rather than the request
-  // echoed. Every other export here runs at the editor's own buffer, where an
-  // output size that never reached the renderer would look exactly like one that
-  // did.
   const odd = await onFreshPage('the unfamiliar-size export', async (page) => {
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
@@ -2786,8 +1542,6 @@ if (lossless.ok && twice[0]?.ok) {
     check(false, 'the unfamiliar-size export ran', odd.error);
   }
 
-  // And what the job record says, since the queue that will read it does not exist
-  // yet and a field nobody writes is a field nobody can retrofit.
   const record = JSON.parse(readFileSync(`${lossless.done.output}.job.json`, 'utf8'));
   check(typeof record.renderer === 'string' && record.renderer.length > 0
     && record.capture === index.hash && record.project !== null && typeof record.project === 'object',
@@ -2795,45 +1549,19 @@ if (lossless.ok && twice[0]?.ok) {
   `renderer ${JSON.stringify(record.renderer)}, capture ${String(record.capture).slice(0, 20)}…`);
 }
 
-// ------------------------------------ 6. a failed export leaves the last one alone
-
 console.log('\n[7] a failed export leaves the previous file and its record exactly as they were');
 
-// The one claim here that does not go through the running server, because it cannot:
-// what it is about is a path inside `server/export.js`, and a page can be served a
-// different `web/main.js` but nothing can serve a running server a different module.
-// So this imports the module - the tree's copy, or the mutated one under `--mutate`
-// - into a WebSocket server of its own on an ephemeral port and drives it from Node
-// with the three messages the page sends. Both arms reach it the same way, so the
-// mutation is the only difference between them, and the wiring the running server
-// adds on top is what claims 3 to 5 above already exercise.
-//
-// The failure is an ordinary path rather than a corner. The export name defaults to
-// the take's id, so every "tweak the look and export again" reuses it, and the code
-// this replaced had ffmpeg open the previous good file with `-y` while `fail`
-// unlinked it by name: a second export that died after one frame left no video and
-// the *first* export's job.json still sitting beside it, describing a successful
-// render of a path with nothing at it.
+// The one claim here that does not go through the running server, because it cannot: what it
+// is about is a path inside `server/export.js`, and nothing can serve a running server a
+// different module. So this imports it into a server of its own on an ephemeral port.
 {
   const outDir = join(REPO, 'exports');
-  // The same directory the running server writes into, and the name is what keeps
-  // the two apart: `check-atomic` belongs to this claim and nothing else here or in
-  // the server ever asks for it, so the file this claim is watching is one only
-  // this claim writes.
   const NAME = 'check-atomic';
-  // The actual file path is returned in the `ready` message, because the encoder
-  // now writes each export into a unique directory and `done.output` is the video
-  // file inside it.
-  // Start with no previous `check-atomic` artifact or scratch in the way, because
-  // the claim is about what this run leaves behind, not what an earlier run did.
   for (const f of readdirSync(outDir).filter((f) => f.startsWith(NAME))) {
     rmSync(join(outDir, f), { recursive: true, force: true });
   }
   let OUT = null;
   let SIDECAR = null;
-  // Small and cheap: this claim is about which files exist afterwards, and a 64x48
-  // frame proves that exactly as well as a 1080p one. Even dimensions because h264
-  // subsamples chroma, and h264 because that is the codec the menu defaults to.
   const SHAPE = { name: NAME, width: 64, height: 48, fps: EXPORT_FPS, frames: 2, codec: 'h264' };
   const FRAME_BYTES = SHAPE.width * SHAPE.height * 4;
   const frameOf = (n) => Buffer.alloc(FRAME_BYTES, 24 + n * 96);
@@ -2843,9 +1571,6 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
     ?? readFileSync(join(REPO, 'server/export.js'), 'utf8');
   let copies = 0;
 
-  // One server on the module under test. A fresh copy per call rather than one
-  // import: `FFMPEG` is read at module load, and the arm below that has to watch an
-  // encoder fail to start needs a module whose encoder does not exist.
   const exportServer = async (ffmpeg) => {
     const modPath = join(scratch, `export-${++copies}.mjs`);
     writeFileSync(modPath, serverSource);
@@ -2866,9 +1591,6 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
     };
   };
 
-  // The page's side of the protocol, one message at a time so an arm can say "wait
-  // for the ack, *then* corrupt the next frame" rather than firing everything and
-  // reading the wreckage.
   const socketTo = async (port) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/export`);
     const queue = [];
@@ -2895,9 +1617,6 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
       if (m.closed) return { error: 'the socket closed before the export was ready' };
     }
   };
-  // Everything the socket has left to say. The server closes only after `fail` has
-  // finished its own cleanup - the unlink is awaited before the close - so reaching
-  // the close here means the directory below is in its final state.
   const settle = async (sock) => {
     const out = { acks: 0, done: null, error: null };
     for (;;) {
@@ -2910,8 +1629,6 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
   };
 
   const server = await exportServer(FFMPEG);
-  // Encoders that do not exist are the second half of the same bug: the old `fail`
-  // deleted `job.output` whether or not this run had ever written a byte of it.
   const noEncoder = await exportServer(join(scratch, 'ffmpeg-that-is-not-here'));
 
   try {
@@ -2933,19 +1650,6 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
       throw new Error('the good export did not produce a file to protect');
     }
 
-    // **The two formats the dialog gained, asked here rather than only in section 5, and
-    // the reason is delivery.** Section 5 exports through the server named by `--url`,
-    // which is a process this tool did not start and cannot stage - so a mutation of
-    // `server/export.js` reaches nothing there, and a control aimed at it runs the clean
-    // build and reports itself caught-by-nothing at exit 0. Measured exactly that way
-    // before this block existed: `prores-writes-h264` came back 45/45 passed, NOT CAUGHT,
-    // with the section 5 rows green because the build under them was never mutated. That
-    // is the silent-delivery failure this suite already carries two entries about.
-    //
-    // This section imports the module itself, `serverSource` carries the mutation, so the
-    // claim about what a codec writes is asked where an edit to the codec table can be
-    // seen. Section 5 keeps its rows: they are the end-to-end confirmation through the
-    // real server, and this is the half that can be falsified.
     for (const [codec, wantExt] of [['prores', 'mov'], ['pngseq', 'pngseq']]) {
       const sock = await socketTo(server.port);
       sock.send({ begin: { ...SHAPE, name: `${NAME}-${codec}`, codec } });
@@ -2964,9 +1668,6 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
         continue;
       }
       if (codec === 'pngseq') {
-        // A sequence is a directory, so `readdirSync` is the question and its ENOTDIR is
-        // the answer when the artifact has stopped being one. Counting the frames is the
-        // only form this claim has - probing the path as a file cannot run at all.
         let files = null;
         let why = '';
         try {
@@ -3006,10 +1707,6 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
       'an export whose encoder never started removes nothing under that name',
       `${second.error ?? 'it did not fail'}; ${state()}`);
 
-    // (c) An export that dies mid-encode, under the same name. The ack is the
-    // precondition that makes this arm mean anything: it is sent once the frame has
-    // reached ffmpeg's stdin, so an ack proves the encoder was alive and writing
-    // when the run was killed, rather than the run having failed before it began.
     const dying = await socketTo(server.port);
     dying.send({ begin: SHAPE });
     await untilReady(dying);
@@ -3028,9 +1725,6 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
       'and an export that dies mid-encode leaves the previous file and its record byte-identical',
       `${acks} frame acked by the encoder, then ${third.error ?? 'no error'}; ${state()}`);
 
-    // The falsification control for the cleanup half: the failed runs each wrote a
-    // scratch file, and if either had left one behind, "the output is untouched"
-    // would be true of a directory that had quietly filled up with half-muxed video.
     const leftovers = readdirSync(outDir).filter((f) => f.startsWith(`${NAME}.`) && (f.includes('.part.') || f.endsWith('.part')));
     check(leftovers.length === 0,
       'and neither failed run left its scratch behind',
@@ -3042,33 +1736,16 @@ console.log('\n[7] a failed export leaves the previous file and its record exact
   }
 }
 
-// ------------------------ 7. a clip needing an effect this build has not got
-
 console.log('\n[8] an export is refused while the clip needs an effect this build lacks, and a suppression is per effect');
 
-// **The missing effect is staged rather than uninstalled, and it has to be.** There is
-// no uninstall in this build - that arrives later - so the shape under test is reached
-// the way a document from another machine reaches it: a look name whose dotted prefix is
-// a perfectly valid effect id that nothing here has ever shipped. `sparkle` and
-// `drizzle` are those, and the first row of this section is that they really are absent,
-// because the day somebody ships a package under either name every row below stops
-// asking anything while still printing a pass.
-//
-// Two of them rather than one, because the claim that separates a per-effect suppression
-// from a global one cannot be made with a single missing effect: suppressing the only
-// one there is looks identical under both implementations.
+// The missing effect is staged rather than uninstalled, because there is no uninstall in this
+// build: a look name whose dotted prefix is a valid effect id that nothing here has shipped.
 const MISSING_A = { id: 'sparkle', version: '1.0.0' };
 const MISSING_B = { id: 'drizzle', version: '2.1.0' };
 
 /**
- * The document under test, built out of the page's own serialiser rather than typed
- * here.
- *
- * A hand-written project is a fixture that stops being what `restoreProject` accepts the
- * first time the loader gains a rule - `jobs-check` has that lesson written into its own
- * fixture twice over - so this takes whatever the open clip currently is and adds the one
- * thing under test: four values and two keyed tracks under an effect that is not here,
- * with the `requires` entry the writer would have derived for them.
+ * The document under test, built out of the page's own serialiser rather than typed here: a
+ * hand-written project stops being what `restoreProject` accepts the moment the shape moves.
  */
 const PARKED_ARM = `((opts) => {
   const k = globalThis.__kinect;
@@ -3101,9 +1778,6 @@ const parkedRun = await onFreshPage('the missing-effect export run', async (page
     }
   })(${JSON.stringify({ project: project, options: options })})`);
 
-  // The effect ids this build actually declares, read off the registry the way the page
-  // itself decides what is installed - so the precondition row below is asking the same
-  // question the parking asks rather than a second reading of it.
   const declared = await page.evaluate(`(() => {
     const k = globalThis.__kinect;
     return [...new Set(k.params.names('look').filter((n) => n.includes('.')).map((n) => n.slice(0, n.indexOf('.'))))];
@@ -3114,20 +1788,12 @@ const parkedRun = await onFreshPage('the missing-effect export run', async (page
   const shot = { width: STAGE.width, height: STAGE.height, fps: EXPORT_FPS, from: 0, to: 2, codec: 'lossless' };
   return {
     declared,
-    // The complete document first, so the pictures the rows below compare against were
-    // taken on the same page with the same camera and the same playhead.
     complete: { ...await attempt(one.base, { ...shot, name: 'check-missing-none' }), doc: one.base },
     refused: await attempt(one.doc, { ...shot, name: 'check-missing-refused' }),
     suppressed: await attempt(one.doc, { ...shot, name: 'check-missing-suppressed', suppressEffects: [MISSING_A.id] }),
     partial: await attempt(two.doc, { ...shot, name: 'check-missing-partial', suppressEffects: [MISSING_A.id] }),
     badge: await page.evaluate(`(() => [...document.querySelectorAll('#tMissing .missingfx')]
       .map((e) => ({ effect: e.dataset.effect, text: e.querySelector('b').textContent })))()`),
-    // **The one seam every row above steps over: what the export *button* hands the
-    // rule.** `exportClip` takes the suppression as an argument so that the page and the
-    // render worker can each supply their own, and the page's answer is read at the click
-    // - so a build whose handler forgot to pass the badge's set would satisfy every row
-    // that calls `export.run` directly and refuse every export a person could ask for.
-    // Driven through the two controls a hand uses, in the order the surface allows.
     throughTheUi: await (async () => {
       await page.evaluate(`(() => {
         globalThis.__kinect.library.restoreProject(${JSON.stringify(one.doc)});
@@ -3141,38 +1807,13 @@ const parkedRun = await onFreshPage('the missing-effect export run', async (page
       await page.locator('#menuExport').click();
       await page.fill('#tExportName', 'check-missing-ui');
       await page.locator('#tExport').click();
-      // The note is where the export reports itself, refusal and success alike, so it is
-      // the one place a driver can read which of the two happened without asking the
-      // function it just pressed a button to reach.
       await page.waitForFunction(
         `!/starting|frame /.test(document.getElementById('tExportNote').textContent)`,
         null, { timeout: 180000 },
       );
       return { pressed, note: await page.evaluate("document.getElementById('tExportNote').textContent") };
     })(),
-    // **A suppression is a decision about one document, and nothing was ending it.**
-    // `restoreProject` prunes the set to whatever is still parked, which is right for the
-    // three callers that are the *same* clip - an undo, a hotload, a rollback - and wrong
-    // for the one that is a different file. Two projects both missing `sparkle` therefore
-    // shared one authorisation: suppress it while A is open, open B, and B exports without
-    // it having been permitted by anybody. Worse than a stale toggle, because the thing it
-    // silently permits is a video leaving the machine short of a layer of its look.
-    //
-    // **Driven through the button and not through `export.run`**, which is the whole reason
-    // this row is here rather than beside the hook rows. `exportClip` takes the suppress set
-    // as an argument, so a call passing `[]` is refused on every build there is and would
-    // prove nothing; the set the leak was made of is the page's own, and the export button
-    // is the only thing that reads it.
     leak: await (async () => {
-      // **The export dialog the block above left open, closed through its own control
-      // before anything here presses a thing behind it.** `#exportDialog` is modal, so the
-      // browser refuses pointer events to everything under it - the badge's suppress button
-      // included - and Playwright's click waits rather than failing: the first attempt at
-      // this block spent thirty seconds retrying against `<dialog open>` and ended the run
-      // with `page.click: Timeout 30000ms exceeded` and no failed assertion, which is the
-      // crash-wearing-the-shape-of-a-catch this suite has recorded three times. Driven
-      // through `#exportClose` rather than by calling `close()`, because a modal a person
-      // can open is a modal a person closes and that is the path this file drives.
       await page.locator('#exportClose').click();
       const pressedFor = (id) => page.evaluate(
         `document.querySelector('#tMissing button[data-suppress="${id}"]')?.getAttribute('aria-pressed') ?? 'absent'`,
@@ -3181,29 +1822,13 @@ const parkedRun = await onFreshPage('the missing-effect export run', async (page
         globalThis.__kinect.library.restoreProject(d);
         await globalThis.__kinect.timeline.settled();
       })(${JSON.stringify(doc)})`);
-      // The complete document first, so this block starts from a page with nothing parked
-      // and therefore nothing suppressed - the prune empties the set on its way past. A
-      // block inheriting `throughTheUi`'s press would be asserting about a latch it did not
-      // set, which is a fixture rather than a claim.
       await restore(one.base);
       await restore(one.doc);
       await page.click('#tMissing button[data-suppress="sparkle"]');
       const inA = await pressedFor('sparkle');
-      // B is a *different document* that happens to miss the same effect, which is exactly
-      // the pair the leak needs: if the set were keyed on the effect rather than on the
-      // document, both look identical to it. Handed over rather than fetched, through the
-      // same `offered` parameter the resume chip uses, so this writes nothing into the
-      // store it is running against.
       await page.evaluate(`globalThis.__kinect.library.loadProject('check-missing-leak', ${JSON.stringify(two.doc)})`);
       await page.evaluate('globalThis.__kinect.timeline.settled()');
       const inB = await pressedFor('sparkle');
-      // Where this block's own console noise starts. Marked before the press rather than
-      // matched by content afterwards, because `throughTheUi` above can produce the
-      // identical sentence on a mutated build - `export-button-drops-the-suppression`
-      // refuses the export it drives - and a drain matching on text alone would take that
-      // line out of the sweep too. That is not a tidier filter, it is this block silently
-      // exempting a *different* control's finding, which is the standing-exemption failure
-      // the drain exists to avoid rather than an instance of it.
       const errorsBefore = pageErrors.length;
       await page.locator('#outputMenuButton').click();
       await page.locator('#menuExport').click();
@@ -3214,47 +1839,14 @@ const parkedRun = await onFreshPage('the missing-effect export run', async (page
         null, { timeout: 180000 },
       );
       const note = await page.evaluate("document.getElementById('tExportNote').textContent");
-      // Closed again before the second half of the block presses anything, for the reason
-      // it was closed at the top: an export refused leaves the dialog standing, and a modal
-      // takes every later click in this file with it.
       await page.locator('#exportClose').click();
-      // **And the sentence this block just provoked, taken out of the sweep by draining
-      // exactly one entry rather than by filtering it.** The refusal is the point of the
-      // rows above, and `showTimelineError` writes every sentence it shows the operator to
-      // `console.error` as well - so the `no page errors` row at the foot of this file
-      // collects it. A filter there would be standing rather than local: it would go on
-      // covering whatever the page said next that matched, and a build that stopped
-      // refusing would take the exemption with it in silence. Draining turns the noise into
-      // a claim - a build that does not refuse drains nothing and reddens the row below.
-      //
-      // Matched on the *shape* of the sentence rather than on `sparkle`, and that is not a
-      // widening for convenience. Under `suppression-outlives-its-document` the leaked
-      // suppression covers sparkle, so the refusal this export produces names drizzle
-      // instead - one line either way, and a drain keyed to the id would leave it in the
-      // sweep and add a red row about console noise to a control that is already saying
-      // what it has to say. The claim the count carries is unchanged: this block's export
-      // is refused, once.
-      // Removed by index from the tail, never by value: two identical sentences are two
-      // entries, and `indexOf` would take the earlier one - which is the same
-      // somebody-else's-line mistake as matching on text, arriving through the splice.
       const drained = [];
       for (let i = pageErrors.length - 1; i >= errorsBefore; i--) {
         if (/this clip requires .* not installed here/.test(pageErrors[i])) {
           drained.push(pageErrors.splice(i, 1)[0]);
         }
       }
-      // And the other half of one rule: within one document the prune is what makes undo
-      // survivable, so a restore of the same body has to leave the latch down. Without this
-      // row the fix could be "clear on every restore", which would spend the decision on
-      // every keystroke that enters the undo stack.
       await restore(one.doc);
-      // **Pressed only if the latch is down**, which is the same discipline `editor-check`'s
-      // panel section keeps for the same reason: this is a toggle, so a blind press on a
-      // build where the state is already set turns it *off* and the row below then reads a
-      // fixture nobody built. That is not hypothetical - under
-      // `suppression-outlives-its-document` the leak half's suppression is still standing
-      // here, and a blind press made this row red about a claim the mutated build actually
-      // keeps, which is a control reddening a row it has nothing to do with.
       if (await pressedFor('sparkle') !== 'true') {
         await page.click('#tMissing button[data-suppress="sparkle"]');
       }
@@ -3269,10 +1861,6 @@ if (!parkedRun.ok) {
   check(false, 'the missing-effect run completed', parkedRun.error);
 } else {
   const r = parkedRun.value;
-  // The precondition, and it is a row rather than an assumption for the reason
-  // `docs/instruments.md` gives about a fixture that cannot hold the property: an arm
-  // whose "missing" effect turned out to be installed would pass every refusal row by
-  // never producing one.
   const clash = [MISSING_A.id, MISSING_B.id].filter((id) => r.declared.includes(id));
   check(clash.length === 0,
     'the two effects these rows are about really are absent from this build',
@@ -3283,8 +1871,6 @@ if (!parkedRun.ok) {
   'a clip whose requires name a missing effect refuses to export, naming the id and the version',
   r.refused.ok ? 'the export ran' : r.refused.error);
 
-  // And the badge said so on the surface, with the version out of the document's own
-  // requires entry - the same fact the refusal quotes, read where a person would.
   const said = r.badge.find((e) => e.effect === MISSING_B.id);
   check(r.badge.length === 2 && said?.text.includes(`${MISSING_B.id} ${MISSING_B.version}`),
     'and the badge names each of them with the version the document asked for',
@@ -3301,20 +1887,12 @@ if (!parkedRun.ok) {
       && got[0].id === MISSING_A.id && got[0].version === MISSING_A.version,
     'and the deliverable\'s own document records what that render went without',
     JSON.stringify(got ?? null));
-    // The parked values are still in the record, which is the half a reader of the file
-    // needs: `suppressed` says what was left out of the *render*, and the document is
-    // still the document. A record that had shed them would say the clip never wanted
-    // the effect at all.
     const kept = Object.keys(record.project?.look?.params ?? {}).filter((n) => n.startsWith(`${MISSING_A.id}.`));
     check(kept.length === 4,
       'and it still carries the parked values, so the record says what was skipped rather than rewriting the clip',
       `${kept.length} parked keys in the deliverable's document: ${kept.join(', ')}`);
   }
 
-  // **The installed part of the look really rendered**, asserted as an equality against
-  // the same document without the parked keys. Bit-identical rather than close: the
-  // parked values never reach the registry, so the two documents leave it in exactly the
-  // same state and any difference at all would mean one of them had touched something.
   if (r.suppressed.ok && r.complete.ok) {
     const a = r.complete.frameHashes ?? [];
     const b = r.suppressed.frameHashes ?? [];
@@ -3329,40 +1907,18 @@ if (!parkedRun.ok) {
   'suppressing one missing effect leaves the export refused for the other, and names only the other',
   r.partial.ok ? 'the export ran' : r.partial.error);
 
-  // The falsification control for every row above: a build that simply refused to export
-  // would satisfy all three refusals, and one that recorded a suppression unconditionally
-  // would satisfy the record row. A complete document has to go straight through and has
-  // to leave no `suppressed` key behind it.
-  // And the same suppression made through the surface a person has, spent by the button
-  // a person presses. The note is the whole assertion: a build whose handler dropped the
-  // badge's set prints the refusal here instead of a filename, with every row above it
-  // still green.
   check(r.throughTheUi?.pressed === 'true'
     && /check-missing-ui/.test(r.throughTheUi?.note ?? '')
     && !/refused|failed/.test(r.throughTheUi?.note ?? ''),
   'and a suppression pressed in the badge is the one the export button spends, driven through both controls',
   `aria-pressed ${r.throughTheUi?.pressed}, note ${JSON.stringify(r.throughTheUi?.note ?? null)}`);
 
-  // **The leak, and the row that says the fix did not go too far.** Two documents both
-  // missing `sparkle` used to share one authorisation, because the loader prunes the
-  // suppression set rather than clearing it - right for the undo and the rollback that
-  // arrive through the same door, wrong for a file somebody opened. Both halves are
-  // asserted from the latch itself and the leak half again from the export, because the
-  // latch is what the fix moves and the refusal is what it is for: a build that cleared the
-  // set and forgot to repaint would pass the second and fail the first.
   check(r.leak?.inA === 'true' && r.leak?.inB === 'false',
     'a suppression made on one document is not carried into the next document opened, even one missing the same effect',
     `pressed in A: ${r.leak?.inA}, then in B: ${r.leak?.inB}`);
-  // `export failed` is the note's own word for a refusal and `refused` is not, which cost a
-  // round: the first spelling of this row asked for `/refus/i`, the build refused exactly as
-  // it should, and the row went red on the message rather than on the outcome. The mirror of
-  // the successful-export row above, which asks for a filename and the absence of this.
   check(/sparkle/.test(r.leak?.note ?? '') && /export failed/.test(r.leak?.note ?? ''),
     'and the export the second document asks for is refused again, naming the effect nobody authorised it to go without',
     JSON.stringify(r.leak?.note ?? null));
-  // The drain asserted rather than performed silently, which is what keeps the sweep at the
-  // foot of this file honest: a build that stopped refusing writes nothing to the console,
-  // drains nothing, and reddens here - so the exemption cannot outlive the thing it exempts.
   check(r.leak?.drained === 1,
     'and that refusal is the one console line this block adds, taken back out of the sweep by name rather than filtered out of it',
     `${r.leak?.drained} drained`);
@@ -3380,26 +1936,6 @@ if (!parkedRun.ok) {
   }
 }
 
-// --------------------------------------------------------------------- shutdown
-
-// The readback the chain rows stand on, asked of every arm this run took rather than
-// of the pairs that happened to be compared.
-//
-// Five rows above judge whether two builds ran the same post chain, and all five read it
-// through `chainOf`, which answers `''` for an arm off a page that has stopped publishing
-// its composer. Two of those and the comparison is an equality between silences: it passes,
-// it goes on passing, and nothing in the run says the instrument went blind. Asking the
-// population instead of the pair is what makes the failure loud - it names the arm, and it
-// names it whether that arm was ever put in a comparison or not, so a future row reading
-// `chainOf` straight is covered by a check that already exists rather than by whoever adds
-// it remembering.
-//
-// The count is asserted with it, because a row over a list is a row that passes on an empty
-// list, and this file's own history has one of those in it - "every parameter every row asks
-// for exists on this build" read `Object.entries` over a `Map`, got `[]`, and printed a pass
-// whatever the arms had dropped. A full clean run captures 39; the floor is stated as "some"
-// rather than as 39 so that adding an arm is not an edit here, and the mutations that cut the
-// run short are why it is not an equality.
 {
   const blind = ARMS.filter(([, a]) => chainOf(a) === '').map(([label]) => label);
   check(ARMS.length > 0 && blind.length === 0,

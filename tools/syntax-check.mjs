@@ -1,37 +1,10 @@
 #!/usr/bin/env node
-// Parses every JavaScript file this repo ships, and asks the five questions about the
-// tree that need nothing to answer: that every tool is documented, that every cited
-// `docs/` page exists, that the `.knct` decoder specification still agrees with the
-// module it specifies, that the hello the grabber emits is the hello the wire-format
-// documents, and that every element id the application shell drives is one the page
-// drawing it declares. No server, no browser, no sensor, no dependencies - which is what
-// makes it the one thing CI can run on a fresh clone and mean it.
+// Parses every JavaScript file this repo ships and asks the questions that need no server,
+// browser or sensor: every tool documented, every citation resolving, the decoder spec
+// agreeing with its module, the grabber's hello matching the wire format, and every shell id
+// declared by the page that draws it.
 //
 //   node tools/syntax-check.mjs [--root <dir>]
-//
-// A syntax checker that finds no files exits 0, and that is the whole reason this is a
-// tool rather than a `find | xargs node --check` in package.json. Rename a directory,
-// get a glob subtly wrong, run it from the wrong place, and the clean pass it prints is
-// about nothing at all - the coverage claim that is an assertion rather than something
-// enforced, which this repo keeps writing paragraphs about. So the roots have to exist,
-// each has to yield files, the count has to clear a floor, and the count is printed
-// beside the verdict so a number that has quietly halved is visible rather than implied.
-//
-// The floors are a tripwire and not a manifest. They are set well under what the tree
-// holds, because a floor that tracks the real count exactly becomes a chore that gets
-// bumped without being read, and the failure being guarded against is zero rather than
-// one fewer than last week.
-//
-// **`node --check` can stop detecting syntax errors entirely, and it does it quietly.**
-// Found by mutation rather than by reading, on the first control this tool was given: a
-// copy of the tree with `const a = {` appended to `web/format.js` passed all 33 files,
-// zero failed, exit 0. The copy had no `package.json`, so Node had nothing to say
-// whether a `.js` file is a module - and in that state a `.js` file that *looks* like
-// ESM and is also broken comes back rc=0 on v26.0.0, while the identical content as
-// `.mjs`, or under either `"type"`, comes back rc=1. Measured all four ways. So the root
-// must carry a `package.json`, and, because "must" is a word rather than a mechanism,
-// the same broken file is fed through first and the run refuses to continue unless it is
-// rejected. Without that canary this whole tool is a green light wired to nothing.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,41 +15,18 @@ const argv = process.argv.slice(2);
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = argv.includes('--root') ? argv[argv.indexOf('--root') + 1] : REPO;
 
-// A literal source substitution in `server/protocol.js`, in the shape the other tools'
-// mutation tables use. It is applied to the copy the specification row actually imports,
-// so that row reads a genuinely moved constant rather than a comparison somebody nudged -
-// and the specification's own prose is left alone, which is the drift being simulated:
-// the code moved and the document did not.
-//
-// **`{ file, edits }` rather than the bare `{ from, to }` it was written as**, and the file
-// is named here rather than left to the anchor row below to infer. That row resolves a
-// target from the entry's *shape*, and a bare `{ from, to }` had exactly one declarer -
-// `registry-check`, which edits `web/main.js` - so the shape was reading as "the browser
-// bundle". This entry made that inference wrong the moment it landed: the row went looking
-// for `export const TYPE_COLOR = 3;` in `web/main.js`, found none, and reported this
-// control as an anchor that had gone stale. The shape says nothing about the file, so the
-// entry has to, which is the normalisation the row's own header asks for.
+// Entries are `{ file, edits }`; the anchor row below resolves its target from that `file`.
 const MUTATIONS = {
   'spec-drifts': {
     file: 'server/protocol.js',
     edits: [['export const TYPE_COLOR = 3;', 'export const TYPE_COLOR = 4;']],
   },
 
-  // The shell row's control: one id the application shell drives, renamed in the markup
-  // and left alone in the module - which is a rename that got half-applied, the exact
-  // shape that shipped. `menuCameraReset` rather than a dialog's button because it is an
-  // application-bar item, so the surface it breaks is the one an operator is looking at.
   'shell-id-renamed': {
     file: 'web/index.html',
     edits: [['id="menuCameraReset"', 'id="menuCameraResetRenamed"']],
   },
 
-  // The control for the other direction, and it reproduces a merge rather than a typo:
-  // code that reads a shell key the table never declares, which is what arrived when a
-  // fork's `shell.stateDialog` met a table with no `stateDialog` in it. The distinction
-  // the row cares about is that this key is never looked up at all, so it is `undefined`
-  // rather than `null` - and `shell-id-renamed` cannot catch it, because a key absent
-  // from the table is absent from the walk that rule does.
   'shell-key-undeclared': {
     file: 'web/main.js',
     edits: [[
@@ -85,12 +35,6 @@ const MUTATIONS = {
     ]],
   },
 
-  // The citation row's control, and it plants the failure that row exists for rather than
-  // an invented one: a module named in this repo's own prose, renamed to something the
-  // tree does not hold. Splitting the browser bundle into twelve modules produced that
-  // fourteen times over - the prose went on naming the file a thing used to be in while the
-  // thing moved to a module beside it - and the name planted here is deliberately one no
-  // page, tool or document mentions, so the anchor row above still finds it exactly once.
   'web-citation-outlives-its-module': {
     file: 'CLAUDE.md',
     edits: [[
@@ -99,34 +43,16 @@ const MUTATIONS = {
     ]],
   },
 
-  // The other half of the same row, and it needs a mutation of its own because a citation
-  // naming a file that exists cannot be falsified by deleting a file. A `file:line` form
-  // rots without the path rotting - which is the more common way of the two, since the
-  // path survives every edit to the file it names and the line survives none of them.
   'line-citation-past-the-end': {
     file: 'docs/proof-tools.md',
     edits: [['`gpuTimer.poll` in `web/main.js` is and what made', '`gpuTimer.poll` in `web/main.js:98600` is and what made']],
   },
 
-  // The package-parse gate's control: one manifest with one brace doubled is a package
-  // the store throws on, and the gate has to name it rather than print a clean count.
-  // The rain package because it is the one whose shape docs/reference.md walks through.
   'manifest-does-not-parse': {
     file: 'effects-builtin/rain/manifest.json',
     edits: [['{\n  "format": 1,', '{{\n  "format": 1,']],
   },
 
-  // The assembled-program row's first control, and it plants the defect that row was
-  // written for rather than an invented one: `export-check`'s `pointsize-absolute` pointed
-  // at `web/cloud-shader.js` for a whole commit after the glyph field moved out, matching
-  // the `v.pointSize` fallback exactly once while the text the driver compiles came from
-  // the package's own chunk. Repointing it there again reproduces that state exactly.
-  //
-  // **It is the count rule's blind spot as well as the move rule's subject**, which is why
-  // this is the control and not a line invented for the purpose. The glyph chunk's `else`
-  // branch carries the old clamp statement verbatim - the chunk's own comment says it is
-  // kept byte-identical on purpose - so the anchor still appears exactly once in the
-  // assembled programs, and only applying the edit and finding them unmoved can see it.
   'anchor-in-dead-fallback': {
     file: 'tools/export-check.mjs',
     edits: [[
@@ -135,66 +61,24 @@ const MUTATIONS = {
     ]],
   },
 
-  // The second control, for the other half of the same row, and it has to plant its
-  // duplicate in a *different* file from the one the anchor names. A line copied inside its
-  // own chunk is already refused by the row above - two matches in one file - so a control
-  // built that way would prove nothing about the assembled text. Copied into a neighbouring
-  // package's chunk, `lattice-ignored`'s anchor still matches its own file exactly once,
-  // the edit still moves the vertex program, and the only thing that can see the second
-  // copy is counting the anchor against what the two programs actually hold: the mutation
-  // would then reach one of the two sites and be recorded under the whole one's name.
   'anchor-duplicated-into-a-second-chunk': {
     file: 'effects-builtin/glitch/tear.vert.glsl',
     edits: [['  vGlitch = 0.0;', '  vGlitch = 0.0;\n  if (lattice > 0.0) {']],
   },
 
-  // The same rule's third control, and the one the grade pass made necessary. Both plants
-  // above put their duplicate in the same *program* as the anchor, so a count that
-  // partitioned by program - asking each of the four assembled strings on its own rather
-  // than summing them - would go on catching both while claiming something it no longer
-  // tested. That partition is the tempting shape, because a file belongs to a program and it
-  // reads as tidier to ask its own; what it misses is a line living in two programs at once,
-  // which is exactly what a shared idea copied between the point shader and the grade would
-  // be.
-  //
-  // So `streak-ignored`'s guard is planted in the thermal package's tone chunk, which feeds
-  // the cloud's fragment program. Its own file still matches once, the anchor row above stays
-  // green, and each program taken alone still counts one - only the sum over all of them
-  // sees two, and only then would the edit reach one of the two sites and be recorded under
-  // the whole mutation's name.
   'anchor-duplicated-into-a-second-program': {
     file: 'effects-builtin/thermal/heat.frag.glsl',
     edits: [['  if (thermal > 0.0) {', '  if (thermal > 0.0) {\n      if (streak > 0.0) {']],
   },
 
-  // The third half of the same row, and the one that says the walk reaches outside the
-  // prose. Both mutations above plant their failure in a file the old citing set already
-  // read - a root markdown page and a `docs/` page - so both stayed caught while the walk
-  // covered four source directories and `docs/`, and neither could tell you that
-  // `native/grabber.cpp`, `presets-builtin/README.md` and this repo's own CI workflow were
-  // outside it. All three cite a module. This plants the same rot in the C++ file, which is
-  // the furthest one from the prose and the one whose citation is load-bearing: the comment
-  // it sits in exists to say that the constant beside it is a second spelling of a value
-  // `web/format.js` owns, so a reader sent to a file that is not there loses the only
-  // pointer to the owner.
   'citation-outside-the-prose': {
     file: 'native/grabber.cpp',
     edits: [['Node reads `web/format.js` by path', 'Node reads `web/capture-format.js` by path']],
   },
 };
 
-// Reads a file, and applies the mutation to it when the mutation is one that names it.
-//
-// **Keyed on the mutation's own `file` rather than on which block is running.** The
-// specification row was the only row with a control when this tool got one, so it took
-// `MUTATIONS[mutation].edits` unconditionally and applied it to `server/protocol.js` -
-// which is correct for exactly one entry and refuses every other with "the anchor is not
-// in server/protocol.js". A second control would have read as a broken control rather
-// than as this tool having one place that assumed there would never be two.
-//
-// Refusal is exit 2 and not a failed assertion, for the reason the row below it gives: a
-// mutation whose anchor has moved changes nothing, and a run that changed nothing comes
-// back green and gets recorded as the control passing.
+// Reads a file, applying the mutation when the mutation names it. An anchor that no longer
+// matches exits 2 rather than failing a row, because a run that changed nothing reads green.
 const sourceWithMutation = (rel) => {
   const file = join(ROOT, rel);
   if (!existsSync(file)) return null;
@@ -208,8 +92,6 @@ const sourceWithMutation = (rel) => {
   return src.replace(from, to);
 };
 
-// Resolved before anything runs, so a name nobody implemented costs a second rather than
-// a full parse of the tree and a verdict about the wrong thing.
 const mutateAt = argv.indexOf('--mutate');
 const mutation = mutateAt === -1 ? null : argv[mutateAt + 1];
 if (mutateAt !== -1 && !MUTATIONS[mutation]) {
@@ -217,44 +99,12 @@ if (mutateAt !== -1 && !MUTATIONS[mutation]) {
   process.exit(2);
 }
 
-// The server, the tools and the browser bundle. Everything else with a .js in it is
-// either vendored, built or a capture, and none of those are ours to parse.
-// A floor per directory rather than a total, so a walk that stops finding a tree says so
-// instead of being covered by another tree having grown. `web` and `test` are raised in
-// step with every phase that splits `main.js`, and raised in the same commit rather than
-// left slack: the floor is a claim that the walk still reaches the modules, and one left
-// behind the tree it counts goes on passing with half of them deleted. `web` was 2 before
-// the split began and 4 after `scene.js`, `curve.js` and `record-poll.js`; it was 9 with
-// `world-tilt.js`, `export-sizes.js` and `plan-geometry.js` beside them, 11 with
-// `view-window.js` and `clip-range.js`, 13 with `cloud-shader.js` and `bloom-pass.js`,
-// 15 with `gpu-textures.js` and `surface-memory.js`, 16 with `post-chain.js`, and 17 with
-// `point-cloud.js`. It is 18 with `grade-shader.js`, which is the first of these to be cut
-// out of a module other than `main.js` - the grade pass's GLSL had to leave `post-chain.js`
-// because a spine has to evaluate under bare node and that file imports three.js. Two
-// modules arrived between those without the floor following them, `shader-assembly.js` and
-// `effect-manifests.js`, so the number is under the tree by more than one; that is the slack
-// this file's own header asks for, a tripwire rather than a manifest.
-// `test` moves with it for the same reason - most of those
-// modules arrived with a test file, which is most of why they are modules - but it has
-// stopped moving, and the last three phases are why. `surface-memory.js` asks the live
-// context whether it can render to float, `post-chain.js` hands a composer a renderer and
-// `point-cloud.js` imports both of them, so none of the three can be imported under bare
-// node at all, and a floor that counted a test nobody can write would be a floor that has
-// to be lowered later.
+// A floor per directory rather than a total, so a tree that stopped being walked says so
+// instead of being covered by another that grew. A tripwire against zero, not a manifest.
 const FLOORS = { server: 5, test: 10, tools: 12, web: 18 };
 
-// **Two different questions, so two different sets, and the difference is the point.**
-// `PARSES` is what `node --check` can be handed and have its answer mean anything - a
-// shell script fed to it fails as a syntax error about JavaScript, which would be a red
-// light wired to the wrong thing. `SHIPPED` is what counts as a tool this repo ships,
-// and it is wider because the questions asked of `tools/` below - is it documented, does
-// its citation resolve - are about the file being ours rather than about it parsing.
-//
-// Named once and used by both because the version where each block spelled its own set
-// out drifted immediately: the documentation block already read `.sh` while the citation
-// scan reused the JavaScript walker, so `pi-registration-ab.sh` was required to be named
-// in CLAUDE.md and then never read for the `docs/` pages it might cite. A tool added in
-// another language next year joins both questions at once by being added here.
+// `PARSES` is what `node --check` can be handed and have its answer mean anything; `SHIPPED`
+// is wider, because what is asked of `tools/` is about the file being ours, not about parsing.
 const PARSES = /\.(js|mjs)$/;
 const SHIPPED = /\.(js|mjs|sh)$/;
 
@@ -270,19 +120,16 @@ const check = (file) => {
 let failed = 0;
 const fail = (line) => { failed++; console.log(`  FAIL  ${line}`); };
 
-// A missing root, or one with no package.json, is the operator pointing this at
-// something that is not a checkout - "the check did not run" rather than "the check
-// found something", which is the reading the rest of the suite gives exit 2.
+// A missing root, or one with no package.json, is exit 2 - the check did not run.
 const missing = ['package.json', ...Object.keys(FLOORS)].filter((name) => !existsSync(join(ROOT, name)));
 if (missing.length) {
   console.log(`DID NOT RUN - ${ROOT} has no ${missing.join(', ')}, so this is not a checkout of this repo`);
   process.exit(2);
 }
 
-// The canary, in a directory of its own governed by this root's own `package.json`, so
-// the thing being proved is the parse mode this run will actually get. It is a `.js`
-// rather than a `.mjs` on purpose: `.mjs` is unambiguous and would sail through the
-// exact configuration that swallows the error.
+// The canary sits under this root's own `package.json`, so it proves the parse mode this run
+// will get: `node --check` returns rc=0 for a broken ESM-shaped `.js` under a root with none.
+// It is a `.js` and not a `.mjs` because a `.mjs` sails through that configuration.
 const scratch = mkdtempSync(join(tmpdir(), 'syntax-check-'));
 try {
   copyFileSync(join(ROOT, 'package.json'), join(scratch, 'package.json'));
@@ -297,12 +144,8 @@ try {
   rmSync(scratch, { recursive: true, force: true });
 }
 
-// Symlinked directories are skipped rather than walked. In a git worktree the heavy
-// shared trees are symlinked back to the main checkout - .gitignore's own header
-// records vendor and node_modules arriving that way - and following one turns a
-// six-second check into a parse of somebody else's library.
-// Which files it yields is the caller's question rather than the walker's, so the two
-// sets above stay one decision made in one place.
+// Symlinked directories are skipped rather than walked: in a worktree the heavy shared trees
+// are symlinked back to the main checkout, and following one parses somebody else's library.
 function walk(dir, matches, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isSymbolicLink()) continue;
@@ -322,32 +165,13 @@ for (const [name, floor] of Object.entries(FLOORS)) {
   }
   for (const file of files) {
     const err = check(file);
-    // Node pads its report with blank lines around the offending source, and a plain
-    // head of it printed four of them and cut the `SyntaxError:` line off the bottom -
-    // a failure that named the file and nothing about what was wrong with it.
     if (err) fail(`${relative(ROOT, file)}\n          ${err.split('\n').filter((l) => l.trim()).slice(0, 4).join('\n          ')}`);
   }
   console.log(`  ${name}/  ${files.length} files parsed`);
 }
 
-// **Every tool has to be named in CLAUDE.md, and this is what makes that true rather
-// than aspirational.** The list in that file is how anybody finds the suite, and the
-// maintained-by-hand version of it had already rotted badly: it said "all six" tools
-// refuse an unmatched mutation where eleven do, documented a `--url` flag
-// `library-check` does not have, and omitted `sensor-view-check` altogether - a
-// 1277-line proof tool that `editor-check` cites three times by name. A tool nobody
-// documented is a tool nobody runs, and the file that was supposed to prevent that was
-// itself the thing drifting.
-//
-// Fixing the names would have closed the instance and left the class open. So the
-// question is asked of the directory rather than of a list: anything in `tools/` that
-// CLAUDE.md does not mention fails here, and a tool added next year is asked by
-// existing. The control is adding a file to `tools/` without documenting it.
-//
-// Checked by basename rather than by path, because the file refers to them both ways -
-// `node tools/vendor-check.mjs` in the invocation blocks and bare `vendor-check` in the
-// prose - and requiring one spelling would be a rule about formatting rather than about
-// coverage.
+// Every tool in `tools/` has to be named in CLAUDE.md, asked of the directory rather than of a
+// list, and matched on basename because the file names tools both as a path and bare.
 const DOC = join(ROOT, 'CLAUDE.md');
 if (!existsSync(DOC)) {
   fail('CLAUDE.md is missing, so the claim that every tool is documented cannot be tested');
@@ -366,34 +190,9 @@ if (!existsSync(DOC)) {
   }
 }
 
-// Blanks the body of every string and template literal, leaving comments, code and every
-// newline where they were so a line number still means what it says. It is the inverse of
-// the comment stripping the shell row below does, and it is here for the inverse reason:
-// that row wants the code and this one wants the prose, and in a JavaScript file the prose
-// is the comments.
-//
-// **A path in a string is data; a path in a comment is a citation**, which is the same
-// distinction `library-check`'s own scanner draws when it refuses to read a number out of
-// a debug message. What it drops here is the `file:` target of a mutation table and the
-// `module:` of `module-check`'s exemption table - both of which name modules, and both of
-// which are already answered somewhere better: a mutation anchoring into a file that is
-// not there fails the anchor row further down this file, and an exemption entry naming a
-// module that is gone fails `module-check`'s own audit of that table. What it would keep
-// is the fixture paths `library-check` builds its probe tree out of, which are relative to
-// a temporary root and name nothing in this checkout at all - and, sharper than that, the
-// two module names this file's own mutation table plants, which are chosen for being absent
-// and are absent on a clean tree by definition. Measured by taking the exclusion out and
-// running: seven paths red, six of them the probe tree's and the seventh this table's, plus
-// the line citation this table moves past the end of the file. A row falsified by its own
-// controls on every clean run is the shape this file's header refuses, so the exclusion is
-// load-bearing rather than tidy.
-//
-// Deliberately not a lexer, and the bound is worth stating because this repo has paid for
-// the other kind: a regex literal spelling a module path would be read as code and its
-// text reported, which fails loudly and has never happened, where the alternative reading
-// swallows to the next slash and loses a citation in silence. `docs/instruments.md`
-// carries nine rounds of that argument under a scanner that had to be exact; this one does
-// not, because over-reporting a citation costs a red row somebody reads.
+// Blanks every string and template literal body, leaving comments and every newline in place.
+// A path in a string is data and a path in a comment is a citation, so this keeps mutation
+// targets and fixture paths out of the citation walk.
 const withoutStringBodies = (src) => {
   let out = '';
   for (let i = 0; i < src.length; i++) {
@@ -421,86 +220,12 @@ const withoutStringBodies = (src) => {
   return out;
 };
 
-// **And every `docs/*.md` anything points at has to exist**, for the same reason and by
-// the same shape as the block above. `CLAUDE.md` was 704 lines and was split into three
-// documents it now sends you to by name, with fourteen comments in `tools/` citing those
-// documents by section - so the disclosure chain is load-bearing and nothing was checking
-// it. Delete one of the three and every citation resolves to nothing while this tool stays
-// green, which is a claim asserted in prose with nothing bringing it about.
-//
-// Enumerated rather than listed: the paths are read out of what actually cites them, so a
-// document added next year is checked by existing and a pointer that outlives its
-// target fails here. The control is `mv docs/instruments.md /tmp` and a run.
-//
-// **Every shipped tool, and not every parseable one.** The first version of this block
-// reused the JavaScript walker, which is the same class of hole it was written to close:
-// `pi-registration-ab.sh` is a documented tool that the scan could not read, so a `docs/`
-// page cited from a shell runbook was covered by an assertion that printed "all N cited
-// pages exist" and had never opened the file. Measured rather than argued - a citation of
-// an absent page appended to that runbook left the check green, and fails here now that
-// the walk asks for `SHIPPED`. That is the control, and running it takes a path this
-// comment deliberately does not spell: the scan reads its own prose, so a filename
-// written here as an example is a citation like any other and fails the run that quotes
-// it. Append the line to the runbook, run, revert.
-//
-// **And the same question asked of the modules, because a `web/` citation rots faster than
-// a `docs/` one and nothing was asking it.** `web/main.js` was fifteen thousand lines and
-// is now a seventh smaller with twelve modules beside it, and the prose did not move with the
-// code: fourteen citations were left naming the browser bundle for code that had been carried
-// out of it. That is the ordinary consequence of a split rather than anything unusual, and
-// it is why the walk had to widen twice over. The **citing** set is every prose page this
-// repo ships and every source file it ships, not `CLAUDE.md` and `tools/` alone - the
-// documents cite each other and the modules cite each other, and a scan that reads only the
-// two files that point at `docs/` would have seen four of the thirty. The **question** is
-// two questions asked of one walk, because they are the same claim about two kinds of
-// target and a second walk beside this one would be the second path this repo keeps
-// refusing.
-//
-// **Read through `sourceWithMutation` rather than off disk**, which is the whole reason
-// this block builds repo-relative paths where it used to build absolute ones. A row that
-// reads the tree directly cannot be falsified by a mutation, so the control would have been
-// green against every build there is - the delivery hole `docs/instruments.md` records
-// `library-check` shipping, arriving here in the one block whose subject is prose.
-//
-// **What this cannot see, said out loud.** A citation is checked for resolving and not for
-// being *right*: `web/point-cloud.js` cited for something that moved to a neighbouring
-// module passes here, because the file is there. The line form is the same bound one step
-// in - a line past the end of the file fails, and a line that has drifted into the middle
-// of something else does not. `server/capture.js` records what that costs and answers it
-// the only way that works, by citing `handleFrame` by name after the line it used to name
-// had drifted nine hundred lines into the middle of a shader with nothing failing. Cite a
-// function, not a line; the line form is checked here because it exists, not because it is
-// a good idea.
-//
-// The controls are `--mutate web-citation-outlives-its-module`, which renames a module in
-// CLAUDE.md's own prose to something the tree does not hold, and
-// `--mutate line-citation-past-the-end`, which moves a line citation past the end of the
-// file it names. Two, because the halves fail differently: a path that still resolves
-// answers for a line that does not.
+// Every `docs/` page and every `web/` module anything cites has to exist. The targets are read
+// out of what cites them, so a page added next year is checked by existing; a citation is
+// checked for resolving and never for being right, hence citing a function rather than a line.
 {
-  // **The set a citation can be written in is every file this repo ships, and it used to be
-  // a list.** The old set was root markdown, `docs/**.md`, and `.js`/`.mjs`/`.sh` under the
-  // four floors - which is the tree a citation is *usually* written in and not the tree one
-  // *can* be written in. Three files were outside it and all three cite a module:
-  // `native/grabber.cpp` names `web/format.js` as the owner of the constant it is a second
-  // spelling of, `presets-builtin/README.md` names `web/main.js`, and this repo's own CI
-  // workflow names it too. Point any of those at a module that has moved and the row above
-  // stayed green while printing that every cited module resolves, which is a claim about
-  // coverage the instrument did not have - the same shape as a row that measures 1200 and
-  // says 1080p.
-  //
-  // An allowlist of directories is the wrong instrument for "everywhere", because it rots
-  // in the direction that reads as success: a source tree added next year is simply not
-  // asked, and nothing says so. **A denylist read from `.gitignore` rots the other way** -
-  // whatever this repo declares it does not ship excludes itself by existing, and a new
-  // gitignored directory needs no edit here. That is also why this still needs nothing but
-  // the filesystem: `git ls-files` would be the more direct spelling of "what this repo
-  // ships" and would make the one tool that runs on a bare checkout depend on git.
-  //
-  // The cost of over-reaching is a red row somebody reads, which is the direction this file
-  // already chose twice. Measured on this tree at the time of writing: nothing under
-  // `third_party/` cites a `web/` module, so the widened walk adds three citations and no
-  // false ones.
+  // Read from `.gitignore` rather than from an allowlist of directories, because an allowlist
+  // rots in the direction that reads as success: a tree added next year is simply not asked.
   const ignored = (() => {
     const names = new Set(['.git']);
     const paths = new Set();
@@ -508,9 +233,6 @@ const withoutStringBodies = (src) => {
     const raw = existsSync(join(ROOT, '.gitignore'))
       ? readFileSync(join(ROOT, '.gitignore'), 'utf8') : '';
     for (const line of raw.split('\n')) {
-      // A negation re-includes rather than excludes, and reading one as an exclusion would
-      // hide a tree this walk is supposed to reach. There are none today; skipping them
-      // keeps that true rather than silently inverting one that arrives.
       const pattern = line.trim();
       if (!pattern || pattern.startsWith('#') || pattern.startsWith('!')) continue;
       const clean = pattern.replace(/^\/+/, '').replace(/\/+$/, '');
@@ -522,9 +244,6 @@ const withoutStringBodies = (src) => {
     }
     return (rel, name) => names.has(name) || paths.has(rel) || globs.some((g) => g.test(name));
   })();
-  // Named `walkShipped` rather than `shipped`, which is already a module-level binding
-  // holding the tool list this file checks against CLAUDE.md. Shadowing it here would be
-  // legal and would read as the same thing twice.
   const walkShipped = (dir, out = []) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.isSymbolicLink()) continue;
@@ -538,37 +257,18 @@ const withoutStringBodies = (src) => {
   const citing = walkShipped(ROOT).map((p) => relative(ROOT, p)).sort();
 
   const cited = new Set();
-  // Keyed by the citation as written, so `web/main.js` and `web/main.js:1` are two
-  // entries and the line form is not answered by the bare one appearing elsewhere.
   const modules = new Map();
   let scanned = 0;
   for (const rel of citing) {
     const raw = sourceWithMutation(rel);
     if (raw === null) continue;
-    // A screenshot cannot cite anything, and reading `media/` as text is the only cost the
-    // widened walk adds. Sniffed rather than listed by extension for the same reason the
-    // exclusions are: a list of binary suffixes is one more thing that rots quietly, and a
-    // NUL in the first bytes is what "not text" actually means. Decoded as UTF-8 already,
-    // so an invalid byte is a replacement character rather than a throw, and the check is
-    // for the NUL that no source file of ours contains.
+    // A NUL in the bytes is what "not text" means, sniffed rather than listed by extension.
     if (raw.includes('\u0000')) continue;
     scanned++;
-    // Markdown is prose throughout, and a shell script is scanned whole because it has no
-    // second kind of text worth separating - both read in the over-reporting direction,
-    // which is the one that fails where somebody sees it.
     const text = /\.(js|mjs)$/.test(rel) ? withoutStringBodies(raw) : raw;
     for (const m of text.matchAll(/\bdocs\/[A-Za-z0-9._-]+\.md\b/g)) cited.add(m[0]);
-    // The effect packages are a citable class the moment prose can name a chunk or a
-    // manifest: `effects-builtin/rain/manifest.json` has to resolve the way a docs
-    // page does, or the prose rots from the first day of the surface existing. No
-    // separate floor - nothing may cite a package yet, and over-reporting is for
-    // matches, not absences; the existence check below covers whatever appears. The
-    // first thing this matcher ever caught was this comment's own example naming a
-    // chunk file that does not exist yet, which is the class working as written.
     for (const m of text.matchAll(/\beffects-builtin\/[a-z][a-z0-9]*\/[A-Za-z0-9._-]+\.[a-z]+\b/g)) cited.add(m[0]);
-    // A range takes its last line, because that is the bound the file has to reach: a
-    // `:844-847` whose 844 still exists and whose 847 does not is a citation half of which
-    // is off the end, and reading the start would call that resolved.
+    // A range takes its last line, since that is the bound the file has to reach.
     for (const m of text.matchAll(/\bweb\/[A-Za-z0-9._/-]+\.js\b(?::(\d+)(?:-(\d+))?)?/g)) {
       const at = `${rel}:${text.slice(0, m.index).split('\n').length}`;
       if (!modules.has(m[0])) modules.set(m[0], { path: m[0].split(':')[0], line: m[2] ?? m[1], at });
@@ -584,9 +284,7 @@ const withoutStringBodies = (src) => {
     console.log(`  docs/   all ${cited.size} cited pages exist, over ${citing.length} pages and source files`);
   }
 
-  // The floor, in the shape the row above has and for the same reason: a scan that matched
-  // nothing would print a clean line about zero citations, which is the green light wired
-  // to nothing this file's own header is about.
+  // The row's floor: a scan that matched nothing would print a clean line about zero citations.
   const byLine = [...modules.values()].filter((c) => c.line);
   const gone = [];
   const past = [];
@@ -600,9 +298,6 @@ const withoutStringBodies = (src) => {
   if (modules.size === 0) {
     fail('nothing cites a web/ module, so this assertion passed on nothing - either the prose stopped naming the modules or this scan is looking in the wrong place');
   } else {
-    // Two failures rather than one, because which of the two it is decides what to do:
-    // a path that is gone is a module that moved and took its prose with it, and a line
-    // past the end is a file that grew or shrank under a citation nobody re-read.
     if (gone.length) {
       fail(`${gone.join('; ')} - the module is not there, so the citation sends a reader to a file this checkout does not have`);
     }
@@ -615,13 +310,8 @@ const withoutStringBodies = (src) => {
   }
 }
 
-// **Every shipped effect package parses.** The manifests are data the client assembles
-// the registry from, and a manifest that does not parse is a package the store throws
-// on at read - a server that boots and then 500s on `/effects`. The gate is the same
-// shape as the per-directory parse floors above: every manifest must parse, an id must
-// match its directory (the namespace parameters carry), and zero packages is its own
-// failure, because an empty directory here is a build with no effects that would
-// otherwise print a clean line about nothing.
+// Every shipped effect package has to parse, since a manifest that does not is a server that
+// boots and then 500s on `/effects`. Zero packages is its own failure.
 {
   const root = join(ROOT, 'effects-builtin');
   const ids = existsSync(root)
@@ -646,29 +336,8 @@ const withoutStringBodies = (src) => {
   }
 }
 
-// **And the `.knct` decoder specification has to agree with the module it specifies.**
-// Same family as the two blocks above - documentation checked against the tree rather than
-// asserted beside it - and here for the same reason they are: this tool needs nothing at
-// all, so the control costs a run of what CI already does.
-//
-// The take is the one irreplaceable artifact in the system, and issue #45 decided its exit
-// from this program is that specification rather than a point-cloud export. That makes the
-// specification load-bearing in a way prose usually is not here: it is the thing somebody
-// writes a reader from once nothing in this tree runs any more, and a constant that moved
-// while it did not would send them to a reader that is plausibly shaped and quietly wrong.
-//
-// **Enumerated from the module, not from a list.** Every numeric export has to appear in
-// the specification with its exact value, so a constant added next year is asked by
-// existing rather than added to a second table that drifts. The values come from importing
-// the module rather than from a regex over its source, because a constant that is computed
-// - `MAX_PAYLOAD_BYTES` is `8 * 1024 * 1024` - reads correctly one way and not the other.
-//
-// **Imported from a scratch copy in both arms, and that is not tidiness.** The clean run
-// and the mutated run have to differ only in the substitution; a row that imported the live
-// path when clean and a copy when mutated would be comparing two mechanisms and calling the
-// difference a catch.
-//
-// The control is `--mutate spec-drifts`, which moves `TYPE_COLOR` and leaves the prose.
+// The `.knct` decoder specification has to agree with the module it specifies, enumerated from
+// the module and read by importing it, because a computed constant does not survive a regex.
 {
   const SPEC_OPEN = '// ---- the .knct decoder specification';
   const SPEC_SHUT = '// ---- end of the .knct decoder specification';
@@ -682,9 +351,6 @@ const withoutStringBodies = (src) => {
     let mod = null;
     const scratch = mkdtempSync(join(tmpdir(), 'syntax-check-spec-'));
     try {
-      // `.mjs` rather than `.js` beside a copied package.json: the parse mode has to be
-      // unambiguous here, and unlike the canary above this row is not trying to prove
-      // anything about how Node decides it.
       const copy = join(scratch, 'protocol.mjs');
       writeFileSync(copy, src);
       mod = await import(pathToFileURL(copy).href);
@@ -718,50 +384,9 @@ const withoutStringBodies = (src) => {
   }
 }
 
-// **The hello the grabber emits and the hello `docs/architecture.md` documents have to be
-// the same set of keys, and the constant saying which generation wrote it has to be the
-// same number in both languages.**
-//
-// That stanza lived in `README.md` until the README was cut back to the usage path. The
-// anchor is the stanza rather than the file, so the move cost this block a path and
-// nothing else - but the path is the thing that silently passes on nothing if it is
-// wrong, which is why an empty extraction below is a failure and not a pass.
-//
-// The prose block was nine keys against the thirteen actually emitted for long enough
-// that the four it omitted became the argument for this: `startedAt` is the only durable
-// capture date a take has, and somebody implementing a second producer against the
-// documented nine writes takes the library dates by file modification time instead - which
-// changes the first time a take is copied off the node, and degrades *quietly*, because
-// the fallback is legitimate and says `dateSource: 'mtime'` rather than failing.
-//
-// Three details decide whether this is an instrument or a green light wired to nothing,
-// and all three are the same rule as the three blocks above.
-//
-// **Both directions.** A key emitted and not documented is the failure that already
-// happened; a key documented and not emitted is somebody writing against a promise the
-// grabber does not keep, which is the same reader misled by the opposite mistake.
-//
-// **Scoped anchors, and an empty extraction is a failure rather than a pass.** A bare
-// `doc.includes('width')` is true of the word appearing anywhere in the page, so the
-// document side is cut to the `type 1 hello` stanza and stops at `type 2`, and the
-// grabber side to the one `snprintf` that builds the hello. Zero keys from either side
-// means the anchor moved and the comparison ran on nothing, which is exactly the shape
-// this tool's own header is about.
-//
-// **Read textually, never imported.** This tool takes `--root`, so an `import` would bind
-// the assertion to this checkout while claiming to have checked another tree - and the C++
-// constant could not be imported at all, which is the whole reason it needs watching: it
-// is unavoidably a second spelling of a JavaScript number, and nothing else in the repo
-// would notice the two drifting.
-//
-// The controls are run by hand, in the idiom the documentation and `docs/` blocks above
-// use. `--mutate` does exist on this tool, but the table behind it carries one entry and
-// that entry belongs to the specification row - so there is no named mutation for this
-// block, and saying so is the point: a reader who saw the flag and assumed it covered
-// every row here would take a green `--mutate spec-drifts` as a control over these
-// assertions, which it is not. Add a key to the grabber literal and not to the stanza,
-// then the other way round, then bump the constant in one language, and require a named
-// failure each time.
+// The hello the grabber emits and the hello `docs/architecture.md` documents have to be the
+// same set of keys, in both directions. Each side is cut to its anchor, and an empty
+// extraction fails rather than passes, because a comparison that ran on nothing reads clean.
 {
   const grabberPath = join(ROOT, 'native/grabber.cpp');
   const formatDocPath = join(ROOT, 'docs/architecture.md');
@@ -771,18 +396,11 @@ const withoutStringBodies = (src) => {
     const grabber = readFileSync(grabberPath, 'utf8');
     const formatDoc = readFileSync(formatDocPath, 'utf8');
 
-    // The literal that builds the hello, from the call to its closing paren. Anchored on
-    // the call rather than on the opening brace of the JSON, because the brace is a
-    // character that appears everywhere and the call appears once.
+    // Anchored on the call rather than on the JSON's opening brace, which appears everywhere.
     const callAt = grabber.indexOf('std::snprintf(hello, sizeof(hello),');
     const literal = callAt === -1 ? '' : grabber.slice(callAt, grabber.indexOf(');', callAt));
-    // `\"name\":` as it is spelled in C++ source. The `%s` values between them cannot
-    // match, because a conversion specifier does not start with a letter.
     const emitted = new Set([...literal.matchAll(/\\"([A-Za-z][A-Za-z0-9]*)\\":/g)].map((m) => m[1]));
 
-    // The stanza, and only the stanza: from the type 1 line to the type 2 line, then the
-    // braced list inside it. Splitting a brace on commas rather than scanning for words
-    // keeps the prose around it - "UTF-8 JSON, once, before any frame" - out of the set.
     const stanzaAt = formatDoc.indexOf('type 1  hello');
     const stanza = stanzaAt === -1 ? '' : formatDoc.slice(stanzaAt, formatDoc.indexOf('type 2', stanzaAt));
     const braced = stanza.match(/\{([^}]*)\}/);
@@ -795,9 +413,6 @@ const withoutStringBodies = (src) => {
     } else {
       const undocumented = [...emitted].filter((k) => !documented.has(k)).sort();
       const unemitted = [...documented].filter((k) => !emitted.has(k)).sort();
-      // Two failures rather than one, because which direction it broke in is the whole
-      // diagnosis: one is a writer that grew a key nobody was told about, the other is a
-      // reader promised a key that never arrives.
       if (undocumented.length) {
         fail(`the grabber's hello emits ${undocumented.join(', ')} and docs/architecture.md's type 1 hello does not document ${undocumented.length === 1 ? 'it' : 'them'}`);
       }
@@ -809,9 +424,7 @@ const withoutStringBodies = (src) => {
       }
     }
 
-    // The format generation, in the two languages that have to agree about it. Anchored
-    // on the declaration in each rather than on any mention, so a comment naming the
-    // constant is not a second reading of its value.
+    // Anchored on the declaration in each language, so a mention is not a second reading.
     const inJs = readFileSync(join(ROOT, 'web/format.js'), 'utf8').match(/^export const CAPTURE_FORMAT = (\d+);/m);
     const inCpp = grabber.match(/^static const uint32_t CAPTURE_FORMAT = (\d+);/m);
     if (!inJs || !inCpp) {
@@ -824,23 +437,9 @@ const withoutStringBodies = (src) => {
       console.log(`  format/ CAPTURE_FORMAT is ${inJs[1]} in both languages`);
     }
 
-    // **The sensor grid, in the two languages that have to agree about it and cannot share
-    // a declaration.** `library-check` proves the grid is stated once across `web/` and
-    // `server/`, and that row is structurally unable to see the other side of the wire:
-    // the grabber is C++ and cannot import `web/format.js`, so its `DW`/`DH` are a second
-    // declaration that has to exist. Two unavoidable declarations are not a drift problem
-    // solved by deleting one - they are a drift problem solved by comparing them, which is
-    // exactly what `CAPTURE_FORMAT` above already does and for the same reason.
-    //
-    // What drift costs is a node that starts and then serves nothing: the grabber would
-    // emit a depth block of its own size and `server/capture.js` measures every frame
-    // against `DEPTH_W * DEPTH_H`, so every frame is refused at the parser with the sensor
-    // working perfectly.
-    //
-    // Anchored on the declaration in each language and never on a mention, which matters
-    // more here than it did for the format: `grabber.cpp` also holds `char hello[512]`,
-    // a buffer that has nothing to do with the sensor and would answer a search for the
-    // number.
+    // The grabber is C++ and cannot import `web/format.js`, so its grid is a second declaration
+    // that has to be compared. Drift is a node that starts and serves nothing, since
+    // `server/capture.js` measures every frame against `DEPTH_W * DEPTH_H`.
     const GRID = [['DEPTH_W', 'DW'], ['DEPTH_H', 'DH']];
     const grid = GRID.map(([js, cpp]) => {
       const fromJs = readFileSync(join(ROOT, 'web/format.js'), 'utf8')
@@ -864,99 +463,25 @@ const withoutStringBodies = (src) => {
   }
 }
 
-// **A mutation is a piece of source text, and until this row nothing checked that the
-// text still existed.** Every claim this suite makes about the tree is proved by running
-// a mutation and reading which assertions fired, so a mutation whose anchor no longer
-// matches proves nothing at all - and it fails in the direction that reads as success.
-// Of the three found when this row was written, two threw at module top level: a stack
-// trace, a non-zero exit and **zero failed assertions**, which is precisely what a caught
-// mutation looks like to anything reading exit codes instead of counting failures. The
-// third refused politely with exit 2. `docs/instruments.md` carries the case file, and
-// the previous instance of this same drift was closed at `keyframe-check`'s
-// `undo-includes-view` without closing the class - which is how three more went stale.
-//
-// **A duplicate is as stale as a miss**, and that is the half a naive row drops. The
-// defect that prompted this was an anchor matching *two* sites, because one conversion
-// had been copied to a second place, and a row asking "does this text appear" rather than
-// "exactly once" sails straight past it while looking thorough.
-//
-// Nothing here executes a tool. The table is read by cutting the tool's source at the end
-// of the declaration, appending an export, and importing that prefix from inside `tools/`
-// so the tool's own relative imports still resolve. Two properties of that cut were
-// measured rather than assumed: no tool that declares a table does side-effectful
-// top-level work above the declaration, and the terminator is the first `};` at column
-// zero, because no table body contains a line starting there. The second is an invariant
-// rather than a guarantee, so a prefix that does not import fails the row instead of being
-// quietly read as "this tool has no table".
-//
-// The target file is resolved from each entry's *shape* rather than from the tool's name,
-// because a hardcoded list of tools is the exact failure `sweep-all`'s header records from
-// its own shell ancestor: four arrays that would have run 59 of 78 mutations and printed
-// "all caught". There are six shapes, which is five more than there should be - and the
-// honest fix is normalising them onto `{ file, edits }`, which this row is the regression
-// test for. A seventh fails naming the tool rather than being skipped, because a
-// deliberate exclusion arrives with a justification that stops anybody looking twice.
-//
-// Last of the three rows on purpose: it is the only one that writes a file into `tools/`,
-// so a crash that leaks the prefix cannot make the same run's documentation row fail for a
-// reason that has nothing to do with the tree.
+// Every mutation's anchor text still has to exist in the tree, exactly once - a duplicate is as
+// stale as a miss, and a stale anchor fails in the direction that reads as success. The target
+// file comes from each entry's shape, and a shape nobody handles fails naming its tool.
 {
   const DECLARATION = /^const MUTATIONS = \{$/m;
-  // The one shape left that does not carry its own target: a bare `[from, to]` pair,
-  // which is only ever the C++ registration mutation. It is a fact about the shape
-  // rather than about any tool, which is the property that makes it safe to infer -
-  // and it is the last one, because every JavaScript table now declares its file.
   const REGISTRATION = 'third_party/libfreenect2/src/registration.cpp';
-  // One name reused for every extraction, so a crash can leak at most one file, and
-  // dotted-and-suffixed so the documentation row above catches it on the next run rather
-  // than letting it sit in `tools/` looking like something this repo ships.
+  // One name reused for every extraction, so a crash leaks at most one file.
   const PROBE = join(ROOT, 'tools', '.mutation-table-probe.mjs');
 
-  // **The declaration alone, and the whole prefix only when the declaration will not stand
-  // up on its own.** Taking the prefix from the top of the file was the obvious cut and it
-  // was wrong twice over, both of them found by running this somewhere other than a
-  // developer's machine.
-  //
-  // It made the row need what the *tool* needs. This tool is documented as needing nothing
-  // at all, and CI installs no dependencies, so `import ... from 'ws'` in the prefix meant
-  // four tables could not be read there while all sixteen read here - 137 anchors against
-  // 248. The row said so, four FAIL lines and the fallen count, which is the loud direction
-  // and is why the count is in the summary line at all.
-  //
-  // Worse, it *executed* the tool's top-level work. `export-check` and `registry-check` both
-  // resolve a commit with `git log -S` while their module body runs, so reading their tables
-  // shelled out to git over the whole history of `web/main.js` - a walk this row has no
-  // business doing, and one that throws outright in a tree extracted without its `.git`.
-  //
-  // So the declaration is cut on its own, which reads fifteen of the sixteen with no imports
-  // and no side effects. The sixteenth is `library-check`, whose table references a
-  // `REVEAL_EDIT` const beside it; that one falls back to the prefix with installed-package
-  // imports struck out, because a `node:` builtin and a relative path both resolve in a tree
-  // nobody ran `npm install` in and a bare package name does not. A table is data, so a
-  // package is the one thing it can never legitimately need.
+  // The declaration alone, with the whole prefix only as a fallback: the prefix makes this row
+  // need what the tool needs, a `ws` import CI has not installed or a top-level `git log`.
   const withoutPackages = (prefix) => prefix.replace(
     /^import\s[^;]*?from\s+'([^']+)';$/gm,
     (line, spec) => (/^[./]|^node:/.test(spec) ? line : ''),
   );
 
-  /**
-   * What a single entry anchors on, or why it anchors on nothing, or null for unknown.
-   *
-   * **An anchor carries its own file rather than borrowing the spec's**, and the two are
-   * usually the same string. They stopped being the same when the page split into modules:
-   * `export-check`'s `scale-by-width` moves the reference every screen-space term is
-   * expressed against, one of those terms is written in `resize` and another is the first
-   * line of a shader that now lives beside its pass, so one mutation's two edits land in
-   * two files. An edit may therefore name its file as a third element, with the spec's
-   * `file` as the default for the ones that do not - and each anchor is checked against
-   * the file it names, because a `from` looked for in the wrong file matches zero times
-   * and reddens as a stale anchor, which is a true statement about the wrong thing.
-   */
+  // What a single entry anchors on, or why it anchors on nothing, or null for unknown. An edit
+  // may name its own file, since one mutation's two edits can land in two files.
   const shapeOf = (spec) => {
-    // The C++ table, and now the only array shape. The JavaScript tables that used to
-    // arrive as a bare array of edit pairs - `timeline-check` and `keyframe-check` -
-    // declare `{ file, edits }` like everything else, so a nested-array first element
-    // is no longer a shape this row recognises and would fail below naming the tool.
     if (Array.isArray(spec)) {
       return typeof spec[0] === 'string' ? { anchors: [{ file: REGISTRATION, from: spec[0], to: spec[1] }] } : null;
     }
@@ -968,26 +493,12 @@ const withoutStringBodies = (src) => {
           anchors: spec.edits.map(([from, to, where]) => ({ file: where ?? spec.file, from, to })),
         };
       }
-      // `registry-check`'s old `{ from, to }` shape used to be read here and resolved to
-      // the browser bundle by inference. It is gone: that table declares `{ file, edits }`
-      // now, and the branch went with it rather than being left as a path nothing takes.
-      // The inference was a guess about a tool, which is the thing the rest of this
-      // resolver refuses to do, and it had already been wrong once - the case is in
-      // `docs/instruments.md`. An entry in that shape now falls through and fails below
-      // naming its tool, which is the loud direction and the whole point.
     }
     return null;
   };
 
-  // **Off disk and deliberately not through the mutation substitution**, which is a
-  // distinction this row had for free until the assembled-program rule below arrived with
-  // controls that stage source text. The question here is whether the tree still holds an
-  // anchor's text; the question below is what that text assembles into. Reading a staged
-  // file here answers the first question about a file nobody has, and it does it in the
-  // shape that is hardest to read: `spec-drifts` replaces the very line it anchors on, so
-  // this row would report the running control's own anchor as stale on every run of it -
-  // one extra red row per control, none of them findings, on four of the seven controls
-  // this tool carries.
+  // Off disk and deliberately not through the substitution: the question is whether the tree
+  // still holds the text, and a control that stages source would report its own anchor stale.
   const targets = new Map();
   const targetSource = (path) => {
     if (!targets.has(path)) {
@@ -997,51 +508,9 @@ const withoutStringBodies = (src) => {
     return targets.get(path);
   };
 
-  // ---- and the same anchor asked of the text the driver is handed
-  //
-  // **A file is not a program any more, and the row above cannot tell the difference.**
-  // Since the cloud's two shaders became a spine plus the installed packages' chunks, a
-  // slot carries the text to use when nothing claims it - so `web/cloud-shader.js` holds
-  // two copies of the shipped point-size statement and the shipped mark, one of them live
-  // and one of them a fallback nothing compiles while the glyph package is installed. An
-  // anchor in the dead copy matches its file **exactly once**, which is all the row above
-  // asks, and the control it belongs to then edits a line no driver ever sees. That is not
-  // hypothetical: `export-check`'s `pointsize-absolute` sat in that fallback for a commit,
-  // green the whole time, and it was found by reading rather than by any check.
-  //
-  // So every anchor into one of the files the programs are built out of is asked two more
-  // questions, and they catch different things. **It appears exactly once across every
-  // assembled program**, which finds a line that reaches no program and a line that reaches
-  // two sites where the edit would reach one - a half-delivered mutation recorded under the
-  // whole one's name. And **applying the edit moves one of them**, which is the one that
-  // sees the dead fallback, because the fallback's twin is the live chunk's own text: the
-  // count is 1 either way and only the edit can tell which copy it landed in.
-  //
-  // **Across every program and not within the one the file belongs to**, which is what the
-  // grade pass made a real question rather than a wording. There are two spines now and four
-  // assembled strings, and a line copied from the point shader into the grade's would count
-  // once in each if the question were asked per program - so the sum is taken over all of
-  // them, exactly as `assembleShaders` collects the joints of every spine before reading a
-  // package. A count that partitioned by file would have been a rule that got weaker every
-  // time this repo grew a program.
-  //
-  // The assembler is in the list too. It is here because the emit is text as much as a spine
-  // is - an anchor on a branch the assembler never takes is the same dead control wearing
-  // JavaScript - and it can be here because it imports nothing, so its bytes evaluate under
-  // a `data:` module the way the spines' do. The count question is not asked of it: its
-  // anchors are JavaScript and the programs are GLSL.
-  //
-  // **`web/post-chain.js` is deliberately not in this list, and the exclusion has a
-  // mechanism behind it rather than a promise.** It holds the grade pass's uniform table and
-  // not a byte of its GLSL, and it imports three.js, so it could not be evaluated here even
-  // if it did. The thing that keeps that honest is that it has nothing left to anchor a
-  // shader mutation on: every GLSL anchor that used to name it names `web/grade-shader.js`
-  // or a chunk now, and one that drifted back would be an anchor into a file with no shader
-  // in it.
-  //
-  // Nothing here needs a server, a browser or a package. `assembleShaders` is concatenation
-  // over data handed in, and the manifests and chunks are files - which is the whole reason
-  // the assembler was written import-free and pure.
+  // The same anchors asked of the text the driver is handed. A file is not a program since the
+  // shaders became a spine plus the packages' chunks, so each anchor must appear exactly once
+  // summed over every assembled program - never per program - and the edit must move one.
   const SPINES = { cloud: 'web/cloud-shader.js', grade: 'web/grade-shader.js' };
   const SPINE_EXPORT = { cloud: 'cloudSpine', grade: 'gradeSpine' };
   const ASSEMBLER = 'web/shader-assembly.js';
@@ -1050,25 +519,17 @@ const withoutStringBodies = (src) => {
   const buildsTheProgram = (file) => isSpine(file) || file === ASSEMBLER || isChunk(file);
 
   const moduleOf = (source) => import(`data:text/javascript;base64,${Buffer.from(source, 'utf8').toString('base64')}`);
-  // A string replacement rather than a pattern one: `String.replace` reads `$&` and its
-  // relatives out of a replacement *string*, and a mutation's `to` is source text that owes
-  // this row nothing about dollar signs.
+  // A string replacement, not a pattern one: `String.replace` reads `$&` out of a replacement.
   const swap = (body, from, to) => body.replace(from, () => to);
 
-  // **These three read through the substitution where the row above reads off disk**, and
-  // the seam is the point rather than an inconsistency: what assembles is the question here,
-  // so a control that stages one of the four files has to reach this and must not reach the
-  // anchor-existence row, where it would report its own anchor as stale.
   let clean = null, spineSources = null, assemblerSource = null, basePackages = null;
   try {
     spineSources = Object.fromEntries(Object.entries(SPINES)
       .map(([name, file]) => [name, sourceWithMutation(file)]));
     assemblerSource = sourceWithMutation(ASSEMBLER);
     const builtin = join(ROOT, 'effects-builtin');
-    // The manifests are read off disk even so: `manifest-does-not-parse` is the
-    // package-parse gate's control and owns that question one block up, and routing it
-    // through here as well would give one control two red rows in two rules asking the
-    // same thing.
+    // The manifests are read off disk even so, since `manifest-does-not-parse` owns that
+    // question one block up.
     basePackages = readdirSync(builtin, { withFileTypes: true })
       .filter((e) => e.isDirectory()).map((e) => e.name).sort()
       .map((id) => {
@@ -1078,9 +539,6 @@ const withoutStringBodies = (src) => {
         return { id, manifest, chunks };
       });
   } catch (err) {
-    // A `fail` rather than a throw, following the rule the whole suite is written under: a
-    // run that dies here exits non-zero with nothing asserted, which reads exactly like a
-    // check that ran and found something.
     fail(`the shipped packages could not be read for the assembled-program rule - ${String(err.message).split('\n')[0]}`);
   }
 
@@ -1100,8 +558,6 @@ const withoutStringBodies = (src) => {
     return assembleShaders(spines, packages);
   };
 
-  // Every assembled string, flattened, so the count below is over the whole build rather
-  // than over whichever pair a file happens to belong to.
   const everyProgram = (built) => Object.values(built)
     .flatMap((p) => [p.vertexShader, p.fragmentShader]);
   const sameProgram = (a, b) => {
@@ -1121,8 +577,6 @@ const withoutStringBodies = (src) => {
   let tablesDeclared = 0, tablesWithAnchors = 0, anchorsChecked = 0, stale = 0, unreadable = 0;
   const anchorless = [];
   for (const name of readdirSync(join(ROOT, 'tools')).filter((f) => PARSES.test(f)).sort()) {
-    // Through the substitution for the reason `targetSource` above is: the two controls for
-    // the assembled-program rule below move a *spec*, and a spec is source text in a tool.
     const source = sourceWithMutation(`tools/${name}`);
     const declared = DECLARATION.exec(source);
     if (!declared) continue;
@@ -1133,10 +587,6 @@ const withoutStringBodies = (src) => {
       continue;
     }
     let table = null;
-    // The declaration on its own first, then the prefix behind it. Both attempts are the
-    // same mechanism reading the same table, and only the first failing puts the tool's own
-    // module body on the path - so a tool that grows a top-level `git log` or a package
-    // import costs this row nothing until its table also starts needing a neighbour.
     const cuts = [
       source.slice(declared.index, end + 3),
       withoutPackages(source.slice(0, end + 3)),
@@ -1144,11 +594,8 @@ const withoutStringBodies = (src) => {
     for (const [attempt, cut] of cuts.entries()) {
       try {
         writeFileSync(PROBE, `${cut}\nexport { MUTATIONS };\n`);
-        // Cache-busted, because sixteen tools are imported through one filename and Node
-        // would otherwise hand back the first tool's table fifteen more times - which
-        // would read as every anchor matching and is the quietest possible way for this
-        // row to pass on nothing. The attempt is in the key as well, so a fallback is not
-        // answered by the cached failure of the cut it is falling back from.
+        // Cache-busted, because sixteen tools import through one filename and Node would
+        // otherwise hand back the first tool's table fifteen more times.
         ({ MUTATIONS: table } = await import(`file://${PROBE}?tool=${encodeURIComponent(name)}&cut=${attempt}`));
         break;
       } catch (err) {
@@ -1200,9 +647,6 @@ const withoutStringBodies = (src) => {
                 : 'the edit reaches one of those sites and the control would be recorded under the whole mutation\'s name'}`);
           }
         }
-        // Staged against what assembles rather than against what `targetSource` read, so a
-        // running control that moved one of the four files is not silently reverted here
-        // by an edit applied to the tree's own copy of it.
         const chunkOf = (rel) => {
           const [, id, chunk] = rel.split('/');
           return basePackages.find((p) => p.id === id)?.chunks[chunk] ?? '';
@@ -1230,22 +674,13 @@ const withoutStringBodies = (src) => {
     if (carriesAnchors) tablesWithAnchors++;
   }
 
-  // Printed rather than absorbed: a table with nothing to check is a real answer, and one
-  // the count would otherwise hide behind a total that looks complete.
   for (const { name, why } of anchorless) {
     console.log(`  anchors/ ${name} declares ${why} rather than source anchors, so it has none to check`);
   }
   if (anchorsChecked === 0) {
     fail('no mutation anchors were checked at all, so this assertion passed on nothing - the tables moved or this scan is looking in the wrong place');
   } else if (stale || unreadable) {
-    // Counted separately from the total rather than folded into it, because "239
-    // checked" beside three FAIL lines is the number a reader needs and "all 239 match"
-    // over the top of them would be this row asserting the very thing it just disproved.
-    //
-    // A table that could not be read at all belongs in the same sentence, and it took a
-    // control to notice that it was not there: with `library-check` unreadable the line
-    // above still said "all 174 match once", which is true of what it read and reads as a
-    // clean row over a FAIL. The number that is missing is the point - it was 248.
+    // Counted separately from the total, because the number that is missing is the point.
     const parts = [];
     if (stale) parts.push(`${stale} not matching exactly once`);
     if (unreadable) parts.push(`${unreadable} table${unreadable === 1 ? '' : 's'} unread, so this count is short by however many ${unreadable === 1 ? 'it' : 'they'} held`);
@@ -1254,13 +689,7 @@ const withoutStringBodies = (src) => {
     console.log(`  anchors/ all ${anchorsChecked} in ${tablesWithAnchors} tables match once, of ${tablesDeclared} declared`);
   }
 
-  // The assembled-program half gets its own line rather than being folded into the one
-  // above, because it counts a different population - the anchors into the four files the
-  // shaders are built out of, which is a fraction of the whole - and a total covering both
-  // would read as though every anchor had been asked the harder question.
   if (clean === null) {
-    // Nothing further to say: the two failures above already name why, and a clean line
-    // here would be this row reporting on a comparison that never ran.
   } else if (programChecked === 0) {
     fail('no anchor was checked against the assembled shader programs, so that rule passed on nothing'
       + ' - either the mutations stopped naming the spine and the chunks, or this scan is looking in the wrong place');
@@ -1272,29 +701,9 @@ const withoutStringBodies = (src) => {
   }
 }
 
-// ---- every id the application shell drives exists on the page that draws it
-//
-// `web/main.js` builds its shell from a table of element ids and then dereferences every
-// entry unguarded. An id that stopped existing therefore does not fail where it is
-// looked up - it fails at whichever consumer touches it first, and because `connect()`
-// runs below that wiring, the socket is never opened at all. What the operator gets is a
-// header stuck on "connecting...", a black viewport, and a server recording a take
-// perfectly well with `clients=0` beside it, which reads as a sensor or network fault
-// and is neither. That shipped, and it cost most of a session before anyone opened a
-// console.
-//
-// The module now refuses by name at the lookup, which is the runtime half. This is the
-// half that means nobody meets it: the two files are compared offline, so a rename that
-// takes the markup and not the module fails `npm test` rather than a shoot.
-//
-// **Read off the module's own table rather than a list kept here.** A hand-copied set of
-// ids is a second representation that drifts, and the failure it drifts into is silent -
-// an id added next year would simply not be checked, which is this repo's most-repeated
-// mistake in a new place. Parsing the literal means a shell entry added later is asked
-// by existing.
-//
-// The control is `--mutate shell-id-renamed`, which renames one id in the markup and
-// must redden this row and only this row.
+// Every id the application shell drives has to exist on the page that draws it, and every
+// `shell.` key the code reads has to be declared by the table. `web/main.js` dereferences that
+// table unguarded, so a half-applied rename fails at whichever consumer touches it first.
 {
   const rel = 'web/main.js';
   const page = 'web/index.html';
@@ -1303,13 +712,10 @@ const withoutStringBodies = (src) => {
   if (src === null || html === null) {
     fail(`${src === null ? rel : page} is missing, so the shell's ids could not be checked against the page`);
   } else {
-    // The call, not the function: `shellElements(` also appears where it is declared, and
-    // matching that would read an empty table and call it a clean row.
+    // The call, not the function: `shellElements(` also appears where it is declared.
     const open = src.indexOf('const shell = shellElements({');
     const shut = open === -1 ? -1 : src.indexOf('});', open);
     const table = open === -1 || shut === -1 ? '' : src.slice(open, shut);
-    // The values, which are the ids. The keys are the module's own names for them and
-    // the page knows nothing about those.
     const ids = [...table.matchAll(/^\s*\w+:\s*'([^']+)',$/gm)].map((m) => m[1]);
     const present = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
 
@@ -1317,9 +723,6 @@ const withoutStringBodies = (src) => {
       fail(`${rel} no longer builds its shell through shellElements({...}), so this row cannot find the ids it is meant to check`
         + ' - if the shell moved, move this row with it rather than leaving it looking at nothing');
     } else if (ids.length === 0) {
-      // The row's own floor. An extraction that silently matched nothing would print a
-      // clean line about zero ids, which is the shape of a green light wired to nothing
-      // that the canary at the top of this file exists to refuse.
       fail(`${rel} declares a shell table this row could not read a single id out of, so this assertion passed on nothing`);
     } else {
       const gone = ids.filter((id) => !present.has(id));
@@ -1328,34 +731,12 @@ const withoutStringBodies = (src) => {
           + ' - the module refuses by name at boot, so this is a surface that will not start');
       }
 
-      // **The other direction, and it is the one that actually shipped.** The rule above
-      // walks the table outwards and asks the page about each id; it is blind by
-      // construction to a `shell.thing` the table never declares, because such a key is
-      // not in the table to be walked. A fork of this branch merged in code reading
-      // `shell.stateDialog` against a table with no `stateDialog` in it - so the lookup
-      // was never made, the property was `undefined`, and a top-level `addEventListener`
-      // on it killed both surfaces at boot. The row above stayed green throughout,
-      // truthfully, about a question that was not the one being failed.
-      //
-      // Git had no conflict to report either: one side added consumers, the other left
-      // the table alone, and every line was individually fine. That is the shape a merge
-      // produces and neither reviewer sees, which is why it belongs to a check rather
-      // than to attention.
+      // The other direction, and the one that shipped: the rule above walks the table outwards
+      // and is blind to a `shell.thing` the table never declares.
       const keys = new Set([...table.matchAll(/^\s*(\w+):\s*'[^']+',$/gm)].map((m) => m[1]));
-      // `shell.menus` is assigned beside the table rather than declared in it, being a
-      // query with no id to miss, so it is a key this rule knows about without the table
-      // saying so.
       keys.add('menus');
-      // Comments stripped first, because the prose in this file and in `main.js` names
-      // these keys while discussing them - the paragraph above names the very key this
-      // rule was written for, and scanning raw source reddened the build on its own
-      // explanation. A check that fires when somebody writes *about* a key is a false
-      // positive, and false positives are how a check stops being read.
-      //
-      // Stripping can only ever remove text, so its failure mode is a miss rather than a
-      // phantom - a `//` inside a string on the same line as a dereference would take the
-      // dereference with it. The floor below is what stops that degrading silently into a
-      // row that scans nothing and reports no problems.
+      // Comments stripped first, because the prose here and in `main.js` names these keys while
+      // discussing them, and scanning raw source reddened the build on its own explanation.
       const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
       const used = new Set([...code.matchAll(/\bshell\.(\w+)/g)].map((m) => m[1]));
       if (used.size === 0) {
@@ -1377,14 +758,9 @@ const withoutStringBodies = (src) => {
 }
 
 console.log(`\n${total} JavaScript files, ${failed} failed`);
-// Said out loud because `npm test` runs this, and a green `npm test` that meant "the
-// suite passed" would be the most expensive wrong impression in the repo. **Two things here
-// execute rather than parse**, and they are named rather than buried. The specification row
-// imports a copy of `server/protocol.js`, which is a module of constants with no imports of
-// its own, and reads its exported values; nothing is called and no behaviour is exercised.
-// The anchor row imports the two spines and `web/shader-assembly.js` the same way and
-// does call one function - `assembleShaders`, which concatenates the strings it is handed
-// and touches nothing outside them. Both files import nothing, which is what lets their
-// bytes evaluate here at all. Everything else is `node --check` and nothing runs.
+// Said out loud because `npm test` runs this. Two rows execute rather than parse: the
+// specification row imports a copy of `server/protocol.js` for its constants, and the anchor
+// row imports the two spines and calls `assembleShaders`. Everything else is `node --check`.
+
 console.log('syntax only - no proof tool ran here; see CLAUDE.md "Proof tools" for the suite and what each of them needs');
 process.exit(failed ? 1 : 0);
