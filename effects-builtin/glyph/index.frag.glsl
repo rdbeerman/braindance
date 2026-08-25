@@ -1,8 +1,13 @@
-  // **Which character this cell draws.** Decided here rather than in the vertex stage
-  // because one of the three keys does not exist up there: the tone key is the luminance of
-  // the colour the cell is about to draw, which is the line above this one. Nothing is lost
-  // by the move - the cell seed and the rain coordinate are both constant across a sprite,
-  // so the character is too.
+  // **Which character this cell draws.** All three keys are now facts about the cell rather
+  // than about the point, and that is a correction rather than the arrangement this shipped
+  // with. This paragraph used to say the character was decided here because the tone key is
+  // the luminance of the colour the cell is about to draw, and that nothing was lost because
+  // the seed and the rain coordinate are constant across a sprite. The second half is true
+  // and the first half was the defect: constant across a *sprite* is not constant across a
+  // *cell*, and once the lattice collapses a few hundred texels onto one cell its occupants
+  // each read their own colour and each drew a different character in the same place.
+  // effects-builtin/glyph/cell.vert.glsl carries what replaced it and why the drawn colour
+  // could not be the thing replacing it.
   //
   // **The three keys add and wrap rather than mixing the way the five readings do**, and
   // the difference is forced rather than stylistic: character indices do not average.
@@ -13,16 +18,17 @@
   // nothing.
   //
   // **The tone key is scaled by 63/64 where the other two keep the pure wrap**, and that
-  // departs from the design document, which writes all three the same. Luminance is the one
-  // key with a direction: the table is sorted by ink, so a tone ramp is only a ramp if full
-  // luminance lands on the densest character. Unscaled it lands on fract(1.0), which is 0
-  // and therefore the sparsest, so the brightest point in the picture would draw an
-  // apostrophe and the top of the ramp would read as a hole in it. The hash and the rain
-  // are not scaled, because wrapping is exactly what makes them look like noise.
+  // departs from the design document, which writes all three the same. Tone is the one key
+  // with a direction: the table is sorted by ink, so a tone ramp is only a ramp if the top
+  // of the key lands on the densest character. Unscaled it lands on fract(1.0), which is 0
+  // and therefore the sparsest, so the nearest cell in the picture would draw an apostrophe
+  // and the top of the ramp would read as a hole in it. The hash and the rain are not
+  // scaled, because wrapping is exactly what makes them look like noise.
   //
-  // The luminance is clamped for the same reason the scaling exists. col can leave the unit
-  // interval - the readings sum, the flare adds, and a duotone pole is hot - and an
-  // unclamped tone term would carry the top of the ramp round to the sparse end again.
+  // The clamp that used to sit on this line has gone up to the write in the vertex stage,
+  // where it belongs now that the key is a clip-range position rather than a colour - the
+  // reason for it is unchanged and is the scaling's own, that a term reaching past 1 carries
+  // the top of the ramp round to the sparse end again.
   //
   // The rain key reads whole heads gone past rather than the continuous coordinate, because
   // a character index that blends is a character nobody wrote. It is multiplied by the
@@ -32,9 +38,9 @@
   // inert. An irrational step walks the table without repeating, which is what a scramble
   // has to do.
   if (glyphMix > 0.0) {
-    float lum = clamp(dot(col, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);
+    float cellTone = 1.0 - vCellT;
     float rainStep = floor(vRain) * 0.6180339887498949;
-    float f = fract(glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);
+    float f = fract(glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);
     // Guarded rather than trusted. fract is below 1 by definition, but a value arriving at
     // exactly 1.0 through a rounding would index one past the end of the table, and reading
     // a constant array out of range in GLSL is undefined rather than an error - so the one

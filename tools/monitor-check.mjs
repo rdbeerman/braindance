@@ -354,6 +354,62 @@ const waitFor = async (cond, ms, what = 'condition') => {
   throw new Error(`timed out after ${ms}ms waiting for ${what}`);
 };
 
+/**
+ * Waits until the page has published what the section about to run reaches through,
+ * and throws naming what never arrived.
+ *
+ * **`waitUntil: 'load'` stopped meaning the page is up when the effect packages moved
+ * onto the wire.** Boot fetches every one of them over HTTP behind the module's own
+ * top-level await, so `globalThis.__kinect` publishes tens of milliseconds *after* the
+ * event `goto` resolves on - measured at 366ms to `load` against 398ms to the handle,
+ * on loopback with a warm page cache. Every driver reaching straight through that
+ * handle on the line after a `goto` is racing that gap, and the race does not arrive
+ * looking like one: a predicate raising `TypeError: Cannot read properties of
+ * undefined` inside `waitFor` is not caught by it, so the seconds the wait was given
+ * are never spent and the row reddens in the same second the heading above it printed.
+ *
+ * So every clause a caller hands this is written to be **false** on a page that has not
+ * booted rather than to throw on one, and `Boolean` is what reads `?.`'s `undefined` as
+ * false. `docs/instruments.md` carries the other half of that rule, which cost two
+ * tools a section each: a guard written with `?.` and compared against `null` is not a
+ * guard, because `undefined !== null` is true before anything exists - the wait then
+ * resolves on its first tick having proved nothing, and the timeout is a comment.
+ *
+ * **A caller asks for what its own section reaches rather than for the earliest thing
+ * that happens to be there.** `__kinect` existing says the module finished evaluating;
+ * it does not say the socket has connected or that a frame has landed, and a probe
+ * whose answer cannot differ from the next probe's is not a probe.
+ *
+ * The two sections whose subject is decimation let the throw out, and that is the
+ * honest verdict rather than a shortcut: the catch at the bottom of this file records
+ * a run that threw as `DID NOT RUN` and nothing in it as a finding, which is what
+ * stops a `--mutate` run reading a viewer that never came up as the mutation being
+ * caught. The colour section catches it and puts it on a row instead, because it is
+ * the one place where "the page never booted" and "colour never arrived" are two
+ * different findings and something can tell them apart.
+ *
+ * **What it waited out is printed rather than left to be assumed**, because the
+ * failure this closes is invisible on the machine that closes it: on an idle Mac the
+ * gap is a few hundred milliseconds and the sleep this replaced covered it by luck,
+ * so a run that says nothing cannot be told from one where the wait does nothing. The
+ * number is the evidence, and it is the same number that says how much headroom a
+ * slower machine has left. Not an assertion, because there is no threshold here worth
+ * gating on: a page is up when it is up.
+ */
+const published = async (page, reaches, what, ms = 20000) => {
+  const began = Date.now();
+  await waitFor(
+    // Caught rather than let out: an evaluate landing while the page is still navigating
+    // rejects with a destroyed execution context, which is a page that is not up yet
+    // rather than an answer about one, and letting it past the predicate would end the
+    // run with the timeout unspent for the second reason rather than the first.
+    () => page.evaluate(`Boolean(${reaches})`).catch(() => false),
+    ms,
+    what,
+  );
+  console.log(`  ....  waited ${Date.now() - began}ms after load for ${what}`);
+};
+
 // The full chromium build rather than the bundled headless shell, for `export-check`'s
 // reason: the shell has no GPU and falls back to SwiftShader, and a renderer nothing
 // else in this repo reproduces is not the renderer the claim is about.
@@ -764,7 +820,18 @@ try {
       const pageErrors = [];
       page.on('pageerror', (e) => pageErrors.push(e.message));
       await page.goto(RECORDER_URL, { waitUntil: 'load' });
-      await wait(1200);
+      // The door and the texture every row below reads back through, rather than the
+      // handle they hang off: what this section does is inject a block and read
+      // `depthCurr` for where its samples landed, so the probe goes on the two objects
+      // whose absence would be the reason it could not. Nothing waits out a duration
+      // beside it, because this server was started with no grabber at all - nothing
+      // arrives on its own, and an injected block is the only thing that ever touches
+      // these textures. A timeout here is a page that never booted rather than a frame
+      // that landed in the wrong place, which is why it is left to throw.
+      await published(page,
+        'typeof globalThis.__kinect?.drive?.injectDepth === "function"'
+        + ' && Boolean(globalThis.__kinect?.uniforms?.depthCurr?.value?.image?.data)',
+        'the viewer to publish the depth door and the texture it writes into');
 
       // Values are generated inside the page from an index, and the expectation is
       // computed from the same index by the reader rather than from anything the door
@@ -930,7 +997,23 @@ try {
       await start([...streamer(), '--captures', join(WORK, 'caps-5b'), '--name', 'renderlive',
         '--projects', join(WORK, 'p5b'), '--presets', join(WORK, 'q5b')]);
       await page.goto(RECORDER_URL, { waitUntil: 'load' });
-      await wait(2000);
+      // **Two clauses, and the second is the one a boot probe would miss.** `setDivisor`
+      // below drives the real control, and `sendMonitor` in `web/main.js` returns
+      // silently unless the socket is OPEN - so a page whose handle has published but
+      // whose socket has not connected takes the drag, sends nothing, and turns the ÷4
+      // arm into a second ÷1 arm read under a ÷4 label, which is the misattribution the
+      // whole negotiation exists to avoid. A depth texel that is no longer zero settles
+      // both halves at once: `web/gpu-textures.js` builds both depth textures zero-filled
+      // deliberately, so that every point leaves at the empty-sample test until a real
+      // frame binds, and on a page nobody has injected into the only thing that writes
+      // one is a frame off that socket. So the wait ends when the stream this section
+      // measures is actually running, rather than when a clock says it probably is, and
+      // a timeout is a stream that never started rather than a divisor that was not
+      // applied - which is why it is left to throw.
+      await published(page,
+        'typeof globalThis.__kinect?.drive?.injectDepth === "function"'
+        + ' && Boolean(globalThis.__kinect?.uniforms?.depthCurr?.value?.image?.data?.some((v) => v !== 0))',
+        'the live socket to land a depth frame in the viewer');
 
       const setDivisor = (d) => page.evaluate(`(${`(d) => {
         const el = document.getElementById('monDivisor');
@@ -1081,30 +1164,40 @@ try {
       // and has to say so. A fixed wait here would turn "no colour ever decoded" into a
       // silent pass on the row that matters most.
       //
-      // **It reads through a published `__kinect` rather than off one, and that is the
-      // difference between a wait and a throw.** `load` stopped meaning the page is up
-      // when the effect packages moved onto the wire: boot now fetches them over HTTP, so
-      // `__kinect` publishes tens of milliseconds *after* the event `goto` waits for -
-      // measured at 366ms to `load` against 398ms to the handle. Reaching straight through
-      // the handle raises a TypeError inside the predicate, `waitFor` does not catch one,
-      // and the twenty seconds are never spent: the row reddened in the same second it was
+      // **Boot is waited for apart from colour, and that is the difference between a wait
+      // and a throw.** `published` above carries why `load` no longer means the page is
+      // up; what is particular here is that reaching for the value before the object
+      // exists raises a TypeError inside the predicate, `waitFor` does not catch one, and
+      // the twenty seconds are never spent - the row reddened in the same second it was
       // printed, saying no colour ever bound about a build whose colour binds in 451ms.
-      // The two sections above survive on a fixed `wait()` after their own `goto`, which is
-      // the silent-pass shape this comment already refuses, so the guard belongs here rather
-      // than a third sleep. `-1` for an unpublished handle keeps the timeout reachable, and
-      // the two states are reported apart below because "the page never booted" and "colour
-      // never arrived" are different findings.
+      // The two sections above come through the same helper rather than a sleep each,
+      // which is the reason it is a helper at all: three copies of a readiness rule drift,
+      // and the copy that drifts is the one nobody re-reads.
+      //
+      // It is caught rather than let out here alone, because this is the one section that
+      // can tell the two states apart and they are different findings: everything below
+      // measures a toggle, so a page that never booted has to say so rather than be
+      // reported as a colour that never arrived. `-1` from the read below keeps the same
+      // distinction available after the colour wait, for a page that booted and then died
+      // inside it.
+      let up = true;
+      try {
+        await published(page, 'globalThis.__kinect?.uniforms?.hasColor',
+          'the viewer to publish the colour uniform the toggle is measured against');
+      } catch { up = false; }
       const hasColor = () => page.evaluate('globalThis.__kinect ? globalThis.__kinect.uniforms.hasColor.value : -1');
       let bound = false;
-      try {
-        await waitFor(async () => (await hasColor()) === 1, 20000, 'a colour frame to decode and bind');
-        bound = true;
-      } catch { /* the row below is the report, and the rows after it are skipped */ }
+      if (up) {
+        try {
+          await waitFor(async () => (await hasColor()) === 1, 20000, 'a colour frame to decode and bind');
+          bound = true;
+        } catch { /* the row below is the report, and the rows after it are skipped */ }
+      }
       // Short-circuited and caught, because this read runs on the path where the wait has
       // already failed: a page that died during those twenty seconds would throw here and
       // turn a red row into a crash with the count still short, which is the shape that
       // reads as a catch to anything checking exit codes.
-      const booted = bound || (await hasColor().catch(() => -1)) !== -1;
+      const booted = up && (bound || (await hasColor().catch(() => -1)) !== -1);
       ok('a colour-on grabber paints the cloud with a real decoded JPEG, which is what the toggle is measured against',
         bound, bound ? '' : (booted
           ? 'hasColor never reached 1, so no colour ever bound and nothing below would have measured the toggle'

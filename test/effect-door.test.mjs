@@ -25,7 +25,10 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MAX_EFFECT_ID, doorRefusal, forkRefusal } from '../server/effect-door.js';
+import {
+  MAX_EFFECT_ID, RESERVED_EFFECT_IDS, doorRefusal, forkRefusal, reservedIdRefusal,
+} from '../server/effect-door.js';
+import { HOST_DRIVEN_UNIFORMS } from '../web/effect-manifests.js';
 import { snapScalar } from '../web/format.js';
 import { cloudSpine } from '../web/cloud-shader.js';
 import { gradeSpine } from '../web/grade-shader.js';
@@ -360,6 +363,307 @@ test('a package may only put its rows in a group that exists, and may not claim 
     c.manifest.panelGroups[0].key = 'glitch';
     for (const p of Object.values(c.manifest.params)) p.panel.group = 'glitch';
   }), /effect glitch already declares/, 'a package group colliding with another package\'s is refused, naming the other package');
+});
+
+// **An array is a uniform with room for the value and is still not somewhere to put it.** The
+// shape rule above reads the declared type, and the reading it was built on threw away the
+// dimension: `uniform float weights[4]` came back as `weights` declared `float`, which is
+// exactly what a plain binding asks for. Three.js takes its uploader off the declaration, so
+// the array setter is handed one number, the write succeeds, and the shader goes on reading
+// whatever the array was initialised with - a control that moves and a picture that does not,
+// which is the failure both halves of the binding rule exist to refuse.
+//
+// Both spellings, because GLSL ES 3.00 takes the dimension on either side of the name and only
+// one of them used to be read at all: `float[4] weights` declared nothing here, so the rule
+// about a uniform nothing binds could not see it either.
+test('a binding may not aim at an array, whichever side the dimension is written on', () => {
+  const arrayed = (declaration) => brokenBy('thermal', (c) => {
+    c.manifest.chunks.push({ stage: 'f.decl', order: 700, file: 'weights.frag.glsl' });
+    c.chunks['weights.frag.glsl'] = `${declaration}\n`;
+    c.manifest.params.weights = {
+      kind: 'scalar', label: 'Weights', def: 0, min: 0, max: 1, step: 0.05,
+      panel: { group: 'colour' }, bind: { on: 'points', uniform: 'thermalWeights' },
+    };
+  });
+  assert.match(arrayed('uniform float thermalWeights[4];'), /declares as float\[4\].*no array kind/s,
+    'a scalar bound to an array declared after the name is refused, naming the dimension it found');
+  assert.match(arrayed('uniform float[4] thermalWeights;'), /declares as float\[4\].*no array kind/s,
+    'and the type-level spelling of the same declaration is refused identically, which is the half that used to declare nothing at all');
+  // The must-accept control for the reading rather than for the rule: the same package with
+  // the same new uniform and no dimension on it goes through, so the refusal above is about
+  // the brackets and not about anything else the fixture does.
+  assert.equal(arrayed('uniform float thermalWeights;'), null,
+    'and the same declaration without a dimension is not refused, which is what says this rule is about the array');
+});
+
+// **An id the HTTP surface has already claimed, which is a rule about the id rather than about
+// the package.** A literal segment under `/effects/` outranks the `:id` pattern beside it, so a
+// package called `refuse` is listed by `GET /effects` and then answered 405 when the client
+// fetches it — `readEffectPackages` throws, the top-level await fails, no `__kinect` publishes.
+// Reproduced against a real server before this rule existed: the listing carried it, `GET
+// /effects/refuse` answered `405 it takes POST`, `DELETE` answered 405 as well so it could not
+// even be removed, and the boot gate said nothing at all because nothing in this door had an
+// opinion about the id beyond its shape and its length.
+test('an id the route table has claimed is not an id a package may have', () => {
+  const all = shipped();
+  const donor = all.find((p) => p.id === 'thermal');
+  // The donor is dropped from `beside` for the same reason the id-length rows drop it: leaving
+  // the original standing beside its own copy collides on every slot and varying it declares,
+  // and the candidate would be refused for something that has nothing to do with its name.
+  const named = (id) => doorRefusal(
+    { id, manifest: { ...JSON.parse(JSON.stringify(donor.manifest)), id }, chunks: { ...donor.chunks } },
+    { beside: beside(all, 'thermal'), spines: SPINES },
+  );
+  // **The live list is empty, so every assertion driven through the door over it runs zero
+  // times.** That is not a hypothetical worry: emptying the list is a mutation that was run
+  // against the previous version of this row, and it left the row green while the rule it tests
+  // was gone. The rule is asked directly instead, with a reserved id in hand, so it is proved on
+  // data that exists — `reservedIdRefusal` is the same code path `doorRefusal` calls.
+  assert.match(reservedIdRefusal('verify', ['verify']),
+    /effect verify takes an id this build's HTTP surface has already claimed/,
+    'the reserved-id rule does not refuse an id on the list it was handed, so nothing here proves it works');
+  assert.match(reservedIdRefusal('verify', ['verify', 'check']), /The reserved names are verify, check/,
+    'and it names the whole set, because an author who trips it needs to know which names are gone');
+  // The must-accept half, one character off in each direction: a rule matching by prefix would
+  // pass the rows above and take ids away from packages that never collided with anything.
+  assert.equal(reservedIdRefusal('verifier', ['verify']), null, 'an id that merely starts with a reserved one is not reserved');
+  assert.equal(reservedIdRefusal('verif', ['verify']), null, 'and neither is one a reserved name starts with');
+
+  // And the live list, driven through the whole door. Today it is empty and this loop is a
+  // no-op, which is exactly why the four rows above exist — but it is what would fire if the
+  // list ever grew, and it is where a real reserved id would be proved refused end to end.
+  for (const id of RESERVED_EFFECT_IDS) {
+    assert.match(named(id), new RegExp(`effect ${id} takes an id this build's HTTP surface has already claimed`),
+      `a package at the reserved id ${id} is accepted, so the store will list one the page cannot read`);
+  }
+  // The shipped set, which is the control that says the list has not grown into a name a real
+  // package uses. Live data, and it does not depend on the list being non-empty.
+  for (const pkg of all) {
+    assert.equal(named(pkg.id) && reservedIdRefusal(pkg.id), null,
+      `the shipped ${pkg.id} sits on a reserved id, so this build refuses its own package`);
+  }
+});
+
+// **The reserved list held to the table it is a second spelling of.** `server/index.js` derives
+// the same set off `ROUTES` at module load and refuses to boot if the two disagree, which is the
+// authority; this asks it again where no server starts, so a route added under `/effects/` fails
+// the unit suite rather than waiting for somebody to run one. Read as text rather than imported,
+// because importing that module builds a server and binds a port.
+test('RESERVED_EFFECT_IDS is what the route table actually claims', () => {
+  const claimedIn = (paths) => [...new Set(
+    paths.map((p) => p.match(/^\/effects\/([^/:]+)$/)?.[1]).filter((s) => s !== undefined),
+  )].sort();
+
+  const server = readFileSync(join(ROOT, 'server/index.js'), 'utf8');
+  const paths = [...server.matchAll(/path:\s*'(\/effects\/[^']*)'/g)].map((m) => m[1]);
+  // Non-vacuous by construction: the scan has to have found the per-id route, or it is reading
+  // nothing and the comparison below is between two empty lists for the wrong reason.
+  assert.ok(paths.includes('/effects/:id'),
+    `the scan found ${paths.length} effect route paths and none of them is the per-id read, so it is not reading the table`);
+  assert.deepEqual(claimedIn(paths), [...RESERVED_EFFECT_IDS].sort(),
+    'the route table claims a different set of effect ids than the door reserves - a package under a claimed id '
+    + 'is listed by GET /effects and refused when the page fetches it, which is a page that does not boot');
+
+  // **And the extraction shown to find something, because today it correctly finds nothing.**
+  // Both sides of the comparison above are empty, so it passes on a build where the route table
+  // claims nothing — which is the state this build is in and the state it should stay in. What
+  // it must not do is pass because the extraction is broken. The same function is handed a path
+  // list with a literal segment in it, which is what the table would look like the day somebody
+  // registers one.
+  assert.deepEqual(claimedIn(['/effects', '/effects/:id', '/effects/verify', '/effects/:id/file/:name']),
+    ['verify'],
+    'the extraction does not pick a literal segment out of the route paths, so the comparison above '
+    + 'is between two empty lists whatever the table holds');
+});
+
+// **A `gates` the gate cannot read, which is the array rule's question asked one field over.**
+// `gates` is a promise about the uniform rather than a flag on the parameter: `gradeNeeded` in
+// `web/main.js` walks the gating bindings, reads the cell each names, and holds the grade pass
+// open while any is not zero. So the binding has to land a number, on the table that function
+// reads.
+//
+// The axisDeg half is the one that bites twice. It lands a `Vector2`, which is never the zero
+// vector, so under the `> 0` this shipped with the pass stayed shut forever and under the
+// `!== 0` it has now an object is never strictly equal to zero and it runs full-screen forever.
+// The symptom flipped when somebody fixed something unrelated, which is the argument for
+// refusing the binding rather than teaching the predicate about it.
+test('a gating binding has to be something the gate can read', () => {
+  // The raster's angle is the shipped axisDeg, on the grade table, with no gate on it.
+  assert.match(brokenBy('raster', (c) => { c.manifest.params.angle.bind.gates = true; }),
+    /declares gates beside the axisDeg transform/,
+    'a gate on a two-component direction is refused, because there is no zero for it to be at');
+  // The other side of the same rule: the gate collects only grade-table bindings, so a gate on
+  // the point cloud's table is a claim the pass never sees.
+  assert.match(brokenBy('rain', (c) => { c.manifest.params.amount.bind.gates = true; }),
+    /declares gates and binds on "points"/,
+    'a gate on the point cloud\'s table is refused, because nothing collects it');
+
+  // **Three near-misses, and without them the two rows above pass on a door that refuses every
+  // `gates` there is.** A plain grade binding with a gate is what all seven shipped gated
+  // parameters are; `degToRad` lands a number and zero radians is zero degrees, so it gates
+  // perfectly well; and `axisDeg` with no gate is the shipped raster untouched.
+  assert.equal(brokenBy('raster', (c) => { c.manifest.params.amount.bind.gates = true; }), null,
+    'a plain grade binding that gates is what the shipped set already does');
+  // Added as a parameter of its own rather than by repointing the shipped `angle`, which was
+  // the first attempt and proved nothing: moving `angle` off `scanAxis` leaves that uniform
+  // declared with nothing binding it, so the fixture came back refused by a rule two hundred
+  // lines away and the row would have been green on a build with no gate rule at all.
+  assert.equal(brokenBy('raster', (c) => {
+    c.manifest.params.tilt = {
+      def: 0, min: 0, max: 1, step: 0.05, kind: 'scalar', label: 'raster tilt',
+      panel: { group: 'raster', tab: 'look' },
+      bind: { on: 'grade', uniform: 'scanTilt', transform: 'degToRad', gates: true },
+      under: 'amount',
+    };
+    c.chunks['decl.grade.glsl'] = `${c.chunks['decl.grade.glsl']}uniform float scanTilt;\n`;
+  }), null, 'and degToRad lands a number, so it gates like any other scalar');
+  assert.equal(brokenBy('raster', () => {}), null,
+    'and the shipped raster, whose angle is axisDeg with no gate on it, is untouched by this rule');
+
+  // The must-accept control for the set: every gated parameter that ships is a plain grade
+  // binding, so a rule that had crept wider would fail here rather than in a browser.
+  for (const pkg of shipped()) {
+    for (const [short, spec] of Object.entries(pkg.manifest.params)) {
+      if (!spec.bind?.gates) continue;
+      assert.equal(spec.bind.on, 'grade', `the shipped ${pkg.id}.${short} gates on ${spec.bind.on}`);
+      assert.equal(spec.bind.transform, undefined,
+        `the shipped ${pkg.id}.${short} gates through the ${spec.bind.transform} transform`);
+    }
+  }
+});
+
+// **The exemption from the rule that something has to write every uniform, held to what this
+// build actually writes.** `hostDriven` excuses a uniform from having a parameter behind it,
+// and while any name at all could go in the list the excuse was self-issued: a package could
+// declare a clock of its own, list it, install cleanly, and read zero from it for the life of
+// the page with no control anywhere that could have moved it. That is the exact failure the
+// two-ended rule stands in front of, reached through the sentence that lets a package out of
+// it.
+test('hostDriven names a uniform this build really drives, not any uniform at all', () => {
+  assert.equal(brokenBy('rain', () => {}), null, 'the shipped rain is accepted before this row changes anything');
+  assert.match(brokenBy('rain', (c) => {
+    c.chunks['decl.vert.glsl'] += 'uniform float rainOwnClock;\n';
+    c.manifest.hostDriven.push('rainOwnClock');
+  }), /lists "rainOwnClock" as host-driven and this build's render loop writes "rainPhase"/,
+  'a package inventing its own host-driven uniform is refused, naming what the host does write');
+  // The must-accept half: the shipped list is one name and it has to keep going through, or
+  // the row above is passing on a door that refuses every `hostDriven` entry there is.
+  assert.deepEqual([...HOST_DRIVEN_UNIFORMS], ['rainPhase'],
+    'the host-driven set is the one name the rain needs - a set that had grown would need this row read again');
+
+  // **The other end of the constant, which no import can hold, and it is asked in both
+  // directions.** The render loop writes one named cell rather than iterating a list, so the
+  // two statements are held together here rather than by a shared symbol.
+  const main = readFileSync(join(ROOT, 'web/main.js'), 'utf8');
+  const written = new Set(
+    [...main.matchAll(/\buniforms\.([A-Za-z_][A-Za-z0-9_]*)\.value\s*(?:=[^=]|\.set\b)/g)].map((m) => m[1]),
+  );
+
+  // Direction one: a name on the list that the page never assigns to. That is the door going on
+  // excusing a uniform nothing writes, which is the whole hole the constant closes.
+  for (const name of HOST_DRIVEN_UNIFORMS) {
+    assert.ok(written.has(name),
+      `${name} is listed as host-driven and nothing in web/main.js writes it, so the door is excusing a uniform that reads zero`);
+  }
+
+  // **Direction two, and it is asked against the packages rather than against the writes**,
+  // because "is this a host clock" is not a question a scan of `web/main.js` can answer: the
+  // page assigns to dozens of cells and almost all of them are the spine's own - `mixT`,
+  // `spanSec`, `time`. What makes a write host-driven is the *other* end, that the uniform is
+  // declared by a package rather than by a spine, and that is knowable off disk. So the rule is:
+  // a uniform some shipped package declares, that `web/main.js` writes, has to be on the list.
+  // A name that appears on both sides and not in the constant is a host clock somebody wired up
+  // without saying so, and the door would then refuse the package that declares it - which is
+  // the loud direction, and is still the two statements disagreeing.
+  // **Comments stripped first, which this row did not do and which produced a false finding.**
+  // The chunks in this repo carry more comment than code, and two of them name the spine's own
+  // read uniforms in prose - the glitch's flare chunk and the duotone's tone chunk each quote a
+  // pinned build's `readRgb, readDepth, readContour` reading. A declaration pattern whose tail
+  // runs to the next semicolon walks straight through a paragraph, so both came back as
+  // package-declared, both are written by `web/main.js`, and the row failed naming `readDepth`
+  // on a build with nothing wrong with it. `withoutComments` in `server/effect-door.js` is the
+  // same two substitutions and exists for the same reason.
+  const withoutComments = (text) => text
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+  const declaredByPackages = new Set();
+  for (const pkg of shipped()) {
+    for (const raw of Object.values(pkg.chunks)) {
+      const text = withoutComments(raw);
+      for (const m of text.matchAll(/\buniform\s+(?:(?:highp|mediump|lowp)\s+)?[A-Za-z_][A-Za-z0-9_]*\s+([^;]*);/g)) {
+        for (const part of m[1].split(',')) {
+          const nm = part.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+          if (nm) declaredByPackages.add(nm[1]);
+        }
+      }
+    }
+  }
+  const unlisted = (writes, declared, listed) => [...writes]
+    .filter((n) => declared.has(n) && !listed.includes(n));
+  assert.deepEqual(unlisted(written, declaredByPackages, HOST_DRIVEN_UNIFORMS), [],
+    'web/main.js writes a uniform a shipped package declares that HOST_DRIVEN_UNIFORMS does not name - '
+    + 'that is a host clock wired up without the door being told, and the door will refuse the package that declares it');
+
+  // **And the same predicate shown to fire, because on this build it cannot.** The only name in
+  // both scans is `rainPhase` and it is on the list, so the assertion above is green on the
+  // corpus that exists whatever the rule says - taking the name off the list does not reach it
+  // either, because the shipped rain is then refused and the identity row at the top of this
+  // test fails first. A conjunct that no input can redden is the vacuous one
+  // `docs/instruments.md` keeps recording, so the rule is asked once more against a triple built
+  // to trip it.
+  assert.deepEqual(
+    unlisted(new Set(['rainPhase', 'someClock']), new Set(['someClock']), ['rainPhase']),
+    ['someClock'],
+    'the direction-two rule does not flag a name that is written, package-declared and unlisted, so the row above proves nothing');
+
+  // **What neither direction reaches, said out loud rather than left to be assumed.** Both read
+  // `web/main.js` as text through one spelling of the write, so a build that started assigning
+  // through a computed key would pass direction one while writing nothing this row can see and
+  // fail direction two by finding nothing at all. And direction two is over the *shipped*
+  // packages only, because a package installed at runtime is not on disk when this runs - a
+  // fork declaring a uniform the host happens to write is outside this rule and is caught by
+  // the door instead, which refuses it for having no parameter behind it.
+  assert.ok(declaredByPackages.size > 0 && written.size > 0,
+    `this row read ${declaredByPackages.size} package-declared uniforms and ${written.size} writes in web/main.js - `
+    + 'either being empty means the scan found nothing and both directions above were vacuous');
+});
+
+// **How big the manifest may be, which every bound above it is silent about.** The three that
+// were here count chunk text, and a package can repeat a correct *parameter* rather than a
+// correct chunk: twelve thousand of them, each individually valid, arriving with one small
+// file of GLSL and inside the four megabytes the server takes as a body. What it costs is the
+// store writing and hashing those bytes on every poll, and a DOM control per parameter on
+// every page that adopts it.
+test('the door bounds the manifest as well as the chunks it names', () => {
+  const withParams = (n) => brokenBy('thermal', (c) => {
+    for (let i = 0; i < n; i++) {
+      c.manifest.params[`k${i}`] = {
+        kind: 'scalar', label: `Knob number ${i} of a manifest nobody wrote by hand`,
+        def: 0, min: 0, max: 1, step: 0.05,
+        panel: { group: 'colour' }, bind: { on: 'points', uniform: 'thermal' },
+      };
+    }
+  });
+  // Sized around the bound rather than far past it, so a build whose bound had drifted anywhere
+  // at all fails one of these two rows. Measured, a parameter of this shape costs 309 bytes in
+  // the spelling the store writes: 95 of them is 29,857 bytes and 115 is 36,067, which straddles
+  // the 32,768 this build takes with about ten per cent either side.
+  assert.equal(withParams(95), null, 'a manifest inside the bound is not refused by it');
+  assert.match(withParams(115), /carries a manifest of \d+ bytes/,
+    'and one past it is refused by name, counting the bytes the store would write');
+  // The reported shape, so the row is about the thing that was found rather than about a
+  // fixture built to trip a number: none of the bounds that count chunk text can see it, and
+  // it is comfortably inside the request limit.
+  assert.match(withParams(12000), /carries a manifest of \d+ bytes/,
+    'the twelve thousand parameters that fit in a request body are refused');
+
+  // The must-accept control, which is what says the bound is not merely low: every manifest
+  // this build ships is inside it, measured the way the store writes them.
+  for (const pkg of shipped()) {
+    const bytes = Buffer.byteLength(`${JSON.stringify(pkg.manifest, null, 2)}\n`, 'utf8');
+    assert.ok(bytes <= 32 * 1024,
+      `the shipped ${pkg.id} carries a ${bytes}-byte manifest, which this build's own door would refuse`);
+  }
 });
 
 test('a fork may add and retune, and may not drop', () => {

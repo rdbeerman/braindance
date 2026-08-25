@@ -222,6 +222,34 @@ const tornRead = (why) => Object.assign(new Error(why), { tornRead: true });
 const effectRefusal = (why) => Object.assign(new Error(why), { effectRefusal: true });
 
 /**
+ * A rebuild that failed because a shader program *would not link*, marked so the one caller
+ * entitled to act on that can tell it from every other way an adoption fails.
+ *
+ * **The mark is what keeps a quarantine off the innocent.** A link failure is the one
+ * failure this page can attribute to a package rather than to itself: the door assembles and
+ * binds and cannot compile, so identifier-valid GLSL that the driver rejects installs
+ * cleanly, and every fresh page load then compiles it at boot - where `warmPrograms` runs
+ * outside any transaction and takes the module down with it, publishing no `__kinect` and
+ * leaving every tool in the suite reporting that it did not run. So the page that discovers
+ * it asks the store to set the package aside. What must not reach that route is any of the
+ * *other* throws the same rollback catches - `buildPanel` refusing a group key, the
+ * completeness rule refusing a document that names a subset of a fork's parameters - because
+ * "this page could not carry its open document across" says nothing whatever about the
+ * package, and setting one aside on it would rename a perfectly good fork out of the way for
+ * a fault in a clip.
+ *
+ * A property beside `effectRefusal`'s rather than a subclass or a phrase in the sentence, for
+ * the reason written out there: the sentences are read by a person and a classification that
+ * matched words in them would be re-decided by every edit to the prose. It carries the
+ * driver's own log beside the mark, because the sentence a person reads is framed on the way
+ * out and the far side's log wants the compiler's words rather than this page's.
+ */
+const shaderLinkFailure = (why, log) => Object.assign(new Error(why), {
+  shaderLinkFailure: true,
+  linkLog: log,
+});
+
+/**
  * `GET /effects`, with the shape of the answer held to what every reader of it assumes.
  *
  * **A 200 carrying a body this build cannot read used to escape every guard there was.**
@@ -1166,9 +1194,9 @@ function updateDrawRange() {
  * The grade terms whose being up is what makes the pass worth running, read off the
  * packages rather than listed here.
  *
- * A binding declares `gates` when a non-zero value has to switch the pass on, and five of
- * the shipped effects do. That used to be five lines of `grade.uniforms.X.value > 0` in the
- * function below, which was true of the shipped set and true by transcription: a package
+ * A binding declares `gates` when a non-zero value has to switch the pass on, and seven of
+ * the shipped effects do. That used to be a line of `grade.uniforms.X.value > 0` per gating
+ * effect in the function below, true of the shipped set and true by transcription: a package
  * installed next year would have written its term into the pass and left the pass shut, so
  * its slider would have moved a uniform nothing ran and the effect would have been silently
  * absent - the shape this repo keeps case files about. Derived, a package is counted by
@@ -1189,6 +1217,32 @@ function updateDrawRange() {
  * end. The mirror case is worse in the other direction: uninstall the last gating effect
  * and the pass stayed open forever on a term nothing could reach any more. It is the same
  * walk over the same packages, one line inside `adoptEffectPackages`.
+ *
+ * **The question a gate asks is whether the term is at zero, and it used to ask whether the
+ * term was above it.** `gates` means a *non-zero* value switches the pass on - the door says
+ * so in its own refusal sentence, the paragraph above says so, and every reading of the
+ * binding says so - but the test below was `> 0`, which is the same answer only for a
+ * parameter whose range starts at zero. All seven shipped gated masters run 0..N, so the
+ * transcription was true of the set that exists and false of the contract, and the gate
+ * matrix could not see the difference because it has no negative range to drive. What that
+ * cost was the same silent absence the derivation above exists to end, arriving from the
+ * other side: install a package whose gated master runs -1..1, drag it below zero, and the
+ * slider moves, the uniform takes the value, `gradeNeeded` says no, and the pass stays shut
+ * across the whole negative half of a range the package author declared.
+ *
+ * **It reads the uniform, so it reads whatever the binding writes there, and this line takes
+ * that for a number.** A scalar write and `degToRad` both land one, and zero means the same
+ * thing in each. `axisDeg` lands a `Vector2` of a sine and a cosine, which is a direction
+ * rather than an amount and is never the zero vector - so a package declaring `gates` beside
+ * `transform: 'axisDeg'` has no term to be up or down at all, and the comparison below would
+ * hold the pass open on it forever where the one it replaced held it shut forever. Neither
+ * reading is the wrong one; the binding is, which is why `doorRefusal` refuses that pair
+ * outright rather than this function being taught a second shape. It refuses `gates` on any
+ * table but `grade` in the same breath and for the same reason read from the other side:
+ * `gradeGatesOf` collects grade bindings only, so a gating binding anywhere else is a promise
+ * this walk never sees. What is left here is therefore a number by construction, and the
+ * assumption is written down rather than defended, because a door is a thing that can be
+ * edited and a comparison against a `Vector2` is silent in whichever direction it fails.
  */
 let GRADE_GATES;
 const gradeGatesOf = (packages) => packages.flatMap((pkg) => Object.values(pkg.manifest.params ?? {})
@@ -1196,7 +1250,7 @@ const gradeGatesOf = (packages) => packages.flatMap((pkg) => Object.values(pkg.m
   .map((p) => p.bind.uniform));
 
 function gradeNeeded() {
-  return GRADE_GATES.some((name) => grade.uniforms[name].value > 0);
+  return GRADE_GATES.some((name) => grade.uniforms[name].value !== 0);
 }
 
 // ------------------------------------------------- fitting the box to the footage
@@ -1495,11 +1549,11 @@ let PANEL_GROUPS;
  * three places this could fail. The throw stays anyway, because the door is not the only
  * way a binding reaches here.
  *
- * The gate is composed on top rather than spelled into each of the five writes. Each post
+ * The gate is composed on top rather than spelled into each of the gating writes. Each post
  * pass costs a full-screen read and write whether or not it changes anything, so a term of
  * the grade at zero has to shut its pass rather than run it as a no-op - and `gradeNeeded`
- * asks the five uniforms rather than the five parameters, so it goes on being right when a
- * project writes them in any order.
+ * asks the uniforms rather than the parameters, so it goes on being right when a project
+ * writes them in any order.
  */
 function effectApply(bind) {
   const table = () => (bind.on === 'grade' ? grade.uniforms : uniforms);
@@ -3138,6 +3192,127 @@ function adoptEffectPackages(packages, programs, held = {}) {
 adoptEffectPackages(effectPackages, shaderPrograms);
 
 /**
+ * How much of the driver's log travels to the store, in characters.
+ *
+ * The reason is written into the server's own log, and a link log is whatever the driver
+ * felt like emitting - some of them quote the offending line, some quote the whole
+ * translated program, and a Metal shader compiler will hand back kilobytes for one missing
+ * semicolon. Bounded on this side rather than trusted to be bounded on the other, for the
+ * reason every other length in this program is: the far side is defending a disk file
+ * against whatever a browser sends it, and a caller that leans on that defence is a caller
+ * that stops working the day the defence is written differently.
+ *
+ * **Four hundred because that is where the store cuts, and the two numbers agreeing is the
+ * point rather than a coincidence.** `serveEffectRefusal` slices the reason at
+ * `MAX_REFUSAL_REASON`, so a longer one is not refused, it is silently shortened - and the
+ * sentence a person then reads in the log is not the sentence this page composed, with
+ * nothing anywhere saying where it was cut. This is still this side's own bound and not a
+ * lean on that one; what matching buys is that what is sent is what is written. The pair is
+ * held together by nothing but this paragraph, which is the honest state of it.
+ *
+ * It is about twice what this rig's own driver emits for a type error - measured, a `float`
+ * assigned to a `vec3` comes back as 193 characters carrying the line number and both halves
+ * of the mismatch - which leaves room for a longer one without letting a shader's whole
+ * source through.
+ */
+const REFUSE_REASON_MAX = 400;
+
+/**
+ * Asks the store to set aside the packages this adoption's link failure can be attributed
+ * to, so the next page to load is not the one that dies compiling them.
+ *
+ * **The whole of why this exists is that the install door cannot compile.** It assembles the
+ * set, binds every uniform and refuses an identifier this build has not got - and a shader
+ * that is syntactically broken while naming only familiar identifiers passes all of that and
+ * is refused by the driver, which reports a log rather than throwing. So a package can be
+ * installed cleanly, roll this page back, and then take down every fresh page load at boot,
+ * where `warmPrograms` runs outside any transaction: no `__kinect`, neither surface opening,
+ * and every tool in the suite reporting that it did not run. The page that discovers the
+ * failure is the only thing in this program with a GL context to discover it in, so it is
+ * what tells the store.
+ *
+ * **A link failure is a property of the assembled program and does not name a package**,
+ * which is the hard half. Both programs are one text spliced out of every installed package,
+ * and the driver's log is about a line number in that text. What this page does know is
+ * which packages *moved*: it is holding the set it was running a moment ago and the set it
+ * just fetched, and the programs assembled from the first one linked. So the candidates are
+ * the ids whose revision changed and the ids that arrived - one of which is the culprit, and
+ * all of which are named when there is more than one, because a set-aside package is renamed
+ * rather than deleted and stays on disk to be repaired. An id present in the set before and
+ * absent from the set after is deliberately not a candidate: its text is not in the program
+ * that failed to link, so it cannot be what the driver rejected.
+ *
+ * **Every way this can fail is swallowed**, and that is not laziness about errors. The
+ * caller is on its way to throwing a refusal that carries the mark the poll reads to stop
+ * asking, so a throw from here would replace that sentence with a network error, lose the
+ * mark, and put the page back on a six-second loop against a store it has already refused.
+ * A server without the route is one of those ways and it is a deployment fact rather than a
+ * fault to report on a chip. Nothing here branches on a status to detect one, and that is
+ * deliberate rather than unfinished: every non-2xx is the same outcome, which is that the store
+ * did not hear and the page says what it always says. A status branch would also have been
+ * wrong twice already - an older server answers 405 rather than 404, because this route was
+ * `POST /effects/refuse` before it was `POST /effect-refusals` and a path under `/effects/`
+ * falls through to the `:id` entry, whose writes are `PUT` and `DELETE`.
+ *
+ * **The address is outside `/effects/` and that is load-bearing rather than tidy.** The route
+ * table is walked in order and a literal segment outranks the `:id` pattern beside it, so a
+ * package genuinely called `refuse` was listed by `GET /effects`, answered 405 when this page
+ * fetched it, and took `readEffectPackages` down with it - no `__kinect`, both surfaces dark,
+ * and no way to uninstall the thing either, since the `DELETE` was 405 too. An effect id is a
+ * directory name and `mkdir` is all it takes to make one, so the namespace is the fix.
+ */
+async function setAsideUnlinkable(before, after, log) {
+  const held = new Map(before.map((p) => [p.id, p.rev]));
+  const ids = after.filter((p) => held.get(p.id) !== p.rev).map((p) => p.id);
+  // **No candidates is unreachable rather than merely unlikely, and it returns rather than
+  // asking.** The programs are assembled out of the packages alone, so a set where nothing
+  // changed assembles to identical text, and identical text is what `sameProgram` compares -
+  // the warm that produced this failure would not have run. A request naming no ids would be
+  // this page asking the store to act on nothing, which the store would have to have an
+  // answer for.
+  if (ids.length === 0) return null;
+  // The compiler's words on one line, because they land in a log where a newline is a new
+  // record, and named with the candidates when the culprit is one of several rather than
+  // known - a person reading the store's log needs to know the set was ambiguous, since it
+  // decides how many packages they go and look at.
+  //
+  // **Every control character and not only whitespace, because a collapse of `\s` alone
+  // leaves the rest behind.** A driver's log is bytes it chose, and the one measured for
+  // `REFUSE_REASON_MAX` above puts two NULs in the middle of its sentence. A NUL is not
+  // whitespace, so it came through the collapse untouched and travelled into a line somebody
+  // reads in a terminal - the same class of forgery the newline collapse is here to stop, and
+  // one an escape sequence would reach through in the same way. Sanitised on this side rather
+  // than left to the far side, for the reason the length cap is.
+  const line = String(log ?? '').replace(/[\s\p{Cc}\p{Cf}]+/gu, ' ').trim();
+  const named = ids.length > 1 ? `one of ${ids.join(', ')}: ` : '';
+  const reason = `${named}${line}`.slice(0, REFUSE_REASON_MAX);
+  try {
+    const res = await fetch('/effect-refusals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, reason }),
+    });
+    if (!res.ok) {
+      console.warn(`could not set aside ${ids.join(', ')}: POST /effect-refusals answered ${res.status}`);
+      return null;
+    }
+    const body = await res.json();
+    const setAside = Array.isArray(body?.setAside) ? body.setAside : [];
+    // The store declining an id is information rather than a failure: a builtin nothing forks
+    // cannot be set aside, and an id already aside is the answer this page wanted. Logged
+    // because a run where everything was skipped is a run after which the store is exactly
+    // where it was, and that is the case where nothing converges and somebody has to know why.
+    for (const skip of Array.isArray(body?.skipped) ? body.skipped : []) {
+      console.warn(`the store kept ${skip?.id}: ${skip?.why}`);
+    }
+    return setAside.length ? setAside : null;
+  } catch (err) {
+    console.warn(`could not set aside ${ids.join(', ')}: ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * The store read again, and everything on this page rebuilt from what it says.
  *
  * **The document goes out through the serialiser and comes back through the loader, and
@@ -3186,6 +3361,15 @@ adoptEffectPackages(effectPackages, shaderPrograms);
  * network, and because staying synchronous is what keeps the half-swapped state
  * unobservable: from any other task the page is either the old set or the old set, never
  * the pair mid-swap.
+ *
+ * **One of the failures it rolls back is also told to the store, and exactly one.** A shader
+ * that will not link is the only thing that can go wrong in here which is a fact about a
+ * package rather than about this page - and rolling back is not enough for it, because the
+ * package stays installed and the next fresh page load compiles it at boot, outside any
+ * transaction, and dies. So a link failure and nothing else asks the store to set the
+ * changed packages aside; every other throw the rollback catches is this page failing to
+ * carry its own document, which says nothing about the package and must never rename one.
+ * `shaderLinkFailure` is the mark that separates them and `setAsideUnlinkable` is the call.
  *
  * **The completeness refusal stays a refusal**, and that is the decision this rollback is
  * built around rather than a limitation of it. Filling the parameter the fork added from
@@ -3301,6 +3485,16 @@ async function reloadEffects() {
       // A refusal, so the poll asks once: the document and the set are both exactly what
       // they were, and a retry is the same two failures at the cost of a second refetch on
       // a page whose next honest instruction is to reload.
+      //
+      // **Nothing is set aside from here even when the failure that started it was a link
+      // failure**, and the reason is the state this page is in rather than the state the
+      // store is in. Everything else on the way out of this function runs against a page
+      // that came back whole; here the document could not be restored onto either set, so
+      // the honest instruction is to reload - and a route call placed in front of that
+      // instruction is one more thing between the operator and the only action left. The
+      // corner is also barely reachable from a link failure: the throw happens before the
+      // forward `restoreProject`, so the document the rollback is putting back is one the
+      // old registry serialised a few lines earlier.
       throw effectRefusal(
         'the installed effects changed, this page could not carry the open document across to them, '
         + `and it could not put itself back either - reload the page: ${stuck.message}`,
@@ -3309,15 +3503,47 @@ async function reloadEffects() {
   }
   refreshGroups();
   requestRepaint();
+  // **The store told, after the page is whole and before the sentence goes out.** A shader
+  // that would not link is the one failure here that is about a package rather than about
+  // this page, and the package survives the rollback: this page goes back to the programs it
+  // was drawing with, and the next fresh load compiles the broken one at boot, where
+  // `warmPrograms` runs outside any transaction and takes the module down. So the page that
+  // discovered it asks the store to set it aside - see `setAsideUnlinkable` for how the
+  // candidates are chosen and why every failure of that call is swallowed.
+  //
+  // **And this terminates rather than looping, which is the interaction with
+  // `refusedEffectSignature` worth walking.** The block goes up on the signature the page
+  // failed on, which is the signature of the set that would not link. Setting a package
+  // aside changes the store, so the next listing carries a different signature - one this
+  // page has never refused - and the block correctly does not cover it, so the next tick
+  // rebuilds against the set with the culprit removed and that set links. If the store sets
+  // nothing aside, the signature has not moved, the block stands, and nothing asks again:
+  // both directions end.
+  //
+  // Awaited here and nowhere earlier, because the rollback above is synchronous on purpose -
+  // from any other task the page is either the old set or the old set, never the pair
+  // mid-swap - and an `await` placed inside it would be exactly the window that promises to
+  // be unobservable.
+  const setAside = failure?.shaderLinkFailure
+    ? await setAsideUnlinkable(heldPackages, fetched, failure.linkLog)
+    : null;
   // Thrown after the repaint rather than before it, so the page the operator is looking at
   // is the rolled-back one by the time the sentence describing it arrives.
   if (failure) {
     // A refusal for the reason the adoption's own failures are: the rollback landed, so the
     // page is whole and the set on the server is still the one it cannot use. Asking again
     // in six seconds refetches every package to reach this same sentence.
+    //
+    // The clause about what was set aside is appended rather than put in front, because the
+    // chip this lands on ellipsises and the compiler's own words are what somebody debugging
+    // a package needs first. `say` writes the whole sentence into the element's `title`, so
+    // the tail is a hover away rather than gone.
     throw effectRefusal(
       'the server installed the effects it was asked for, but this page could not carry the open '
-      + `document across to them, so it is still running the effects it had: ${failure.message}`,
+      + `document across to them, so it is still running the effects it had: ${failure.message}`
+      + (setAside
+        ? ` (${setAside.join(', ')} set aside, so the next rebuild is without ${setAside.length > 1 ? 'them' : 'it'})`
+        : ''),
     );
   }
   // A set this page has carried a document onto is a set it is not blocked on, whichever door
@@ -4121,8 +4347,30 @@ function paintEffectRackDialog() {
       remove.type = 'button';
       remove.dataset.effectRemove = id;
       remove.setAttribute('aria-label', `remove ${title} from the sidebar`);
+      // **The document is asked again here, and the row's own reading of it is not what
+      // decides.** This press either opens a confirmation or resets every value and deletes
+      // every track the effect owns, and the entry a few lines above was read when the list
+      // was painted - which nothing repaints when the document moves underneath it. The
+      // dialog is modal, so no slider can move behind it, and the page's own Cmd-Z handler
+      // fires straight through a modal: paint the rack while an effect sits at its defaults,
+      // tab to its remove button, undo the edit that reset it, and the closure still says
+      // nothing is there to lose while the document holds the work the undo just brought
+      // back. Pressed, that skipped the confirmation and reset the restored values in the
+      // same gesture, which is the one outcome in this dialog nobody can get back.
+      //
+      // **The row's detail text goes stale the same way and is deliberately left that way**,
+      // which is the choice between recomputing at the press and repainting the list whenever
+      // the document moves. There is no single writer to hang a repaint on - values, tracks, the
+      // undo stack and a hotload all move this state, and this file's own rule is that a
+      // repaint belongs where the state is written rather than in a second reader beside it -
+      // so the repaint would have to be a poll or a hook on `history`, and either one rebuilds
+      // the list under whatever the operator is pointing at. `N changed` reading one edit out
+      // of date is a count somebody can see and re-open the dialog to correct; the press is a
+      // decision, and a decision has to be taken against the document as it is at the moment
+      // it is taken. The confirmation this now opens paints the true counts on its way up.
       remove.addEventListener('click', () => {
-        if (entry.moved.length || entry.keys) {
+        const now = effectRackEntry(id);
+        if (now.moved.length || now.keys) {
           effectRackConfirming = id;
           paintEffectRackDialog();
         } else {
@@ -4535,8 +4783,25 @@ let parkedLook = { params: {}, tracks: {}, requires: [] };
  * `refuseRequires` would then be reading a list that no longer describes the values
  * beside it.
  *
+ * **That sentence was a description of what the serialiser does and it needed a line to be
+ * true of what the badge says.** The commit rewrites the document and nothing was dropping
+ * the notice beside it, so the chip went on quoting a version pair the open document no
+ * longer named - which is the shape of stale reading this repo is least able to afford
+ * here, because the argument for surfacing a skew instead of parking the effect is that the
+ * notice is the only thing that says so. `history.commit` is where the clear is, beside the
+ * write that makes it necessary.
+ *
  * Replaced whole by `restoreProject` for the reason `parkedLook` is: it is a property of
- * the open document, not an accumulation across the ones a session has seen.
+ * the open document, not an accumulation across the ones a session has seen. Two of that
+ * door's four callers land where they should - a load recomputes from the file, and an undo
+ * recomputes from a stack snapshot that already carries the derived list - and the other
+ * two are a known gap rather than a decision: a hotload and its rollback hand
+ * `restoreProject` the output of `serialiseProjectBody`, whose `requires` has already been
+ * derived by the time the loader reads it, so an install landing while a skewed document is
+ * open and uncommitted clears the notice without anything having been written to disk at
+ * all. Recovering it would mean carrying
+ * the authored version across a serialisation that exists to replace it, and the value it
+ * would recover is one line of prose about a document nobody has saved.
  */
 let effectVersionSkew = [];
 
@@ -5424,6 +5689,40 @@ const history = {
     this.stack.push(this.baseline);
     if (this.stack.length > UNDO_LIMIT) this.stack.shift();
     this.baseline = now;
+    // **The version notice, dropped here because this is the line that makes it false.**
+    // The badge says the open document was authored against a version other than the one
+    // installed, and `requires` is derived from the installed set by every serialisation -
+    // so the snapshot two lines above and the auto-save two lines below both already claim
+    // the version that is actually here. The declaration of `effectVersionSkew` has always
+    // said the notice does not survive the next commit and nothing made it stop, which left
+    // a chip quoting a pair the document no longer names, for the rest of the session, over
+    // a picture that was by then exactly what the document asked for. That matters more than
+    // a stale line usually would: the decision *not* to park an effect that is here at
+    // another version rests on this notice being the one thing that says so, and a notice
+    // that is wrong is worse than none.
+    //
+    // Cleared rather than recomputed, and the two are the same answer. A recomputation would
+    // read `requires` back off the snapshot and compare each entry against `versionOf`, and
+    // `requiresFor` writes `versionOf` into every entry it derives - so the comparison is
+    // between a value and itself and the list is empty by construction. Written out, the
+    // clear is that derivation with the arithmetic done.
+    //
+    // **Guarded on there being a notice, and the guard is load-bearing rather than thrift.**
+    // `paintMissingEffects` rebuilds the chip with `replaceChildren`, and the chip carries
+    // the suppress button for every effect this build has not got - so painting it on every
+    // slider release would replace, under the pointer, the one control an operator with a
+    // parked effect is reaching for.
+    //
+    // The other four doors onto this state are `restoreProject`'s, and they answer for
+    // themselves rather than needing anything here: a load recomputes from the file's own
+    // `requires`, which is the one place the authored version still exists; an undo
+    // recomputes from a stack snapshot, which carries the derived list, so a notice cleared
+    // here stays cleared through the undo of the edit that cleared it - which is right,
+    // since undo is about what the clip is and this machine has built it either way.
+    if (effectVersionSkew.length) {
+      effectVersionSkew = [];
+      paintMissingEffects();
+    }
     // Auto-save the project after every change. Fire-and-forget: a failed save is
     // logged in the UI but it must not block the interaction that caused it.
     const workingBody = { ...serialiseProject(), take: { id: openTakeId, hash: openTakeHash } };
@@ -15802,8 +16101,21 @@ function warmPrograms() {
   }
   // After the restore rather than inside the try, so the enabled flags and the
   // accumulators are back where they belong before the caller starts unwinding.
+  //
+  // **Marked, because this is the one failure in the whole adoption that names a package
+  // rather than this page.** Everything else the rollback catches is a document that could
+  // not be carried across or a registry that would not build, and a store asked to set a
+  // package aside for one of those would be renaming somebody's fork out of the way for a
+  // fault in a clip. See `shaderLinkFailure`, and `setAsideUnlinkable` for what the one
+  // caller entitled to read the mark does with it. The first failure is the one carried:
+  // the two programs are warmed in one composed frame, so a second entry is the same
+  // package's other stage or the other program built from the same set, and a person
+  // reading a chip needs the compiler's first sentence rather than all of them.
   if (linkFailures.length) {
-    throw new Error(`this build's shaders did not compile after the effects changed - ${linkFailures[0]}`);
+    throw shaderLinkFailure(
+      `this build's shaders did not compile after the effects changed - ${linkFailures[0]}`,
+      linkFailures[0],
+    );
   }
 }
 warmPrograms();

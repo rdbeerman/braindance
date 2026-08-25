@@ -2635,9 +2635,47 @@ the timestamp on the line is the cheapest thing that tells those apart; here the
 the section heading above it carry the same second. The repair is a guarded read that leaves the
 timeout reachable and reports "the page never published `__kinect`" apart from "colour never
 arrived", because those are different findings. What it is *not* is a fixed `wait()` after the
-`goto` — the two sections above it in the same tool survive on one, which is the silent-pass
-shape their own comments refuse, and a sleep tuned on this machine is a pass waiting for a
-slower one.
+`goto` — the two sections above it in the same tool survived on one until the entry below, which
+is the silent-pass shape their own comments refuse, and a sleep tuned on this machine is a pass
+waiting for a slower one.
+
+**Then those two sleeps were measured, and the measurement is the entry: a sleep sixty-five
+times longer than what it waits for and a sleep a tenth as long read exactly the same on the
+machine doing the measuring.** `monitor-check` drove the recorder from three places and only
+the third had the guard, so the repair was one wait — `published`, beside `waitFor` in that
+file — which all three call after their own `goto` and which each hands the expression its
+own section reaches through. What the sleeps had been covering, printed by the wait itself
+rather than assumed: 15 to 18ms from `load` to the handle, where one section waited 1200, and
+92 to 94ms to the first depth frame, where the next waited 2000. Six runs, two clean and four
+mutated, on an idle Mac over loopback with a warm page cache and a warm capture sidecar. Both
+margins were real and nothing was reading either, which is the failure rather than a detail
+beside it: the tool passed all 91 rows with the race in it, and would have gone on passing
+until a contended machine turned a margin negative and reddened a decimation row about a
+viewer that had not finished booting.
+
+**The second sleep was covering something a boot probe would not have found**, and that is
+the half worth carrying to the next tool. That section drives the real divisor control, and
+`sendMonitor` in `web/main.js` returns without sending unless the socket is `OPEN` — so a
+page that has published `__kinect` and not yet connected takes the drag, sends nothing, and
+the ÷4 arm becomes a second ÷1 arm read under a ÷4 label, which is the misattribution the
+whole negotiation exists to prevent. A wait on the handle alone is green for that. What it
+waits for instead is a depth texel that is no longer zero: `buildTextures` in
+`web/gpu-textures.js` builds both depth textures zero-filled deliberately, so that every
+point leaves at the empty-sample test until a real frame binds — which means that on a page
+nobody has injected into, the only thing that can write a non-zero texel is a frame off that
+socket, and one clause settles the handle, the socket and the stream together. **Ask a
+readiness wait what its own section reaches, never what publishes first**: the earliest thing
+that happens to be there is a probe whose answer cannot differ from the next probe's.
+
+**A readiness wait earns a falsification control like anything else on this page, and it is
+cheap** — point one at a name that never publishes and read what the run says. The two
+sections whose subject is decimation let the timeout out, so that control ends at 53
+assertions with **none failed** and `DID NOT RUN` naming what never arrived, which is the
+answer that matters under `--mutate`: a red row there would have been counted as the mutation
+being caught. The colour section catches it onto its own row instead, for the reason above,
+and its control reddens exactly that row, leaves the respawn rows green and skips the viewer
+row beneath it. Both were run against the repaired tool, because a wait nobody has watched
+time out is a wait nobody has tested.
 
 **And the same publish race has a second door, where the guard is vacuous rather than
 absent.** `library-check` waited on
@@ -4283,3 +4321,34 @@ that it is the only user package still standing.
 **A refusing gate has this shape wherever it appears**: a section whose rows all read the state
 after a refusal is blind to over-refusal, however many rows it has. Ask what a rule that refused
 everything would fail here, and if the answer is nothing, the missing row is a must-accept.
+
+## A new rule placed ahead of an old one takes that one's fixture away
+
+A hostile fixture reaches the rule it is named after by being the only thing wrong with it.
+Add a rule that fires earlier and the fixture still gets refused, the row still goes green on
+a good build, and nothing anywhere says the probe has stopped arriving where it was aimed.
+
+Three of these landed in one change and they are the same shape read at three distances.
+`effect-check` section 2's `one joint naming one file over and over` probe pushed a thousand
+chunk descriptors, which is a 90,623-byte manifest — so a new 32 KiB manifest bound refused it
+by size, several rules ahead of the assembler's repeat rule, and the row reddened naming the
+manifest on a build where both rules were working. Cut to fifty descriptors it is about 6KB,
+inside every bound and outside none, and it reaches its own rule again. In the same change a
+near-miss fixture built to prove the new `gates` rule does not refuse a legal `degToRad`
+binding was written by repointing the shipped `angle` off `scanAxis`, which left that uniform
+declared and bound to nothing — so it came back refused by the two-ended binding rule two
+hundred lines away, and the row would have been green on a build carrying no gate rule at all.
+It is a new parameter now. And the scan behind the second half of `HOST_DRIVEN_UNIFORMS` read
+declarations without stripping comments, so it walked through the glitch's flare chunk and the
+duotone's tone chunk, which both quote `readRgb, readDepth, readContour` in prose from a
+pinned build, and failed naming `readDepth` on a build with nothing wrong with it. The door's
+own `withoutComments` is the two substitutions that fix it.
+
+**Every hostile fixture is a claim that one rule refuses it, and the claim decays whenever a
+rule is added.** The cheap enforcement is the row `effect-check` already has: every hostile
+package is refused *by the sentence for its own rule*, not merely refused — which is what
+turned the first of these from a silent decay into a red row somebody had to read. A suite
+that only asserted refusal would have carried all three. When a refusal is added ahead of
+others, re-read what the existing probes now trip on rather than only what the new one does,
+and make the new refusal's message name which rule fired, so the next person reads the
+attribution instead of running both arms to work it out.

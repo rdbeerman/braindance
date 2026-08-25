@@ -631,14 +631,32 @@ void main() {
   // the divisor is 1 and this is the drawn sprite, at 1080 the two units coincide exactly,
   // and above it this is the drawn sprite back in reference pixels.
   //
-  // Taken here because this is the last line in the file that can move gl_PointSize, and
-  // the halving above it is inside the reading on purpose - a cut-away cell drawn at half
-  // its pixels has half the texels to resolve on, whatever the look asked for.
+  // Taken here because this is the last line in the file that can move gl_PointSize, so
+  // whatever the halving above it did is already in the number.
+  //
+  // **A cut-away point reports no legible pixels at all, which is the crop's own half of
+  // this and is a decision rather than a reading.** The halving used to be the whole of what
+  // the crop contributed here, and it was not enough: a 64-pixel sprite halved to 32 is
+  // still far above the band, so cut-away geometry drew a *smaller character* where the
+  // paragraph above the halving promises dust. The two claims are not the same claim - "a
+  // quarter of the footprint is a quarter of the occlusion" is about how much room the
+  // scaffolding takes up, and it says nothing about whether the scaffolding is still
+  // reading as text. So the fallback to the round mask is asked for here rather than left
+  // to the size crossfade to arrive at, and it is exact rather than nearly: zero is below
+  // the band's lower end at every output size, so glyphMix is exactly 0 and the mark is
+  // the disc the look draws with no glyph field at all, discard and all.
+  //
+  // **What this varying is therefore has to be said out loud, because the name reads like
+  // the other thing.** It is not the sprite's size; it is how many pixels this mark has to
+  // be legible in, and a point the crop has cut away has been asked not to read as surface,
+  // so it has none. Every other point's answer is still the lesser of the two readings
+  // above. The halving stays where it is because the occlusion argument it was written for
+  // is untouched - it is simply no longer carrying a second job it was never able to do.
   //
   // vSize is a different quantity and stays one: it is what the additive normalisation
   // divides by, it is taken before the halving, and it is in reference pixels always,
   // because brightness has to be invariant to output size where legibility cannot be.
-  vLegiblePx = gl_PointSize / max(k, 1.0);
+  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize / max(k, 1.0);
 }
 ` },
   ]),

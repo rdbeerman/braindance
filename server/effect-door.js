@@ -31,7 +31,7 @@
 
 import {
   MANIFEST_FORMAT, EFFECT_PARAM_KINDS, EFFECT_BIND_TABLES, EFFECT_BIND_TRANSFORMS,
-  CORE_PANEL_GROUP_KEYS,
+  CORE_PANEL_GROUP_KEYS, HOST_DRIVEN_UNIFORMS,
 } from '../web/effect-manifests.js';
 import { assembleShaders } from '../web/shader-assembly.js';
 import { decimalsOf, snapScalar } from '../web/format.js';
@@ -59,6 +59,42 @@ import { decimalsOf, snapScalar } from '../web/format.js';
  */
 const MAX_PACKAGE_FILES = 64;
 const MAX_PACKAGE_BYTES = 256 * 1024;
+
+/**
+ * And how much of the *manifest* this build will take, which the two bounds above leave a
+ * package free to answer with anything at all.
+ *
+ * Both of those count chunk text. A manifest is not chunk text, so a package carrying one
+ * declaration of GLSL and twelve thousand parameters passes every rule in this file: each
+ * parameter is individually correct, each binds a uniform some program really declares, each
+ * names a group that really exists, and the whole thing is comfortably inside the four
+ * megabytes `server/index.js` takes as a request body. Measured, that package is 2.33 MiB on
+ * the wire and the door answers null in 42ms.
+ *
+ * What it costs is paid by everything downstream. The store writes the manifest to disk,
+ * `read` hashes those bytes on every `GET /effects`, and every open page then builds a DOM
+ * control per parameter and a registry entry beside it - so one install lands a permanent
+ * per-poll hashing cost on the server and a panel nothing can scroll on every browser that
+ * adopts it.
+ *
+ * **A bound on the serialised bytes rather than a cap per collection, and the choice is the
+ * one this repo keeps making.** Capping `params` would leave `panelGroups` outside the rule,
+ * capping that too would leave `varyings`, and the field somebody adds next year would be
+ * outside whatever list was written today. The byte count is the whole manifest by
+ * construction: every collection, every label, and every key a later format grows are in it
+ * without being named. It is also the quantity the cost is actually about - what the store
+ * hashes on every poll is bytes, not entries.
+ *
+ * Measured the way the store will write it, `JSON.stringify(manifest, null, 2)` plus the
+ * newline, because that is what lands on disk and what every read hashes rather than what
+ * happened to arrive. The widest manifest that ships is the glitch at 2,740 bytes, seven
+ * parameters and one panel group; 32 KiB is nearly twelve times that, which is the same
+ * multiple the file and byte bounds above sit at. A parameter costs about 280 to 310 bytes in
+ * this spelling depending on how long its label is - the glitch's first one is 283 - so what
+ * the bound leaves room for is a package of around 120 parameters, seventeen times the widest
+ * thing this build ships and rather more rows than a panel can usefully hold.
+ */
+const MAX_MANIFEST_BYTES = 32 * 1024;
 
 /**
  * The finest grid a slider may snap to.
@@ -120,6 +156,71 @@ const VALID_FILE_NAME = /^[a-z0-9][a-z0-9._-]*$/i;
  * encoding step between this count and the one the kernel makes.
  */
 export const MAX_EFFECT_ID = 64;
+
+/**
+ * The ids no package may have, because the HTTP surface has already claimed them.
+ *
+ * **It is empty, and it is here armed rather than deleted.** A literal segment under
+ * `/effects/` outranks the `:id` pattern beside it, so claiming one takes that id away from
+ * every package there will ever be: a package under that name is listed by `GET /effects`,
+ * fetched by the client on the next request and answered `405`, which is `readEffectPackages`
+ * throwing, no `__kinect` published, both surfaces dark and every tool reporting DID NOT RUN.
+ * That shipped once, as `POST /effects/refuse`, and was reproduced against a running server -
+ * the listing carried the package, the read was refused, and `DELETE` was refused too, so it
+ * could not even be uninstalled.
+ *
+ * **The repair was to move the route out of the namespace rather than to reserve the word**, and
+ * the reasoning is worth keeping because it decides what this constant is for. `/jobs/claim`
+ * sits beside `/jobs/:id` on exactly this trade and it is sound there, because a job id is
+ * minted by the queue and nobody can make a job called `claim`. An effect id is a directory
+ * name, so `mkdir` is the whole of what it takes - the collision is not a naming coincidence
+ * here. The refusal route is `POST /effect-refusals` now, at top level, and nothing under
+ * `/effects/` is claimed by anything.
+ *
+ * So this list is empty, the rule below it never fires, and both are kept because the invariant
+ * is still true and still worth enforcing: every literal segment under `/effects/` has to be a
+ * reserved id, and a reserved id has to be refused here. Today that holds trivially. The day
+ * somebody registers `/effects/verify` it stops holding, and what happens then is a server that
+ * will not start with both lists printed - which is the "asked by existing" property that keeps
+ * a rule from being something the next person has to know. A guard deleted for guarding nothing
+ * is a guard nobody reinstates.
+ *
+ * **This is a second spelling of the route table in `server/index.js` and it is held to it
+ * rather than trusted.** The door cannot read that table - `server/index.js` builds a server and
+ * listens when it is imported, and importing it here would be a cycle as well as a side effect -
+ * so the list is stated and the server checks it: the block below `ROUTES` derives every literal
+ * segment under `/effects/` and refuses to boot if the two disagree, in the shape
+ * `withEffectGroups` already uses for `CORE_PANEL_GROUP_KEYS`.
+ *
+ * `test/effect-door.test.mjs` proves the rule on a synthetic id rather than on this list, since
+ * an empty list makes every assertion over it run zero times - which is the vacuity that mutation
+ * found here once already.
+ */
+export const RESERVED_EFFECT_IDS = Object.freeze([]);
+
+/**
+ * Whether one id is a name the HTTP surface has claimed, as a sentence or null.
+ *
+ * **Written as a function taking the list rather than as two lines inside `doorRefusal`, so
+ * that it can be proved on data that exists.** `RESERVED_EFFECT_IDS` is empty today, which makes
+ * every assertion driven through the door over that list run zero times - and that is not a
+ * hypothetical: emptying the list is a mutation that was run here, and it left the row testing
+ * the rule green while the rule was gone. The list is a parameter with a default, so
+ * `test/effect-door.test.mjs` asks the same code the door asks with a reserved id in hand, and
+ * the row goes red when the rule stops working whatever the live list happens to hold.
+ *
+ * The wording names the whole set rather than only the id, because an author who has tripped it
+ * needs to know which names are gone rather than that this one is.
+ */
+export const reservedIdRefusal = (id, reserved = RESERVED_EFFECT_IDS) => {
+  if (!reserved.includes(id)) return null;
+  return `effect ${id} takes an id this build's HTTP surface has already claimed - `
+    + `/effects/${id} is a route rather than a package, so a package under that name is listed by `
+    + 'GET /effects and then refused when the page fetches it, and a page that cannot read a package '
+    + 'the store just listed does not boot at all. '
+    + `${reserved.length === 1 ? 'The reserved name is' : 'The reserved names are'} `
+    + `${reserved.join(', ')}`;
+};
 
 // A GLSL name, which is what a uniform binding, a varying and an identifier all are.
 const GLSL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -284,17 +385,37 @@ const declaredIn = (text) => {
  * in the shipped set declares one name at two types, which is asserted rather than assumed:
  * `test/effect-door.test.mjs` runs the whole set through this door, and a build that grew
  * such a pair would fail here by refusing a binding it can no longer answer for.
+ *
+ * **The array dimension is part of the type, and dropping it was a hole rather than a
+ * simplification.** `uniform float weights[4];` used to be read as the two words either side
+ * of the space - `weights` declared as `float` - because the name pattern stopped at the
+ * bracket and nothing looked at what followed it. A parameter binding a plain scalar to that
+ * name then satisfied the shape rule below, which asks only for `float` or `vec2`, and three.js
+ * picks its uploader off the *declared* uniform: an array declaration gets the array setter,
+ * handed one number instead of a list. The value never lands, the control still moves, and the
+ * picture does not change - the same silent failure the two ends of a binding exist to refuse,
+ * reached through a reading that threw away the half that said no.
+ *
+ * Both spellings carry the dimension, because GLSL ES 3.00 accepts it on either side of the
+ * name: `float weights[4]` and `float[4] weights` declare the same thing. The second one used
+ * to declare *nothing* here - the name pattern failed against `[4] weights` and the entry was
+ * skipped - so a package could have declared an array under that spelling and had the rule
+ * about a uniform nothing binds unable to see it at all.
  */
 const uniformTypesIn = (text) => {
   const src = withoutComments(text);
   const types = new Map();
-  const decl = /\buniform\s+(?:(?:highp|mediump|lowp)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+([^;]*);/g;
+  const decl = /\buniform\s+(?:(?:highp|mediump|lowp)\s+)?([A-Za-z_][A-Za-z0-9_]*)((?:\s*\[[^\]]*\])*)\s+([^;]*);/g;
   for (const m of src.matchAll(decl)) {
-    for (const part of m[2].split(',')) {
-      const name = part.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)/);
-      if (!name) continue;
-      if (!types.has(name[1])) types.set(name[1], new Set());
-      types.get(name[1]).add(m[1]);
+    for (const part of m[3].split(',')) {
+      const declared = part.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)((?:\s*\[[^\]]*\])*)/);
+      if (!declared) continue;
+      // The dimension from whichever side of the name carried it, with the whitespace taken
+      // out so `float [4]` and `float[4]` are one string rather than two readings of one
+      // declaration.
+      const type = `${m[1]}${m[2]}${declared[2]}`.replace(/\s+/g, '');
+      if (!types.has(declared[1])) types.set(declared[1], new Set());
+      types.get(declared[1]).add(type);
     }
   }
   return types;
@@ -401,6 +522,15 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       + 'is that name with a suffix on it, so an id with no room for one is a package nothing could set '
       + 'aside once it was in place';
   }
+  // **An id the HTTP surface has already claimed, refused here so it is never a routing
+  // accident.** See `RESERVED_EFFECT_IDS`: a literal segment under `/effects/` outranks the
+  // per-id read beside it, so a package at one of these names is listed by `GET /effects` and
+  // then answered `405` when the client fetches it - which is not a bad install, it is a page
+  // that does not boot. Asked with the shape rules rather than with the rules about a manifest,
+  // because it is a fact about the id and the boot gate has to reach it on a package whose
+  // manifest may be anything at all.
+  const claimed = reservedIdRefusal(id);
+  if (claimed) return claimed;
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
     return `effect ${id} arrives with no manifest object - a package is a manifest and its chunks, and half of that is not a package`;
   }
@@ -501,6 +631,22 @@ export function doorRefusal(candidate, { beside = [], spines }) {
   // thousand times passes all of them. What it costs is not the install: it is every
   // `GET /effects` afterwards, which reads and hashes every file of every package, on
   // every poll of every page that is open.
+  //
+  // **The manifest first, because it is the one this section used to be silent about.** The
+  // three bounds under it all count chunk text, and a package can repeat a correct *parameter*
+  // rather than a correct chunk - twelve thousand of them, inside every rule in this file and
+  // inside the request limit, arriving as one small file of GLSL. Asked here rather than after
+  // the parameter walk for the same reason the list-shape rules are asked before anything walks
+  // a list: a bound that only answers once the thing it is bounding has been walked is a bound
+  // the walk has already paid for. See `MAX_MANIFEST_BYTES` for the measurement and for why
+  // this counts bytes rather than capping each collection.
+  const manifestBytes = Buffer.byteLength(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  if (manifestBytes > MAX_MANIFEST_BYTES) {
+    return `effect ${id} carries a manifest of ${manifestBytes} bytes and this build takes ${MAX_MANIFEST_BYTES} - `
+      + 'the widest manifest that ships is under three kilobytes, and this one is written to disk, hashed on '
+      + 'every read of the store and turned into a control per parameter on every page that adopts it, so a '
+      + 'manifest is bounded by what all of those cost rather than by what a request body can hold';
+  }
   const fileCount = new Set([...declaredFiles, ...Object.keys(chunks)]).size;
   if (fileCount > MAX_PACKAGE_FILES) {
     return `effect ${id} carries ${fileCount} files and this build takes ${MAX_PACKAGE_FILES} - `
@@ -685,6 +831,42 @@ export function doorRefusal(candidate, { beside = [], spines }) {
     if (bind.gates !== undefined && typeof bind.gates !== 'boolean') {
       return `${name} declares gates as ${JSON.stringify(bind.gates)} - it says whether this term holds the grade pass open, which is a yes or a no`;
     }
+    // **And a `gates` that nothing can read, which is the same question the array rule asks a
+    // few hundred lines down: does the shape of this binding match what the value has to be.**
+    // `gates` is not a flag on the parameter, it is a promise about the *uniform* - `gradeNeeded`
+    // in `web/main.js` walks the gating bindings, reads the cell each one names, and holds the
+    // grade pass open while any of them is not zero. So a gating binding has to land a number,
+    // on the table that function reads, or the promise is about nothing.
+    //
+    // **Both halves were reachable and the first one is worse than it sounds.** `axisDeg` writes
+    // `.value.set(sin, cos)`, so the cell holds a `Vector2` - a direction rather than an amount,
+    // and never the zero vector. Against the predicate this shipped with, `> 0`, that was always
+    // false and the pass stayed shut for the life of the page; against the `!== 0` it has now,
+    // an object is never strictly equal to zero, so it is always true and the pass runs
+    // full-screen forever. Neither reading of the predicate is wrong - the binding is, and it is
+    // the kind of wrong that changes its symptom when somebody fixes something unrelated, which
+    // is why it is refused here rather than handled there.
+    //
+    // The other half is quieter and is the same claim: `gradeGatesOf` collects only bindings
+    // whose table is `grade`, so `gates` on the point cloud's table is dropped on the floor. The
+    // author has said their term holds the pass open, the pass ignores it, and nothing anywhere
+    // says so. Refused together because they are one rule read from two sides, and neither
+    // refuses anything this build ships: all seven gated parameters are plain grade bindings.
+    if (bind.gates) {
+      if (bind.on !== 'grade') {
+        return `${name} declares gates and binds on ${JSON.stringify(bind.on)} - gates says this term holds `
+          + 'the grade pass open, and the gate reads the grade pass\'s own uniforms, so a gating binding on any '
+          + 'other table is a claim the pass never sees: the control moves, the term is collected by nothing, '
+          + 'and the pass opens and shuts on the parameters that did bind there';
+      }
+      if (bind.transform === 'axisDeg') {
+        return `${name} declares gates beside the axisDeg transform - axisDeg writes a two-component direction `
+          + 'and the gate asks whether the term is zero, which a direction never is. That pair has no reading: '
+          + 'it held the pass shut for the life of the page under the comparison this build used to make, and '
+          + 'holds it open forever under the one it makes now, so it is refused rather than given a meaning '
+          + 'that changes when the comparison does';
+      }
+    }
     if (spec.role !== undefined) {
       if (spec.role !== 'master') {
         return `${name} declares the role ${JSON.stringify(spec.role)} - the only role this build knows is master, `
@@ -865,6 +1047,42 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       return `${id}.${short} binds the uniform ${JSON.stringify(spec.bind.uniform)} and the assembled `
         + `${program} program declares no such uniform - the control would move, the value would be written, and nothing would read it`;
     }
+    // **An array is a place with room for the value and is still not somewhere to put it.**
+    // Every binding this build can make writes one cell - a number, or the two components
+    // `axisDeg` sets - and three.js chooses its uploader from the declaration, so a uniform
+    // declared as an array is handed the array setter and a scalar to fill it with. Nothing
+    // throws: the control moves, the value is written into the cell, and the upload puts it
+    // nowhere the shader reads.
+    //
+    // **What actually closed that is the reading above, and this rule is about the sentence**,
+    // which is worth being exact about rather than letting the refusal take credit for the
+    // repair. Once `uniformTypesIn` keeps the dimension, `float[4]` is not `float` and the
+    // shape rule below refuses the binding on its own - measured, dropping this block leaves
+    // the package refused and never on disk. What it refuses it *for* is then "this binding
+    // needs a float", which sends an author to change their binding when the thing this build
+    // cannot do is the array. So this is asked first, and it says so.
+    //
+    // **Refused rather than given a kind of its own**, because the binding vocabulary is a
+    // closed set stated in `web/effect-manifests.js` and every reader of it - the applier, the
+    // registry, the uniform cell the install mints - implements exactly the two shapes that
+    // are in it. Inventing an array kind here would be a door accepting a manifest three other
+    // places cannot execute, which is the drift this whole file exists to make impossible. An
+    // author who needs one is told so in a sentence rather than by a picture that never moves.
+    //
+    // Read off the *declared* type rather than off the manifest, for the same reason the two
+    // rules around it are: what a package says about its own binding is a claim, and what the
+    // assembled program declares is the fact the driver will act on. Any array reading refuses,
+    // including a name some chunk declares plainly and another declares as an array, because a
+    // build that cannot say which declaration wins cannot say which uploader three.js picks
+    // either.
+    const arrayed = [...declaredAs].filter((t) => t.includes('['));
+    if (arrayed.length) {
+      return `${id}.${short} binds the uniform ${JSON.stringify(spec.bind.uniform)}, which the assembled `
+        + `${program} program declares as ${arrayed.join(' and ')} - this build's binding vocabulary has no `
+        + 'array kind in it, so every parameter writes a single cell and three.js would take the array '
+        + 'uploader off that declaration and hand it one value. The control moves, the write succeeds and '
+        + 'the shader goes on reading whatever the array was initialised with';
+    }
     // **The other half of what a binding promises, and it fails one layer further in.** The
     // rule above asks whether the value has anywhere to go; this asks whether the place is
     // the shape of the value, which nothing else here or downstream ever checks. `axisDeg`
@@ -896,7 +1114,27 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       + 'nothing on this side would ever write it, so the shader reads zero for the life of the page. '
       + 'A uniform this build\'s own render loop drives goes in `hostDriven`';
   }
+  // **And the exception held to what the host actually implements, which it was not.** The
+  // list above excuses a uniform from the rule that something must write it, and while any
+  // name at all could be listed the excuse was self-issued: a package declaring
+  // `uniform float myClock;` and listing it here installed cleanly, and no line anywhere in
+  // this build ever assigned to that cell. So the shader read zero for the life of the page,
+  // no control existed to move it, nothing threw, and the effect was absent from a picture
+  // nobody could see was wrong - the exact failure the two-ended rule stands in front of,
+  // reached through the one door out of it.
+  //
+  // `HOST_DRIVEN_UNIFORMS` is the set the render loop really writes, and it is one name.
+  // Asked before the declaration rule below rather than after it, because it names the cause:
+  // an author who lists a clock this build has not got should be told which clocks it has,
+  // not told that a uniform they can see in their own chunk is missing.
   for (const u of manifest.hostDriven ?? []) {
+    if (!HOST_DRIVEN_UNIFORMS.includes(u)) {
+      return `effect ${id} lists ${JSON.stringify(u)} as host-driven and this build's render loop writes `
+        + `${HOST_DRIVEN_UNIFORMS.map((n) => JSON.stringify(n)).join(' and ')} - the list is an exemption from `
+        + 'the rule that something has to write every uniform a package declares, so a name the host does not '
+        + 'actually drive is that rule excused by a claim nobody checked: the shader reads zero for the life '
+        + 'of the page, and there is no control anywhere that could have moved it';
+    }
     if (!declaredHere.has(u)) {
       return `effect ${id} lists ${JSON.stringify(u)} as host-driven and declares no such uniform - `
         + 'the list says which of this package\'s own declarations the host writes, so a name not among them is a claim about nothing';

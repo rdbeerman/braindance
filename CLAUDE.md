@@ -251,7 +251,12 @@ thing that should be touching capture bytes.
 - **There are three screen-space references and not two, and the third is the newest.** The
   glyph field's legibility band is 8 to 16 pixels of *whichever reading is smaller* — the drawn
   framebuffer sprite, or that sprite back in reference pixels — which the vertex stage writes as
-  `gl_PointSize / max(k, 1.0)` into `vLegiblePx`. Neither half alone is correct and each one
+  `outsideCrop ? 0.0 : gl_PointSize / max(k, 1.0)` into `vLegiblePx`. The crop's half of that is
+  a decision and not a reading: a point outside the box reports no legible pixels at all, so
+  `glyphMix` is exactly 0 and cut-away geometry draws the round mask. Halving the sprite was the
+  whole of what the crop used to contribute here and it was never enough — half of a 64-pixel
+  sprite is 32, still far above the band, so cut geometry drew a *smaller character* where the
+  halving's own paragraph promises dust. Neither half alone is correct and each one
   alone is a shipped defect: in reference pixels the fallback inverts at small buffers, because
   the lower clamp lifts a sub-pixel sprite to one framebuffer pixel and that divides back into
   fifteen reference ones, so the far cloud drew one arbitrary bit of a character each instead of
@@ -263,7 +268,15 @@ thing that should be touching capture bytes.
   arm is above the band on both readings.
 - **1080p is the unit; 600 is bloom's frozen chain; both are correct and do not reconcile them.**
   Every screen-space term is *expressed* against 1080p, which is why the shaders in
-  `web/cloud-shader.js` read `bufferHeight / 1080.0`. Bloom has no parameter to express, because
+  `web/cloud-shader.js` read `bufferHeight / 1080.0`. That sentence was aspirational for one term
+  until recently and is now true of it: the glyph field's point-size ceiling is expressed in
+  reference pixels too, `min(255.0 * k, pointCeiling)`, so the range at which characters stop
+  filling their cells is the same at any output size. The hardware bound stays outside it, because
+  a reference ceiling the GPU will not rasterise is a clamp that does not clamp — measured off the
+  context the tools open, this rig reports `ALIASED_POINT_SIZE_RANGE` as [1, 511] (Apple M2 Max
+  through ANGLE's Metal backend, one read from the page). 255 is the largest number that survives
+  the tallest output `web/export-sizes.js` offers: 2160 is a scale of exactly 2, and 255 × 2 is
+  510. Bloom has no parameter to express, because
   `UnrealBloomPass` bakes its tap count in at construction, so its mip chain is frozen at the
   600-tall buffer the look was graded on: `bloomChainSize` computes
   `refWidth = (bufferWidth / bufferHeight) * 600` and sets the chain at half of it. The mechanism

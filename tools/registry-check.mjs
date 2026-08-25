@@ -790,6 +790,26 @@ const MUTATIONS = {
       + 'stay green, correctly - they run with the ripple and the push at zero, where this '
       + 'mutation is the shipped arithmetic',
   },
+  // **The tone key read off the point instead of the cell, which is the line that shipped.**
+  // It is the whole of the old expression, clamp and weights and all, so a build under this
+  // mutation is the build the repo drew with before the fix rather than an invented defect.
+  //
+  // Nothing that renders a flat wall can see it, and that is the point rather than a caveat:
+  // with one depth behind every cell each occupant reads the same colour and chooses the same
+  // character, so every glyph arm in this file except the heterogeneous one stays green. It
+  // takes a cell whose occupants disagree, and then the cell paints the union of the
+  // characters they each chose.
+  'glyph-tone-per-point': {
+    file: 'effects-builtin/glyph/index.frag.glsl',
+    edits: [[
+      '    float cellTone = 1.0 - vCellT;',
+      '    float cellTone = clamp(dot(col, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);',
+    ]],
+    fails: 'the thinning row of the heterogeneous section, alone. All three of its guards stay '
+      + 'green - the occupants still land in one cell, they still paint many colours as '
+      + 'splats, and the mask still moves when the key does - which is what says this is the '
+      + 'character following the point rather than the fixture collapsing',
+  },
   // The three keys mixed rather than summed, which draws a completely plausible wrong
   // character in every cell. Nothing asking whether the frame changed can tell the two
   // apart, and the discriminator the design document proposes cannot either: at two keys
@@ -803,13 +823,38 @@ const MUTATIONS = {
   'glyph-index-averages': {
     file: 'effects-builtin/glyph/index.frag.glsl',
     edits: [[
-      '    float f = fract(glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
-      '    float f = (glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep) '
+      '    float f = fract(glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
+      '    float f = (glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep) '
         + '/ max(1e-4, glyphTone + glyphHash + glyphRain);',
     ]],
-    fails: 'the row that says doubling two keys renders a different frame, alone - the guard '
-      + 'and the solo-key control beside it stay green, because a mix still draws characters '
-      + 'and still draws different ones for each key',
+    fails: 'two rows: the one that says doubling two keys renders a different frame, and the '
+      + 'fitted index row beneath it, where a normalising mix with the other two keys down '
+      + 'draws one character at every tone and the painted count sits at 20104px across the '
+      + 'whole sweep. The guard and the solo-key control stay green, because a mix still draws '
+      + 'characters and still draws different ones for each key',
+  },
+  // **A composition that is scale-sensitive and monotone out of the sparse end and is still
+  // not a sum**, which is the shape the section's own comment used to name as the thing
+  // nothing here could refuse. Squaring the argument leaves the doubling row green - four
+  // times a number is not the same number - and leaves the hash sweep climbing, because the
+  // square of a rising quantity rises. It draws a different character in every cell.
+  //
+  // What refuses it is the fitted row: the ink a cell paints is read back out of the
+  // framebuffer and held against the popcount of the character a wrapped sum names, and a
+  // square lands its indices somewhere else in a table sorted by ink. Measured, the worst
+  // arm of the sweep comes back 41.2% off the fit where the clean run's worst is 3.1%.
+  'glyph-index-squares': {
+    file: 'effects-builtin/glyph/index.frag.glsl',
+    edits: [[
+      '    float f = fract(glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
+      '    float s = glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep;\n'
+        + '    float f = fract(s * s);',
+    ]],
+    fails: 'the fitted index row of the index section, alone. Its guard stays green - the '
+      + 'cloud is still unrotated and the predicted sweep still walks the table - and so do '
+      + 'the doubling row and the hash sweep above it, which is the whole reason this control '
+      + 'exists: a square is scale-sensitive and it is monotone, so every row that stood here '
+      + 'before this one passes it',
   },
   // The tonal key promoted to the zero it defaults to, so a cell's character stops knowing
   // how bright the cell is. The drop-one sweep sees this the plain way. The row it exists
@@ -820,12 +865,15 @@ const MUTATIONS = {
   'glyph-tone-ignored': {
     file: 'effects-builtin/glyph/index.frag.glsl',
     edits: [[
-      '    float f = fract(glyphTone * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
-      '    float f = fract(0.0 * lum * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
+      '    float f = fract(glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
+      '    float f = fract(0.0 * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
     ]],
-    fails: 'three rows: glyph.tone unexplained in the drop-one sweep, the count at 85 of 89, '
-      + 'and the ink ramp\'s strict row at 1.55% to 1.55%. The non-decreasing row above it '
-      + 'stays green and that is why the strict one exists - four equal readings satisfy '
+    fails: 'four rows: glyph.tone unexplained in the drop-one sweep, the count beneath it one '
+      + 'lower than the clean run\'s, the ink ramp\'s strict row at 1.55% to 1.55%, and the '
+      + 'fitted index row, where every arm of the sweep draws index 0 and paints the same '
+      + '2852px. The count is quoted as a delta rather than as a figure because the clean run '
+      + 'moves with the parameter table. The non-decreasing row above the strict one stays '
+      + 'green and that is why the strict one exists - four equal readings satisfy '
       + '"non-decreasing" perfectly. Both source rows stay green too, correctly: this '
       + 'mutation does not touch the table',
   },
@@ -913,10 +961,13 @@ const MUTATIONS = {
     ]],
     fails: 'four rows, on a tree that is otherwise green. **Two carry the claim** and they '
       + 'are the two halves of it: the in-band '
-      + 'cell coming back a hard bit at one colour, and the cut-away cell doing the same - '
-      + 'vSize is taken before the halving as well as in the wrong unit, so this mutation is '
-      + 'wrong about both. The hard-bit reference row above them stays green, which is what '
-      + 'says the statistic still reads a one where it should. **Two are the two-surface '
+      + 'cell coming back a hard bit at one colour, and the cut-away pair parting company - '
+      + 'vSize is the un-halved reference size and carries no crop state at all, so a cut-away '
+      + 'cell measures 72 reference pixels, sits well above the band, and draws the characters '
+      + 'the crop asked it not to. That second half used to read as a colour count and reads as '
+      + 'the keys reaching a pixel inside the crop now, which is the same mutation caught by a '
+      + 'row a blend cannot satisfy. The hard-bit reference row above them stays green, which '
+      + 'is what says the statistic still reads a one where it should. **Two are the two-surface '
       + 'section losing its fixture**, both guards: that section wants a far surface under '
       + 'the band drawing splats, and the reference reading puts it above at 30 pixels, so '
       + 'the far surface inks 1.71% of the frame instead of 41.42% and the at-risk '
@@ -942,8 +993,8 @@ const MUTATIONS = {
   'crossfade-ignores-the-buffer-scale': {
     file: 'web/cloud-shader.js',
     edits: [[
-      '  vLegiblePx = gl_PointSize / max(k, 1.0);',
-      '  vLegiblePx = gl_PointSize;',
+      '  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize / max(k, 1.0);',
+      '  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize;',
     ]],
     fails: 'the claim row of the above-1080 section, alone: the two key settings parting '
       + 'company at a cell the look asked to draw as a splat. Its guard row stays green - the '
@@ -953,21 +1004,29 @@ const MUTATIONS = {
       + 'is the coverage statement rather than luck: every other arm here renders at a third '
       + 'of the reference height, where the divisor this deletes is 1',
   },
-  // The same reading taken one line too early, which is the half of it the crop owns. The
-  // size is right and the unit is right; what is missing is the cut-away halving, so a
-  // point drawn at half its pixels is crossfaded as though it still had all of them.
-  // Written at the assignment rather than by moving it, so the anchor is one line and the
-  // arithmetic is exactly the pre-halving value.
-  'crossfade-before-the-halving': {
+  // **The crop left to the size crossfade to handle, which is the build that shipped and is
+  // what this replaces `crossfade-before-the-halving` with.** That control planted the
+  // reading one line too early, so a cut-away point was crossfaded as though the halving had
+  // not happened - a distinction that had a subject only while a halved sprite was still
+  // being asked whether it was legible. It is not, now: a cut-away point reports no legible
+  // pixels at all, so the halving cannot reach the crossfade by any route and a mutation
+  // about where the reading is taken relative to it has nothing left to move.
+  //
+  // The defect worth a control is the older one underneath it. Halving a 64-pixel sprite
+  // leaves 32, which is above the band's top, so cut-away geometry went on drawing
+  // characters - smaller ones - where the halving's own paragraph in web/cloud-shader.js
+  // promises dust. This mutation is that build exactly: the reading with the crop taken out
+  // of it and nothing else touched.
+  'crop-still-draws-characters': {
     file: 'web/cloud-shader.js',
     edits: [[
+      '  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize / max(k, 1.0);',
       '  vLegiblePx = gl_PointSize / max(k, 1.0);',
-      '  vLegiblePx = (outsideCrop ? gl_PointSize * 2.0 : gl_PointSize) / max(k, 1.0);',
     ]],
-    fails: 'the cut-away row of the unit section, alone. The in-band row beside it stays '
-      + 'green, because nothing there is cropped and the two expressions are the same '
-      + 'number - which is the split that says the crop half is its own claim rather than a '
-      + 'second reading of the unit',
+    fails: 'the cut-away row of the unit section, alone: the three keys parting company on a '
+      + 'frame every point of which the crop has cut away. Its guard stays green, because the '
+      + 'cut-away wall still paints, and so does the uncropped control beside it - that arm is '
+      + 'inside no crop, so this mutation is the shipped expression there',
   },
   // **The rain key's counter used raw, which is inert at exactly the weight where it should
   // be loudest.** The key reads whole drops gone past, an integer, and the fraction of an
@@ -4834,6 +4893,42 @@ const FIELD_HELPERS = `
     return a;
   };
   const oneTexel = (mm) => { const a = new Uint16Array(512 * 424); a[212 * 512 + 256] = mm; return a; };
+  // **A wall whose texels sit at different depths inside one cell**, which is the fixture
+  // every other glyph section here deliberately is not. A flat wall hands every occupant of
+  // a cell the same colour, so a character keyed on the point and a character keyed on the
+  // cell draw the same picture and no thinning can tell them apart - which is exactly why
+  // the tone key shipped broken. The spread is bounded under half a cell so the occupants
+  // stay inside one cell rather than becoming several: what this fixture is about is many
+  // *different* sources in one cell, not more cells.
+  const hetero = (baseMm, ampMm) => {
+    const a = new Uint16Array(512 * 424);
+    const span = 2 * ampMm + 1;
+    for (let r = 0; r < 424; r++) {
+      for (let c = 0; c < 512; c++) a[r * 512 + c] = baseMm - ampMm + ((r * 7 + c * 11) % span);
+    }
+    return a;
+  };
+  // Every second texel in each axis dropped out of whatever was planted, which the thinned
+  // helper above does for a constant plane and this does for a fixture that varies.
+  const thin = (src) => {
+    const a = new Uint16Array(512 * 424);
+    for (let r = 0; r < 424; r += 2) for (let c = 0; c < 512; c += 2) a[r * 512 + c] = src[r * 512 + c];
+    return a;
+  };
+  // Which pixels a frame painted at all, as one hash, and it is the only comparison a
+  // heterogeneous cell admits. The *colour* of a painted pixel is the colour of whichever
+  // occupant won the depth test, and at full lattice every occupant of a cell is at the same
+  // snapped depth - so which one that is depends on attribute order and changes when the
+  // sources are thinned, on a build with nothing wrong with it. Which pixels got painted is
+  // a different quantity: a set bit of the character paints and a clear bit discards, so the
+  // mask is the bitmask the cell chose and nothing else.
+  const maskHash = (px, bg) => {
+    const m = new Uint8Array(px.length / 4);
+    for (let i = 0, j = 0; i < px.length; i += 4, j++) {
+      m[j] = (px[i] !== bg[i] || px[i + 1] !== bg[i + 1] || px[i + 2] !== bg[i + 2]) ? 1 : 0;
+    }
+    return sha256(m);
+  };
   // A near surface standing in front of a far one, which one depth image cannot hold
   // twice over: a texel is one range, so the two surfaces have to be cut out of the same
   // grid rather than stacked along one ray. Every step-th texel in each axis is the near
@@ -5008,6 +5103,104 @@ console.log('\n[registry] one cell, one character: the mark is a fact about the 
       ? 'identical as round splats too - the thinning reached nothing'
       : `${(100 * shots.wholeDots.lit).toFixed(2)}% inked, ${shots.wholeDots.hash.slice(0, 12)} `
         + `against ${shots.thinnedDots.hash.slice(0, 12)}`);
+}
+
+// **The same claim asked of a cell whose occupants disagree, which is the fixture the
+// section above cannot be and the reason the tone key shipped broken.** That section holds
+// `glyph.tone` at 0, and its own comment gives the reason - the colour planted two sections
+// up is a 2x2 image, so points inside one cell would draw different colours and the equality
+// would fail on a build with nothing wrong with it. A deliberate exclusion carrying a good
+// justification is exactly where CLAUDE.md's fifth rule says to look, and what it was
+// excluding was the only condition in which a per-point tone key differs from a per-cell one
+// at all. On a flat wall the two builds are the same picture.
+//
+// **So the wall is a fine depth ramp bounded under half a cell.** Every texel snaps into the
+// same cell its neighbours do - the row below asserts that rather than assuming it - and
+// every texel arrives with its own depth, so a key reading the colour the point is about to
+// draw reads a different number for each occupant and a key reading the cell reads one.
+// Bounding the spread is what keeps this a statement about occupants rather than about
+// cells: let it past half a cell and the occupied set changes, which is a different claim
+// that the turbulence section below already makes.
+//
+// **The comparison is the painted mask and not the pixels**, for the reason `maskHash`
+// carries: at full lattice every occupant of a cell is at one snapped depth, so which one
+// wins the depth test is attribute order and thinning moves it on any build. Which pixels
+// were painted is the character. A per-point key paints the *union* of the characters its
+// occupants chose - which is what "they composite into noise" is, said as a set - and
+// dropping three quarters of those occupants changes the union.
+//
+// The clip range is tightened to 2.0/3.0 rather than left at the section's 0.5/4, and that
+// is sensitivity rather than decoration: the tone key reads a position in that range, so a
+// 0.24m spread of occupants is 24% of a metre-wide range against 6.9% of a 3.5m one, and the
+// characters an old build would disagree about go from about three apart to about ten.
+console.log('\n[registry] and a cell whose occupants disagree still draws one character');
+{
+  const hetero = await page.evaluate(`(async () => {
+    ${PAGE_HELPERS}
+    ${FIELD_HELPERS}
+    const look = { ...${JSON.stringify(GLYPH_LOOK)}, cell: 0.25, 'glyph.tone': 1,
+      'glyph.hash': 0, 'glyph.rain': 0, near: 2, far: 3 };
+    const wall = hetero(2500, 120);
+    const bg = field({ look, depth: empty() }).slice();
+    const at = async (over, depth) => {
+      const px = field({ look: { ...look, ...over }, depth });
+      return { mask: await maskHash(px, bg), levels: levels(px, bg), ...above(px, bg) };
+    };
+    return {
+      whole: await at({}, wall),
+      thinned: await at({}, thin(wall)),
+      // The same wall drawn as round splats, which is what says the occupants really do
+      // differ: a flat wall at one depth paints one colour and this paints many.
+      dots: await at({ 'glyph.amount': 0 }, wall),
+      flatDots: await at({ 'glyph.amount': 0 }, plane(2500)),
+      // The key moved on the same geometry, so the mask is shown to be able to see a
+      // character before it is asked to prove one did not change.
+      toneDown: await at({ 'glyph.tone': 0 }, wall),
+      cell: k.uniforms.latticeCell.value,
+    };
+  })()`);
+
+  // The first guard, and it is the fixture's whole premise: the planted depths have to land
+  // in one cell. Written out here rather than asked of the page, the same way the fitted row
+  // further down reimplements the snap it is testing.
+  const cellOf = (mm) => Math.floor(-(mm / 1000) / hetero.cell + 0.5);
+  const oneCell = cellOf(2380) === cellOf(2620);
+  check(oneCell && hetero.whole.lit > 0.005,
+    'the planted occupants span 0.24m and all of it falls in one cell, and the wall draws '
+    + 'characters - so the rows below are about disagreeing occupants rather than about '
+    + 'more cells',
+    `2.380m and 2.620m both snap to cell ${cellOf(2380)} at a ${hetero.cell}m grid, `
+    + `${(100 * hetero.whole.lit).toFixed(2)}% inked`);
+
+  // The second guard, and the one the section above could not satisfy. A build whose tone key
+  // reads the point rather than the cell can only differ where the points differ, so an arm
+  // that cannot show its occupants differing is an arm that proves nothing.
+  check(hetero.dots.levels > hetero.flatDots.levels * 4,
+    'and as round splats those occupants paint many colours where a flat wall paints few, so '
+    + 'the cell genuinely holds sources a per-point key would read differently',
+    `${hetero.dots.levels} distinct colours on the ramped wall against `
+    + `${hetero.flatDots.levels} on a flat one at the same depth`);
+
+  // The third guard: the mask can see a character at all. Without it the claim below is
+  // satisfied by any two frames whose painted sets happen not to move.
+  check(hetero.whole.mask !== hetero.toneDown.mask,
+    'and dropping the tone key repaints the frame, so the mask is an observable that reads '
+    + 'which character was chosen',
+    `${hetero.whole.mask.slice(0, 12)} at a tone of 1 against `
+    + `${hetero.toneDown.mask.slice(0, 12)} at 0`);
+
+  // **The claim.** Which character a cell draws cannot depend on which of its occupants
+  // arrived, so dropping three quarters of them paints exactly the same pixels. A build
+  // keying the tone on the colour each point is about to draw paints the union of several
+  // characters per cell, and the union changes when the sources are thinned.
+  check(hetero.whole.mask === hetero.thinned.mask,
+    'thinning a cell whose occupants sit at different depths paints the identical pixels, so '
+    + 'the tone key is a fact about the cell rather than about whichever point got there',
+    hetero.whole.mask === hetero.thinned.mask
+      ? `both ${hetero.whole.mask.slice(0, 12)} over ${hetero.whole.painted}px painted`
+      : `${hetero.whole.mask.slice(0, 12)} against ${hetero.thinned.mask.slice(0, 12)} - the `
+        + `cell is painting the union of its occupants' characters, `
+        + `${hetero.whole.painted}px against ${hetero.thinned.painted}px`);
 }
 
 // The defect the probe this design came out of actually shipped, and the one the spec says
@@ -5240,8 +5433,10 @@ console.log('\n[registry] the three keys add and wrap, so doubling two of them i
   // that is neither a sum nor a difference can still climb monotonically out of the sparse
   // end. A squared sum is the clearest of them - it is scale-sensitive, so the doubling row
   // passes it, and it is monotone in each key with the other down, so this row passes it
-  // too. Nothing in this suite separates a sum from a squared sum, and the two draw
-  // different characters in every cell.
+  // too. That gap stood open for a while and this comment used to end by naming it; what
+  // closes it is the fitted row at the foot of this section, which predicts the index from
+  // the keys and reads the drawn ink back against the compiled alphabet, and
+  // `glyph-index-squares` is the control that must redden it and nothing else here.
   const ramp = keys.ramp;
   const inks = ramp.map((r) => r.lit);
   const descents = ramp.filter((r, i) => i > 0 && r.lit < ramp[i - 1].lit);
@@ -5277,6 +5472,113 @@ console.log('\n[registry] the three keys add and wrap, so doubling two of them i
         + 'whole-number counter is inert at this weight'
       : `${keys.rainAlone.hash.slice(0, 12)} against ${keys.neither.hash.slice(0, 12)} with `
         + 'every key down');
+
+  // **An oracle for the composition rather than another property of it**, and the comment
+  // above the sweep names why one was needed: a squared sum is scale-sensitive, so the
+  // doubling row passes it, and it is monotone in each key with the others down, so the ink
+  // sweep passes it too - and it draws a different character in every cell. Every row above
+  // this one asks whether two pictures differ. None of them can say which character was
+  // chosen, and that is what "the three keys add and wrap" is a claim about.
+  //
+  // **The observable is ink, and the arithmetic that turns ink into an index is the
+  // alphabet's own sorted table read out of the compiled shader.** At full glyph on a flat
+  // wall with lattice 1 the sprite is exactly the cell, so the marks tile the covered region
+  // with no gaps and no overlap and the painted fraction of that region is the character's
+  // popcount over 64. Coverage is identical across the arms below - same wall, same cell,
+  // same pose, same sprite - so the painted counts across a sweep are one unknown constant
+  // times a sequence of popcounts this file predicts without asking the shader anything.
+  // Fitting that constant by least squares leaves seven measurements against one free
+  // parameter, and a build composing its keys any other way lands its indices somewhere
+  // else in a table sorted by ink.
+  //
+  // **The prediction reimplements the snap rather than reading it**, which is the whole
+  // point of an oracle, and the guard under it enforces the one premise that
+  // reimplementation rests on: with the cloud carrying no rotation, room space is sensor
+  // space, so the wall's cell centre is `floor(-2.4 / cell + 0.5) * cell` and the tone key
+  // reads that depth's place in the clip range. The far plane is moved out to 8 so the
+  // sweep walks two thirds of the table instead of the third the shipped range reaches -
+  // seven distinct popcounts from 5 to 15, where at far 4 the top three arms land on 10,
+  // 10 and 11 and the fit stops being able to tell them apart.
+  const oracle = await page.evaluate(`(async () => {
+    ${PAGE_HELPERS}
+    ${FIELD_HELPERS}
+    const look = { ...${JSON.stringify(GLYPH_LOOK)}, cell: 0.25, 'glyph.hash': 0,
+      'glyph.rain': 0, near: 0.5, far: 8 };
+    const wall = plane(2400);
+    const bg = field({ look: { ...look, 'glyph.tone': 0 }, depth: empty() }).slice();
+    // Exact rather than thresholded: at full glyph the mark is a hard bit at one colour, so
+    // a pixel was either painted by a set bit or left as the empty frame.
+    const painted = (px) => {
+      let n = 0;
+      for (let i = 0; i < px.length; i += 4) {
+        if (px[i] !== bg[i] || px[i + 1] !== bg[i + 1] || px[i + 2] !== bg[i + 2]) n++;
+      }
+      return n;
+    };
+    let cloud = null;
+    k.scene.traverse((o) => { if (o.geometry === k.geometry) cloud = o; });
+    cloud.updateMatrixWorld(true);
+    const rows = [];
+    for (const tone of [0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1]) {
+      rows.push({ tone, painted: painted(field({ look: { ...look, 'glyph.tone': tone }, depth: wall })) });
+    }
+    return {
+      rows,
+      cloudMatrix: Array.from(cloud.matrixWorld.elements).map((v) => Number(v.toFixed(9))),
+      near: k.uniforms.nearClip.value,
+      far: k.uniforms.farClip.value,
+      cell: k.uniforms.latticeCell.value,
+      shader: k.material.fragmentShader,
+    };
+  })()`);
+
+  {
+    const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    const levelled = oracle.cloudMatrix.every((v, i) => v === IDENTITY[i]);
+    const table = oracle.shader.match(/const uvec2 GLYPHS\[64\] = uvec2\[64\]\(([\s\S]*?)\n\);/);
+    const popcount = (n) => { let c = 0; for (let x = n >>> 0; x; x >>>= 1) c += x & 1; return c; };
+    const inks = table
+      ? [...table[1].matchAll(/uvec2\(0x([0-9a-fA-F]{8})u,\s*0x([0-9a-fA-F]{8})u\)/g)]
+        .map(([, a, b]) => popcount(parseInt(a, 16)) + popcount(parseInt(b, 16)))
+      : [];
+    // The snap, the clip position and the index, written out here rather than asked of the
+    // page. -2.4 is the planted wall in metres of scene, which unproject puts down -z.
+    const cellZ = Math.floor(-2.4 / oracle.cell + 0.5) * oracle.cell;
+    const cellTone = 1 - Math.min(1, Math.max(0,
+      (-cellZ - oracle.near) / Math.max(0.001, oracle.far - oracle.near)));
+    const predicted = oracle.rows.map((r) => {
+      const f = (r.tone * cellTone * (63 / 64)) % 1;
+      const idx = Math.min(Math.floor(f * 64), 63);
+      return { ...r, idx, ink: inks[idx] ?? 0 };
+    });
+
+    // The two guards, and they are separate questions. The first is the premise the
+    // prediction rests on - a rotated cloud would put the cell somewhere else and the whole
+    // sequence below would be about a different wall. The second is that the sweep reaches
+    // characters of genuinely different density, because a fit against seven equal popcounts
+    // is satisfied by any build that draws one character everywhere.
+    const spread = Math.max(...predicted.map((p) => p.ink)) / Math.min(...predicted.map((p) => p.ink));
+    check(levelled && inks.length === 64 && spread > 2,
+      'the cloud is unrotated and the predicted sweep walks the table from sparse to dense, '
+      + 'so the fit below has a premise and something to fit',
+      `${levelled ? 'identity' : 'rotated'} cloud, ${inks.length} characters read off the `
+      + `compiled shader, cell centre at ${(-cellZ).toFixed(3)}m giving a tone of `
+      + `${cellTone.toFixed(4)}, predicted ink ${predicted.map((p) => p.ink).join('/')}`);
+
+    // The claim. One free constant - how many pixels the tiling covers - against seven
+    // painted counts, fitted by least squares so no arm is privileged as the reference.
+    const num = predicted.reduce((s, p) => s + p.painted * p.ink, 0);
+    const den = predicted.reduce((s, p) => s + p.ink * p.ink, 0);
+    const perBit = den > 0 ? num / den : 0;
+    const residuals = predicted.map((p) => Math.abs(p.painted - perBit * p.ink) / Math.max(1, perBit * p.ink));
+    const worst = Math.max(...residuals);
+    check(worst < 0.08,
+      'the ink a cell paints is the popcount of the character the wrapped sum names, at every '
+      + 'step of the sweep - so the three keys add into an index rather than into anything '
+      + 'else that rises with them',
+      predicted.map((p, i) => `tone ${p.tone}: index ${p.idx}, ink ${p.ink}, ${p.painted}px `
+        + `against ${Math.round(perBit * p.ink)} (${(100 * residuals[i]).toFixed(1)}%)`).join('; '));
+  }
 }
 
 // The alphabet is sorted by ink so that one table can be read as tone by one key and as
@@ -5408,6 +5710,14 @@ console.log('\n[registry] the alphabet is sorted by ink, and the tone key reads 
 // 0.125m cell at the pinned pose's four metres rasterises into about 12 pixels and measures
 // 36 reference pixels: inside the band on the reading the shipped build takes, and well
 // above it on the reading it must not take.
+//
+// **The crop's pair at the foot of the section is a different claim wearing this one's
+// fixture**, and it is worth saying so rather than letting the heading cover it. The crop
+// used to reach the crossfade by halving the sprite, and this section asked whether the
+// halved size was the size being read; a cut-away point now reports no legible pixels at
+// all, so the question is no longer about a unit but about whether a character is drawn.
+// The two rows there are an equality over the keys and its uncropped control, and they stay
+// in this section because they need exactly this section's stage and cell to stand up.
 console.log('\n[registry] and the band is counted in the pixels the buffer actually has');
 {
   const unit = await page.evaluate(`(async () => {
@@ -5416,34 +5726,46 @@ console.log('\n[registry] and the band is counted in the pixels the buffer actua
     const base = { ...${JSON.stringify(GLYPH_LOOK)}, 'glyph.hash': 0, 'glyph.tone': 0, 'glyph.rain': 0 };
     const wall = plane(2400);
     const bg = field({ look: base, depth: empty() }).slice();
-    const at = (over, cropOutside = null) => {
+    const at = async (over, cropOutside = null) => {
       const px = field({ look: { ...base, ...over }, depth: wall, cropOutside });
-      return { levels: levels(px, bg), ...above(px, bg) };
+      return { hash: await sha256(px), levels: levels(px, bg), ...above(px, bg) };
     };
+    // The three keys raised together, for the two rows that ask whether a key can reach a
+    // pixel at all. Which characters they choose does not matter to either row - only that
+    // the answer is a different picture where the mark is a character and the same picture
+    // where it is a splat.
+    const LOUD = { 'glyph.hash': 1, 'glyph.tone': 0.7 };
+    // Every point outside the box, by the depth pair rather than by a lateral face: the wall
+    // is at 2.4m and the far face is at 1.0, so the whole frame is cut away and the faint
+    // pass is what keeps it on screen to be measured.
+    const CUT = { cell: 0.25, crop: true, near: 0.5, far: 1.0 };
     return {
       // 0.25m: 24 framebuffer pixels, 72 reference. Above the band on both readings, so
       // the mark is a hard bit whichever one the shader takes - this is the arm that says
       // the statistic can read a one.
-      above: at({ cell: 0.25 }),
+      above: await at({ cell: 0.25 }),
       // 0.125m: 12 framebuffer pixels, 36 reference. The two readings disagree here.
-      inside: at({ cell: 0.125 }),
-      // The crop's own half, which is the same disagreement produced by the halving rather
-      // than by the cell. A cut-away point draws at half its size, so a 0.25m cell that is
-      // above the band whole is inside it cut - and the sprite is then smaller than the
-      // cell pitch, so the marks stand apart and nothing overlaps into a second value.
-      // The depth range is what puts every point outside the box: the wall is at 2.4m and
-      // the far face is at 1.0, so the whole frame is cut away and the faint pass keeps it.
-      cropped: at({ cell: 0.25, crop: true, near: 0.5, far: 1.0 }, 0.6),
+      inside: await at({ cell: 0.125 }),
+      // The crop's own half, and it is a different claim from the two above rather than a
+      // third reading of theirs: a cut-away point is scaffolding, so it draws the round mask
+      // whatever size it came out at. Both arms are the same geometry at the same cell with
+      // the keys down and up.
+      croppedQuiet: await at(CUT, 0.6),
+      croppedLoud: await at({ ...CUT, ...LOUD }, 0.6),
+      // The control, which is that same pair with nothing cut away. Without it the equality
+      // above would pass on a page where the keys reach nothing anywhere.
+      wholeQuiet: await at({ cell: 0.25 }),
+      wholeLoud: await at({ cell: 0.25, ...LOUD }),
     };
   })()`);
 
   // The floor is 0.5% and not the 3% the two-surface guard uses, for that section's own
   // reason: every key is down here so every cell draws index 0, the sparsest character in a
   // table sorted by ink, and it reads 1.55% on a build doing exactly what it should.
-  check(unit.above.lit > 0.005 && unit.inside.lit > 0.005 && unit.cropped.painted > 500,
+  check(unit.above.lit > 0.005 && unit.inside.lit > 0.005 && unit.croppedQuiet.painted > 500,
     'all three arms draw their marks, so the counts below are taken on pictures',
     `above ${(100 * unit.above.lit).toFixed(2)}% inked, inside `
-    + `${(100 * unit.inside.lit).toFixed(2)}%, cut away ${unit.cropped.painted}px painted`);
+    + `${(100 * unit.inside.lit).toFixed(2)}%, cut away ${unit.croppedQuiet.painted}px painted`);
 
   // The reference the other two are read against. A hard bit is one colour, and if this
   // arm ever stops reading one the statistic has stopped meaning what the rows below take
@@ -5462,12 +5784,33 @@ console.log('\n[registry] and the band is counted in the pixels the buffer actua
     `${unit.inside.levels} distinct colours at 12 framebuffer pixels against `
     + `${unit.above.levels} at 24`);
 
-  // The crop half of the same claim, which had never executed: the halving is the last
-  // thing that moves the sprite and the reading is taken after it.
-  check(unit.cropped.levels > 1,
-    'and a cut-away cell is read at the half size it is actually drawn at, so the crop edge '
-    + 'crossfades rather than staying a hard mark at half the pixels',
-    `${unit.cropped.levels} distinct colours over ${unit.cropped.painted}px`);
+  // **The crop's own claim, and it is an equality over the keys rather than a statistic
+  // about the mark.** A cut-away point draws no character at all, so the three keys are
+  // choosing a symbol nothing draws and cannot reach a pixel - which is bit-identity with
+  // no threshold anywhere in it. The row this replaces counted distinct colours and asked
+  // that a cut-away cell be a blend rather than a hard bit, which was the halving's own
+  // claim; a build that falls back to the round mask satisfies that count for a reason the
+  // row was not testing, and would have gone on reading green while the picture changed
+  // completely. Counting colours cannot separate "crossfaded halfway" from "not a character
+  // at all", and the keys can.
+  check(unit.croppedQuiet.hash === unit.croppedLoud.hash,
+    'a cut-away cell draws the round mask, so the three keys reach no pixel inside the crop '
+    + 'and cut geometry reads as dust rather than as smaller text',
+    unit.croppedQuiet.hash === unit.croppedLoud.hash
+      ? `both ${unit.croppedQuiet.hash.slice(0, 12)} with the keys down and up, over `
+        + `${unit.croppedQuiet.painted}px painted`
+      : `${unit.croppedQuiet.hash.slice(0, 12)} against ${unit.croppedLoud.hash.slice(0, 12)} - `
+        + 'the crop is still drawing characters');
+
+  // And its control: the identical geometry and the identical two key settings with nothing
+  // cut away, where the marks are characters and the keys have to move the picture. Without
+  // it the equality above passes on any page where the keys reach nothing at all.
+  check(unit.wholeQuiet.hash !== unit.wholeLoud.hash,
+    'while the same two key settings on the same cell outside no crop do draw different '
+    + 'characters, so the equality above is not a fixture the keys cannot move',
+    unit.wholeQuiet.hash === unit.wholeLoud.hash
+      ? `identical uncropped too, ${unit.wholeQuiet.hash.slice(0, 12)} - the keys reached nothing`
+      : `${unit.wholeQuiet.hash.slice(0, 12)} against ${unit.wholeLoud.hash.slice(0, 12)}`);
 }
 
 // **And the other half of the invariant, which needs a buffer this file does not otherwise

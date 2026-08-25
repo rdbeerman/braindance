@@ -22,7 +22,7 @@ import { EffectStore } from './effect-store.js';
 // this process at all: it answers whether the page *would* boot with this package
 // installed, and the only way to ask that honestly is with the same assembler the page
 // runs.
-import { doorRefusal, forkRefusal } from './effect-door.js';
+import { RESERVED_EFFECT_IDS, doorRefusal, forkRefusal } from './effect-door.js';
 import { cloudSpine } from '../web/cloud-shader.js';
 import { gradeSpine } from '../web/grade-shader.js';
 import { Recorder } from './recorder.js';
@@ -627,6 +627,13 @@ const sendJson = (res, body, status = 200) => {
 // is a request nobody meant.
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
+// How much of a page's own sentence about a package it could not compile goes into the log
+// line beside it. A driver's link log is whatever the driver felt like emitting, which on a
+// bad day is the whole shader source - and this ends up in `console.warn` on a server nobody
+// is watching, above the store's own sentence, which is the one that says what happened. See
+// `serveEffectRefusal`.
+const MAX_REFUSAL_REASON = 400;
+
 function readBody(req) {
   return new Promise((done, fail) => {
     const chunks = [];
@@ -1151,6 +1158,105 @@ async function serveEffectWrite(req, res, [id]) {
     // fine and retrying it is the right next move.
     return sendJson(res, { error: `effect ${id} could not be written: ${err.message}` }, 500);
   }
+}
+
+/**
+ * The packages a page could not compile, set aside on that page's word.
+ *
+ * **This build has no GLSL compiler and is not getting one.** The door refuses a package
+ * whose chunks name something this build has not got, and it cannot refuse one whose GLSL is
+ * merely wrong: a missing brace, a `vec3` assigned to a `float`, a function called with two
+ * arguments where it takes three. Those are syntactically reachable, they name only
+ * identifiers that exist, and what they produce is a shader that will not link - which is a
+ * log line inside the driver rather than an exception anywhere the server can see. So the
+ * only thing in this program that ever *learns* a package cannot be compiled is a page that
+ * tried, and until this route existed it had nowhere to say so: `warmPrograms` collects the
+ * link failures and throws, the hotload transaction rolls the page back onto the set it was
+ * holding, the store never hears, and the package sits there. The page that discovered it
+ * carries on, and every *fresh* page load compiles that package at boot and dies on it - no
+ * `__kinect`, both surfaces dark, and the machine is one reload away from being unusable by
+ * anybody who was not already looking at it.
+ *
+ * **It grants the caller no authority it did not already have, which is worth writing down
+ * because it is the first question a reviewer asks about a route that takes an id off the
+ * wire and renames a directory.** `PUT /effects/:id` and `DELETE /effects/:id` are on this
+ * same server behind this same guard and neither asks who is calling - anything that can
+ * reach this route can already install a package over that id or remove it outright. And
+ * this does strictly less than either: `setAside` renames within the user directory, so the
+ * package is still on disk under `<id>.<seq>.incompatible`, still complete, and still there
+ * to be repaired and moved back. The one thing it cannot do at all is touch a builtin, which
+ * is not a rule written here - it is `setAside` renaming inside `this.dir` and nothing else.
+ *
+ * **An id with no copy in the user root is skipped rather than refused**, and the answer says
+ * so per id. A builtin is the case that matters: a page that failed to link a program has the
+ * ids it was assembling from and no reason to know which root each of them came out of, and
+ * the honest answer to "set aside the builtin glyph" is that there is nothing here to set
+ * aside, not a 4xx that leaves the caller unable to tell which of the ids it named went
+ * through. A partial answer is the useful one - the packages that could be quarantined were,
+ * and the rest are named with why.
+ */
+async function serveEffectRefusal(req, res) {
+  let body;
+  try {
+    body = await readBody(req);
+  } catch (err) {
+    return sendJson(res, { error: err.message }, 400);
+  }
+  if (!Array.isArray(body.ids)) {
+    return sendJson(res, {
+      error: 'this route takes { ids: [...], reason } - a page that could not compile the installed set '
+        + 'names which packages it was compiling, and a body without that list is a request about nothing',
+    }, 400);
+  }
+  // **Bounded against the store rather than against a number somebody picked.** The ids a page
+  // can honestly name are the ids it was assembling from, and that set is exactly what this
+  // store answered its listing with - so a list longer than the store has packages is a list
+  // that is not about this store, and the bound moves by itself as packages are installed. The
+  // alternative is a constant here that a machine with a lot of effects eventually trips over.
+  //
+  // Counted off the two directory listings rather than through `list()`, which reads and hashes
+  // every file of every package to build an answer this line takes the length of. That is the
+  // work `GET /effects` exists to do and it is the wrong thing to make a bad request pay for.
+  const installed = new Set([...EFFECTS.idsIn(EFFECTS.builtinDir), ...EFFECTS.idsIn(EFFECTS.dir)]).size;
+  if (body.ids.length > installed) {
+    return sendJson(res, {
+      error: `this names ${body.ids.length} packages and the store holds ${installed} - `
+        + 'the ids a page can have failed to compile are the ids it was handed, so a longer list is not about this store',
+    }, 400);
+  }
+  // The reason is the page's own sentence and arrives over the network, so it is treated the
+  // way every other string off the wire is: it goes into a `console.warn` line the operator
+  // reads after the fact, and a link log is whatever a driver felt like emitting - three
+  // hundred lines of shader source in the bad case. Collapsed to one line so it cannot forge
+  // log lines around itself, and cut, because the sentence that matters is the store's own and
+  // it is printed after this one.
+  const reason = typeof body.reason === 'string' && body.reason.trim().length
+    ? body.reason.replace(/\s+/g, ' ').trim().slice(0, MAX_REFUSAL_REASON)
+    : 'a page that adopted it could not compile the programs it assembles into, and said no more than that';
+  const setAside = [];
+  const skipped = [];
+  // **The rename and the generation bump are one call into the store, rather than the two this
+  // route used to make.** The counter is the store's own history and `install` and `remove`
+  // already own it; a route reaching in with `EFFECTS.generation += 1` was a third writer of a
+  // field nothing outside that file should be assigning to, and the next route would have
+  // copied it. `setAsideForClient` carries the argument for why this case moves the number and
+  // the boot gate's does not, and answers which of the three things happened so the reasons
+  // below stay where a caller can read them.
+  const WHY = {
+    absent: 'there is no copy of it in the user root - a builtin is what this build ships with and what an '
+      + 'install falls back to, so there is nothing here that could be set aside',
+    stuck: 'it could not be renamed out of the way - the server log says what the rename answered',
+  };
+  for (const id of body.ids) {
+    if (typeof id !== 'string') {
+      skipped.push({ id: String(id), why: WHY.absent });
+      continue;
+    }
+    const outcome = EFFECTS.setAsideForClient(id, `a page that adopted it reports that it does not compile: ${reason}`);
+    if (outcome === 'aside') setAside.push(id);
+    else skipped.push({ id, why: WHY[outcome] });
+  }
+  return sendJson(res, { setAside, skipped });
 }
 
 async function writeDocument(req, res, store, name) {
@@ -1757,6 +1863,29 @@ const ROUTES = [
       return res.end(bytes);
     },
   },
+
+  // ---- the packages a page could not compile
+  //
+  // **A namespace of its own, and being outside `/effects/` is the whole reason it is here
+  // rather than there.** This route was `POST /effects/refuse` first, and that is one segment
+  // and a table walked in order: a literal under `/effects/` outranks the `:id` read beside it,
+  // so a package directory called `refuse` was listed by `GET /effects` and then answered 405
+  // when the page fetched it - no `__kinect`, both surfaces dark. Reproduced against a running
+  // server, and the `DELETE` was 405 too, so it could not even be uninstalled.
+  //
+  // The first repair reserved the word at the install door. What that missed is that the
+  // collision is not a property of the word: `/jobs/claim` sits beside `/jobs/:id` on the same
+  // trade, and it holds there because a job id is *minted by the queue*, so nobody can make a
+  // job called `claim`. An effect id is a directory name and `mkdir` is all it takes. So the
+  // namespace is the fix and the reservation is the guard: at top level nothing under
+  // `/effects/` is claimed, an existing package called `refuse` keeps working and needs no
+  // quarantine, and no reader has to learn why one word is forbidden.
+  //
+  // Plural resource noun at top level, posted to, which is the shape `/deliverables`, `/jobs`
+  // and `/library` already have. It joins `OWNED_NAMESPACES` by existing, so a path under it
+  // that matches no entry gets the API's 404 rather than a file lookup.
+  { path: '/effect-refusals', pattern: /^\/effect-refusals\/?$/, write: { methods: ['POST'], run: serveEffectRefusal } },
+
   {
     path: '/projects/:name',
     pattern: /^\/projects\/([^/]+)$/,
@@ -1836,6 +1965,45 @@ export const OWNED_NAMESPACES = new Set(ROUTES.map((r) => {
   }
   return first;
 }));
+
+/**
+ * The ids this table takes away from the effect store, derived from the table and held against
+ * the door's copy.
+ *
+ * **It is empty today, and the check is here for the day it is not.** A literal segment under
+ * `/effects/` outranks the `:id` pattern beside it, because the dispatcher walks this array in
+ * order - so registering one would take that id away from every package there will ever be. A
+ * package at that name is listed by `GET /effects` and then answered 405 when the client fetches
+ * it, which is `readEffectPackages` throwing, no `__kinect`, and both surfaces dark. That is not
+ * hypothetical: the refusal route was `POST /effects/refuse` first and did exactly this, which
+ * is why it is `POST /effect-refusals` now.
+ *
+ * So nothing under `/effects/` is claimed, `RESERVED_EFFECT_IDS` is empty, and the two agree
+ * trivially. What this block buys is that they go on agreeing: register `/effects/verify`
+ * tomorrow and this server refuses to start with both lists printed, rather than shipping a
+ * build where one package id is quietly unreadable. The table is the authority and the door's
+ * constant is checked against it, so the door is never reserving a word somebody typed once.
+ *
+ * **Held equal here rather than imported**, on the same argument `withEffectGroups` makes about
+ * `CORE_PANEL_GROUP_KEYS`: the door is a pure module that `test/effect-door.test.mjs` runs under
+ * bare node, and importing this file to read a list would import a server that binds a port. So
+ * two statements, and a start that refuses to come up with both printed if they have come apart
+ * - which is the loud direction, where a door reserving the wrong word is silent until somebody
+ * loses a page over it.
+ *
+ * The pattern matches one literal segment and nothing else: `:id` carries a colon, and
+ * `/effects/:id/file/:name` has a segment past it, so neither is a claim on an id.
+ */
+const RESERVED_BY_ROUTES = [...new Set(
+  ROUTES.map((r) => r.path.match(/^\/effects\/([^/:]+)$/)?.[1]).filter((seg) => seg !== undefined),
+)].sort();
+if (RESERVED_BY_ROUTES.join(',') !== [...RESERVED_EFFECT_IDS].sort().join(',')) {
+  throw new Error(`the route table claims the effect ids ${RESERVED_BY_ROUTES.join(', ') || '(none)'} and `
+    + `RESERVED_EFFECT_IDS names ${[...RESERVED_EFFECT_IDS].sort().join(', ') || '(none)'} - the install door reads `
+    + 'the second one, so the two disagreeing is a door reserving a name this table has not claimed or, worse, '
+    + 'leaving one it has: a package under a claimed id is listed by GET /effects and refused when the page '
+    + 'fetches it, which is a page that does not boot');
+}
 
 /**
  * The pages, and the only URLs they answer at.

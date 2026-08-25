@@ -25,6 +25,15 @@
   // reference pixels, because the boundary between text and texture is a property of the
   // look and a 4K export has to draw the same picture the grade was made on. The band is
   // therefore stated once and read against whichever limit is nearer.
+  //
+  // **A cut-away point never draws a character, and it arrives here already saying so.**
+  // The crop writes a legible size of exactly zero for anything outside the box, which is
+  // below the band at every output size, so this collapses to a glyphMix of 0 and the mark
+  // below is the disc. That is asked for in the vertex stage rather than tested again here
+  // because the crop's state is up there and the comment beside that write carries the
+  // argument: halving the sprite was never enough on its own, since half of a sprite well
+  // above the band is still above it, and cut-away geometry drawing a smaller character is
+  // the opposite of the dust the halving's own paragraph promises.
   float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);
 
   // Additive mode shapes the sprite purely with alpha falloff. Skipping the

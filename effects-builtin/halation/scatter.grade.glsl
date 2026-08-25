@@ -8,11 +8,39 @@
       // sits above the threshold - and every bit of the colour comes from the tint.
       //
       // It sits at 150, above the streak at 100 and below everything drawn over the picture,
-      // and the placement is an argument rather than a free slot. The streak's smear is
-      // light that reached the emulsion, so it scatters too, and gathering before it ran
-      // would ring the highlight while leaving the smear it drags across the frame cold. The
-      // raster and the grain are marks made on top of the picture and have nothing to
-      // scatter, which is why they sit below this rather than above it.
+      // and the placement is an argument rather than a free slot. The raster and the grain
+      // are marks made on top of the picture and have nothing to scatter, which is why they
+      // sit below this rather than above it.
+      //
+      // **No gather in this pass can see another effect's output, and that is the rule
+      // rather than a fact about halation.** Every package filling g.body concatenates into
+      // a single fragment shader that runs once per pixel, so a tap reaches a neighbour's
+      // *input* and never a neighbour's *output* - a fragment has no way to read what the
+      // same pass computed at some other pixel. Ordering decides what each effect does to
+      // the pixel it owns, and no ordering can make a gather see work that has not been
+      // written to a texture yet. An effect added here that samples its neighbourhood meets
+      // this the moment it is written, so it is stated before the instance rather than
+      // after it.
+      //
+      // **Halation is one instance and the streak is the other**, which is what says this is
+      // the rule and not a placement somebody got wrong. Every tap below reads tDiffuse, the
+      // immutable input to the whole grade pass, so what halation rings is the highlight as
+      // the frame carried it *into* this pass and never the smear the streak drags across
+      // it - the smear stays cold. The streak meets the same wall from the other side: its
+      // own sixteen taps read tDiffuse too, and only its starting value comes from col.
+      //
+      // The correction is written down rather than made quietly, because this paragraph used
+      // to argue the opposite. It said the streak's smear is light that reached the emulsion
+      // so it scatters too, and that gathering before the streak ran would ring the highlight
+      // while leaving the smear cold. That describes a build which gathers after the streak,
+      // and no build here does.
+      //
+      // **The decision is made rather than pending.** Lifting the limit costs an
+      // intermediate render target - the streak resolved into its own buffer and the grade
+      // split into two passes - bought for a look nobody has reported; recomputing the
+      // streak inside each tap is sixteen sixteen-tap gathers, 256 samples on every pixel of
+      // every frame, for the same thing. Neither is worth ringing a smear, so the claim is
+      // brought down to what ships and the order stays where the paragraph above puts it.
       //
       // Sixteen taps on a golden-angle disc, the distance taken as the square root of the
       // tap's share of the disc so the samples spread evenly over the area instead of

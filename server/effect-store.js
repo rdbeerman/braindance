@@ -236,9 +236,54 @@ export class EffectStore {
    * unreachable through the install door, which takes them one at a time and would have
    * refused whichever arrived first, so it is hand placement or nothing.
    *
-   * It costs one assembly per *user* package per round, which is a string concatenation
-   * over the shipped set and is paid once at boot; a machine with no forks pays nothing at
-   * all, because the loop walks the user root and that root is where forks are.
+   * **A promotion is only allowed if the set it produces still stands, which is the half
+   * this gate did not ask.** Everything above validates the *candidate*: the door is handed
+   * the packages that would sit beside it and reports what the candidate cannot do. What it
+   * never re-asked is the packages already accepted, and a shadow can invalidate one of them
+   * without being wrong about anything of its own. `doorRefusal` walks the candidate's chunks
+   * for identifiers this build has not got and `forkRefusal` catches a fork that dropped a
+   * parameter - neither looks at a *varying* the fork stopped declaring. So a `rain` fork that
+   * removes `vRain`, with its own two references to it removed as well, is a package with
+   * nothing wrong with it: clean chunks, every parameter kept, the door answers null. It then
+   * shadows the shipped rain, the builtin glyph goes on reading `vRain` out of its
+   * `index.frag.glsl`, and nothing in the assembled pair declares the name. The cloud program
+   * fails to link, `web/main.js` throws while it is still evaluating, and no `__kinect`
+   * publishes - the failure this whole gate exists to move, arriving through the one package
+   * it validated and the two it did not re-ask. Reachable through `PUT /effects/rain` as well
+   * as by hand placement, because the install door has the same shape and the same hole.
+   *
+   * So a candidate is promoted only when every member of the resulting set still passes the
+   * door with the rest of that set beside it, and a candidate that breaks somebody is refused
+   * under a sentence naming both ends: which package it broke and what the door said about it.
+   * The blame lands where the change is, which is the point - the builtins are this build's
+   * own packages and the survivors were standing a moment ago, so the only thing that moved
+   * is the candidate.
+   *
+   * **Except where a builtin was already refused before any fork was in the room**, which is
+   * asked once at the top and is what keeps this from being an over-refusal machine. Without
+   * it, a build that shipped a package its own door refuses would quarantine every fork on
+   * every machine, each under a sentence blaming somebody's authored work for a fault it had
+   * nothing to do with. `test/effect-door.test.mjs` makes that unreachable on a correct build
+   * by running the whole shipped set through this door under bare node; this is what happens
+   * on an incorrect one, and the honest answer there is the log line the paragraph above
+   * declines to be more helpful than.
+   *
+   * The walk over the resulting set is in id order rather than in map order, because the first
+   * refusal found is the sentence the package is set aside under and "whichever the iteration
+   * reached first" is the arbitrariness this method already spent a paragraph removing.
+   *
+   * **Two mutually-dependent forks are still both set aside, and now for the ordinary
+   * reason.** Neither can be promoted first, so neither is ever promoted - unchanged by the
+   * rule above, which only ever refuses more.
+   *
+   * It costs one door pass per builtin once, and then one per candidate plus one per member of
+   * the set that candidate would produce, per round - so with the eighteen packages this build
+   * ships and one fork of one of them in the user root, 36 passes where it used to be one.
+   * Measured on this rig by timing `claimUserRoot` itself, twelve runs of each arm interleaved
+   * rather than one arm after the other, medians: **17.68ms with one fork and 0.057ms with
+   * none.** The second number is the one that matters - a machine with no forks pays nothing
+   * at all, because the walk is over the user root, the baseline pass is skipped when that root
+   * has nothing readable in it, and the user root is where forks are.
    */
   refuseIncompatiblePackages() {
     // **Pass one, and it has no rule of its own about the length of a name.** A directory
@@ -256,11 +301,42 @@ export class EffectStore {
       }
     }
 
+    // Nothing readable in the user root is nothing this gate can set aside, and every pass
+    // below walks a set built out of that root - so the whole of the rest of this method is
+    // about forks, and a machine with none of them stops here having read one directory
+    // listing. Stated as a return rather than left to the loops, because the baseline pass
+    // just below is the one thing here that would otherwise cost something on a machine with
+    // nothing to gate.
+    if (!readable.length) return;
+
     // Read once for the whole gate rather than per candidate, and read from the shipped
     // root by name: `packageOf` resolves through `rootFor`, which answers with the user's
     // copy, so asking it for a builtin a candidate's unvalidated neighbour shadows would
     // hand back the neighbour - the very package this pass is refusing to trust.
     const builtins = new Map(this.idsIn(this.builtinDir).map((id) => [id, this.builtin(id)]));
+
+    // What one member of a standing set is doored against: everything else in it, in the
+    // order `list()` answers and therefore the order the page assembles from.
+    const besideIn = (standing, id) => [...standing.values()]
+      .filter((p) => p.id !== id)
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+
+    // **The baseline: this build's own packages, asked of each other, with no fork in the
+    // room.** Anything refused here was refused before any user package existed, so it is a
+    // fault in the build rather than something a candidate did - and the rule below has to
+    // know the difference, or the first fork on a machine with a broken builtin is quarantined
+    // for it. Held by identity rather than by id, because a survivor shadowing one of these
+    // ids is a different package and gets asked on its own account.
+    const bornRefused = new Set();
+    for (const [id, pkg] of builtins) {
+      const refusal = doorRefusal(pkg, { beside: besideIn(builtins, id), spines: this.spines });
+      if (!refusal) continue;
+      bornRefused.add(pkg);
+      console.warn(`effect ${id} is shipped with this build and this build's own install door refuses it: `
+        + `${refusal} - nothing here can set a builtin aside, so it goes on being served; what this line `
+        + 'exists for is that a fork standing beside it must not be quarantined in its place');
+    }
+
     const survivors = new Map();
     const refusals = new Map();
     let pending = readable;
@@ -283,8 +359,30 @@ export class EffectStore {
         standing.delete(candidate.id);
         const beside = [...standing.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
         const shadowed = builtins.get(candidate.id) ?? null;
-        const refusal = doorRefusal(candidate, { beside, spines: this.spines })
+        let refusal = doorRefusal(candidate, { beside, spines: this.spines })
           ?? (shadowed ? forkRefusal(candidate, shadowed) : null);
+        // **And the other direction, which is what a shadow can do to the packages it is not
+        // about.** Everything above asks whether the candidate works beside the set; this asks
+        // whether the set still works beside the candidate, and the two are different questions
+        // because the door reads one package's chunks and the whole set's declarations. A fork
+        // that stops declaring a varying its neighbour reads is correct on its own account and
+        // takes the neighbour's program down with it. See this method's own note for the
+        // shipped instance and for why a builtin the baseline already refused is skipped
+        // rather than charged to whoever happens to be standing next to it.
+        if (!refusal) {
+          const resulting = new Map([...builtins, ...survivors]);
+          resulting.set(candidate.id, candidate);
+          for (const id of [...resulting.keys()].sort()) {
+            const member = resulting.get(id);
+            if (member === candidate || bornRefused.has(member)) continue;
+            const broke = doorRefusal(member, { beside: besideIn(resulting, id), spines: this.spines });
+            if (!broke) continue;
+            refusal = `with it installed this build can no longer assemble ${id}: ${broke}. Nothing is `
+              + `wrong with ${id} on its own - it stood a moment ago and stands again once ${candidate.id} `
+              + 'is out of the way, so the package being set aside is the one that changed';
+            break;
+          }
+        }
         if (refusal) {
           refusals.set(candidate.id, refusal);
           stillPending.push(candidate);
@@ -324,6 +422,41 @@ export class EffectStore {
    * announced it cannot use is a page that fails with a sentence in the log naming exactly
    * why; a build that will not start is a machine with nothing to read at all.
    */
+  /**
+   * One package set aside on a client's word, with the generation moved to match - which is the
+   * whole of what this adds over `setAside` and is why it exists rather than the route reaching
+   * in to do both.
+   *
+   * **The counter is the store's own history and the store is the only thing that may move it.**
+   * `install` and `remove` bump it and each carries the argument for where in the operation the
+   * bump sits; a route doing `EFFECTS.generation += 1` after calling `setAside` made a third
+   * writer of a field two methods here already own, and the next one would have been written the
+   * same way. So the composite is a method: ask whether there is a user copy, rename it, move
+   * the number.
+   *
+   * **The boot gate deliberately does not come through here.** It calls `setAside` directly and
+   * moves nothing, because it runs before the socket has dispatched a request and there is no
+   * earlier number for any reader to be holding - see `claimUserRoot`. This is the other case:
+   * pages are open, one of them has just failed to compile a package and rolled back, and what
+   * it needs is for the next poll to disagree with the listing it is holding so it is handed the
+   * set without the broken package in it.
+   *
+   * Three outcomes rather than a boolean, because the caller answers per id and "there was
+   * nothing of yours here" and "it would not move" are different sentences: `absent` is an id
+   * with no copy in the user root, which is what a builtin looks like from here, `stuck` is a
+   * rename that would not go, and `aside` is the one that moved.
+   *
+   * The user root is read per call rather than snapshotted by the caller, which is what makes an
+   * id named twice answer honestly: the second one finds the first already renamed and comes
+   * back `absent` rather than being sent into a rename of a directory that is no longer there.
+   */
+  setAsideForClient(id, reason) {
+    if (!this.idsIn(this.dir).includes(id)) return 'absent';
+    if (!this.setAside(id, reason)) return 'stuck';
+    this.generation += 1;
+    return 'aside';
+  }
+
   setAside(id, refusal) {
     const stem = id.slice(0, MAX_EFFECT_ID);
     const seq = `${process.pid}.${Date.now().toString(36)}`;

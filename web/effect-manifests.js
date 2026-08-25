@@ -52,6 +52,37 @@ export const EFFECT_BIND_TABLES = Object.freeze(['points', 'grade']);
 export const EFFECT_BIND_TRANSFORMS = Object.freeze(['axisDeg', 'degToRad']);
 
 /**
+ * The uniforms this build's own render loop writes, which is the one exception to the rule
+ * that a package's uniform has to be bound by one of that package's parameters.
+ *
+ * **The exception is what the rule is for, so it has to be as closed as the rule is.** A
+ * uniform nothing writes reads zero for the life of the page - the control that should have
+ * moved it does not exist, nothing throws, and the effect is simply absent from a picture that
+ * looks fine. `hostDriven` is a manifest saying "this one is written from outside", and while
+ * the door took any name at all it was a way of asserting that about a uniform nothing in this
+ * build has ever written: valid GLSL, a clean install, and the exact failure the two-ended
+ * binding rule refuses, reached through the sentence that excuses a package from it.
+ *
+ * `rainPhase` is the whole set and the rain is why it exists. `renderProgramFrame` in
+ * `web/main.js` writes it once a frame from program time, deliberately as a second cell beside
+ * `uniforms.time` so that `timeline-check --mutate rain-accumulates` has one line to integrate;
+ * a package that wants a clock of its own gets a parameter, not an entry here.
+ *
+ * **Stated here rather than in the render loop, and the two ends are held together by a test
+ * rather than by an import.** The loop writes one named cell - `uniforms.rainPhase.value = t` -
+ * because that is what a hand-written render step looks like, and threading a list through it
+ * would be a loop iterating a constant to write the one assignment it already has. So the door
+ * reads this and `test/effect-door.test.mjs` reads `web/main.js`, refusing a name here that the
+ * page does not actually write. That catches the drift the constant is about: a name kept on
+ * this list after the host stopped writing it is a package the door goes on excusing and the
+ * shader goes on reading zero from.
+ *
+ * Frozen for the reason the vocabularies above it are: a closed set anybody could push onto is
+ * not a closed set, and this one is the door's own exception list.
+ */
+export const HOST_DRIVEN_UNIFORMS = Object.freeze(['rainPhase']);
+
+/**
  * The panel groups the client's own spine holds, as a set, sorted so it reads as one.
  *
  * **The install door needs this and cannot reach the thing that declares it.**

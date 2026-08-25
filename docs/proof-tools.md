@@ -663,7 +663,34 @@ node tools/effect-check.mjs --mutate adopt-outside-the-transaction # ... the ado
 node tools/effect-check.mjs --mutate a-broken-shader-is-warm # ... the throw dropped from the end of the warm, leaving a link
                                                           #     failure where three.js puts it: a console line. The install
                                                           #     succeeds, the poll announces success, and the cloud draws
-                                                          #     nothing. Reddens two rows of section 9
+                                                          #     nothing. Reddens **six** rows, measured, all in
+                                                          #     section 9: the two the mutation is about - the rebuild
+                                                          #     reporting success and the broken line reaching the
+                                                          #     assembled program - and the four under them, which are
+                                                          #     the quarantine not happening because there is no longer
+                                                          #     a link failure to mark
+node tools/effect-check.mjs --mutate a-link-failure-is-not-quarantined # ... the throw and its mark left exactly where
+                                                          #     they are and the one call that acts on them dropped,
+                                                          #     which is the build this replaced. The page still
+                                                          #     refuses the package, still rolls back and still says
+                                                          #     which shader did not compile - and the package sits in
+                                                          #     the store afterwards, so the next browser to open
+                                                          #     compiles it at boot, outside any transaction, and dies
+                                                          #     there. Reddens **four** rows, measured, all in section
+                                                          #     9, and the third is the point: the fresh page comes
+                                                          #     back `no __kinect published`
+node tools/effect-check.mjs --mutate any-failure-is-quarantined # ... the mark test dropped and the call kept, so every
+                                                          #     failure the rollback catches reaches the refusal route.
+                                                          #     This is the direction the fix does damage in rather
+                                                          #     than merely fails in, and the page reads correctly
+                                                          #     through all of it - the refusal is right, the sentence
+                                                          #     is right, the rollback is right, and a package nothing
+                                                          #     is wrong with has been renamed out of the way behind
+                                                          #     them. Reddens **three** rows, measured, and only the
+                                                          #     first is a finding: section 6 asks the store whether
+                                                          #     the fork the completeness rule refused is still
+                                                          #     installed, and it answers 404. The two under it are
+                                                          #     section 9's aside count seeing two where it expects one
 node tools/effect-check.mjs --mutate the-sweep-eats-the-last-copy # ... the sweep removing every aside it finds and the recovery
                                                           #     pass removed with it, so a crash between an install's two
                                                           #     renames loses the package to the next install of that id.
@@ -1658,6 +1685,58 @@ about. `Webcam.subscribersCostingTheTake` is written as a filter over `describe(
 and charge every proof tool in this repo for its own localhost connection. Forcing the rule to
 `return this.describe()` reddens three rows — the section 1 one by name, and the two in section
 3 that need a take to start with a loopback webcam attached.
+
+**`monitor-check`** spawns its own server on 8341 and needs none running, but it needs a
+capture at `captures/sample.knct` to stream and a GPU browser for its renderer sections
+(`--no-browser` drops them and says `UNTESTED` rather than passing quietly). Read its three
+`....  waited Nms after load for ...` lines before you read its rows: each is what one
+browser section waited for its page to publish before driving anything, printed rather than
+asserted because there is no threshold here worth gating on, and the number is the headroom
+a slower machine has left. On an idle Mac they run 15 to 18ms, 92 to 94ms and 60 to 68ms.
+**A wait that runs out there is not a row.** The two decimation sections let it throw, so the
+run ends `DID NOT RUN` naming what never arrived — which is what stops a `--mutate` run
+counting a viewer that never came up as the mutation being caught. Only the colour section
+turns it into a failed row, because there "the page never booted" and "colour never arrived"
+are different findings and it is the one place that can tell them apart.
+
+**Its renderer section rebuilds the capture index every run, and that is deliberate**: it
+symlinks the sample into its own staged tree, so the sidecar the first open builds lands
+there and is deleted with it. Warming `captures/sample.idx` therefore does not reach that
+section — it reaches the `--replay` server in the section above, which serves the repo's own
+capture. So a red `the frame API served frame 7 of the sample at every divisor this compares`
+is a server still indexing 138MB rather than a finding about decimation, and it is the row to
+suspect first on a contended machine now that the boot sleep no longer stands between the
+page load and that fetch. Stated rather than measured: that row passed on all six runs behind
+this paragraph, and every one of them was on an idle machine.
+
+**`export-check` has the same shape and a bigger number: 10 of its 66 rows are red on the
+synthetic sample and none of them is about the build.** Nine are the resolution-invariance
+family — `trails`, `rgbsplit`, `scanlines`, `grain`, `bloom`, `nobloom`, `full`, `regionpush`
+and `regionmask` each asking that 1920x1200 is 960x600 at twice the size — and the tenth is the
+crop's cull row. They compare fine structure and coarse means between two renders of the same
+look at two sizes, and `make-sample`'s three surfaces carry no depth jitter and no sensor noise,
+so the structure those rows correlate is aliasing rather than anything in the room. Measured
+against a clean checkout of the merge commit `3b7ab90` and again on the effects branch: **the
+same ten rows, at identical numbers to four figures** — `trails` at a coarse mean of 2.732 on
+both, the crop row at 110 revealed and 314,021 lit against 410,577 released on both. That
+identity is the useful part rather than the count: a change that moved any screen-space term
+would move these numbers, so reading them as equal is a stronger statement than reading them as
+red. Take the baseline before believing this tool has found something, and compare the numbers
+rather than the pass count.
+
+**`registry-check`'s crop and snap rows are placed against a capture, and `make-sample`'s is
+not that capture.** The scrambled set authors `near` 0.35 and `far` 4.2 and places the four
+lateral faces against a cloud running x [-2.31, 2.97] and y [-2.26, 1.63], while
+`tools/make-sample.mjs` builds its back wall at z = 3.2m and its sphere at 1.55m with a 0.28m
+radius — so the whole synthetic cloud sits inside the depth pair and there is nothing for it
+to cut. Run against the synthetic sample the tool therefore comes back **FAIL (3)** on a tree
+with nothing wrong with it: the drop-one sweep reports `unexplained: bottom snapDelta`, the
+count lands at `92 of 97 parameters are proven to reach the pixels`, and the crop's second row
+reports `identical with only near/far authored`. All three are the fixture rather than the
+build, and `snapDelta` at 410 is the same shape — a threshold the synthetic motion never
+crosses. Measured on a clean checkout of the merge commit `3b7ab90`, so a run of this tool
+that reports three reds and these three sentences has found nothing. A machine holding real
+footage sees them pass, and a change that takes the count past three has moved something.
 
 **`guard-check`** spawns its own servers and needs none running. It exits 2 when the machine has
 no non-internal IPv4, because "not listening on the network" is only a claim if there is a

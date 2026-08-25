@@ -61,10 +61,18 @@
 //     accumulators mid-playback; a package that did change GLSL must release the program it
 //     replaced; and a rebuild must stand down when a gesture starts while it is reading
 //     rather than when it started reading.
-//  9. **A package this build cannot compile is a rollback and a sentence, not a black
-//     frame.** The door checks vocabulary and cannot compile GLSL, so identifier-valid text
-//     that is syntactically broken reaches the driver - where a link failure is a log line
-//     and not an exception. `a-broken-shader-is-warm` is the control.
+//  9. **A package this build cannot compile is a rollback, a sentence, and a package the
+//     store stops serving.** The door checks vocabulary and cannot compile GLSL, so
+//     identifier-valid text that is syntactically broken reaches the driver - where a link
+//     failure is a log line and not an exception. Rolling back is only half of it: the
+//     package survives the rollback, and the next page to open compiles it at boot, outside
+//     any transaction, and publishes no `__kinect` at all. The only process in this program
+//     with a GL context is the page, so the page is what tells the store, and the row that
+//     matters is the fresh load booting afterwards rather than the store's answer.
+//     `a-broken-shader-is-warm` and `a-link-failure-is-not-quarantined` are the controls for
+//     the two halves, and `any-failure-is-quarantined` is the control for the direction that
+//     does damage - a refusal about a *document* must never set a package aside, which is
+//     what section 6 asks of the store after the completeness rule has refused a fork.
 // 10. **A fork the door passed years ago is asked again at every start.** A package outlives
 //     the build it was installed on, and an upgrade that drops or renames a joint leaves a
 //     valid fork shadowing an upgraded builtin with nothing re-validating it - which is a
@@ -112,6 +120,14 @@
 //   node tools/effect-check.mjs --mutate the-gate-runs-before-the-bind   # must FAIL
 //   node tools/effect-check.mjs --mutate the-aside-keeps-the-whole-name  # must FAIL
 //   node tools/effect-check.mjs --mutate a-refused-body-is-a-failed-read # must FAIL
+//   node tools/effect-check.mjs --mutate the-gate-never-re-asks-the-set  # must FAIL
+//   node tools/effect-check.mjs --mutate door-takes-an-array-binding     # must FAIL
+//   node tools/effect-check.mjs --mutate hostdriven-takes-any-name       # must FAIL
+//   node tools/effect-check.mjs --mutate door-takes-any-manifest         # must FAIL
+//   node tools/effect-check.mjs --mutate a-refusal-moves-no-generation   # must FAIL
+//   node tools/effect-check.mjs --mutate door-takes-a-gates-nothing-reads # must FAIL
+//   node tools/effect-check.mjs --mutate a-link-failure-is-not-quarantined # must FAIL
+//   node tools/effect-check.mjs --mutate any-failure-is-quarantined      # must FAIL
 //
 // It spawns its own server on a port nothing else in the suite uses and needs none
 // running. A GPU browser, a free port 8281, no capture, no sensor and no ffmpeg.
@@ -321,12 +337,106 @@ const MUTATIONS = {
    * failure where three.js puts it: a line in a console nobody has open. The install
    * succeeds, the document is carried across, the poll announces that the page has been
    * rebuilt from the new effects, and the cloud renders nothing at all.
+   *
+   * **The whole statement is anchored rather than its first line**, which is worth a
+   * sentence because the anchor had to move once already. It used to quote a bare
+   * `throw new Error(...)`, and the throw is a marked one now - `reloadEffects` reads
+   * `shaderLinkFailure` to decide which failures may reach the refusal route, and a
+   * classification that matched words in the sentence is what `effectRefusal`'s own comment
+   * rejects by name, so the mark had to be minted here where the difference is known. Taking
+   * the statement whole is what leaves nothing of it behind: a replacement that swapped only
+   * the first line would leave a live call to the minter standing under a `void`, which
+   * builds an error and does nothing with it and reads to the next person like code that
+   * still matters.
    */
   'a-broken-shader-is-warm': {
     file: 'web/main.js',
     edits: [[
-      "    throw new Error(`this build's shaders did not compile after the effects changed - ${linkFailures[0]}`);",
-      "    console.warn(`shaders did not compile: ${linkFailures[0]}`);",
+      "    throw shaderLinkFailure(\n"
+      + "      `this build's shaders did not compile after the effects changed - ${linkFailures[0]}`,\n"
+      + '      linkFailures[0],\n'
+      + '    );',
+      '    console.warn(`shaders did not compile: ${linkFailures[0]}`);',
+    ]],
+  },
+
+  /**
+   * `door-takes-a-gates-nothing-reads` drops the pair of rules that ask whether a `gates`
+   * binding lands something the gate can actually read, which is how the door shipped. Both
+   * shapes then install cleanly and the promise the author made is about nothing: a gating
+   * binding on the point cloud is collected by no walk, and a gating binding through `axisDeg`
+   * puts a `Vector2` where a number belongs, which held the grade pass shut for the life of the
+   * page under the comparison `gradeNeeded` used to make and holds it open forever under the one
+   * it makes now.
+   *
+   * Written from `server/effect-door.js`'s side because that is where the refusal is, and aimed
+   * at the `if (bind.gates)` that guards both halves rather than at either sentence, so one
+   * mutation takes the whole rule away. Reddens **one** row, measured - section 2's hostile
+   * sweep - and the row now names both fixtures rather than the first of them, which is what
+   * makes a single mutation over two rules readable at all.
+   */
+  'door-takes-a-gates-nothing-reads': {
+    file: 'server/effect-door.js',
+    edits: [[
+      '    if (bind.gates) {\n      if (bind.on',
+      '    if (false) {\n      if (bind.on',
+    ]],
+  },
+
+  /**
+   * `a-link-failure-is-not-quarantined` leaves the throw and the mark exactly where they are
+   * and drops the one call that acts on them, which is the build this fix was written to
+   * replace and is the state every green run before it was in. The page still refuses the
+   * package, still rolls back, still says which shader did not compile - and the package sits
+   * in the store afterwards, so the next browser to open compiles it at boot, where
+   * `warmPrograms` runs outside any transaction and takes the module down with it.
+   *
+   * **Reddens four rows, measured, all of them in section 9, and the third is the point.** The
+   * store still lists the package and there is no aside beside it, which is the mechanism; the
+   * fresh page comes back `no __kinect published: this build's shaders did not compile`, which
+   * is the damage; and the delete that follows answers 200 rather than 404, because the live
+   * copy is still there to remove. Without the fresh-page row a build that called the route
+   * and achieved nothing would pass everything above it.
+   */
+  'a-link-failure-is-not-quarantined': {
+    file: 'web/main.js',
+    edits: [[
+      '  const setAside = failure?.shaderLinkFailure\n'
+      + '    ? await setAsideUnlinkable(heldPackages, fetched, failure.linkLog)\n'
+      + '    : null;',
+      '  const setAside = null;',
+    ]],
+  },
+
+  /**
+   * `any-failure-is-quarantined` keeps the call and drops the mark test, so every failure the
+   * rollback catches reaches the refusal route. That is the direction this fix does damage in
+   * rather than merely fails in, and it is the harder half to notice: the page behaves
+   * correctly in every reading a person takes of it - the refusal is right, the sentence is
+   * right, the rollback is right - and a package nothing is wrong with has been renamed out of
+   * the way behind all of it.
+   *
+   * The failure it turns loose is the one section 6 provokes on purpose: install a fork that
+   * *adds* a parameter while a document holds that effect, and the per-effect completeness
+   * rule refuses the subset. Nothing about the package is wrong there; what could not be done
+   * is carrying *this document* onto it, and the operator's next move - opening a document
+   * that names the new parameter - would have worked.
+   *
+   * **Reddens three rows, measured, and only the first is the finding.** Section 6's asks the
+   * store whether the fork is still installed and comes back `GET /effects/probe answered 404,
+   * user root holds probe.<seq>.incompatible` - a package renamed out of the way for a fault
+   * in a clip, which is the whole of what this mutation is about. The two under it are section
+   * 9's and are the fixture carrying forward rather than a second finding: both of them key on
+   * there being exactly one `probe.*.incompatible` in the user root, and section 6's innocent
+   * aside is sitting beside section 9's real one. Everything else in section 9 stays green -
+   * the store still drops the package and the generation still moves by one - which is what
+   * makes those two a count going wrong rather than a second thing being found.
+   */
+  'any-failure-is-quarantined': {
+    file: 'web/main.js',
+    edits: [[
+      '  const setAside = failure?.shaderLinkFailure\n',
+      '  const setAside = failure\n',
     ]],
   },
 
@@ -647,6 +757,112 @@ const MUTATIONS = {
    * the pair of rows still sees a number move, on a store that has stopped counting half of
    * what it does.
    */
+  /**
+   * `the-gate-never-re-asks-the-set` puts the boot gate back to validating each candidate and
+   * never re-asking the packages it has already accepted, which is how it shipped. That reads
+   * as sufficient and is not: `doorRefusal` walks the *candidate's* chunks for names this build
+   * has not got and `forkRefusal` catches a dropped parameter, so a fork that stops declaring a
+   * varying its neighbour reads is correct about everything the gate asks it. It is promoted,
+   * it shadows the shipped package, and the neighbour's program stops linking.
+   *
+   * Reddens **five** rows, measured. Four of them are section 15 and are what this is about:
+   * the fork stands, the aside is not there, the log says nothing, and the page opened on that
+   * store publishes no `__kinect` at all - the last of those is the finding and the three above
+   * it are how it got there. The must-accept row beside them stays green, because a gate that
+   * quarantines nothing leaves the healthy glyph fork alone too, and that is exactly what makes
+   * it a control for over-refusal rather than for this.
+   *
+   * **The fifth is a cascade into section 16 and this comment said four until it was counted.**
+   * That section drives the refusal route against a store section 15 was supposed to have
+   * cleaned up, so with the rain fork still standing its row about the shipped set being all
+   * that is left sees a user package and reddens. It is a consequence of the fixture surviving
+   * rather than a second finding, and it is written down because a comment naming which rows
+   * catch a mutation is a claim like any other.
+   */
+  'the-gate-never-re-asks-the-set': {
+    file: 'server/effect-store.js',
+    edits: [[
+      '        if (!refusal) {\n          const resulting = new Map([...builtins, ...survivors]);',
+      '        if (false) {\n          const resulting = new Map([...builtins, ...survivors]);',
+    ]],
+  },
+
+  /**
+   * `door-takes-an-array-binding` drops the rule that a binding may not aim at an array,
+   * leaving the shape rule beside it. The two are not the same question: three.js takes its
+   * uploader off the declaration, so an array uniform is handed the array setter and one
+   * number, and the write succeeds into a cell no shader reads.
+   *
+   * Aimed at the refusal rather than at the reading that finds the dimension, because those
+   * two fail differently and `test/effect-door.test.mjs` separates them: with the reading
+   * undone the door accepts the package outright, and with only the refusal gone it refuses
+   * under the shape sentence instead.
+   *
+   * So this reddens **one** row, measured - the refusal row, on the sentence rather than on the
+   * acceptance - and the residue row beside it stays green, because the shape rule catches the
+   * package a few lines later and it never reaches disk. This comment said two until it was
+   * counted, on the assumption that a mutation of a refusal means a package lands. The one that
+   * would land is the reading, and the reading has no mutation here because
+   * `door-takes-any-manifest` and the bare-node rows already carry that shape.
+   */
+  'door-takes-an-array-binding': {
+    file: 'server/effect-door.js',
+    edits: [['    if (arrayed.length) {', '    if (false) {']],
+  },
+
+  /**
+   * `hostdriven-takes-any-name` puts back the door that let a package list any uniform at all
+   * as host-driven. `hostDriven` is the one exemption from the rule that something has to write
+   * every uniform a package declares, and an exemption a package issues itself is the rule
+   * gone: the shader reads zero for the life of the page and no control exists that could
+   * have moved it.
+   *
+   * Reddens **two** rows of section 2, measured - the refusal and the residue, because nothing
+   * else in this door has anything to say about the package and it lands on disk. The sweep
+   * after them is what keeps it to two rather than carrying an installed fixture into section 3.
+   */
+  'hostdriven-takes-any-name': {
+    file: 'server/effect-door.js',
+    edits: [['    if (!HOST_DRIVEN_UNIFORMS.includes(u)) {', '    if (false) {']],
+  },
+
+  /**
+   * `door-takes-any-manifest` drops the bound on the manifest, leaving the three that count
+   * chunk text. A package can repeat a correct *parameter* rather than a correct chunk, so
+   * those three see a small package while the store writes and hashes megabytes on every read
+   * and every open page builds a control per parameter. Reddens **two** rows of section 2,
+   * measured - the refusal and the residue, because the package lands on disk - on the same
+   * argument `door-takes-any-expansion` does, and the sweep after them keeps it to two.
+   */
+  'door-takes-any-manifest': {
+    file: 'server/effect-door.js',
+    edits: [['  if (manifestBytes > MAX_MANIFEST_BYTES) {', '  if (false) {']],
+  },
+
+  /**
+   * `a-refusal-moves-no-generation` stops the refusal route counting itself as a change of the
+   * store. A set-aside id stops resolving from the user root and starts answering from the
+   * builtin, and the page that just called the route is sitting on a rolled-back set waiting
+   * for the next poll to hand it a working one - so a store that does not move the number is
+   * a page whose recovery depends on the revisions happening to differ. Reddens one row of
+   * section 16 and leaves the three beside it green, because the rename still happens.
+   *
+   * **Re-anchored once, and where it moved to is the mutation reading better than it did.** It
+   * used to quote `EFFECTS.generation += 1` in the route, and the bump has since moved into
+   * `setAsideForClient` so that the store's own history has one writer rather than a route
+   * reaching into a field it does not own. Anchored on the assignment beside the rename it
+   * belongs to, which is also what keeps it distinct from the two `store-generation-never-moves`
+   * edits: three assignments of that field now exist in one file and each is quoted with the
+   * line above it.
+   */
+  'a-refusal-moves-no-generation': {
+    file: 'server/effect-store.js',
+    edits: [[
+      "    if (!this.setAside(id, reason)) return 'stuck';\n    this.generation += 1;",
+      "    if (!this.setAside(id, reason)) return 'stuck';",
+    ]],
+  },
+
   'store-generation-never-moves': {
     file: 'server/effect-store.js',
     edits: [
@@ -1300,10 +1516,18 @@ try {
     // must-accept control; what these rows add is that the refusal happens on disk, through
     // the route, and leaves nothing behind.
     ['one joint naming one file over and over', 'probe', bent((p) => {
-      // The reported shape: a thousand descriptors over one 493-byte chunk, which carries
+      // The reported shape was a thousand descriptors over one 493-byte chunk, which carries
       // 493 bytes and asks a driver to compile half a megabyte. It is refused for being a
-      // repeat rather than for being large, so the count here is about reaching the rule.
-      for (let i = 0; i < 1000; i++) p.manifest.chunks.push({ stage: 'f.tone', order: 500 + i, file: 'tone.frag.glsl' });
+      // repeat rather than for being large, so the count here is only about reaching the rule.
+      //
+      // **Fifty rather than a thousand, and the reduction is a measured finding rather than
+      // tidying.** A descriptor costs about ninety bytes in the manifest, so the thousand-entry
+      // fixture arrived as a 90,623-byte manifest - past the bound this door now puts on that,
+      // which fires several rules earlier. The row went red naming the manifest size, on a
+      // build where both rules were working: the fixture had stopped reaching the rule it is
+      // named after. Fifty descriptors is about 6KB of manifest, comfortably inside every bound
+      // here and outside none, so what refuses it is the repeat and nothing else.
+      for (let i = 0; i < 50; i++) p.manifest.chunks.push({ stage: 'f.tone', order: 500 + i, file: 'tone.frag.glsl' });
     }), /spliced into "f\.tone" twice/],
     ['a manifest asking for more assembled text than it carries', 'probe', bent((p) => {
       // Sixty distinct files of three kilobytes on two stages each: 62 files and about 180KB
@@ -1324,23 +1548,106 @@ try {
     ['a bound finer than this build\'s own rounding can write', 'probe', bent((p) => {
       p.manifest.params.hue.min = 1e-101;
     }), /declares min as 1e-101, which needs 100 decimal places/],
+    // **A binding aimed at an array, which passed the shape rule by being read without its
+    // dimension.** `uniform float probeWeights[4]` came back as `probeWeights` declared
+    // `float`, which is exactly what a plain binding asks for - and three.js takes its
+    // uploader off the declaration, so the array setter is handed one number. The write
+    // succeeds and the shader goes on reading whatever the array held.
+    ['a parameter bound to an array uniform', 'probe', bent((p) => {
+      p.chunks['decl.frag.glsl'] = 'uniform float probeAmount, probeHue;\nuniform float probeWeights[4];\n';
+      p.manifest.params.weights = {
+        def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', label: 'probe weights',
+        panel: { group: 'probe', tab: 'look' },
+        bind: { on: 'points', uniform: 'probeWeights' },
+        under: 'amount',
+      };
+    }), /no array kind/],
+    // **A package excusing itself from the rule that something has to write every uniform.**
+    // `hostDriven` is the one exception to it, and while the door took any name at all the
+    // exception was self-issued: nothing in this build writes `probeClock`, so the shader
+    // reads zero for the life of the page with no control anywhere that could move it.
+    ['a host-driven uniform this build\'s render loop does not write', 'probe', bent((p) => {
+      p.chunks['decl.frag.glsl'] = 'uniform float probeAmount, probeHue, probeClock;\n';
+      p.manifest.hostDriven = ['probeClock'];
+    }), /this build's render loop writes "rainPhase"/],
+    // **And the size of the manifest itself, which the three bounds above cannot see.** They
+    // count chunk text; this package repeats a correct *parameter* rather than a correct
+    // chunk. Two hundred of them is about 60KB of manifest arriving with the same two small
+    // files of GLSL, inside every rule in this door and inside the four megabytes the server
+    // takes as a body - and the store then writes it, hashes it on every read, and every open
+    // page builds a control per parameter out of it.
+    ['a manifest that is enormous and carries almost no GLSL', 'probe', bent((p) => {
+      for (let i = 0; i < 200; i++) {
+        p.manifest.params[`k${i}`] = {
+          def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', label: `probe knob number ${i}`,
+          panel: { group: 'probe', tab: 'look' },
+          bind: { on: 'points', uniform: 'probeHue' },
+          under: 'amount',
+        };
+      }
+    }), /carries a manifest of \d+ bytes/],
+    // **A `gates` the gate can never read, in both of the shapes that reach it.** `gates` is a
+    // promise about the *uniform* rather than a flag on the parameter: `gradeNeeded` in
+    // `web/main.js` walks the gating bindings, reads the cell each names and holds the grade
+    // pass open while any is not zero. So the promise is about nothing unless the binding lands
+    // a number on the table that walk reads.
+    //
+    // The first fixture binds on the point cloud, whose uniforms `gradeGatesOf` never collects,
+    // so the author has said their term holds the pass open and the pass has never heard of it.
+    // The second lands a `Vector2` - `axisDeg` writes a sine and a cosine, which is a direction
+    // and never the zero vector - and it is the one whose *symptom moved under an unrelated
+    // fix*: against `> 0` the pass stayed shut for the life of the page, and against the
+    // `!== 0` that predicate is now, an object is never strictly equal to zero, so the pass
+    // runs full-screen forever. Neither reading of the comparison is wrong, which is exactly
+    // why the pair is refused at the door rather than given a meaning in the page.
+    //
+    // `scanAxis` because it is a `vec2` some installed program declares, which is what gets
+    // this fixture past the uniform rule and down to the one it is named after; a package
+    // binding a neighbour's uniform is legal here and most of what ships does it.
+    ['a gating binding on a table the gate never reads', 'probe', bent((p) => {
+      p.manifest.params.hue.bind.gates = true;
+    }), /declares gates and binds on "points"/],
+    ['a gating binding whose value is a direction rather than an amount', 'probe', bent((p) => {
+      p.manifest.params.hue.bind = {
+        on: 'grade', uniform: 'scanAxis', transform: 'axisDeg', gates: true,
+      };
+      p.chunks['decl.frag.glsl'] = 'uniform float probeAmount;\n';
+    }), /declares gates beside the axisDeg transform/],
   ];
 
   let refusedCount = 0;
-  let wrongReason = null;
+  // **Every fixture that answered with the wrong rule, and this used to keep only the first.**
+  // The row makes one claim per hostile package - each is refused *by the rule it is named
+  // after* - so a row that can report one violation of N is a row that cannot say which of its
+  // claims failed. What that costs is not tidiness: a refusal added to the door can fire ahead
+  // of several existing fixtures at once, and with only the first reported the loop is see one,
+  // fix it, re-run, see the next. It happened here - a new bound on manifest size caught a
+  // thousand-descriptor fixture before it reached the repeat rule it is named after - and
+  // recovering the attribution cost a two-arm experiment that the list below would have
+  // answered outright.
+  const wrongReasons = [];
   let residue = null;
   for (const [what, id, body, matches] of hostile) {
     const answer = await put(id, body);
     if (answer.status === 409 && matches.test(answer.body.error ?? '')) refusedCount++;
-    // Truncated, because a door that accepted one of these answers with the whole package it
-    // just stored - and one of the fixtures here carries sixty files, so an un-cut detail
-    // line buries the row name that says which rule stopped firing under a wall of revisions.
-    else wrongReason ??= `${what}: ${answer.status} ${(answer.body.error ?? JSON.stringify(answer.body)).slice(0, 200)}`;
+    // Truncated per entry, because a door that accepted one of these answers with the whole
+    // package it just stored - and one of the fixtures here carries sixty files, so an un-cut
+    // detail line buries the row name that says which rule stopped firing under a wall of
+    // revisions. Cut harder now that several can be printed at once, since the useful part of
+    // a door's sentence is its opening clause and the row has to stay one line.
+    else wrongReasons.push(`${what}: ${answer.status} ${(answer.body.error ?? JSON.stringify(answer.body)).slice(0, 120)}`);
     const held = userRootHolds();
     if (held.length !== 0) residue ??= `${what} left ${held.join(', ')}`;
   }
+  // The count stays in the row's name rather than only in its detail, because it is what
+  // separates a tool that has gone stale from a build that has broken: a run naming 22 rules
+  // against a tree carrying 25 is a fixture list nobody updated, and that reading is available
+  // before anybody looks at which of them failed.
   ok(`every hostile package is refused with the sentence for its own rule - ${hostile.length} rules`,
-    refusedCount === hostile.length, wrongReason ?? `${refusedCount} of ${hostile.length}`);
+    refusedCount === hostile.length,
+    wrongReasons.length
+      ? `${wrongReasons.length} of ${hostile.length} answered with the wrong rule - ${wrongReasons.join(' | ')}`
+      : `${refusedCount} of ${hostile.length}`);
   ok('and none of them reaches the filesystem: no package, no .tmp, no .old left behind',
     residue === null, residue ?? `user root ${userRootHolds().join(', ') || 'empty'}`);
   // **Swept after the row that measures it, so a caught mutation cannot become a crash five
@@ -1765,6 +2072,21 @@ try {
   ok('and the signature with it, so nothing is left claiming to be assembled from a set it refused',
     afterFork.signature === beforeFork.signature,
     afterFork.signature === beforeFork.signature ? 'unchanged' : 'the page moved to the new set');
+  // **And the fork is still installed, which is the one thing in this rollback that is about
+  // the store rather than about this page.** Section 9 has the page ask the store to set a
+  // package aside when a program will not link, and this is the refusal that must never reach
+  // that route: what failed here is the completeness rule, which is a fact about the pairing
+  // of *this document* with that manifest and says nothing whatever about the package. A
+  // build that quarantined on it would rename somebody's authored fork out of the way because
+  // one clip on one machine could not be carried onto it - and the operator's next move,
+  // opening a document that does not name `probe.glow`, would have worked. The mark on the
+  // throw is what separates the two and `any-failure-is-quarantined` is the mutation that
+  // takes it away.
+  const forkStanding = await getJson('/effects/probe');
+  ok('and the fork is still installed, because a page that could not carry its document across has said nothing about the package',
+    forkStanding.status === 200 && forkStanding.body.builtin === false
+      && !userRootHolds().some((name) => /^probe\..+\.incompatible$/.test(name)),
+    `GET /effects/probe answered ${forkStanding.status}, user root holds ${userRootHolds().join(', ') || 'nothing'}`);
   ok('the parked pool is exactly what it was: the same values, the same track, the same entry',
     JSON.stringify(afterFork.pool) === JSON.stringify(beforeFork.pool),
     `${Object.keys(afterFork.pool.params).length} values, ${Object.keys(afterFork.pool.tracks).length} tracks`);
@@ -2455,6 +2777,10 @@ try {
   const broken = await put('probe', brokenProbe());
   ok('the server takes it: every name in it is one this build has, which is all the door can ask',
     broken.status === 200, `${broken.status}: ${broken.body.error ?? 'installed'}`);
+  // The store as it stands with the package in it, read before the page is asked to adopt it,
+  // because the quarantine below is a change to *this* and the only honest way to say a
+  // counter moved is to have read it on the other side of the thing that moves it.
+  const stored = await getJson('/effects');
 
   const refused = await page.evaluate(async () => {
     const k = globalThis.__kinect;
@@ -2481,6 +2807,63 @@ try {
     `${refused.names.length} parameters, the signature ${refused.signatureHeld ? 'held' : 'moved'}, `
     + `the broken line ${refused.shader ? 'reached the assembled program' : 'did not'}`);
 
+  // **And then the half of this that is not about this page at all.** Rolling back puts this
+  // browser right and leaves the package exactly where it was, so the next browser to open
+  // compiles it at boot - where `warmPrograms` runs outside any transaction and takes the
+  // module down with it, publishing no `__kinect` and leaving every tool in this suite
+  // reporting that it did not run. Nothing on the server can see that coming, because the
+  // door assembles and binds and is not a compiler: the only process in this program holding
+  // a GL context is the page that just failed, which is why quarantining is something the
+  // page does rather than something done to it. `setAsideUnlinkable` in `web/main.js` is the
+  // caller and `serveEffectRefusal` in `server/index.js` is the route.
+  //
+  // **Only a link failure may do this, which is the constraint the row in section 6 holds.**
+  // The same rollback catches a document this page could not carry across, and setting a
+  // package aside for one of those would rename authored work out of the way for a fault in a
+  // clip - so the throw carries a mark and the caller reads it. `any-failure-is-quarantined`
+  // is the mutation for that direction and it reddens there rather than here.
+  const afterRefusal = await getJson('/effects');
+  const asides = userRootHolds().filter((name) => /^probe\..+\.incompatible$/.test(name));
+  ok('the page has the store set the package aside, so the id stops answering with something that will not compile',
+    (afterRefusal.body.effects ?? []).every((e) => e.id !== 'probe')
+      && afterRefusal.body.generation === stored.body.generation + 1
+      && asides.length === 1,
+    `${(afterRefusal.body.effects ?? []).length} packages, generation ${stored.body.generation} -> `
+    + `${afterRefusal.body.generation}, user root holds ${userRootHolds().join(', ') || 'nothing'}`);
+  // Renamed and never deleted, for the reason the boot gate's aside is: a package that will
+  // not compile on this build is somebody's authored work and a fork is repairable. The files
+  // are counted rather than trusted, because a rename that dropped one would leave a
+  // directory nobody can move back and every reading above would still be green.
+  ok('and renamed rather than deleted, with every file it arrived with still in it',
+    asides.length === 1
+      && readdirSync(join(USER_ROOT, asides[0])).sort().join(', ') === 'decl.frag.glsl, manifest.json, tone.frag.glsl',
+    asides.length === 1
+      ? `${asides[0]} holds ${readdirSync(join(USER_ROOT, asides[0])).sort().join(', ')}`
+      : `${asides.length} asides in the user root`);
+  // **The row the two above exist for, and the one thing neither of them can say.** A store
+  // that answered perfectly would still be beside the point if the surface it feeds did not
+  // come up, and coming up is exactly what the quarantine is for: this is the fresh load that
+  // was dying, asked of a browser rather than of a route. Without it a build that called the
+  // route and achieved nothing would pass both rows above.
+  const freshPage = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  const freshErrors = [];
+  freshPage.on('pageerror', (e) => freshErrors.push(String(e)));
+  await freshPage.goto(`${BASE}/record`, { waitUntil: 'load' }).catch(() => {});
+  const freshBooted = await freshPage.waitForFunction('Boolean(globalThis.__kinect)', null, { timeout: 20000 })
+    .then(() => freshPage.evaluate(() => !globalThis.__kinect.params.names().includes('probe.amount')))
+    .catch(() => null);
+  ok('and a page opened fresh on that store boots, which is what the package surviving the rollback used to stop',
+    freshBooted === true,
+    freshBooted === null
+      ? `no __kinect published: ${freshErrors[0]?.slice(0, 130) ?? 'nothing arrived on the page error channel'}`
+      : `__kinect published, probe.amount ${freshBooted ? 'absent from' : 'in'} the registry`);
+  await freshPage.close();
+
+  // And the page that discovered it, converging on the store it just changed. The delete this
+  // row used to open with has gone: the quarantine has already taken the live copy out of the
+  // user root, so there is nothing left to remove and `DELETE /effects/probe` answers 404 -
+  // which is the state being *left* rather than a failure, and is asked for here so a build
+  // that quarantined nothing cannot reach this row's green through the old route.
   const mended = await del('probe');
   const mendedPage = await page.evaluate(async () => {
     const k = globalThis.__kinect;
@@ -2488,9 +2871,13 @@ try {
     try { await k.effects.reload(); } catch (err) { threw = String(err.message); }
     return { threw, knows: k.params.names().includes('probe.amount') };
   });
-  ok('and taking the package back off restores the page, so a build that cannot compile is a state to leave rather than one to be stuck in',
-    mended.status === 200 && mendedPage.threw === null && mendedPage.knows === false,
-    mendedPage.threw ?? 'the page rebuilt without it');
+  ok('and the page rebuilds from what is left, so a build that cannot compile is a state to leave rather than one to be stuck in',
+    mended.status === 404 && mendedPage.threw === null && mendedPage.knows === false,
+    `DELETE answered ${mended.status}, ${mendedPage.threw ?? 'the page rebuilt without it'}`);
+  // The aside swept, so the sections below stage their fixtures into the user root this one
+  // found rather than into one carrying a leftover from section 9. The rows above are the
+  // proof that it was there; keeping it would be a coupling nothing states.
+  if (asides.length === 1) rmSync(join(USER_ROOT, asides[0]), { recursive: true, force: true });
 
   // ---- and a package that never went through the door at all
   //
@@ -3221,6 +3608,205 @@ try {
     afterShapeless.status === 200 && adoptedAfter === true,
     `${afterShapeless.status}: ${afterShapeless.body.error ?? 'installed'}, and the page `
     + `${adoptedAfter ? 'adopted it' : 'never adopted it'}`);
+
+  await browser.close();
+  browser = null;
+
+  // ============ 15. a fork that is correct about itself and wrong about the set
+  //
+  // **Section 12 asks whether the gate refuses a package this build cannot assemble. This
+  // asks the half that is not about the package at all.** The gate validated each candidate
+  // against the packages standing beside it and never re-asked those packages afterwards, so
+  // a shadow could be promoted and take one of them down: `doorRefusal` walks the
+  // *candidate's* chunks for names this build has not got, and `forkRefusal` catches a fork
+  // that dropped a parameter, and neither of them looks at a varying the fork stopped
+  // declaring.
+  //
+  // So the fixture is a `rain` fork with `vRain` gone and its own two references to it edited
+  // out. Nothing about the package is wrong - clean chunks, every parameter kept, the door
+  // answers null - and the builtin glyph goes on reading `vRain` out of its
+  // `index.frag.glsl` with nothing anywhere declaring it. The cloud program does not link,
+  // `web/main.js` throws while it is still evaluating, and no `__kinect` publishes.
+  //
+  // **`test/effect-store-gate.test.mjs` holds the same property under bare node and this is
+  // not that row twice.** That one reads directories; this one is the failure itself - a page
+  // that has to come up on the store the gate settled, which is the only reading that says
+  // the quarantine was for the right reason. And it is reached through the real server, with
+  // the real restart, on the tree this tool staged.
+  console.log('\n[effect] 15. a fork that is correct about itself and takes its neighbour down');
+
+  await stopAll();
+  for (const held of userRootHolds()) rmSync(join(USER_ROOT, held), { recursive: true, force: true });
+
+  // The healthy fork is `glyph` and it is the package the rain fork actually breaks, which
+  // makes it the one a gate with the attribution backwards would blame: it is the package
+  // whose chunk the door reports the missing name against. It has to be standing at the end.
+  const healthyGlyph = JSON.parse(readFileSync(join(BUILTIN_ROOT, 'glyph/manifest.json'), 'utf8'));
+  healthyGlyph.version = '2.0.0';
+  const glyphFork = join(USER_ROOT, 'glyph');
+  mkdirSync(glyphFork, { recursive: true });
+  writeFileSync(join(glyphFork, 'manifest.json'), `${JSON.stringify(healthyGlyph, null, 2)}\n`);
+  for (const c of healthyGlyph.chunks ?? []) {
+    writeFileSync(join(glyphFork, c.file), readFileSync(join(BUILTIN_ROOT, 'glyph', c.file), 'utf8'));
+  }
+
+  const strippedRain = JSON.parse(readFileSync(join(BUILTIN_ROOT, 'rain/manifest.json'), 'utf8'));
+  strippedRain.version = '2.0.0';
+  strippedRain.varyings = [];
+  const rainFork = join(USER_ROOT, 'rain');
+  mkdirSync(rainFork, { recursive: true });
+  writeFileSync(join(rainFork, 'manifest.json'), `${JSON.stringify(strippedRain, null, 2)}\n`);
+  for (const c of strippedRain.chunks ?? []) {
+    const shipped = readFileSync(join(BUILTIN_ROOT, 'rain', c.file), 'utf8');
+    writeFileSync(join(rainFork, c.file), c.file === 'cell.vert.glsl'
+      ? shipped.replace(/^.*\bvRain\b.*$/gm, '  // the varying this fork dropped')
+      : shipped.replace(/fract\(vRain\)/g, '0.5'));
+  }
+  writeFileSync(join(rainFork, 'witness.marker'), 'the author\'s own copy of a fork this build cannot keep\n');
+
+  ok('a fork with nothing wrong with it and a fork that drops a varying its neighbour reads are both staged',
+    existsSync(join(rainFork, 'manifest.json')) && existsSync(join(glyphFork, 'manifest.json'))
+      && !/vRain/.test(readFileSync(join(rainFork, 'cell.vert.glsl'), 'utf8')),
+    `user root holds ${userRootHolds().join(', ')}`);
+
+  await start();
+
+  const settledRain = await getJson('/effects/rain');
+  ok('the fork that broke its neighbour is the one set aside, and the id answers from the shipped package again',
+    settledRain.status === 200 && settledRain.body.builtin === true,
+    `answered ${settledRain.status}, builtin=${settledRain.body.builtin}, `
+    + `version ${JSON.stringify(settledRain.body.manifest?.version)}`);
+  // **The must-accept row, and it is the one the row above is silent about.** A gate that
+  // quarantined both would satisfy it: rain would answer from the builtin, and a page would
+  // come up.
+  const settledGlyph = await getJson('/effects/glyph');
+  ok('and the fork it broke is left exactly where it was, because the package that changed is the package that goes',
+    settledGlyph.status === 200 && settledGlyph.body.builtin === false
+      && settledGlyph.body.manifest?.version === '2.0.0',
+    `answered ${settledGlyph.status}, builtin=${settledGlyph.body.builtin}, `
+    + `version ${JSON.stringify(settledGlyph.body.manifest?.version)}`);
+  const rainAsides = userRootHolds().filter((n) => /^rain\..*\.incompatible$/.test(n));
+  ok('the fork is renamed aside rather than deleted, with the author\'s own file still in it',
+    rainAsides.length === 1 && existsSync(join(USER_ROOT, rainAsides[0], 'witness.marker')),
+    `user root holds ${userRootHolds().join(', ') || 'empty'}`);
+  ok('and the start said which package it could no longer assemble, rather than only which one it moved',
+    /effect rain was installed by an earlier build/.test(serverLog)
+      && /can no longer assemble glyph/.test(serverLog) && /vRain/.test(serverLog),
+    (serverLog.split('\n').find((l) => /^effect rain/.test(l))
+      ?? `nothing about rain in ${serverLog.length} bytes of server log`).slice(0, 170));
+
+  // **The row the four above exist for**, on the same argument section 12 makes: everything
+  // so far is HTTP against a store, and the failure this gate is about is the assembler
+  // throwing while `web/main.js` is still evaluating. A store that answered perfectly and a
+  // page that never published `__kinect` is the build this whole surface is arranged to
+  // prevent.
+  browser = await chromium.launch();
+  const settledPage = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  const settledErrors = [];
+  settledPage.on('pageerror', (e) => settledErrors.push(String(e)));
+  await settledPage.goto(`${BASE}/record`, { waitUntil: 'load' }).catch(() => {});
+  const settledBoot = await settledPage.waitForFunction('Boolean(globalThis.__kinect)', null, { timeout: 20000 })
+    .then(() => settledPage.evaluate(() => globalThis.__kinect.params.names().includes('rain.speed')))
+    .catch(() => null);
+  ok('and a page opened on the store the gate settled boots, which is the failure the whole pass is about',
+    settledBoot === true,
+    settledBoot === null
+      ? `no __kinect published: ${settledErrors[0]?.slice(0, 130) ?? 'nothing arrived on the page error channel'}`
+      : `__kinect published, rain.speed ${settledBoot ? 'in' : 'missing from'} the registry`);
+
+  // ============ 16. the route a page uses to say what it could not compile
+  //
+  // **This build has no GLSL compiler and the door is not one.** A package whose chunks name
+  // only identifiers this build has can still be GLSL that will not link - a missing brace, a
+  // `vec3` assigned to a `float` - and what that produces is a log line inside the driver.
+  // So the only thing in this program that ever learns a package cannot be compiled is a page
+  // that tried, and `POST /effect-refusals` is where it says so. Section 9 is the page half of
+  // this; these rows are the route's own contract, driven over HTTP, because a route that is
+  // only ever exercised through its one caller is a route whose skipped and refused answers
+  // nobody has read.
+  console.log('\n[effect] 16. the route a page uses to say a package would not compile');
+
+  const beforeRefuse = await getJson('/effects');
+  const quarantined = await fetch(`${BASE}/effect-refusals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: ['glyph', 'thermal', 'nosuchpackage'], reason: 'link failed:\n  not a compiler' }),
+  }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  ok('a page naming a package it could not compile has the user copy set aside, and the id answers from the builtin again',
+    quarantined.status === 200 && quarantined.body.setAside?.join(',') === 'glyph'
+      && (await getJson('/effects/glyph')).body.builtin === true,
+    `${quarantined.status}: set aside ${JSON.stringify(quarantined.body.setAside)}`);
+  // **An id with no user copy is skipped rather than quarantined, per id.** A page that failed to
+  // link has the ids it was assembling from and no reason to know which root each came out
+  // of, so a 4xx over the builtin in the list would leave it unable to tell which of the
+  // three went through. `setAside` renames inside the user root and nothing else, so a
+  // builtin is not a rule written into the route - it is the one thing the rename cannot
+  // reach.
+  ok('and a builtin and a name that is nowhere are each skipped with a reason rather than refusing the whole call',
+    quarantined.body.skipped?.length === 2
+      && quarantined.body.skipped.every((s) => /no copy of it in the user root/.test(s.why))
+      && quarantined.body.skipped.map((s) => s.id).sort().join(',') === 'nosuchpackage,thermal',
+    `skipped ${JSON.stringify(quarantined.body.skipped?.map((s) => s.id))}`);
+  const afterRefuse = await getJson('/effects');
+  ok('the store counts it as a change of its own, because what every open page is holding a listing of has moved',
+    afterRefuse.body.generation === beforeRefuse.body.generation + 1,
+    `generation ${beforeRefuse.body.generation} -> ${afterRefuse.body.generation}`);
+  ok('and the shipped set is all still there, so a route that renames one directory renamed one directory',
+    afterRefuse.body.effects?.length === beforeRefuse.body.effects.length
+      && (afterRefuse.body.effects ?? []).every((e) => e.builtin),
+    `${afterRefuse.body.effects?.length ?? 'no'} packages, `
+    + `${(afterRefuse.body.effects ?? []).filter((e) => !e.builtin).length} of them from the user root`);
+  // The reason is a page's own sentence off the network, so it is cut and flattened before it
+  // reaches a log line - a driver's link log is whatever the driver felt like emitting, and a
+  // newline in it is a forged line in somebody's terminal.
+  ok('the page\'s reason reaches the log as one line rather than as whatever a driver emitted',
+    /a page that adopted it reports that it does not compile: link failed: not a compiler/.test(serverLog),
+    (serverLog.split('\n').find((l) => /does not compile/.test(l)) ?? 'nothing in the log about it').slice(0, 150));
+
+  const noList = await fetch(`${BASE}/effect-refusals`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'x' }),
+  }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  const tooMany = await fetch(`${BASE}/effect-refusals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: new Array(afterRefuse.body.effects.length + 1).fill('glyph') }),
+  }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  ok('a body with no list and a list longer than the store has packages are both refused by name',
+    noList.status === 400 && tooMany.status === 400 && /not about this store/.test(tooMany.body.error ?? ''),
+    `${noList.status} and ${tooMany.status}: ${(tooMany.body.error ?? '').slice(0, 80)}`);
+  // **The route is a `write`, so it stands behind the same gate every other consequence does**,
+  // and a GET has to say what it takes rather than report itself as something that is not there.
+  const getRefuse = await fetch(`${BASE}/effect-refusals`);
+  const getRefuseSaid = (await getRefuse.json()).error ?? '';
+  const putRefuse = await fetch(`${BASE}/effect-refusals`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(probePackage()),
+  });
+  ok('the namespace answers for itself: a GET says what it takes, and a PUT does not install a package into it',
+    getRefuse.status === 405 && /takes POST/.test(getRefuseSaid)
+      && putRefuse.status === 405 && !userRootHolds().includes('effect-refusals'),
+    `GET ${getRefuse.status} "${getRefuseSaid.slice(0, 70)}", PUT ${putRefuse.status}, `
+    + `user root holds ${userRootHolds().join(', ') || 'nothing'}`);
+  // **And the id this route used to steal is an id like any other, which is the row the move
+  // out of `/effects/` exists for.** The route was `POST /effects/refuse` first, and the table
+  // is walked in order, so that literal outranked the `:id` entry beside it: a package
+  // genuinely called `refuse` was listed by `GET /effects` and then answered 405 when a page
+  // fetched it - `readEffectPackages` throwing, no `__kinect`, both surfaces dark - and it
+  // could not be uninstalled either, because the `DELETE` was 405 too. That is not the shape
+  // `/jobs/claim` gets away with beside `/jobs/:id`: a job id is minted by the queue and nobody
+  // can make a job called `claim`, while an effect id is a directory name and `mkdir` is the
+  // whole of what it takes. Reserving the word at the door was the first repair and it is the
+  // guard rather than the fix, so this asks the question the guard is about: install the
+  // package, read it back, see it listed, take it away again.
+  const asRefuse = await put('refuse', bent((p) => { p.manifest.id = 'refuse'; }));
+  const readRefuse = await getJson('/effects/refuse');
+  const listsRefuse = ((await getJson('/effects')).body.effects ?? []).some((e) => e.id === 'refuse');
+  const dropRefuse = await del('refuse');
+  ok('and a package genuinely called refuse installs, serves, lists and uninstalls, because nothing under /effects/ is claimed',
+    asRefuse.status === 200 && readRefuse.status === 200 && readRefuse.body.manifest?.id === 'refuse'
+      && listsRefuse === true && dropRefuse.status === 200 && !userRootHolds().includes('refuse'),
+    `PUT ${asRefuse.status}, GET ${readRefuse.status} for id ${JSON.stringify(readRefuse.body.manifest?.id)}, `
+    + `${listsRefuse ? 'listed' : 'not listed'}, DELETE ${dropRefuse.status}, `
+    + `user root holds ${userRootHolds().join(', ') || 'nothing'}`);
 
   await browser.close();
   browser = null;
