@@ -1,37 +1,15 @@
-// The full sweep, with the mutation list taken from each tool rather than written
-// down beside it.
-//
-// The list used to be four arrays in a shell script, and the step 7 fix round grew
-// library-check from 18 mutations to 37 - so that script would have run 59 of 78 and
-// printed "all caught", which is the shape of failure this repo keeps naming: a check
-// whose coverage claim is an assertion rather than something it enforces. Each tool
-// already refuses an unknown mutation with `have a, b, c`, so that refusal is the
-// enumeration and nothing has to agree with anything.
-//
-// Judged by failed-assertion count and never by exit code. A refused anchor, a
-// Playwright context destruction and a real catch all exit non-zero, so fails=0 is a
-// crash to investigate rather than a success to record - retried on the crash
-// signature alone and reported UNPROVEN otherwise.
-//
-//   node tools/sweep-all.mjs [--out <dir>]     # SWEEP_URL picks the server, :8080 by default
-//
-// It needs a running server and a browser, and it takes hours - this is the sweep a
-// merge waits on, not something to reach for while iterating.
+// The full sweep, with each tool's mutation list read out of the tool rather than written down
+// beside it: every tool refuses an unknown mutation with `have a, b, c`, so that refusal is the
+// enumeration. Judged by failed-assertion count and never by exit code, since a refused anchor,
+// a Playwright context destruction and a real catch all exit non-zero.
 
 import { spawn } from 'node:child_process';
 import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
-// Aliased because every promise in this file names its own `resolve`, and a path
-// helper that four callbacks quietly shadow is a trap for whoever edits it next.
+// Aliased because every promise in this file names its own `resolve`.
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StringDecoder } from 'node:string_decoder';
 
-// Both of these were absolute paths belonging to the session that wrote this file - a
-// worktree and a scratchpad that exist on one machine, for one afternoon. So the tool
-// ran nothing anywhere else, and the way it failed was to spawn `node tools/...` in a
-// directory that is not a checkout, which arrives as every mutation reporting UNPROVEN
-// rather than as a missing path. The repo is found from this file instead, because a
-// tool that lives in `tools/` already knows where the tree is.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const OUT = resolvePath(argv.includes('--out') ? argv[argv.indexOf('--out') + 1] : join(ROOT, '.sweep-all'));
@@ -41,12 +19,8 @@ const CRASH = 'Execution context was destroyed';
 const TOOLS = ['library', 'timeline', 'keyframe', 'export'];
 
 mkdirSync(OUT, { recursive: true });
-// The summary is written once, at the end. So a previous run's file sits here for
-// the whole of this one, and anything waiting on "does SUMMARY.txt say it is done"
-// is answered immediately by the run before - which is how a 78-mutation result
-// got read as this run's while it was 17 into 85. Removed up front so the
-// artifact cannot outlive the thing it describes: absent means running, present
-// means finished, and there is no third state that looks like the second.
+// Removed up front so the artifact cannot outlive the thing it describes: absent means running,
+// present means finished, and a previous run's file otherwise answers for this one.
 rmSync(join(OUT, 'SUMMARY.txt'), { force: true });
 
 function run(tool, args, timeoutMs = 900_000) {
@@ -56,13 +30,8 @@ function run(tool, args, timeoutMs = 900_000) {
       toolArgs.push('--take', TAKE);
     }
     const child = spawn('node', [`tools/${tool}-check.mjs`, ...toolArgs], { cwd: ROOT });
-    // Decoded through a StringDecoder rather than by concatenating Buffers. `out += c`
-    // calls toString() per chunk, so a multi-byte sequence straddling a chunk boundary
-    // becomes two replacement characters and the line it was on is corrupted - which
-    // would silently cost a `  FAIL ` match and report a mutation as uncaught. A stray
-    // byte in one of these logs already made a plain grep return nothing during the
-    // review, which is the same failure with the same consequence: a check that found
-    // nothing and a check nobody could read look identical to a counter.
+    // Decoded through a StringDecoder rather than by concatenating Buffers: a multi-byte sequence
+    // straddling a chunk boundary would corrupt the line and silently cost a `  FAIL ` match.
     const decoder = new StringDecoder('utf8');
     let out = '';
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
@@ -76,9 +45,7 @@ function run(tool, args, timeoutMs = 900_000) {
   });
 }
 
-// The refusal message is the enumeration. A tool that stopped refusing - or that
-// changed the wording - has to be noticed rather than silently yielding zero
-// mutations, so an unparseable refusal throws.
+// The refusal message is the enumeration, so an unparseable one throws rather than yielding no mutations.
 async function enumerate(tool) {
   const { out } = await run(tool, ['--mutate', '__enumerate__'], 60_000);
   const m = out.match(/unknown mutation __enumerate__ - have ([^\n]+)/);

@@ -1,6 +1,6 @@
-// Kinect v2 grabber: pulls depth + registered colour from libfreenect2 and writes
-// a length-framed binary stream to stdout. All logging goes to stderr so a stray
-// log line can never desync the frame stream.
+// Kinect v2 grabber: pulls depth + registered colour from libfreenect2 and writes a
+// length-framed binary stream to stdout. All logging goes to stderr, because a stray log
+// line on stdout would desync the frame stream.
 //
 //   [u32 magic 'KNCT'][u32 type][u32 payloadLen][payload]
 //
@@ -46,23 +46,16 @@ static const uint32_t TYPE_COLOR = 3;
 static const int CW = 1920;
 static const int CH = 1080;
 
-// What generation of this format the hello below declares. A magic says which reader
-// to use and a message type says which record this is; neither says what the numbers
-// inside it mean, and that is what changes: move the depth quantisation or the
-// registration path and every take written afterwards is structurally identical to
-// every take written before, so one geometry model runs over two archives and the
-// older half is silently reprojected wrong.
-//
-// **This is unavoidably a second spelling of a JavaScript number**, since the browser
-// cannot import a C++ constant and Node reads `web/format.js` by path. That file owns
-// the meaning - the three bands and what each opens - and `tools/syntax-check.mjs`
-// reads both values textually and requires them equal, which is what stops the two
-// drifting apart in the one direction nothing else would notice.
+// What generation of this format the hello declares: move the depth quantisation or the
+// registration path and one geometry model would run over two archives, reprojecting the
+// older half wrong. Unavoidably a second spelling of a JavaScript number, since the browser
+// cannot import a C++ constant and Node reads `web/format.js` by path - `tools/syntax-check.mjs`
+// requires the two equal.
 static const uint32_t CAPTURE_FORMAT = 1;
 
-// A corpus is deliberately not KNCT: the wire format carries u16 millimetre depth
-// and a JPEG, which are both lossy relative to what Registration::apply actually
-// consumes. Its own magic keeps the two from ever being read by the wrong reader.
+// A corpus is deliberately not KNCT: the wire format carries u16 millimetre depth and a
+// JPEG, both lossy relative to what Registration::apply consumes. Its own magic keeps the
+// two from ever being read by the wrong reader.
 static const uint32_t CORPUS_MAGIC = 0x4B435250; // 'KCRP'
 static const uint32_t CORPUS_VERSION = 1;
 
@@ -98,9 +91,8 @@ static bool write_all(int fd, const void *buf, size_t len) {
   return true;
 }
 
-// Corpus files are written whole and closed before the next frame is touched, so
-// a corpus interrupted mid-capture leaves complete frames rather than a trailing
-// half-frame the harness would have to guess about.
+// Corpus files are written whole and closed before the next frame is touched, so a corpus
+// interrupted mid-capture leaves complete frames rather than a trailing half-frame.
 static bool write_file(const std::string &path, const void *const *parts,
                        const size_t *lens, size_t n) {
   int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -115,13 +107,9 @@ static bool write_file(const std::string &path, const void *const *parts,
   return ok;
 }
 
-// **stdout has two writers, so framing a message is a critical section.** The frame
-// loop writes type 1 and type 2; the colour encoder thread below writes type 3. A
-// message is a header followed by its payload as two separate `write_all` calls over
-// a pipe that partial-writes at 64KB, so without this lock the two interleave - a
-// header claiming 215KB followed by the first 64KB of somebody else's depth grid.
-// The parser on the other end reads that as a desync and restarts the grabber, and
-// it would do it rarely, unreproducibly, and only once a webcam was attached.
+// stdout has two writers - the frame loop and the colour encoder thread - and a message is a
+// header plus a payload as two `write_all` calls over a pipe that partial-writes at 64KB.
+// Without this lock the two interleave and the parser reads a desync.
 static std::mutex g_writeMutex;
 
 static bool write_message(int fd, uint32_t type, const void *payload, uint32_t payloadLen) {
@@ -137,57 +125,32 @@ static uint64_t now_ms() {
   return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
-// The serial segments of the frame loop are single-digit milliseconds each and
-// the payload memcpy is well under one, so profiling needs microseconds - a
-// millisecond clock would quantise half the breakdown to zero.
+// Microseconds, because the serial frame-loop segments are single-digit milliseconds each
+// and a millisecond clock would quantise half the profile breakdown to zero.
 static uint64_t now_us() {
   using namespace std::chrono;
   return (uint64_t)duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
 /**
- * The webcam output's producer: the colour camera's own picture, encoded off the
+ * The webcam output's producer: the colour camera's own 1920x1080 picture, encoded off the
  * frame loop.
  *
- * **Why a second encode at all.** Type 2 already carries colour, but it carries the
- * *registered* colour - `Registration::apply`'s resample of the colour camera into
- * the depth camera's viewpoint. That image wears the depth camera's 70.6 degree
- * frustum rather than the colour camera's 84.1, and it is punched through with holes
- * wherever the depth solve returned nothing, because registration has no depth to
- * carry a colour sample on. It is a texture for a point cloud and not a picture of a
- * room, so a webcam has to start from the 1920x1080 frame instead.
- *
- * **Why its own thread.** A 1080p TurboJPEG encode at the same settings measures
- * 5.50ms mean on this machine - 90 real sensor frames over a six-second subscription,
- * no warmup discarded, zero busy drops, q80, TJSAMP_420, FASTDCT. The serial half of
- * the frame loop is 7.1ms against a 33ms budget with `Registration::apply` taking 6.3
- * of it, so encoding here would add the full encode to capture-to-wire latency for an
- * output most runs do not have attached. On its own thread the loop pays the copy
- * below and nothing else.
- *
- * **Why it copies rather than borrows.** The `Frame` handed in belongs to
- * libfreenect2's listener and is released when the next colour frame arrives. At
- * 30fps that is 33ms against a 5.50ms mean encode, so borrowing would be safe almost
- * always - and "almost always" is a data race that surfaces as a torn picture on a
- * dim-light run nobody can reproduce.
- *
- * **Drop-to-latest rather than a queue.** A colour frame arriving while the encoder
- * is busy overwrites the pending one. A queue would grow latency under exactly the
- * condition a live output cannot afford it, and a webcam wants the newest frame
- * rather than every frame.
+ * Type 2 carries the *registered* colour, which wears the depth camera's frustum and is
+ * punched through with holes wherever the depth solve returned nothing - a texture for a
+ * point cloud rather than a picture of a room, so a webcam has to start from the native
+ * frame. Its own thread because the encode is 5.50ms against a 7.1ms serial loop, and it
+ * copies rather than borrows because the `Frame` belongs to libfreenect2's listener and is
+ * released when the next colour frame arrives. A frame arriving while the encoder is busy
+ * overwrites the pending one, since a queue would grow latency on a live output.
  */
 class HdEncoder {
 public:
   explicit HdEncoder(int quality) : quality_(quality) {}
 
-  // **A joinable std::thread destroyed is `std::terminate`, not a leak**, and this class
-  // was one early `return` away from it the whole time: `main` calls `stop()` on the way
-  // out of the frame loop, but the corpus writer's `return 1` above it does not, so a
-  // full disk during `--dump-corpus` took the process out through an abort instead of
-  // through the exit code that says what happened. Idempotent, because `stop()` joins and
-  // a joined thread is no longer joinable - so the ordinary path still stops the encoder
-  // where it always did, at a point where the thread is quiescent rather than mid-encode,
-  // and this is only the net under the paths that never get there.
+  // A joinable std::thread destroyed is `std::terminate` rather than a leak, and the corpus
+  // writer's early `return 1` never reaches the `stop()` in `main`. Idempotent, because
+  // `stop()` joins and a joined thread is no longer joinable.
   ~HdEncoder() { stop(); }
 
   void start() { thread_ = std::thread(&HdEncoder::run, this); }
@@ -211,10 +174,6 @@ public:
   void submit(const uint8_t *bgrx, size_t bytes, uint64_t ts) {
     {
       std::lock_guard<std::mutex> lock(m_);
-      // An unconsumed frame still in the slot is one the encoder never got to, and
-      // it is counted rather than silently replaced: a webcam delivering 12fps off a
-      // 30fps sensor is a fact about this machine, and the alternative is somebody
-      // attributing it to the sensor.
       if (hasPending_) dropped_.fetch_add(1, std::memory_order_relaxed);
       pending_.assign(bgrx, bgrx + bytes);
       pendingTs_ = ts;
@@ -233,9 +192,8 @@ private:
     std::vector<uint8_t> work;
     std::vector<uint8_t> payload;
     unsigned char *buf = nullptr;
-    // Declared out here and never reset for the same reason the frame loop's is:
-    // TurboJPEG reads it as the capacity of the buffer it allocated last time, and
-    // zeroing it claims a zero-length buffer that the encode then runs off the end of.
+    // Never reset between encodes: TurboJPEG reads it as the capacity of the buffer it
+    // allocated last time, and zeroing it claims a zero-length buffer the encode runs off.
     unsigned long size = 0;
 
     for (;;) {
@@ -260,8 +218,6 @@ private:
       payload.resize(8 + (size_t)size);
       std::memcpy(payload.data(), &ts, 8);
       std::memcpy(payload.data() + 8, buf, (size_t)size);
-      // Through the same locked writer as everything else, which is what keeps this
-      // thread's 215KB from landing inside the frame loop's 486KB.
       if (!write_message(STDOUT_FILENO, TYPE_COLOR, payload.data(), (uint32_t)payload.size())) break;
       sent_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -284,20 +240,18 @@ private:
   std::atomic<uint64_t> dropped_{0};
 };
 
-// Low light on is the sensor's own behaviour: it lengthens integration until the
-// image is properly exposed, which drops the colour camera to 15fps. Off pins the
-// exposure to a single mains-flicker period - 16.667 pseudo-ms resolves to 10ms
-// at 50Hz or 8.3ms at 60Hz, whichever the room is - so colour holds 30fps and the
-// gain compensates as far as it can. Depth never changes either way.
+// Low light on lets the sensor lengthen integration until the image is exposed, which drops
+// the colour camera to 15fps. Off pins the exposure to one mains-flicker period so colour
+// holds 30fps. Depth never changes either way.
 static void applyLowLight(libfreenect2::Freenect2Device *dev, bool on) {
   if (on) dev->setColorAutoExposure(0.0f);
   else dev->setColorSemiAutoExposure(16.667f);
   std::fprintf(stderr, "[grabber] low light %s\n", on ? "on" : "off");
 }
 
-// Commands arrive newline terminated on stdin so the server can retune a running
-// grabber. Restarting instead would cost a multi-second blackout, because closing
-// the device on macOS sleeps 4s inside libfreenect2.
+// Commands arrive newline terminated on stdin so the server can retune a running grabber.
+// Restarting instead would cost a multi-second blackout: closing the device on macOS sleeps
+// 4s inside libfreenect2.
 static void pollCommands(libfreenect2::Freenect2Device *dev, std::string &pending, bool wantColor,
                          HdEncoder *hd) {
   char buf[256];
@@ -313,11 +267,8 @@ static void pollCommands(libfreenect2::Freenect2Device *dev, std::string &pendin
     if (line == "low-light on" || line == "low-light off") {
       if (wantColor) applyLowLight(dev, line == "low-light on");
     } else if (line == "hd-color on" || line == "hd-color off") {
-      // Asked for rather than always on, because a 1080p JPEG is roughly 215KB and
-      // another ~50Mbit/s down a pipe whose backpressure reaches this process and
-      // makes it miss USB deadlines. With colour off there is no frame to encode, and
-      // saying so on stderr is what stops the server waiting for a stream that is
-      // never coming.
+      // Asked for rather than always on: a 1080p JPEG is roughly 215KB and another ~50Mbit/s
+      // down a pipe whose backpressure reaches this process and makes it miss USB deadlines.
       const bool on = line == "hd-color on";
       if (!wantColor && on) {
         std::fprintf(stderr, "[grabber] refusing hd colour: this grabber was started with --no-color\n");
@@ -334,31 +285,15 @@ static void pollCommands(libfreenect2::Freenect2Device *dev, std::string &pendin
 /**
  * Reads a flag given in metres, or refuses it.
  *
- * `std::strtof` rather than the `std::atof` this used to be, and the end pointer is the
- * whole of the difference: `atof` has no way at all to say "that was not a number". It
- * answers 0.0 for `x`, and - the one that actually destroys footage - it stops at the
- * first character it cannot read and keeps what it had, so `--max-depth 4,5` typed on a
- * keyboard whose decimal separator is a comma clips at 4.0m and the hello reports 4.000
- * with complete confidence. Half a metre of the room is missing from a file that cannot
- * be shot again, the frame rate is a healthy 30.0, and nothing downstream can tell.
+ * `std::strtof` with the end pointer checked, because `std::atof` stops at the first
+ * character it cannot read and keeps what it had: `--max-depth 4,5` typed on a comma-decimal
+ * keyboard clips at 4.0m, the hello reports 4.000, and half a room is missing from a file
+ * that cannot be shot again. `nan` and `inf` parse cleanly through `strtof` and would reach
+ * libfreenect2 as a clip plane, so they are refused too, along with zero and negatives.
  *
- * So the token has to be consumed entirely, and the value has to be one this pair can
- * mean: `nan` and `inf` both parse cleanly through `strtof` and would reach libfreenect2
- * as a clip plane, and zero or a negative distance is a plane at or behind the sensor.
- * What is deliberately *not* refused is a large finite value - the u16 millimetre
- * conversion already floors anything past 65.535m to "no reading", so a wide clip is
- * permissive rather than wrong, and a ceiling invented here would be a number this file
- * had an opinion about with nothing behind it.
- *
- * **Two edges of `strtof` measured rather than assumed**, by compiling this function on
- * its own and running the cases through it. `" 4.5"` is accepted and `"4.5 "` is refused,
- * because `strtof` consumes leading whitespace itself and leaves trailing whitespace for
- * the end pointer to find. The asymmetry is stated rather than smoothed over: trimming
- * would be repairing an argument, and everything else in this block refuses one instead.
- * And `"0x10"` parses as 16 metres, because a hex float is a float - which is not a
- * number anybody types for a distance, so it is recorded here rather than given a rule.
- * Measured: 0.05, 9.0 and 4.5 accepted; `4,5`, `x`, empty, `6m`, `nan`, `inf`, `-inf`,
- * `0`, `-1`, `1e40` and `1e-60` all refused.
+ * A large finite value is deliberately not refused - the u16 millimetre conversion already
+ * floors anything past 65.535m to "no reading". Note `" 4.5"` is accepted and `"4.5 "` is
+ * not, because `strtof` consumes leading whitespace itself.
  */
 static bool read_metres(const char *text, float *out) {
   if (!text || !*text) return false;
@@ -376,10 +311,9 @@ static bool read_metres(const char *text, float *out) {
 int main(int argc, char **argv) {
   int jpegQuality = 80;
   bool wantColor = true;
-  // No libfreenect2 build has every processor: the macOS one has OpenCL and no
-  // OpenGL, the Pi's V3D has OpenGL and no OpenCL at all. So the default is the
-  // fastest processor this build actually contains, and asking for one that was
-  // not compiled in is an error rather than a silent fall-through.
+  // No libfreenect2 build has every processor: the macOS one has OpenCL and no OpenGL, the
+  // Pi's V3D has OpenGL and no OpenCL. Asking for one not compiled in is an error rather than
+  // a silent fall-through.
 #if defined(LIBFREENECT2_WITH_OPENCL_SUPPORT)
   std::string pipelineName = "cl";
 #elif defined(LIBFREENECT2_WITH_OPENGL_SUPPORT)
@@ -389,42 +323,28 @@ int main(int argc, char **argv) {
 #endif
   std::string logLevel = "warning";
   bool profile = false;
-  // libfreenect2 clips depth on the GPU before we ever see it, and its 0.5-4.5
-  // defaults are Microsoft's published range, not the sensor's limit. Measured
-  // by walking a hand into the lens: readings stay coherent at 99% right down to
-  // 38mm, with the pixel count climbing monotonically the whole way in - 32k at
-  // 160mm to 128k at 40mm, which is 59% of the frame from one palm. There is no
-  // saturation cliff and no phase wrap; a wrap would jump discontinuously rather
-  // than track the hand smoothly. The sensor is limited by reach, not physics.
-  //
-  // These are deliberately wider than what looks good. Gating here destroys data
-  // the viewer can never get back, while the viewer's own near/far merely hides
-  // it - and capturing wide is free, because the depth payload is a fixed-size
-  // array whether 40% or 90% of it is populated. So the grabber takes everything
-  // the sensor can resolve and the UI decides what to show. There is a real
-  // surface at ~8.5m here that a 6m ceiling would have thrown away.
+  // libfreenect2 clips depth on the GPU before we ever see it, and its 0.5-4.5 defaults are
+  // Microsoft's published range rather than the sensor's limit - readings stay coherent down
+  // to 38mm. Deliberately wider than what looks good: gating here destroys data the viewer
+  // can never get back, while the viewer's own near/far merely hides it.
   float minDepth = 0.05f;
   float maxDepth = 9.0f;
   bool lowLight = true;
 
-  // Corpus dumping exists so the registration harness can run without a sensor.
-  // It writes the *inputs* to Registration::apply - the undistorted-depth source
-  // and the colour image - rather than its output, because a corpus of outputs
-  // could only ever agree with the build that produced it.
+  // Corpus dumping exists so the registration harness can run without a sensor. It writes the
+  // *inputs* to Registration::apply, because a corpus of outputs could only ever agree with
+  // the build that produced it.
   std::string dumpCorpus;
   int dumpCount = 24;
   int dumpEvery = 10;
 
-  // The text each numeric flag was actually given, kept alongside the parsed value
-  // purely so a refusal can quote it. `std::atoi` answers 0 for anything it cannot
-  // read, so reporting the parsed int tells somebody who typed `--dump-every all`
-  // that the problem is a '0' they never wrote, and sends them looking for it.
+  // The text each numeric flag was given, kept so a refusal can quote it: `std::atoi` answers
+  // 0 for anything it cannot read, and reporting the parsed int sends the operator looking
+  // for a '0' they never wrote.
   const char *qualityRaw = nullptr, *dumpCountRaw = nullptr, *dumpEveryRaw = nullptr;
-  // The depth pair keeps only its text here and is parsed entirely below, which is the
-  // one place this differs from the three ints above. They can parse in the loop because
-  // `atoi` throws nothing away that a later range test cannot recover; `read_metres`
-  // refuses on what the *parse* saw - characters left over at the end of the token - and
-  // that evidence is gone by the time a float has been stored.
+  // The depth pair keeps only its text and is parsed below, unlike the three ints above:
+  // `read_metres` refuses on what the parse saw - characters left over at the end of the
+  // token - and that evidence is gone once a float has been stored.
   const char *minDepthRaw = nullptr, *maxDepthRaw = nullptr;
 
   for (int i = 1; i < argc; i++) {
@@ -496,43 +416,20 @@ int main(int argc, char **argv) {
         pipelineName.c_str());
       return 0;
     }
-    // **Nothing falls through this loop, and until it did not there was no way to be
-    // told about a flag that never arrived.** Every arm above pairs a name with a value
-    // it needs, so a misspelling (`--max-dept 6`), a flag whose value was eaten by a
-    // shell, and a flag left last on the line with nothing after it all missed every arm
-    // and ran a completely ordinary session on defaults - which for these two flags in
-    // particular means an operator who typed a clip range watching footage recorded
-    // without one, with a hello that agrees with the defaults it actually used.
-    //
-    // Exit 2 for the same reason the three range refusals below use it: nothing was
-    // attempted, so there is nothing to retry or diagnose. On the server that lands in
-    // the backoff and eventually reads as `absent`, which is a misleading word for a
-    // rejected argument - but the alternative is the session that runs, and the argument
-    // is in `[server] starting grabber:` one line above the refusal.
+    // Nothing falls through this loop. A misspelling, a value eaten by a shell, or a flag left
+    // last on the line used to miss every arm and run an ordinary session on defaults - which
+    // for the clip flags means footage recorded without the range the operator typed.
     else {
       std::fprintf(stderr, "[grabber] unknown argument or missing value: '%s' - see --help\n", a.c_str());
       return 2;
     }
   }
 
-  // The numeric flags are checked here rather than where they are parsed, because a
-  // later argument overwrites an earlier one and the only value worth judging is the
-  // one that survives the loop.
-  //
-  // All three arrive through std::atoi, which reports "not a number" as 0 - so a typo,
-  // a swapped argument, or the literal 0 are indistinguishable by the time the value is
-  // used. --dump-every reaching the loop as 0 makes the sampling test
-  // `frameCount % (uint64_t)dumpEvery` a division by zero, which on both arm64 and
-  // x86-64 is SIGFPE rather than anything the program can catch. Under the server that
-  // reads as a grabber dying the instant it is spawned, and the supervisor treats an
-  // instant exit as the flaky USB link it was written for and respawns forever - so the
-  // operator is told there is no sensor when what actually happened is that a flag was
-  // not a number. --dump-count 0 is quieter and no better: the frame that would end the
-  // dump can never satisfy `++dumped >= dumpCount`, so a corpus run never stops. And
-  // --quality reaches tjCompress2, which is undefined outside 1-100.
-  //
-  // Exit 2 rather than the 1 a runtime failure returns, because these two are different
-  // answers: nothing was attempted here, so there is nothing to retry or diagnose.
+  // Checked here rather than where they are parsed, because a later argument overwrites an
+  // earlier one and the only value worth judging is the one that survives the loop. All three
+  // arrive through `std::atoi`, which reports "not a number" as 0: `--dump-every 0` makes the
+  // sampling test a division by zero, which is SIGFPE and reads to the server as a grabber
+  // dying the instant it is spawned. Exit 2 rather than 1, because nothing was attempted.
   if (jpegQuality < 1 || jpegQuality > 100) {
     std::fprintf(stderr, "[grabber] --quality must be an integer 1-100, got '%s'\n", qualityRaw ? qualityRaw : "");
     return 2;
@@ -546,13 +443,9 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  // The two flags that decide what exists at all, and for most of this file's life the
-  // only numeric ones with no refusal to make. The three above are recoverable mistakes:
-  // a bad `--quality` produces an ugly take somebody can re-grade, a bad `--dump-count`
-  // wastes a corpus run. These clip on the GPU before a frame is assembled, so what a
-  // typo here removes is not in the file and cannot be put back - and it goes wrong
-  // quietly, because the hello faithfully reports whatever number was parsed at `%.3f`
-  // and every reader downstream believes it.
+  // The two flags that decide what exists at all. The three above are recoverable mistakes;
+  // these clip on the GPU before a frame is assembled, so what a typo here removes is not in
+  // the file and cannot be put back - and the hello reports whatever was parsed at `%.3f`.
   if (minDepthRaw && !read_metres(minDepthRaw, &minDepth)) {
     std::fprintf(stderr, "[grabber] --min-depth must be a positive finite number of metres, got '%s'\n", minDepthRaw);
     return 2;
@@ -561,20 +454,16 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "[grabber] --max-depth must be a positive finite number of metres, got '%s'\n", maxDepthRaw);
     return 2;
   }
-  // Asked of the pair unconditionally rather than only when a flag was given, because it
-  // is a property of the two values that survived the loop rather than of the arguments
-  // that set them - and the shipped defaults, 0.05 and 9.0, are what it is calibrated not
-  // to refuse. Swapped, the range is empty and every frame is a grid of zeroes delivered
-  // at a perfectly healthy 30fps, which is this repo's own definition of the worst kind
-  // of failure: a wrong result that renders successfully and passes the health number.
+  // Asked of the pair unconditionally, because it is a property of the two values that
+  // survived the loop rather than of the arguments that set them. Swapped, the range is empty
+  // and every frame is a grid of zeroes delivered at a perfectly healthy 30fps.
   if (!(minDepth < maxDepth)) {
     std::fprintf(stderr, "[grabber] --min-depth %.3f must be less than --max-depth %.3f - "
                  "a range that is empty or inverted clips every point away\n", minDepth, maxDepth);
     return 2;
   }
 
-  // Debug is genuinely noisy - one line per incomplete depth frame - so it stays
-  // opt-in rather than being the default the server spawns with.
+  // Debug is genuinely noisy - one line per incomplete depth frame - so it stays opt-in.
   libfreenect2::Logger::Level level = libfreenect2::Logger::Warning;
   if (logLevel == "none") level = libfreenect2::Logger::None;
   else if (logLevel == "error") level = libfreenect2::Logger::Error;
@@ -598,8 +487,7 @@ int main(int argc, char **argv) {
     pipeline = new libfreenect2::CpuPacketPipeline();
   } else if (pipelineName == "gl") {
 #ifdef LIBFREENECT2_WITH_OPENGL_SUPPORT
-    // The GL processor opens its own window, so a Wayland or X session has to be
-    // reachable - XDG_RUNTIME_DIR and WAYLAND_DISPLAY on a headless login shell.
+    // The GL processor opens its own window, so a Wayland or X session has to be reachable.
     pipeline = new libfreenect2::OpenGLPacketPipeline();
 #else
     std::fprintf(stderr, "[grabber] this libfreenect2 was built without OpenGL support\n");
@@ -623,12 +511,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // Depth and colour are listened to separately on purpose. A single
-  // SyncMultiFrameListener releases a frame set only once *both* streams have
-  // delivered, and the Kinect's colour camera halves to 15fps in dim light while
-  // depth stays at 30 - so syncing them throws away every other depth frame for
-  // no reason. Decoupled, depth runs at its own rate and reuses the most recent
-  // colour, which is at worst one interval stale.
+  // Depth and colour are listened to separately: a single SyncMultiFrameListener releases a
+  // frame set only once both streams have delivered, and the colour camera halves to 15fps in
+  // dim light while depth stays at 30, so syncing them throws away every other depth frame.
   libfreenect2::SyncMultiFrameListener depthListener(libfreenect2::Frame::Depth);
   libfreenect2::SyncMultiFrameListener colorListener(libfreenect2::Frame::Color);
   dev->setIrAndDepthFrameListener(&depthListener);
@@ -647,8 +532,7 @@ int main(int argc, char **argv) {
 
   if (wantColor) applyLowLight(dev, lowLight);
 
-  // Non-blocking so the capture loop never stalls waiting on a command that may
-  // never come - the server usually has nothing to say.
+  // Non-blocking so the capture loop never stalls waiting on a command that may never come.
   ::fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
   std::string pendingCommands;
 
@@ -657,24 +541,21 @@ int main(int argc, char **argv) {
   libfreenect2::Registration registration(ir, cp);
   libfreenect2::Frame undistorted(DW, DH, 4), registered(DW, DH, 4);
 
-  // 1920x1082, not 1080. apply() sizes its filter map as
-  // 1920*1080 + 1920*filter_height_half*2 with filter_height_half == 1, and the
-  // scatter writes into the row above and below the image so it needs no bounds
-  // check - so a 1080-row buffer is two rows short and it writes past the end.
+  // 1920x1082, not 1080. apply() sizes its filter map as 1920*1080 + 1920*1*2 and the scatter
+  // writes into the row above and below the image with no bounds check, so a 1080-row buffer
+  // is two rows short and it writes past the end.
   libfreenect2::Frame bigdepth(1920, 1082, 4);
   std::vector<int> colorDepthMap(DEPTH_PIXELS);
 
-  // The calibration goes out as the raw structs rather than as JSON on purpose.
-  // Registration builds its distortion and depth-to-colour maps from these floats
-  // in its constructor, so a value that shifted by one ulp on the way through a
-  // decimal round-trip would move the maps and make the harness report a
-  // difference that only ever existed in the corpus reader.
   if (!dumpCorpus.empty()) {
     if (::mkdir(dumpCorpus.c_str(), 0755) != 0 && errno != EEXIST) {
       std::fprintf(stderr, "[grabber] cannot create %s: %s\n",
                    dumpCorpus.c_str(), std::strerror(errno));
       return 1;
     }
+    // The calibration goes out as the raw structs rather than as JSON: Registration builds its
+    // distortion maps from these floats, so a value shifted by one ulp through a decimal
+    // round-trip would make the harness report a difference that only existed in the reader.
     const uint32_t head[4] = {CORPUS_MAGIC, CORPUS_VERSION,
                               (uint32_t)sizeof(ir), (uint32_t)sizeof(cp)};
     const void *parts[3] = {head, &ir, &cp};
@@ -685,19 +566,9 @@ int main(int argc, char **argv) {
   }
 
   // The browser needs the real intrinsics to unproject; hardcoded values skew the cloud.
-  //
-  // format leads the record because it is what says how to read the rest of it. Every
-  // other key here is a measurement whose meaning depends on the generation that took
-  // it, so a reader that has not yet decided whether it can interpret this take at all
-  // has no business acting on its focal length.
-  //
-  // startedAt is the wall clock, and it is here rather than in the server because
-  // this is the only place that knows when the stream actually began. Every frame
-  // timestamp below is steady_clock - monotonic since boot, which is exactly right
-  // for frame spacing and useless for sorting a library, since two takes recorded a
-  // day apart on a node that never rebooted are indistinguishable by it. A gallery
-  // otherwise has nothing but the file's modification time, which changes when a
-  // take is copied between machines.
+  // `format` leads the record because it says how to read the rest of it. `startedAt` is the
+  // wall clock and belongs here because every frame timestamp below is steady_clock, which is
+  // right for frame spacing and useless for sorting a library.
   long long startedAt = std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()).count();
   char hello[512];
@@ -708,11 +579,9 @@ int main(int argc, char **argv) {
     CAPTURE_FORMAT, serial.c_str(), dev->getFirmwareVersion().c_str(), DW, DH,
     ir.fx, ir.fy, ir.cx, ir.cy, wantColor ? "true" : "false",
     minDepth, maxDepth, (wantColor && lowLight) ? "true" : "false", startedAt);
-  // snprintf truncates silently, and a truncated hello is not JSON - so every take
-  // recorded afterwards would carry a sensor record nothing can parse, and the
-  // gallery would list them all with unknown intrinsics. The serial and the
-  // firmware are device strings rather than constants, so the length is not
-  // something this file can reason about once and forget.
+  // snprintf truncates silently, and a truncated hello is not JSON - every take recorded
+  // afterwards would carry a sensor record nothing can parse. The serial and the firmware are
+  // device strings, so the length is not something this file can reason about once.
   if (helloLen < 0 || (size_t)helloLen >= sizeof(hello)) {
     std::fprintf(stderr, "[grabber] hello needs %d bytes and the buffer is %zu: refusing to "
                  "stream a sensor record that would be cut in half\n", helloLen, sizeof(hello));
@@ -726,10 +595,9 @@ int main(int argc, char **argv) {
   unsigned char *jpegBuf = nullptr;
   unsigned long jpegSize = 0;
 
-  // Started with the stream rather than on the first request, because a thread parked
-  // on a condition variable costs nothing and starting one on demand would put the
-  // thread's own startup inside the latency of the first webcam frame. It encodes
-  // only what `hd-color on` lets the loop below hand it.
+  // Started with the stream rather than on the first request: a thread parked on a condition
+  // variable costs nothing, and starting one on demand puts its startup inside the latency of
+  // the first webcam frame.
   HdEncoder hdEncoder(jpegQuality);
   if (wantColor) hdEncoder.start();
 
@@ -738,24 +606,20 @@ int main(int argc, char **argv) {
 
   libfreenect2::FrameMap depthFrames, colorFrames;
   bool haveColor = false;
-  // Said once rather than per frame: a decoder producing something the webcam cannot
-  // encode does it thirty times a second, and a log that repeats at frame rate is a
-  // log nobody reads.
+  // Said once rather than per frame: a decoder producing something the webcam cannot encode
+  // does it thirty times a second, and a log that repeats at frame rate is a log nobody reads.
   bool hdFormatWarned = false;
   uint64_t frameCount = 0;
   uint64_t colorCount = 0;
-  // Frames libfreenect2 handed over having already marked its own solve as failed. They
-  // are counted rather than only dropped, because a drop that leaves no trace is
-  // indistinguishable from a frame that never arrived, and the two want opposite answers
-  // from whoever reads the log: one is a machine that cannot keep up with its GPU, the
-  // other is a USB link. Reported beside the frame count for the same reason the colour
-  // count is - it is the number that explains the picture.
+  // Counted rather than only dropped: a drop that leaves no trace is indistinguishable from a
+  // frame that never arrived, and the two want opposite answers - one is a machine that cannot
+  // keep up with its GPU, the other is a USB link.
   uint64_t badDepth = 0;
   uint64_t badColor = 0;
   int dumped = 0;
 
-  // Records are buffered and dumped at exit rather than printed per frame, so
-  // the profiling I/O cannot land inside the loop it is measuring.
+  // Records are buffered and dumped at exit rather than printed per frame, so the profiling
+  // I/O cannot land inside the loop it is measuring.
   struct ProfRecord {
     uint64_t arrival;
     uint32_t newColor, wait, acq, reg, conv, enc, asm_, write, jpegBytes, hdCopy;
@@ -773,20 +637,15 @@ int main(int argc, char **argv) {
 
     pollCommands(dev, pendingCommands, wantColor, &hdEncoder);
 
-    // Take a new colour frame only if one is already waiting; never block on it.
-    // The previous one is released first so at most one is held outside the pool.
+    // Take a new colour frame only if one is already waiting; never block on it. The previous
+    // one is released first, so at most one is held outside the pool.
     bool newColor = false;
     if (wantColor && colorListener.hasNewFrame()) {
       if (haveColor) colorListener.release(colorFrames);
       haveColor = colorListener.waitForNewFrame(colorFrames, 1000);
-      // **`status` is libfreenect2 telling us this frame's own decode failed, and it
-      // hands the frame over regardless.** The JPEG processors set it and return the
-      // buffer with whatever the failure left in it, so a frame taken on trust here is
-      // registered into the depth frustum and encoded into the take as ordinary colour.
-      // Dropped back to no colour for this frame rather than reused: the previous good
-      // one was already released a line above, and painting the depth cloud with a
-      // failed decode is worse than painting it with nothing - the geometry is right
-      // either way, and the operator can see an untextured cloud.
+      // `status` is libfreenect2 saying this frame's own decode failed, and it hands the frame
+      // over regardless. Dropped back to no colour rather than reused - the previous good one
+      // was already released a line above, and an untextured cloud is better than a torn one.
       if (haveColor && colorFrames[libfreenect2::Frame::Color]->status != 0) {
         badColor++;
         colorListener.release(colorFrames);
@@ -797,32 +656,15 @@ int main(int argc, char **argv) {
     libfreenect2::Frame *depth = depthFrames[libfreenect2::Frame::Depth];
     libfreenect2::Frame *rgb = haveColor ? colorFrames[libfreenect2::Frame::Color] : nullptr;
 
-    // The webcam's picture, handed off before registration rather than after, because
-    // nothing it needs happens downstream and every microsecond it waits here is
-    // latency in somebody's video call.
-    //
-    // **Only on a new colour frame.** The loop reuses the last colour when none has
-    // arrived - that is the whole point of the decoupled listeners - so submitting
-    // every iteration would re-encode one picture at the depth rate and bill a
-    // stationary webcam for 30fps of identical JPEGs. Gated this way, the output runs
-    // at the colour camera's real rate, which halves to 15 in dim light and is the
-    // honest number to show.
-    //
-    // **And above the bad-depth refusal, because the two frames fail independently.**
-    // This block used to sit below it, and the ordering was a webcam defect wearing a
-    // depth cause: a healthy colour frame taken in the same iteration as a failed
-    // depth readback was held but never submitted - `newColor` resets next iteration,
-    // and the next colour arrival releases the frame unseen - so an intermittent GPU
-    // readback failure showed up as `/camera.mjpg` dropping and freezing while the
-    // colour decoder succeeded every time. The colour camera owes depth nothing, so
-    // its hand-off happens before depth is even asked.
+    // The webcam's picture, handed off before registration because nothing it needs happens
+    // downstream. Only on a new colour frame, or a stationary webcam would be billed for 30fps
+    // of identical JPEGs. And above the bad-depth refusal, because the two frames fail
+    // independently: below it, a healthy colour frame was lost to a failed depth readback.
     uint64_t tHdStart = now_us();
     uint64_t tHdDone = tHdStart;
     if (newColor && rgb && hdEncoder.enabled()) {
-      // Checked rather than assumed: both JPEG decoders this library can be built
-      // with produce BGRX today, and a build that produced RGBX would hand the webcam
-      // a picture with its red and blue swapped - wrong in a way that looks like a
-      // colour-grading choice rather than a bug.
+      // Checked rather than assumed: a build whose JPEG decoder produced RGBX would hand the
+      // webcam a picture with red and blue swapped, which looks like a grading choice.
       if (rgb->format != libfreenect2::Frame::BGRX) {
         if (!hdFormatWarned) {
           std::fprintf(stderr, "[grabber] hd colour off: the colour decoder produced format %d, not BGRX\n",
@@ -841,26 +683,12 @@ int main(int argc, char **argv) {
       tHdDone = now_us();
     }
 
-    // The same refusal on the half of the frame that cannot be re-derived. The OpenCL
-    // processor - the default wherever OpenCL is compiled in, which is this project's
-    // editing station - sets `status = 1` when the readback off the device fails and
-    // still delivers the frame, buffer holding whatever was in it. Taken as ordinary
-    // depth it becomes u16 millimetres, goes down the wire, and is written into a take
-    // that cannot be shot again, while `frameCount` keeps advancing and delivered fps
-    // stays at a flawless 30.0. That is the one shape this whole repository is built to
-    // reject: a wrong result that renders successfully and passes the health number.
-    //
-    // Skipped rather than repaired, and the frameset is released first because the next
-    // `waitForNewFrame` needs the slot back. `frameCount` deliberately does not advance,
-    // so a run losing frames reads as a rate below 30 - which is the honest reading, and
-    // `badDepth` beside it is what separates this cause from a degraded USB link.
-    //
-    // The count reports on its own cadence rather than riding the healthy log below,
-    // because that log is gated on `frameCount` advancing - so a readback failing
-    // *continuously* was exactly the case with nothing to say: `waitForNewFrame` kept
-    // succeeding, the process looked alive, no frame was delivered, and the counter
-    // built to separate a GPU failure from a dropped USB link stayed invisible until
-    // shutdown.
+    // The same refusal on the half of the frame that cannot be re-derived. The OpenCL processor
+    // sets `status = 1` when the readback off the device fails and still delivers the frame,
+    // buffer holding whatever was in it - taken as ordinary depth it is written into a take
+    // that cannot be shot again while delivered fps stays at a flawless 30.0. `frameCount`
+    // deliberately does not advance, so a run losing frames reads as a rate below 30, and the
+    // count reports on its own cadence because the healthy log below is gated on that counter.
     if (depth->status != 0) {
       badDepth++;
       if (badDepth % 150 == 0)
@@ -871,10 +699,9 @@ int main(int argc, char **argv) {
     }
     uint64_t tAcquired = now_us();
 
-    // Dumped before apply() rather than after, because these two frames are the
-    // harness's input and apply() writes into buffers it also reads maps from.
-    // Only frames carrying colour are usable: apply() refuses a null rgb, so a
-    // depth-only frame would sit in the corpus as a case nothing can run.
+    // Dumped before apply() rather than after, because these two frames are the harness's input
+    // and apply() writes into buffers it also reads maps from. Only frames carrying colour are
+    // usable: apply() refuses a null rgb.
     if (!dumpCorpus.empty() && rgb && frameCount % (uint64_t)dumpEvery == 0) {
       char path[1024];
       std::snprintf(path, sizeof(path), "%s/frame-%04d.bin", dumpCorpus.c_str(), dumped);
@@ -896,16 +723,13 @@ int main(int argc, char **argv) {
 
     const float *depthSrc;
     if (rgb) {
-      // The scratch buffers are passed in rather than left to apply(), which
-      // otherwise new/deletes an 8.3MB filter map and an 868KB offset map on
-      // every frame. Worth 0.30ms of registration's 5.71ms p50 on the Mac,
-      // measured as an interleaved A/B on the real loop - a tight loop cannot
-      // see it, because the allocator just hands the same block straight back.
+      // The scratch buffers are passed in rather than left to apply(), which otherwise
+      // new/deletes an 8.3MB filter map and an 868KB offset map on every frame.
       registration.apply(rgb, depth, &undistorted, &registered, true, &bigdepth, colorDepthMap.data());
       depthSrc = (const float *)undistorted.data;
     } else {
-      // Same undistortion the colour path applies, so geometry does not shift
-      // between the frames before the first colour arrives and the ones after.
+      // Same undistortion the colour path applies, so geometry does not shift between the
+      // frames before the first colour arrives and the ones after.
       registration.undistortDepth(depth, &undistorted);
       depthSrc = (const float *)undistorted.data;
     }
@@ -918,14 +742,11 @@ int main(int argc, char **argv) {
     }
     uint64_t tConverted = now_us();
 
-    // registered is BGRX, already aligned 1:1 with the depth pixels. jpegSize is
-    // an input as well as an output: TurboJPEG reuses the buffer it allocated on
-    // the previous call and reads jpegSize as that buffer's capacity, so zeroing
-    // it beforehand claims a zero-length buffer and the encode runs off the end.
-    // libjpeg-turbo 3 on macOS absorbs that; 2.1.5 on Debian aarch64 corrupts the
-    // heap and the grabber dies inside tjCompress2 within a few frames.
-    // Because jpegSize now survives the call, a failed encode would leave the
-    // previous frame's length behind and we would ship stale bytes as fresh ones.
+    // `jpegSize` is an input as well as an output: TurboJPEG reuses the buffer it allocated on
+    // the previous call and reads `jpegSize` as that buffer's capacity, so zeroing it claims a
+    // zero-length buffer and the encode runs off the end - libjpeg-turbo 2.1.5 on Debian
+    // aarch64 corrupts the heap and dies inside tjCompress2 within a few frames. Because it
+    // survives the call, a failed encode would ship the previous frame's bytes as fresh ones.
     uint32_t colorBytes = 0;
     if (rgb) {
       if (tjCompress2(jpegCompressor, (unsigned char *)registered.data, DW, 0, DH,
@@ -957,12 +778,8 @@ int main(int argc, char **argv) {
       r.arrival   = tArrived; // absolute, so delivered rate over any window is exact
       r.newColor  = newColor ? 1 : 0;
       r.wait      = (uint32_t)(tArrived - tWaitStart);
-      // The webcam's copy now happens inside the acquisition span - it moved above
-      // the bad-depth refusal so a healthy colour frame is never lost to a failed
-      // depth readback - so it is subtracted back out rather than left to inflate
-      // `acq`. A cost that hides in a neighbouring segment is a cost the next person
-      // attributes to the wrong stage; the columns keep their meanings and the row
-      // still sums to the frame.
+      // The webcam's copy happens inside the acquisition span, so it is subtracted back out
+      // rather than left to inflate `acq` and be attributed to the wrong stage.
       r.acq       = (uint32_t)((tAcquired - tArrived) - (tHdDone - tHdStart));
       r.hdCopy    = (uint32_t)(tHdDone - tHdStart);
       r.reg       = (uint32_t)(tRegistered - tAcquired);
@@ -976,16 +793,14 @@ int main(int argc, char **argv) {
 
     if (!ok) break; // consumer closed the pipe
 
-    // Colour lagging depth is normal in dim light and is the one number that
-    // explains a washed-out or stale-looking image, so it is reported alongside.
     if (++frameCount % 150 == 0)
       std::fprintf(stderr, "[grabber] %llu frames (%llu colour, %llu bad depth, %llu bad colour)\n",
                    (unsigned long long)frameCount, (unsigned long long)colorCount,
                    (unsigned long long)badDepth, (unsigned long long)badColor);
   }
 
-  // Stopped before the listener releases its frame and before the counters below are
-  // read, so the thread is quiescent rather than mid-encode when either happens.
+  // Stopped before the listener releases its frame and before the counters below are read, so
+  // the thread is quiescent rather than mid-encode when either happens.
   hdEncoder.stop();
   if (haveColor) colorListener.release(colorFrames);
 
@@ -1001,11 +816,6 @@ int main(int argc, char **argv) {
     std::fflush(stderr);
   }
 
-  // The webcam's own cost, reported off the per-frame table because the encode does
-  // not happen on the frame loop's clock. `dropped` is the number that says whether
-  // this machine kept up: a colour frame arriving while the encoder was still busy is
-  // one the webcam never showed, and a viewer counting a low frame rate needs to know
-  // it was this and not the sensor.
   if (wantColor && hdEncoder.sent() > 0) {
     std::fprintf(stderr, "[grabber] hd colour: %llu sent, %llu dropped busy, %.2f ms mean encode\n",
                  (unsigned long long)hdEncoder.sent(), (unsigned long long)hdEncoder.dropped(),

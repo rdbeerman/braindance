@@ -1,20 +1,7 @@
-// Random access into a .knct capture: a sidecar index built by one streaming
-// scan, and a reader that preads the frames a playhead actually asks for.
-//
-// Every read in here is incremental, and that is the point of the module rather
-// than a detail of it. `fs.readFileSync` refuses any file of 2 GiB or more with
-// ERR_FS_FILE_TOO_LARGE - bracketed exactly on Node v26.0.0, where 2,147,483,647
-// bytes reads and 2,147,483,648 throws - so at the measured 14.6 MB/s no take
-// longer than about two and a half minutes could be opened that way at all.
-// Hashing a capture by reading it whole would put that identical throw back
-// inside the code written to escape it, so the scan feeds the hash chunk by chunk
-// and never holds a payload, and a frame run streams its slice rather than
-// buffering it.
-//
-// The index is a sidecar rather than a footer so the capture stays append-only
-// and a writer that died mid-take is still usable: the scan indexes every whole
-// message that landed and reports the trailing partial one, instead of refusing
-// the file over bytes nobody needs.
+// Random access into a .knct capture: a sidecar index built by one streaming scan, and a reader
+// that preads the frames a playhead asks for. Every read here is incremental because
+// `fs.readFileSync` throws ERR_FS_FILE_TOO_LARGE at 2 GiB. The index is a sidecar rather than a
+// footer so the capture stays append-only and a take cut off mid-write is still usable.
 
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -22,92 +9,33 @@ import { open, readFile, writeFile, rename, stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { basename, resolve } from 'node:path';
 import { MAGIC, HEADER_BYTES, TYPE_HELLO, TYPE_FRAME, MAX_PAYLOAD_BYTES } from './protocol.js';
-// The depth grid every frame in this format carries, and the only reason it is
-// named on the server at all: the decimation below has to know the shape of the
-// array it is sampling down, and a divisor applied to a flat byte count would
-// take every k-th sample along one axis and none along the other. Checked against
-// the frame's own declared length before anything is sampled, so a capture whose
-// grid is not this one is refused rather than shredded.
-//
-// Imported rather than declared, and not re-exported: nothing outside this file
-// reached for the pair even while it was exported, so the `export ... from` that
-// `server/library.js` needs for `VALID_ID` - where the constant is both imported and
-// passed on, because `export ... from` puts nothing in local scope - would be a door
-// nobody uses. A second grabber or a different device changes `web/format.js` and
-// `native/grabber.cpp`, and nothing in between.
+// A divisor applied to a flat byte count would take every k-th sample along one axis and none
+// along the other, so the decimation has to know the grid's shape.
 import { DEPTH_H, DEPTH_W } from '../web/format.js';
 
 export const INDEX_VERSION = 2;
 
-// Large enough that neither sha256 nor the filesystem is paying per-call
-// overhead, small enough that the scan's working set does not track file size.
 const SCAN_CHUNK = 4 * 1024 * 1024;
 
 
-// What a frame run is read in. Bounded on purpose: a run can be the whole take,
-// and the point of this module is that no read is ever the size of the file.
 const RUN_CHUNK = 1024 * 1024;
 
-// The framing header plus the u32 depth length, u32 colour length and u64
-// timestamp that open every frame payload - `handleFrame` in `web/main.js` reads
-// exactly these three off the other end. Cited by the function's name rather than by
-// a line, because the line it used to name had already drifted nine hundred lines
-// into the middle of a shader and nothing failed when it did. Assembling
-// exactly this much per message is what lets the scan record a timestamp without
-// ever holding the payload it came from.
+// The framing header plus the u32 depth length, u32 colour length and u64 stamp that open every
+// frame payload - `handleFrame` in `web/main.js` reads exactly these three off the other end.
 const STAMP_BYTES = 16;
 const PREFIX_BYTES = HEADER_BYTES + STAMP_BYTES;
 
-/**
- * One frame's payload sampled down by a depth divisor, or the payload itself at a
- * divisor of 1.
- *
- * Decimation is a **network** concession and never a compute one, which is why it
- * lives here rather than in any one consumer: the monitor asks for it because a
- * radio link cannot carry 14.6 MB/s, the editor asks for it when the take is on the
- * other end of that link, the gallery asks for it to skim a take that has not been
- * downloaded, and the live socket asks for it because a full-rate monitor costs the
- * take frames. One mechanism, four callers.
- *
- * **The fourth caller is why this is a function and not a method.** The first three
- * hold a `Capture` - a file on disk with an index over it - and the socket holds a
- * buffer that has not been written yet. Reaching for a `Capture` there was never
- * possible, so the alternative to this was a second copy of the loop on the live
- * path, drifting from this one about what a `÷4` frame is until a monitor and a
- * gallery tile disagreed about the same take.
- *
- * What comes back is still a KNCT frame - same sixteen-byte payload header, same
- * field offsets, same decoder - carrying a `ceil(DEPTH_W/k) x ceil(DEPTH_H/k)` grid
- * sampled nearest-neighbour. **The colour block is copied through untouched**, and
- * that is deliberate rather than an omission: at a divisor of 4 the depth falls from
- * 424KB to 27KB while the JPEG stays at about 52KB, so colour is what a decimated
- * frame mostly is, and a version that dropped it would be a different mechanism
- * wearing this one's measured numbers.
- *
- * **What goes to disk is unaffected, and on the live path that is a property rather
- * than an observation.** The recorder is handed the grabber's own framed bytes
- * before this is ever called, so no divisor any monitor asks for can reach the
- * take - which is the `nearClip` versus `--min-depth` failure by another name, and
- * the one this design cannot afford, since it destroys footage in the situation
- * where nobody is watching for it. `monitor-check` asserts the identity rather than
- * trusting this paragraph.
- *
- * `what` names the frame in a refusal, because the two callers identify frames
- * differently - by index in a take, or as whatever just arrived on the wire.
- */
+// One frame's payload sampled down by a depth divisor, or the payload itself at a divisor of 1. A
+// function rather than a method because the live socket holds a buffer instead of a `Capture`. The
+// colour block is copied through untouched, and nothing here can reach the take.
 export function decimatePayload(payload, depthDivisor, what = 'frame') {
   const k = Math.trunc(depthDivisor);
   if (!(k > 1)) return payload;
 
   const depthBytes = payload.readUInt32LE(0);
   const colorBytes = payload.readUInt32LE(4);
-  // The frame's own two lengths have to add up to the frame. Only the depth length
-  // was checked, so a colour length that overstated the payload sized `out` larger
-  // than the copy that follows fills it - and `allocUnsafe` hands back whatever was
-  // in that memory, so the tail of the served frame was this process's own recycled
-  // heap. Checked here rather than in the scan because this is the path that builds a
-  // new buffer from the two numbers; at divisor 1 the payload is returned exactly as
-  // it arrived, which is what the format promises.
+  // Checking only the depth length let an overstated colour length size `out` past what the copy
+  // fills, exposing recycled heap.
   if (16 + depthBytes + colorBytes !== payload.length) {
     throw new Error(
       `${what} declares ${depthBytes} depth and ${colorBytes} colour bytes, which is not the `
@@ -125,9 +53,8 @@ export function decimatePayload(payload, depthDivisor, what = 'frame') {
   const out = Buffer.allocUnsafe(16 + w * h * 2 + colorBytes);
   out.writeUInt32LE(w * h * 2, 0);
   out.writeUInt32LE(colorBytes, 4);
-  // The capture timestamp, verbatim. A decimated frame is the same moment as the
-  // frame it came from, and a stamp rewritten here would put a second timeline into a
-  // format that has one.
+  // Verbatim: a decimated frame is the same moment, and a stamp rewritten here would put a second
+  // timeline into a format that has one.
   payload.copy(out, 8, 8, 16);
   for (let y = 0; y < h; y++) {
     const src = 16 + y * k * DEPTH_W * 2;
@@ -138,22 +65,14 @@ export function decimatePayload(payload, depthDivisor, what = 'frame') {
   return out;
 }
 
-/** `captures/take3.knct` → `captures/take3.idx`, beside the take it describes. */
 export const indexPathFor = (capturePath) => `${capturePath.replace(/\.knct$/i, '')}.idx`;
 
-/** The name a capture is addressed by over HTTP: its file name, no extension. */
 export const captureIdFor = (capturePath) => basename(capturePath).replace(/\.knct$/i, '');
 
-/**
- * One sequential pass that produces the index and the content hash together.
- * Doing them separately would mean reading multiple gigabytes twice for a result
- * one read already has in hand.
- */
+/** One sequential pass that produces the index and the content hash together. */
 export async function buildIndex(capturePath) {
-  // Stamped before the read rather than after it. If the capture is written to
-  // while the scan is walking it, a pre-scan mtime is the one that no longer
-  // matches on the next load, so the stale index rebuilds instead of being
-  // trusted; an after-scan stamp would certify exactly the race it missed.
+  // Stamped before the read: a pre-scan mtime no longer matches on the next load if the capture
+  // is written to meanwhile, where an after-scan stamp would certify the race.
   const before = await stat(capturePath);
   const hash = createHash('sha256');
   const offset = [];
@@ -169,15 +88,12 @@ export async function buildIndex(capturePath) {
   let msgOffset = 0;
   let base = 0; // absolute offset of the chunk being walked
 
-  // A message enters the index only once every one of its bytes has been read.
-  // That ordering is what makes a take cut short mid-frame index cleanly - the
-  // partial tail is simply never committed - rather than leaving a final entry
-  // whose declared length runs off the end of the file.
+  // A message enters the index only once every one of its bytes has been read, which is what
+  // makes a take cut short mid-frame index cleanly.
   const commit = () => {
     const payloadOffset = msgOffset + HEADER_BYTES;
     if (pending.type === TYPE_HELLO) {
-      // Only the first: a second hello means two takes were concatenated, which
-      // the recorder's one-take-one-file rule exists to prevent.
+      // Only the first: a second hello means two takes were concatenated.
       hello ??= { offset: payloadOffset, length: pending.len };
     } else if (pending.type === TYPE_FRAME) {
       offset.push(payloadOffset);
@@ -202,8 +118,6 @@ export async function buildIndex(capturePath) {
       }
 
       if (filled === 0) msgOffset = base + i;
-      // A header, or the stamp behind it, can land either side of a chunk
-      // boundary, so `prefix` carries the split ones across.
       const n = Math.min(need - filled, chunk.length - i);
       chunk.copy(prefix, filled, i, i + n);
       filled += n;
@@ -219,21 +133,16 @@ export async function buildIndex(capturePath) {
         }
         const type = prefix.readUInt32LE(4);
         const len = prefix.readUInt32LE(8);
-        // The same ceiling the live parser holds, applied to a file. The scan itself
-        // only walks past a payload so a huge length costs it nothing here - what it
-        // costs is later, because this number is written into the sidecar and every
-        // read of that frame allocates a buffer of it. A capture whose framing has
-        // gone is better refused at the scan, where the message names an offset, than
-        // turned into an index that describes bytes the file does not contain.
+        // The same ceiling the live parser holds, applied to a file: this number is written into
+        // the sidecar and every later read allocates a buffer of it.
         if (len > MAX_PAYLOAD_BYTES) {
           throw new Error(
             `message at ${msgOffset} declares ${len} payload bytes, past the ${MAX_PAYLOAD_BYTES} `
             + 'this format allows: the stream is desynced rather than carrying a large frame',
           );
         }
-        // A frame carries its own lengths and stamp in its first sixteen bytes,
-        // so one shorter than that is malformed rather than merely small, and
-        // indexing it would put a fabricated zero timestamp into the pacing.
+        // A frame carries its lengths and stamp in its first sixteen bytes, so indexing a shorter
+        // one would put a fabricated zero timestamp into the pacing.
         if (type === TYPE_FRAME && len < STAMP_BYTES) {
           throw new Error(`frame at ${msgOffset} is ${len} bytes, too short to carry its header`);
         }
@@ -251,8 +160,6 @@ export async function buildIndex(capturePath) {
   const index = {
     version: INDEX_VERSION,
     capture: basename(capturePath),
-    // The byte count the hash actually covers, and the modification time it
-    // covered it at. Together they are the staleness check.
     bytes: base,
     mtimeMs: before.mtimeMs,
     hash: `sha256:${hash.digest('hex')}`,
@@ -263,56 +170,31 @@ export async function buildIndex(capturePath) {
 
   const sidecar = indexPathFor(capturePath);
   try {
-    // Written aside and renamed, so a crash partway through cannot leave a
-    // sidecar that parses and lies about where the frames are.
+    // Written aside and renamed, so a crash cannot leave a sidecar that parses and lies.
     await writeFile(`${sidecar}.tmp`, JSON.stringify(index));
     await rename(`${sidecar}.tmp`, sidecar);
   } catch (err) {
-    // A capture on read-only media is still perfectly readable; it just pays for
-    // the scan again next time rather than failing to open at all.
     console.error(`[capture] could not write ${sidecar}: ${err.message}`);
   }
   return index;
 }
 
-/**
- * Whether a sidecar's numbers describe the file it sits beside, closely enough to
- * read from.
- *
- * The staleness test below says only that this sidecar was written for a file of
- * this size at this modification time. Everything in it then reaches `readAt`,
- * which allocates a buffer of the declared length and preads at the declared
- * offset - so a length nobody checked is a `Buffer.allocUnsafe` of whatever the
- * sidecar likes, and an offset nobody checked reads from wherever it likes. A
- * sidecar is an ordinary small file beside the take, rewritten by any scan and
- * writable by anything that can write the captures directory, which is a much
- * lower bar than producing a multi-gigabyte capture - so it is checked rather than
- * trusted for having the right size stamped in it.
- *
- * The bounds are the ones the scan itself enforces while building an index, which
- * is what makes this a check on the file rather than a second opinion about the
- * format: a payload fits the ceiling, a frame carries at least its own sixteen-byte
- * header, and each frame's bytes lie inside the capture and after the frame before
- * it. Failing any of them is treated exactly as a sidecar that is absent or not
- * JSON - the take is scanned again, which is slow and correct.
- */
+// Whether a sidecar's numbers describe the file it sits beside. The staleness test says only that
+// it was written for a file of this size at this mtime, and everything in it then reaches
+// `readAt`, which allocates and preads on those numbers. Failing a bound is treated as absent.
 function indexDescribes(cached, size) {
   const frames = cached?.frames;
   if (!frames || !Array.isArray(frames.offset) || !Array.isArray(frames.length) || !Array.isArray(frames.stampMs)) {
     return false;
   }
   if (frames.length.length !== frames.offset.length || frames.stampMs.length !== frames.offset.length) return false;
-  // A payload begins after a header at the very least, ends inside the file, and is
-  // no longer than the format allows.
   const spans = (offset, length, least) => Number.isSafeInteger(offset) && Number.isSafeInteger(length)
     && offset >= HEADER_BYTES && length >= least && length <= MAX_PAYLOAD_BYTES && offset + length <= size;
   if (cached.hello !== null && !spans(cached.hello?.offset, cached.hello?.length, 0)) return false;
   let after = 0;
   for (let i = 0; i < frames.offset.length; i++) {
     if (!spans(frames.offset[i], frames.length[i], STAMP_BYTES)) return false;
-    // Ordered and non-overlapping, because that is what appending messages to a file
-    // produces. Two entries pointing at one span is a sidecar describing some other
-    // arrangement of bytes than the one the take has.
+  // Ordered and non-overlapping, because that is what appending messages to a file produces.
     if (frames.offset[i] < after) return false;
     if (!Number.isFinite(frames.stampMs[i])) return false;
     after = frames.offset[i] + frames.length[i];
@@ -320,54 +202,36 @@ function indexDescribes(cached, size) {
   return true;
 }
 
-/** The sidecar if it still describes this file, otherwise a fresh scan. */
 export async function loadIndex(capturePath) {
   const st = await stat(capturePath);
   try {
-    // The sidecar is three orders of magnitude smaller than the take - tens of
-    // bytes per frame against half a megabyte - so this is the one read here
-    // that can safely be a whole-file read.
+    // The sidecar is three orders of magnitude smaller than the take, so this is the one read
+    // here that can safely be a whole-file read.
     const cached = JSON.parse(await readFile(indexPathFor(capturePath), 'utf8'));
-    // Byte length catches an appended or truncated capture, which invalidates
-    // every offset past the change. Modification time has to sit beside it,
-    // because a same-size substitution would otherwise be waved through to the
-    // content hash - and the hash it would be waved through to is the stale one
-    // in this very sidecar. Re-hashing gigabytes on project load is exactly what
-    // the design refuses, so deferring here would defer to a lie, and the
-    // gallery's reconciliation-by-hash would inherit it.
+    // Modification time has to sit beside the byte length, or a same-size substitution is waved
+    // through to the stale hash in this very sidecar.
     if (cached.version === INDEX_VERSION && cached.bytes === st.size && cached.mtimeMs === st.mtimeMs) {
-      // Size and modification time say this sidecar was written for this file. What
-      // it *contains* is a separate question, and the offsets and lengths in it are
-      // what every later read allocates and preads on - so they are checked before
-      // the sidecar is accepted rather than when a frame is asked for, by which time
-      // the number has already reached `allocUnsafe`.
       if (indexDescribes(cached, st.size)) return cached;
       console.error(`[capture] the sidecar for ${basename(capturePath)} does not describe it - scanning again`);
     }
   } catch {
-    // Absent, unreadable or not JSON all mean the same thing: scan it again.
   }
   return buildIndex(capturePath);
 }
 
-/** An open capture: its index in memory, its bytes still on disk. */
 export class Capture {
   constructor(path, index, handle) {
     this.path = path;
     this.index = index;
     this.handle = handle;
-    // How many callers are mid-read on this handle. The eviction below only ever
-    // closes a capture nobody is holding, because a descriptor closed underneath a
-    // frame run would fail inside a stream whose errors nobody is positioned to
-    // catch - which is the same reason the run reads off the retained handle in
-    // the first place.
+    // Eviction only ever closes a capture nobody is holding: a descriptor closed under a frame run
+    // fails inside a stream nobody can catch.
     this.leases = 0;
     this.usedAt = 0;
-    // Set when this capture has been dropped from the map while a reader still holds
-    // it. Nothing can reach it again, so the last lease to be released is the only
+    // Dropped from the map while a reader still holds it, so the last lease released is the only
     // thing left that can close it - see `forgetCapture`.
     this.doomed = false;
-    // Set by `close()`. See the comment there for why this is separate from `doomed`.
+    // Set by `close()`, and separate from `doomed` - see the comment there.
     this.closed = false;
   }
 
@@ -375,19 +239,8 @@ export class Capture {
     return this.index.frames.offset.length;
   }
 
-  /**
-   * Holds this capture open for the life of the process.
-   *
-   * The replay loop is the one reader that does not come and go: it opens a take
-   * once and preads a frame out of it every few tens of milliseconds forever, with
-   * nothing bracketing the read that a lease could hang off. Without this it is not
-   * merely evictable, it is the *first* thing evicted - `leases` stays zero and
-   * `usedAt` never moves, so it sorts to the front of the queue below - and a
-   * library of twenty-five takes skimmed while a replay is running closes the
-   * replay's own descriptor underneath it. The reads then fail into the tick's
-   * catch, the viewer goes to `lost`, and the loop retries forever against a closed
-   * handle with one line in the log.
-   */
+  // Holds this capture open for the life of the process. The replay loop preads forever with
+  // nothing a lease could hang off, so without this it is the *first* thing evicted.
   retain() {
     this.leases++;
     this.usedAt = ++useClock;
@@ -395,11 +248,8 @@ export class Capture {
   }
 
   async readAt(position, bytes) {
-    // The one allocation both readers reach, so the bound is asserted here as well
-    // as where the numbers came from. The scan enforces the format's ceiling while
-    // building an index and `indexDescribes` enforces it on a sidecar read back off
-    // disk, and this is the line those two are protecting - a guard at the
-    // allocation is the one that cannot be reached around by a third caller.
+    // The one allocation both readers reach, so the bound is asserted here as well as where the
+    // numbers came from: a guard at the allocation cannot be reached around.
     if (!Number.isSafeInteger(position) || position < 0
       || !Number.isSafeInteger(bytes) || bytes < 0 || bytes > MAX_PAYLOAD_BYTES) {
       throw new Error(
@@ -409,9 +259,8 @@ export class Capture {
     }
     const buf = Buffer.allocUnsafe(bytes);
     let got = 0;
-    // A positioned read of a regular file normally returns everything asked for,
-    // but nothing promises it, and a short read here would ship a frame with a
-    // tail of whatever was in memory.
+    // Nothing promises a positioned read returns everything asked for, and a short read here
+    // would ship a frame with a tail of whatever was in memory.
     while (got < bytes) {
       const { bytesRead } = await this.handle.read(buf, got, bytes - got, position + got);
       if (bytesRead === 0) throw new Error(`short read at ${position + got} in ${this.path}`);
@@ -420,49 +269,27 @@ export class Capture {
     return buf;
   }
 
-  /** The hello payload, or null for a capture whose writer died before one. */
   readHello() {
     const h = this.index.hello;
     return h ? this.readAt(h.offset, h.length) : Promise.resolve(null);
   }
 
-  /**
-   * One frame's payload, byte for byte as the socket would have delivered it -
-   * or, with a depth divisor above 1, the same frame sampled down.
-   *
-   * The sampling itself is `decimatePayload` below, which this shares with the live
-   * socket rather than reimplementing: a stored frame and a frame still in flight
-   * are the same sixteen bytes of header over the same grid, so two copies of this
-   * loop would be two things to keep agreeing about what a `÷4` frame is.
-   */
+  // Sampled down by `decimatePayload`, which the live socket shares rather than reimplementing.
   async readFrame(n, depthDivisor = 1) {
     const { offset, length } = this.index.frames;
     const payload = await this.readAt(offset[n], length[n]);
     return decimatePayload(payload, depthDivisor, `frame ${n}`);
   }
 
-  /**
-   * The byte span of frames a..b as they sit in the file, framing included, with
-   * an inclusive end for `createReadStream`. A run of bare payloads would have no
-   * boundaries to parse back, and the KNCT headers that supply them are already
-   * interleaved between the payloads - so the file's own slice is both the honest
-   * answer and a single contiguous read.
-   */
+  // Framing included, inclusive end for `createReadStream`: a run of bare payloads would have no
+  // boundaries to parse back.
   frameRunSpan(a, b) {
     const { offset, length } = this.index.frames;
     return { start: offset[a] - HEADER_BYTES, end: offset[b] + length[b] - 1 };
   }
 
-  /**
-   * A run can be the whole take, so it streams in bounded chunks rather than
-   * landing in memory. It reads off the same retained handle every other call
-   * here uses, and that is the load-bearing part rather than an implementation
-   * detail: reopening by path would answer from whatever file sits at that name
-   * now, so a take deleted underneath a running server would fail inside a
-   * stream whose errors nobody is positioned to catch, and a take re-recorded
-   * under the same name would serve the new file's bytes at the old file's
-   * offsets while `readFrame` still served the old ones. One handle, one answer.
-   */
+  // Streams in bounded chunks off the same retained handle every other call uses: reopening by
+  // path would serve a re-recorded take's bytes at the old file's offsets.
   createFrameRunStream(a, b) {
     const { start, end } = this.frameRunSpan(a, b);
     const { handle, path } = this;
@@ -492,60 +319,24 @@ export class Capture {
   }
 
   close() {
-    // Recorded, because "this descriptor is gone" is a question `withCapture` has to be
-    // able to ask and `doomed` is not that question - a capture can be doomed and still
-    // perfectly readable, which is the ordinary case for a read that was already in
-    // flight when a delete or a rename landed. Only a capture that has actually been
-    // closed is one nothing may read through.
+    // `doomed` is not the question `withCapture` has to ask - a capture can be doomed and still
+    // readable, which is the ordinary case for a read already in flight.
     this.closed = true;
     return this.handle.close();
   }
 }
 
-// ------------------------------------------------------ how far the cloud reaches
 
-/**
- * Where a take's points actually are, laterally, in the sensor's own metres.
- *
- * **The crop box opens at plus or minus seven metres and the cloud is nowhere near
- * it.** Seven is the right *bound* - it clears everything a Kinect can see at the
- * furthest depth a slider allows, which is what keeps a document that never asked to
- * be cropped from loading cropped - but as the box you are handed it is three to seven
- * times the thing it bounds, and the twelve edges are all off screen: measured against
- * the sample take at the defaults, not one of them is inside the frame and the only
- * furniture on the stage is a single handle nobody can associate with a box. So the
- * editor asks this and fits the four lateral faces to the answer.
- *
- * **Percentiles rather than extremes, and the difference is the whole design.** The
- * widest samples a take carries are single texels at the frame corners, at the range
- * limit where this sensor's depth is mostly speckle - on 2026-08-07-take1 the extreme
- * x runs to 5.98m while the 99.5th percentile is 1.91m. Fitting to the extreme would
- * hand back the bound it was trying to replace. A percentile also answers the question
- * a take that goes outdoors halfway through raises: a sustained stretch of further
- * geometry is a real share of the samples and moves p99.5 out, where a doorway at the
- * sensor's limit does not.
- *
- * **The whole take, not a frame.** A fit to frame zero is a box that crops whatever the
- * take does later, which is the one failure this must not have. Cost, measured warm on
- * this machine: a full scan of take1's 738 frames took 0.18s and a stride-8 scan 0.07s,
- * with take2's 1953 frames at 0.26s - and stride 64, twelve frames, already lands within
- * 5cm of the full scan on every face. Stride 8 is therefore comfortable rather than
- * tuned, and the histograms mean the scan never holds its samples: a full pass at every
- * fourth texel is twenty million of them.
- *
- * **The depth pair is not fitted and this returns nothing for it.** Fitting depth to the
- * cloud fits to the back wall, and the sensor sees the back wall: a p1/p98 fit asks for
- * a far plane of 9.06m on take2 and 9.08m on take3 against the 6m they open at, which is
- * wider rather than narrower. What the depth range does here is decide which points the
- * lateral fit is over - a box has no business bounding points the box already discards -
- * which is why it is an argument rather than a constant, and why the cache below keys on
- * it.
- */
+// Where a take's points actually are, laterally, so the editor can fit the crop box to a take
+// instead of a plus-or-minus seven metre box whose edges are all off screen. Percentiles rather
+// than extremes, because the widest samples are corner texels at the range limit where depth is
+// mostly speckle. Over the whole take at a stride, or the box crops what the take does later.
+// Depth is not fitted - a fit to the cloud fits to the back wall - so the range is an argument
+// deciding which points the lateral fit is over, and the cache keys on it.
 const EXTENT_FRAME_STRIDE = 8;
 const EXTENT_TEXEL_STRIDE = 4;
 const EXTENT_PERCENTILE = 0.5;
-// Ten millimetre bins across twenty metres, which is finer than the fit's own step of
-// 50mm by a factor of five and wider than anything the sensor can return.
+// Ten millimetre bins across twenty metres: finer than the fit's own 50mm step.
 const EXTENT_BINS = 2000;
 const EXTENT_SPAN = 20;
 
@@ -559,14 +350,8 @@ const percentile = (bins, total, p) => {
   return EXTENT_SPAN / 2;
 };
 
-/**
- * Fitted lateral bounds for one capture and one depth range.
- *
- * `hello` is the take's own, so the unprojection uses the intrinsics the footage was
- * shot with rather than whatever the sensor now reports - the same rule the editor
- * follows when it opens a take, and the reason this takes the hello as an argument
- * instead of reading a default.
- */
+// `hello` is the take's own, so the unprojection uses the intrinsics the footage was shot with
+// rather than the sensor's today.
 export async function cloudExtent(capture, hello, near, far) {
   const { fx, fy, cx, cy } = hello;
   const x = new Float64Array(EXTENT_BINS);
@@ -577,8 +362,7 @@ export async function cloudExtent(capture, hello, near, far) {
     Math.floor(((v + EXTENT_SPAN / 2) / EXTENT_SPAN) * EXTENT_BINS)));
   for (let n = 0; n < capture.frameCount; n += EXTENT_FRAME_STRIDE) {
     const payload = await capture.readFrame(n);
-    // A frame whose grid is not this build's is skipped rather than sampled past, on
-    // `decimatePayload`'s reasoning: the alternative reads whatever is beside it.
+    // A frame whose grid is not this build's is skipped rather than sampled past.
     if (payload.readUInt32LE(0) !== DEPTH_W * DEPTH_H * 2) continue;
     scanned++;
     for (let row = 0; row < DEPTH_H; row += EXTENT_TEXEL_STRIDE) {
@@ -588,12 +372,8 @@ export async function cloudExtent(capture, hello, near, far) {
         if (mm === 0) continue;
         const z = mm * 0.001;
         if (z < near || z > far) continue;
-        // libfreenect2's pinhole model, and the negation on x is the same mirror
-        // correction `drawPlanCloud` and the vertex shader carry: the sensor's frames
-        // arrive horizontally flipped, so a fit computed without it would hand back a
-        // box reflected about the optical axis - which on this rig's off-centre
-        // principal point is a box that is wrong by centimetres on both faces and
-        // looks entirely plausible.
+        // The negation on x is the same mirror correction `drawPlanCloud` carries: without it the
+        // box comes back reflected about the optical axis.
         x[bin((-(col + 0.5 - cx) / fx) * z)]++;
         y[bin(-((row + 0.5 - cy) / fy) * z)]++;
         total++;
@@ -611,34 +391,17 @@ export async function cloudExtent(capture, hello, near, far) {
 
 const openCaptures = new Map();
 
-/**
- * How many captures may hold a descriptor at once. This is the debt step 2 named
- * and left for the gallery, and the scarce resource is descriptors rather than
- * memory: an index is about twenty-five bytes a frame, but every open capture
- * holds one fd against a soft limit of 256, and a library skimming a directory of
- * takes touches every one of them. Unbounded, that is EMFILE followed by thrash.
- *
- * Deliberately far below the limit rather than near it, because this process also
- * holds the listener, every live socket, the replay handle and whatever ffmpeg is
- * doing. A capture reopened after eviction costs one `open` and a sidecar read
- * that the index cache below already answers.
- */
+// The scarce resource is descriptors: each open capture holds one fd against a soft limit of 256,
+// and a library skim touches every take. Far below the limit, because this process also holds the
+// listener, every socket and the replay.
 export const MAX_OPEN_CAPTURES = 24;
 
-// The index without the descriptor. A manifest wants offsets, stamps and a hash
-// for every take in a directory and wants to hold none of them open afterwards,
-// so it comes through here rather than through `openCapture` - and the sidecar
-// read `loadIndex` performs is itself short-lived, which is the whole property.
-// Cached in process on the same staleness test the sidecar uses, so listing a
-// directory twice does not stat and parse every take twice.
+// The index without the descriptor, for a manifest that wants a hash for every take and none of
+// them held open. Cached on the sidecar's own staleness test.
 const indexCache = new Map();
 
-// Scans in flight, keyed by path. The promise rather than the result, for the same
-// reason `openCapture` memoises one: a take being written moves its size and its
-// modification time continuously, so every request that reaches the staleness test
-// above fails it, and the gallery on the node's own panel polls. Without this, each
-// poll started its own full read plus sha256 of the same multi-gigabyte file, in
-// parallel, against the disk the recorder is writing to.
+// Scans in flight, keyed by path: a take being written moves its size and mtime continuously, so
+// every poll fails the staleness test and used to start its own full read plus sha256.
 const indexPending = new Map();
 
 export async function cachedIndex(capturePath) {
@@ -652,10 +415,8 @@ export async function cachedIndex(capturePath) {
   indexPending.set(path, started);
   started.then(
     (index) => {
-      // Only if this scan is still the one in flight. `forgetCapture` clears the
-      // entry when the file changes underneath, and a scan that finished after that
-      // is describing bytes that are already gone - caching it would put the state
-      // this whole module invalidates for straight back into the map.
+      // Only if this scan is still the one in flight: `forgetCapture` clears the entry when the
+      // file changes underneath, and a later-finishing scan describes bytes now gone.
       if (indexPending.get(path) === started) {
         indexCache.set(path, index);
         indexPending.delete(path);
@@ -666,15 +427,8 @@ export async function cachedIndex(capturePath) {
   return started;
 }
 
-/**
- * A take's hello, read and the descriptor closed again before this returns.
- *
- * A manifest wants the sensor record of every take in a directory, and routing
- * that through `openCapture` would leave one descriptor per take held for the
- * length of a listing - the exact shape of the EMFILE the cap above exists to
- * stop, arrived at from the other side. The hello is a few hundred bytes at an
- * offset the index already recorded, so three syscalls per take is the whole cost.
- */
+// The descriptor is closed again before this returns: routing a manifest through `openCapture`
+// would hold one per take for the length of a listing.
 export async function readHelloOnce(capturePath, index) {
   const h = index.hello;
   if (!h) return null;
@@ -690,8 +444,6 @@ export async function readHelloOnce(capturePath, index) {
     try {
       return JSON.parse(buf.subarray(0, got).toString('utf8'));
     } catch {
-      // A hello that is not JSON is a take from a writer this build does not know.
-      // The gallery still lists it; it just has nothing to say about the sensor.
       return null;
     }
   } finally {
@@ -699,20 +451,9 @@ export async function readHelloOnce(capturePath, index) {
   }
 }
 
-/**
- * Drops a take's cached index, for a file this process just changed underneath.
- *
- * **The descriptor goes with it, whenever the last reader lets go.** This used to
- * close only when the lease count was already zero, and then drop the map entry
- * anyway - so a delete, a reclaim or a take closing while a gallery tile was mid-skim
- * left a `FileHandle` that nothing could reach and nothing would ever close.
- * `withCapture`'s `finally` only decremented. On Node 26 that is fatal rather than
- * untidy: a `FileHandle` collected unclosed throws `ERR_INVALID_STATE` from the
- * garbage collector, at the top level, where there is nothing to catch it - measured
- * on v26.0.0, process gone, taking the listener, every socket and whatever the
- * recorder's write stream still had buffered. The gallery leases per pointer move
- * and Delete is a button on the same tile, so the two are one gesture apart.
- */
+// Drops a take's cached index and closes the descriptor whenever the last reader lets go. A
+// `FileHandle` collected unclosed throws `ERR_INVALID_STATE` from the garbage collector on Node
+// 26, where nothing can catch it.
 export function forgetCapture(capturePath) {
   const path = resolve(capturePath);
   indexCache.delete(path);
@@ -725,35 +466,21 @@ export function forgetCapture(capturePath) {
   }, () => {});
 }
 
-/**
- * Opens a capture once and keeps it open until something else needs the
- * descriptor. The promise rather than the result is memoised, so two requests
- * arriving during a multi-gigabyte scan share it instead of starting a second one.
- *
- * Eviction is least-recently-used and only ever takes a capture with no lease
- * out - see `Capture.leases`. That means the map can exceed the cap while enough
- * requests are genuinely in flight, which is the honest behaviour: refusing to
- * open the file a request is asking for would trade EMFILE for a 500, and the
- * bound this exists to enforce is on descriptors left lying about rather than on
- * descriptors in use.
- */
+// The promise rather than the result is memoised, so two requests during a scan share it.
+// Eviction is least-recently-used and only takes a capture with no lease, so the map may exceed
+// the cap while requests are in flight - the bound is on descriptors left lying about.
 export function openCapture(capturePath) {
   const path = resolve(capturePath);
   let pending = openCaptures.get(path);
   if (!pending) {
     pending = (async () => new Capture(path, await cachedIndex(path), await open(path, 'r')))();
-    // A failure must not be remembered, or a capture that appears a moment later
-    // would keep reporting the error from before it existed.
+    // A failure must not be remembered, or a capture that appears a moment later would keep
+    // reporting the error from before it existed.
     pending.catch(() => openCaptures.delete(path));
     pending.then((capture) => {
       settledValue.set(pending, capture);
-      // Swept again now this one has a descriptor, and that second pass is what
-      // makes the cap hold at all. The pass below runs while this promise is still
-      // unresolved, and an unresolved entry is not a candidate - so under concurrent
-      // opens every pass looked at a map of promises, evicted nothing, and nothing
-      // ever looked again once they landed. The bound then failed silently, which is
-      // the worst way for a descriptor cap to fail: EMFILE arrives much later, in
-      // whatever else was next to ask the kernel for a file.
+      // Swept again now this one has a descriptor: the pass below runs while the promise is still
+      // unresolved, and an unresolved entry is not a candidate.
       evictIdle();
     }, () => {});
     openCaptures.set(path, pending);
@@ -764,23 +491,9 @@ export function openCapture(capturePath) {
 
 function evictIdle() {
   if (openCaptures.size <= MAX_OPEN_CAPTURES) return;
-  // Resolved entries only. A capture still opening has no descriptor yet and no
-  // `usedAt` to rank by, and awaiting one here would make an eviction sweep wait
-  // on the multi-gigabyte scan it is trying to make room for.
-  //
-  // And a `usedAt` of zero is a capture that has resolved but that nobody has
-  // touched yet: `withCapture` takes its lease in the continuation *after* the one
-  // this sweep now runs from, so for that moment a freshly opened capture has no
-  // lease and the oldest `usedAt` there is - it would sort to the front of the queue
-  // and be closed into the read it was opened for. It becomes a candidate the moment
-  // something actually uses it.
-  //
-  // Which is a rule about callers as much as about this loop: a caller that opens a
-  // capture and then neither leases it through `withCapture` nor `retain`s it holds a
-  // descriptor for the life of the process, because nothing will ever move its
-  // `usedAt` off zero. Both of today's callers do one or the other - every request
-  // goes through `withCapture` and the replay retains - and a third that did neither
-  // would be the leak this cap exists to prevent, arrived at from inside.
+  // Resolved entries only, or the sweep waits on the scan it is making room for. A `usedAt` of
+  // zero is a capture nobody has touched yet, which would otherwise sort to the front and be
+  // closed into the read it was opened for - so a caller that neither leases nor retains leaks one.
   const settled = [];
   for (const [path, pending] of openCaptures) {
     const capture = pendingValue(pending);
@@ -794,32 +507,16 @@ function evictIdle() {
   }
 }
 
-// A promise's resolved value, or null if it has not settled. There is no way to
-// ask a promise this, so the value is recorded on it as it resolves.
+// A promise's resolved value, or null if it has not settled. There is no way to ask a promise.
 const settledValue = new WeakMap();
 const pendingValue = (pending) => settledValue.get(pending) ?? null;
 
-/**
- * Runs `fn` against an open capture with a lease held for exactly as long as it
- * takes. Every reader goes through here rather than calling `openCapture`
- * directly, because a lease released early is a descriptor closed under a read
- * and a lease never released is the unbounded map this replaced.
- */
+// A lease released early is a descriptor closed under a read; one never released is
+// an unbounded map.
 export async function withCapture(capturePath, fn) {
   const pending = openCapture(capturePath);
-  // **The lease is taken in this turn when there is anything to take it on, because an
-  // `await` on an already-resolved promise is still a microtask somebody else can run
-  // in.** `evictIdle` runs synchronously out of `openCapture`, so one request opening a
-  // twenty-fifth capture sweeps while this one is between the handle it was given and
-  // the lease it is about to take - and a capture used before has `usedAt > 0` and
-  // `leases === 0`, which is the front of that queue. It gets closed into the read it
-  // was handed over for, and the read surfaces as a 500. `forgetCapture` reaches the
-  // same window from a delete or a rename, and does not consult `usedAt` at all.
-  //
-  // The carve-out in `evictIdle` covers the other half and only the other half: a
-  // capture that has *just* resolved has `usedAt === 0` and is not a candidate, which is
-  // what makes the `await` below safe for the open this call started. So the two
-  // branches are the two states, and neither is left leaning on the caller being quick.
+  // Taken in this turn when there is anything to take it on, because an `await` on a resolved
+  // promise is still a microtask - and `evictIdle` runs synchronously out of `openCapture`.
   const already = pendingValue(pending);
   let capture;
   if (already) {
@@ -829,23 +526,9 @@ export async function withCapture(capturePath, fn) {
     capture = await pending;
     capture.leases++;
   }
-  // Asked after the lease rather than before it, because `forgetCapture` does not check
-  // `usedAt`: a delete landing during the open above dooms and closes a capture whose
-  // lease count was still zero, and reading on through it would be reading a deleted
-  // take out of a closed descriptor. Said rather than surfaced as a handle error, which
-  // is the difference between "that take was removed" and a 500 nobody can attribute.
-  //
-  // **Both, and the pair is narrower than `doomed` alone on purpose.** `forgetCapture`
-  // runs on a rename as well as on a delete, and a rename is the operation this program
-  // promises carries a take rather than losing it - the capture keeps its inode, so a read
-  // already holding the handle goes on returning the take's own bytes and always has.
-  // Refusing on `doomed` alone would have turned that into an error for a race nobody
-  // asked about, on the one path the architecture doc singles out as safe. What is
-  // genuinely unreadable is a capture whose descriptor was closed in the window above, and
-  // that only happens when the lease count was still zero when `forgetCapture` looked.
-  //
-  // After the lease there is no second window: `forgetCapture` closes only at zero leases,
-  // and this one is held from here to the `finally`.
+  // Asked after the lease, because `forgetCapture` does not check `usedAt`. Both flags, and
+  // narrower than `doomed` alone on purpose: `forgetCapture` also runs on a rename, where the
+  // inode survives and a read already holding the handle returns the take's own bytes.
   if (capture.doomed && capture.closed) {
     capture.leases--;
     throw new Error(`${capturePath} was removed or renamed while it was being opened`);
@@ -855,15 +538,11 @@ export async function withCapture(capturePath, fn) {
     return await fn(capture);
   } finally {
     capture.leases--;
-    // The last lease on a capture nobody can reach any more is what closes it. Not
-    // an optimisation: an unclosed `FileHandle` is a process death on Node 26 - see
-    // `forgetCapture` for the measurement - and this is the only place left holding
-    // a reference to one.
+    // Not an optimisation: an unclosed `FileHandle` is a process death on Node 26.
     if (capture.doomed && capture.leases === 0) await capture.close().catch(() => {});
   }
 }
 
 let useClock = 0;
 
-/** How many descriptors this module is holding. Read by the proof tool. */
 export const openCaptureCount = () => openCaptures.size;

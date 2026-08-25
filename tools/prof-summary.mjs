@@ -1,13 +1,7 @@
 #!/usr/bin/env node
-// Summarises `grabber --profile` output: one line per segment, plus the two
-// numbers that decide whether the run is worth reading at all.
-//
-// Delivered fps is a health number, not a result. The loop idles 55% of every
-// interval, so a run that does not sustain ~30.0 was competing for the machine
-// and its per-segment timings are noise dressed up as a measurement. A threading
-// A/B on this rig once came back at 22.75fps with registration p50 swinging
-// 11.50/13.65/8.30ms across three rounds of one arm, which read as a wildly
-// variable optimisation and was Spotlight indexing a corpus.
+// Summarises `grabber --profile` output: one line per segment, plus the two numbers that
+// decide whether the run is worth reading. Delivered fps is a health number rather than a
+// result - a run that does not sustain ~30.0 was competing for the machine.
 import { readFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);

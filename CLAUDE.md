@@ -7,17 +7,22 @@ first. `README.md` carries the usage path. Three pages beside it carry what surv
 design: `docs/architecture.md` (the four surfaces, program time, the wire format),
 `docs/reference.md` (the command line, the controls, the readings, presets) and
 `docs/performance.md` (the measurements and the negative results worth not re-deriving). The
-reasoning lives where it is enforced — in the code's comments, which are long on purpose, and in
-the proof tools.
+reasoning lives where it is enforced — in the proof tools, and in short comments where the code
+alone would mislead.
+
+**Comments are short. The prose pages carry the long form.** This repo spent a period writing
+essays in its source and reached 44,000 comment lines against 47,000 of code; that is not a
+design record, it is a second document nobody reads that drifts from the first. A measurement,
+a failure that shipped twice, an argument for one design over another — those go in the page
+under `docs/` that already covers the surface, in one or two sentences. What stays in the source
+is the line that stops the next reader making a specific mistake.
 
 **When reality disagrees with an intention, report the contradiction rather than silently
 redesigning.** That has happened repeatedly and reporting was the right move every time.
 
 ## Working with the person who asked
 
-- **Write plainly.** Short sentences, ordinary words, no term the reader did not use first. The
-  comments in this repo are long because the failure modes are subtle; a message to a human is
-  not a comment.
+- **Write plainly.** Short sentences, ordinary words, no term the reader did not use first.
 - **Surface open questions instead of implementing one reading of them.** An ambiguous
   requirement gets a question with concrete options, asked before the work rather than explained
   after it. Guessing costs a rewrite and asking costs a minute.
@@ -240,8 +245,13 @@ thing that should be touching capture bytes.
 
 ## Conventions
 
-- Comments explain *why*, usually by naming the failure mode being avoided, in flowing prose.
-  Match the density and voice already in the file.
+- **Comments are for two things only.** A one-line description of what a function or method
+  does, where the name alone is not enough; and a short *why*, one or two lines, where a reader
+  would otherwise change the code and break something. Everything else goes: no essays, no
+  history of what the code used to be, no measurement narratives, no weighing of design
+  alternatives, no restating the line below, no bold-lead paragraphs, no section banners. The
+  code is meant to be self-explanatory and the pages under `docs/` carry the long form. When in
+  doubt, delete it.
 - Commits: imperative subject, then a body explaining the why and carrying the measurements with
   their methods.
 - **`pointSize` is pixels at 1080p**, and every screen-space term with it. A project saved before

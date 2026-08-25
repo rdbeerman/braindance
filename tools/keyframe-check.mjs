@@ -1,71 +1,8 @@
-// Proves the keyframe layer: that the three interpolation kinds are the curves the
-// design names, that evaluating at a program position writes those values through
-// the registry, that the retime curve maps program time to source time including a
-// hold, that the pre-roll a curve needs is a window on it rather than a tangent,
-// and that undo restores the document and never the view.
+// Proves the keyframe layer: the three interpolation kinds are the curves the design names, evaluation writes them through the registry, the retime curve maps
+// program time to source time including a hold, and undo restores the document and never the view. Invocations and mutations: docs/proof-tools.md.
 //
-// Six claims, separated because they fail for different reasons.
-//
-// **The interpolations are the curves, not curves.** Every expected value here is
-// computed by this tool from its own implementation, never read back from the page
-// and compared to itself. Each kind carries a falsification control that has to
-// *disagree*: an eased scalar against a straight lerp, a step against a lerp, a
-// Catmull-Rom against a straight line. Without those a check would pass on a page
-// that lerped everything, since a lerp agrees with every other interpolation at
-// the keys and this would only ever be sampling near them if nobody said otherwise.
-// The Catmull-Rom also gets an anchor rather than only a control: on evenly spaced
-// keys the non-uniform form the page implements must equal the textbook uniform
-// formula exactly, which ties it to something outside both implementations.
-//
-// **Evaluation goes through the registry and asks for nothing.** The values have
-// to arrive on `params.get`, and the evaluation must schedule no seek - an
-// evaluator that announced its writes would have each render schedule a repaint
-// which renders which schedules more, and the symptom is a tab that gets slower
-// rather than an error. Counted, not assumed.
-//
-// **A keyframed look still seeks the way it plays.** Step 4's central property
-// with tracks moving under it, and the pre-roll still has to suffice.
-//
-// **The retime curve, including a hold.** The mapping is checked against source
-// times this tool computes from the index it fetched itself, and the pre-roll's
-// window query is checked against this tool's own walk over its own curve. The
-// hold is the case the old slope-at-a-point arithmetic answered "no frames needed"
-// for, so the number it would have produced is printed beside the one the window
-// gives, and a seek run at the old number has to land somewhere else.
-//
-// **Undo is document state and only document state.** Orbiting, scrubbing and
-// dropping render scale have to leave the stack untouched, and a slider drag has
-// to push once on release rather than once per pointer move.
-//
-// **The editor's furniture is not in the frame.** The camera path, its nodes and
-// the top-down draw on a canvas of their own, so the rendered image has to be
-// byte-identical with them on and off. This is the check that keeps them there:
-// the first version of this feature scissored a top-down into the render buffer
-// and it broke step 4's frame-identity claim.
-//
-//   node server/index.js --port 8080 --replay captures/fixture-1g.knct &
-//   node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g
-//   node tools/keyframe-check.mjs --mutate pose-linear       # must FAIL
-//   node tools/keyframe-check.mjs --mutate pose-ignores-ease # must FAIL
-//
-// **The last two are separable on purpose and the counts are how you tell.**
-// `pose-linear` fires 6 - the spline rows, the uniform-formula anchor, and section
-// 1c's route row, because a straight line between the keys really is a different
-// route. `pose-ignores-ease` fires 4 - the three channels of section 1c plus its
-// handles-do-something control - and leaves every route row green, because a camera
-// that ignores its handles still travels the same curve, just at the wrong times.
-// Two claims, two sets of rows: one says the route is a spline, the other says the
-// traversal of it is shaped.
-//
-// **The take has to be at least `NEEDS_TAKE_SEC` long and the run refuses one that is
-// not**; the reasoning is beside that declaration. The cadence is read off the take
-// rather than assumed, which is a correction rather than a detail: this header used to
-// state "284 frames over 30.36s, median gap 64ms, mean 9.32fps" and the comment in
-// section 6d said "the 49.79s sample this tree holds", while the tree's own
-// `captures/sample.knct` runs 284 frames over 9.42s at 30.03fps. Three figures, one of
-// them right by accident, all written down as facts about a file `captures/` does not
-// track - which is the shape a number nobody re-derived always ends up in. Every source
-// figure below is against the cadence the run prints.
+// Every expected value is computed here rather than read back off the page, and each kind carries a control that must disagree: a lerp agrees with every other
+// kind at the keys, so without one a page that lerped everything would pass.
 
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -86,42 +23,27 @@ const HEADED = argv.includes('--headed');
 const MUTATE = flag('--mutate');
 const SHOTS = flag('--shots');
 
-// 16:9, and the shape matters as much as the size. This was 640x400, which is 8:5 - a shape
-// `EXPORT_SIZES` offers no resolution for, so `restoreProject` refuses a document framed at
-// it, and this file undoes. The run died mid-way with "this project is framed at 8:5, which
-// this build offers no resolution for" coming out of an undo restoring a snapshot this tool
-// had put the editor into. A stage no user gesture can reach and no document can hold is a
-// stage this file should never have been measuring in.
+// 16:9, because `restoreProject` refuses a document framed at a shape `EXPORT_SIZES` has
+// no resolution for, and this file undoes.
 const STAGE = { width: 640, height: 360 };
-// A first guess at the timeline strip; the real height is measured after load and the
-// viewport corrected. See the resize below the goto.
+// A first guess; the real height is measured after load and the viewport corrected.
 const CHROME_H_GUESS = 148;
 
-// How far apart two images may be and still count as the same landing, and how far
-// apart a control has to be before its difference means anything. Between them is
-// a band where a result proves nothing either way, and a run landing there fails
-// rather than picking a side. Same two numbers as step 4, for the same reasons.
+// Between them is a band where a result proves nothing either way, and a run landing
+// there fails rather than picking a side.
 const SAME_MAX = 2;
 const CONTROL_MIN = 16;
 const CONTROL_MIN_PCT = 1.0;
 
-// How close an evaluated value has to be to the one this tool computed. Both sides
-// are doubles running the same arithmetic in different orders, so this is a float
-// tolerance and nothing more - a wrong interpolation is wrong by hundredths.
+// Both sides are doubles in different orders - a wrong interpolation is wrong by
+// hundredths.
 const VALUE_EPS = 1e-9;
-// Scalars land on the registry's step grid, so a comparison against an unsnapped
-// expectation has to allow half a step. The snapping itself is step 3's claim.
+// Scalars land on the registry's step grid, so an unsnapped expectation gets half a step.
 const halfStep = (spec) => spec.step / 2 + 1e-9;
 
-// ------------------------------------------------------------------- mutations
-//
-// Each breaks exactly one claim, and the tool refuses a mutation whose text it
-// could not find exactly once - a replacement that silently matched nothing would
-// run the unmutated page and be recorded as the check having missed a bug it was
-// never shown.
+// A mutation whose text is not found exactly once is refused: a replacement matching nothing would run the unmutated page and be recorded as a miss.
 const MUTATIONS = {
-  // Ease handles stop bending the timing, so every scalar segment is a straight
-  // lerp whatever its handles say.
+  // Ease handles stop bending the timing, so every scalar segment is a straight lerp.
   'ease-ignored': { file: 'web/curve.js', edits: [[
     `function easeAt(a, b, x) {
   return bezAxis(a, b, 1, easeParam(a, b, x));
@@ -151,23 +73,14 @@ const MUTATIONS = {
     `  const position = [0, 1, 2].map((axis) => a.value.position[axis]
     + (b.value.position[axis] - a.value.position[axis]) * u);`,
   ]] },
-  // The camera goes back to ignoring its handles, which is what it did before the
-  // pose track was eased at all: the raw fraction of the way through the segment
-  // reaches the spline, the slerp and the fov lerp, so the five preset buttons write
-  // numbers nothing reads and a move departs and arrives at speed.
-  //
-  // Aimed at the remap alone rather than at anything around it. The `hermite` block
-  // below it is what `pose-linear` anchors and the two must stay separable, because a
-  // mutation that reddened both rows could not say which term broke - and these are
-  // genuinely different claims: one is that the route is a spline, the other is that
-  // the traversal of it is shaped.
+  // The camera ignores its handles. Aimed at the remap alone so it stays separable from
+  // `pose-linear`: one says the route is a spline, this one says the traversal is shaped.
   'pose-ignores-ease': { file: 'web/main.js', edits: [[
     '  const u = easeAt(a.easeOut, b.easeIn, (t - a.t) / span);',
     '  const u = (t - a.t) / span;',
   ]] },
-  // The carried finding, put back: the pre-roll reads the slope at the target and
-  // multiplies, instead of asking how far back the curve covers the span. A hold
-  // then answers "no frames needed" for the case that needs the most.
+  // The pre-roll reads the slope at the target instead of asking how far back the curve
+  // covers the span, so a hold answers "no frames needed".
   'preroll-slope-at-target': { file: 'web/main.js', edits: [[
     '    const back = retime.framesBackFor(programSec, surfaceSec, this.outputFps, this.lastFrame);',
     `    // Step 4's two lines restored verbatim, zero-slope branch and all: the slope
@@ -183,8 +96,7 @@ const MUTATIONS = {
     return scalarAt(keys, programSec, EXTEND_ENDS);`,
     '    return programSec * this.rate;',
   ]] },
-  // The evaluator announces its writes, so every evaluated frame schedules an
-  // accurate seek, which evaluates, which schedules more.
+  // The evaluator announces its writes, so every evaluated frame schedules a seek.
   'evaluator-repaints': { file: 'web/main.js', edits: [[
     `  withoutRepaint(() => {
     for (const track of tracks.values()) {
@@ -199,34 +111,17 @@ const MUTATIONS = {
     params.set(track.name, track.valueAt(t));
   }`,
   ]] },
-  // The undo snapshot takes the whole registry rather than document state, so
-  // dropping render scale for performance lands on the stack and pressing undo
-  // puts it back.
-  // Re-anchored for v3. The line this names moved into `serialiseProjectBody`'s `look`
-  // block and grew an explicit tag argument, so the old text matched nothing and the
-  // tool refused the mutation - correctly, and silently as far as anything reading only
-  // the exit code was concerned. The claim is unchanged: the snapshot is document state,
-  // so widening it to the whole registry has to be caught.
+  // The undo snapshot widens to the whole registry, so dropping render scale lands on it.
   'undo-includes-view': { file: 'web/main.js', edits: [[
     '  const lookParams = params.values(lookNames);',
     '  const lookParams = params.values(params.names());',
   ]] },
-  // Undo pushes on every input event rather than on the end of the interaction, so
-  // one slider drag is two hundred levels.
-  // Re-anchored: the listener's local was renamed `el` to `input`, and a one-word rename
-  // is enough to kill a control outright - this one proves that a slider drag is a single
-  // undo step, and it had stopped running while reading as though it had. Caught by
-  // `syntax-check`'s anchor row rather than by anybody noticing; `docs/instruments.md`
-  // carries the case file.
+  // Undo pushes per input event rather than per interaction: one drag is two hundred.
   'undo-on-input': { file: 'web/main.js', edits: [[
     "      input.addEventListener('input', () => writeFromControl(name, Number(input.value)));",
     "      input.addEventListener('input', () => { writeFromControl(name, Number(input.value)); history.commit(); });",
   ]] },
-  // A seek plans its span once and never looks again, which is what the code did
-  // before a curve could move under it. The hazard is older than step 5 - the speed
-  // slider mutates `retime.rate` outside the transport's exclusive queue, so a
-  // committed step 4 could hit it too - it is only far harder to reach without a
-  // drag rewriting the curve on every pointer move.
+  // A seek plans its span once and never looks again.
   'seek-plans-once': { file: 'web/main.js', edits: [
     [`        this.overtaken++;
         if (this.overtaken > SEEK_OVERTAKEN_LIMIT) {
@@ -251,19 +146,14 @@ const MUTATIONS = {
     await this.source.ensure(planned.from, planned.to);
 `],
   ] },
-  // The pre-roll goes back to reading the uniforms, which hold the look at wherever
-  // the playhead was parked rather than the look at the target.
-  // The surface half alone. It used to carry the trails half too, which made it two
-  // claims in one mutation and left it stale the moment the trails half changed
-  // shape - and a stale mutation is refused rather than run, which is the guard
-  // working but not a catch. `trails-damp-at-target` is the trails half's own.
+  // The pre-roll reads the uniforms, which hold the look where the playhead was parked.
+  // The surface half alone; `trails-damp-at-target` is the trails half.
   'preroll-reads-uniforms': { file: 'web/main.js', edits: [[
     `    const surfaceSec = (valueAtProgram('fade', programSec)
       + valueAtProgram('wake', programSec)) / 1000;`,
     '    const surfaceSec = uniforms.fadeTime.value + uniforms.wakeTime.value;',
   ]] },
-  // The trails half of the pre-roll goes back to the closed form, which is the
-  // product over the window only while damp is constant.
+  // The trails half goes back to the closed form, which holds only while damp is constant.
   'trails-damp-at-target': { file: 'web/main.js', edits: [[
     `    const back2 = this.trailsFramesBack(programSec);
     const trails = back2.frames;`,
@@ -271,17 +161,15 @@ const MUTATIONS = {
     const back2 = { covered: true };
     const trails = dampNow > 0 ? Math.ceil(Math.log(AFTERIMAGE_RESIDUAL) / Math.log(dampNow)) : 0;`,
   ]] },
-  // Orientation stops interpolating and holds the earlier key. Every quaternion is
-  // still a unit quaternion and every key is still hit exactly, which is what made
-  // this invisible while the test rotations were identities.
+  // Orientation holds the earlier key. Every quaternion is still a unit quaternion and
+  // every key still hit exactly, so identity rotations hide it.
   'pose-no-slerp': { file: 'web/main.js', edits: [[
     `  slerpA.fromArray(a.value.quaternion);
   slerpB.fromArray(b.value.quaternion);
   slerpA.slerp(slerpB, u);`,
     '  slerpA.fromArray(a.value.quaternion);',
   ]] },
-  // The retime's editing doors stop holding a key inside its neighbours, so a drag
-  // can author a curve that runs downhill.
+  // The retime's editing doors stop holding a key inside its neighbours.
   'retime-unclamped': { file: 'web/main.js', edits: [
     [`  const floor = i > 0 ? keys[i - 1].value : 0;
   const ceiling = i < keys.length - 1 ? keys[i + 1].value : timeline.source.duration;
@@ -289,16 +177,12 @@ const MUTATIONS = {
       '  key.value = Math.max(0, Math.min(timeline.source.duration, key.value));'],
     ['      if (keys[i].value < keys[i - 1].value) {', '      if (false) {'],
   ] },
-  // The handle half of the retime guard goes away while the key-value half stays, so
-  // a curve whose keys ascend can still be bent downhill inside a segment. Its own
-  // mutation rather than part of `retime-unclamped`, because they are two claims:
-  // one is about where a key may sit, the other about where its handles may.
+  // The handle half of the retime guard goes and the key-value half stays: two claims.
   'retime-handle-unchecked': { file: 'web/main.js', edits: [[
     '        if (!h[0].every((c) => c >= 0 && c <= 1)) {',
     '        if (false) {',
   ]] },
-  // The animation loop stops catching, so the pair source's refusal escapes it and
-  // three never asks for another frame.
+  // The animation loop stops catching, so the pair source's refusal escapes it.
   'tick-uncaught': { file: 'web/main.js', edits: [[
     `    try {
       this.tickNow(nowMs);
@@ -311,8 +195,7 @@ const MUTATIONS = {
       this.tickNow(nowMs);
     } catch (err) {`,
   ]] },
-  // The furniture goes back inside the frame, which is where it was first written
-  // and where it broke step 4.
+  // The furniture goes back inside the frame, where it broke step 4.
   'chrome-in-frame': { file: 'web/main.js', edits: [[
     `    if (postEnabled()) composer.render(dt);
     else renderer.render(scene, viewCamera);`,
@@ -339,16 +222,7 @@ function drawChrome() {`,
   ]] },
 };
 
-// **The spec names the file it edits, and the interception is derived from that name.**
-// This used to read the literal `web/main.js` regardless of what the table said, which
-// was true of every entry and true by coincidence: the page is built from more than one
-// module, so an anchor that moves into a neighbouring one would leave a hardcoded route
-// matching nothing, the browser loading the unmutated build, and the run recorded as
-// this tool having missed a bug it was never shown. That is the failure direction
-// `docs/instruments.md` keeps the case file for, and it is silent.
-//
-// Returned with its file rather than as a bare string so the caller can install the
-// route for the right URL and refuse when that URL is never asked for.
+// The interception route comes off the spec's own file rather than a hardcoded `web/main.js`: an anchor moving into another module would leave the route matching nothing and the run recorded as a miss.
 function mutatedSource() {
   const spec = MUTATIONS[MUTATE];
   if (!spec) {
@@ -365,22 +239,14 @@ function mutatedSource() {
   return { file: spec.file, body: source };
 }
 
-/**
- * Where a file under `web/` is reached from a browser.
- *
- * Matched on the whole pathname rather than with a `**​/name.js` glob, because a glob
- * on the basename is a claim about a filename where the server's rule is about a path -
- * two modules could end in the same name and the wrong one would be served without
- * anything failing.
- */
+/** Where a file under `web/` is reached from a browser. Matched on the whole pathname,
+  * because two modules could end in the same name and the wrong one would be served. */
 function servedAt(file) {
   if (!file.startsWith('web/')) {
     throw new Error(`${file} is not served to a browser, so a page mutation cannot reach it`);
   }
   return `/${file.slice('web/'.length)}`;
 }
-
-// ------------------------------------------------------------------- playwright
 
 async function loadPlaywright() {
   const require = createRequire(import.meta.url);
@@ -405,14 +271,7 @@ async function loadPlaywright() {
   throw new Error('playwright not found - install it globally or in this project');
 }
 
-// ------------------------------------------------ values into the page as source
-//
-// Never `JSON.stringify`. This repo has already been bitten once by it: a table of
-// malformed values passed into a page as JSON turned `NaN` and `undefined` into
-// `null`, so three cases labelled NaN were silently testing null a second and
-// third time. Nothing here is deliberately malformed, but the labels would lie the
-// same way if it ever were, and one emitter that cannot do that is cheaper than
-// remembering which call sites are safe.
+// Never `JSON.stringify`: it turns `NaN` and `undefined` into `null`, so a case labelled NaN silently tests null instead.
 function src(value) {
   if (value === undefined) return 'undefined';
   if (value === null) return 'null';
@@ -420,9 +279,7 @@ function src(value) {
     if (Number.isNaN(value)) return 'NaN';
     if (value === Infinity) return 'Infinity';
     if (value === -Infinity) return '-Infinity';
-    // Enough digits that a double round-trips exactly, which matters because the
-    // page snaps scalars to a step grid and a value a hair off its grid lands one
-    // step away.
+    // Enough digits that a double round-trips exactly, or a value lands one step grid away.
     return Object.is(value, -0) ? '-0' : String(value);
   }
   if (typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
@@ -430,31 +287,16 @@ function src(value) {
   return `{${Object.entries(value).map(([k, v]) => `${JSON.stringify(k)}: ${src(v)}`).join(', ')}}`;
 }
 
-// ------------------------------------------ this tool's own interpolation
-//
-// Written here rather than imported from the page, because a check that asked the
-// page for both the answer and the expectation would agree with itself whatever
-// the arithmetic was. Where the formulation could reasonably be the same as the
-// page's - a cubic is a cubic - the algorithm differs: the Bezier parameter is
-// found by plain bisection over sixty halvings rather than by Newton, and the
-// spline is anchored against the textbook uniform formula below.
+// An oracle that asked the page for both the answer and the expectation would agree with itself whatever the arithmetic was, so the algorithm differs too:
+// bisection rather than Newton, and the spline anchored against the textbook uniform formula below.
 
 const LIN_OUT = [[1 / 3, 1 / 3]];
 const LIN_IN = [[2 / 3, 2 / 3]];
 
 /**
- * One coordinate of a segment's timing curve, summed as Bernstein terms.
- *
- * **The page evaluates the same curve by de Casteljau, and this does not, on purpose.**
- * A handle is a list of control points now rather than a fixed pair, so the closed-form
- * cubic this replaced could not answer the question any more - and the obvious
- * replacement, the same recurrence the page runs, is the one formulation that would
- * agree with it by construction whatever either of them got wrong. The binomial row is
- * built as it goes by Pascal's rule, so nothing here shares a line of reasoning with
- * `bezAxis` beyond the definition of a Bezier itself.
- *
- * `mid` is the interior ordinates in order; the ends are pinned at 0 and 1.
- */
+  * One coordinate of a segment's timing curve, summed as Bernstein terms; the page uses de Casteljau, and running that same recurrence here would agree with it
+  * by construction. `mid` is the interior ordinates in order, and the ends are pinned at 0 and 1.
+  */
 const bezN = (mid, u) => {
   const c = [0, ...mid, 1];
   const n = c.length - 1;
@@ -484,14 +326,8 @@ const easeOf = (key) => key.easeOut ?? LIN_OUT;
 const easeIn = (key) => key.easeIn ?? LIN_IN;
 
 /**
- * How far through a segment the handles say we are, by this file's own bisection
- * rather than the page's Newton - which is the point of it existing twice.
- *
- * Both the scalar curve and the pose track want this, and a pose wants it for the
- * same reason a scalar does: the handles remap time and leave the values alone. It
- * is written here rather than imported from `web/curve.js` because an oracle that
- * calls the thing under test agrees with it by construction and proves nothing.
- */
+  * How far through a segment the handles say we are, by bisection rather than the page's Newton - which is the point of it existing twice.
+  */
 const ordinates = (a, b, axis) => [
   ...easeOf(a).map((point) => point[axis]),
   ...easeIn(b).map((point) => point[axis]),
@@ -538,27 +374,19 @@ function stepValueAt(keys, t) {
 }
 
 /**
- * Slerp, written from the definition rather than from three's implementation: the
- * shorter arc between two unit quaternions, at the angle between them.
- *
- * This is here because orientation was, for three rounds of this check, entirely
- * unverified - every test quaternion was the identity, so a page that dropped the
- * rotation on the floor and returned the first key's forever would have passed
- * every assertion. That is the instrument asserting what it does not enforce, on
- * the one interpolation kind whose maths is not in the spec.
- */
+  * Slerp from the definition rather than from three's implementation. Orientation went three rounds unverified because every test quaternion was the identity,
+  * so a page returning the first key's rotation forever passed everything.
+  */
 function slerp(qa, qb, u) {
   let [bx, by, bz, bw] = qb;
   let dot = qa[0] * bx + qa[1] * by + qa[2] * bz + qa[3] * bw;
-  // The shorter arc. Two quaternions and their negations name the same rotation, so
-  // a negative dot means the direct path is the long way round the sphere.
+  // The shorter arc: a negative dot means the direct path is the long way round.
   if (dot < 0) {
     dot = -dot;
     bx = -bx; by = -by; bz = -bz; bw = -bw;
   }
   if (dot > 0.9995) {
-    // Nearly parallel: the sine below goes to zero and the division with it, so
-    // this is a lerp and a renormalise, which is what the arc becomes in the limit.
+    // Nearly parallel, where the sine goes to zero: a lerp and a renormalise.
     const out = [0, 1, 2, 3].map((i) => qa[i] + ([bx, by, bz, bw][i] - qa[i]) * u);
     const len = Math.hypot(...out) || 1;
     return out.map((v) => v / len);
@@ -585,16 +413,9 @@ function quatAngle(qa, qb) {
 }
 
 /**
- * Non-uniform Catmull-Rom in Hermite form, tangents divided by neighbour time, and
- * the whole traversal put through the handles first.
- *
- * The ease enters exactly once, and that is the claim rather than a convenience: all
- * three channels read the same remapped fraction, so shaping the timing cannot move
- * the curve through space. A build that eased position alone would still round its
- * corners and would still be wrong - the camera would slide along a path it was no
- * longer aimed down - and this oracle would catch it, because the quaternion it
- * predicts is the one taken at the eased fraction.
- */
+  * Non-uniform Catmull-Rom in Hermite form, the traversal put through the handles first. The ease enters exactly once and that is the claim: all three channels
+  * read the same remapped fraction, so shaping the timing cannot move the curve through space.
+  */
 function poseValueAt(keys, t) {
   if (keys.length === 1) return keys[0].value;
   const i = before(keys, t);
@@ -604,8 +425,8 @@ function poseValueAt(keys, t) {
   const b = keys[i + 1];
   const span = b.t - a.t;
   const u = easedFraction(a, b, (t - a.t) / span);
-  // The end keys are mirrored one segment outside the path, which is what the
-  // textbook clamp means once the parameter is time rather than an index.
+  // The end keys are mirrored one segment outside the path, which is the textbook clamp
+  // once the parameter is time rather than an index.
   const at = (k) => {
     if (k < 0) return { t: 2 * keys[0].t - keys[1].t, value: keys[0].value };
     if (k > keys.length - 1) {
@@ -652,10 +473,8 @@ const retimeAt = (curve, t) => (curve.keys.length === 0
     : scalarAt(curve.keys, t, true)));
 
 /**
- * How many output frames back the curve has to reach to cover `span` source
- * seconds ending at `t`. This tool's own walk over its own curve, which is what
- * the page's number is compared against.
- */
+  * How many output frames back the curve reaches to cover `span` source seconds ending at `t`. This tool's own walk over its own curve, which the page's number is compared to.
+  */
 function framesBack(curve, t, span, fps, ceiling) {
   if (!(span > 0)) return 0;
   const at = retimeAt(curve, t);
@@ -673,8 +492,6 @@ function framesBackByTangent(curve, t, span, fps) {
   return perFrame > 0 ? Math.ceil(span / perFrame) : 0;
 }
 
-// ------------------------------------------------------------------- the index
-
 const index = await (await fetch(`${URL_BASE}/capture/${TAKE}/index`)).json();
 const stamps = index.frames.stampMs;
 const TIMES = stamps.map((s) => (s - stamps[0]) / 1000);
@@ -691,8 +508,6 @@ function bracketOf(sourceSec) {
   return lo;
 }
 
-// ------------------------------------------------------------------- reporting
-
 let failures = 0;
 const check = (ok, label, detail = '') => {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `   ${detail}` : ''}`);
@@ -701,13 +516,8 @@ const check = (ok, label, detail = '') => {
 const show = (d) => `max ${d.max}/255, mean ${d.mean.toFixed(4)}, ${d.pct.toFixed(3)}% of pixels differ`;
 const worst = (xs) => xs.reduce((a, b) => Math.max(a, b), 0);
 
-// --------------------------------------------------------------- the test curves
-//
-// One ramp and one hold, both anchored at the origin the way the page's curve is,
-// and both sized against the sample take's real 30.36s rather than a round number.
-//
-// The ramp runs slow then fast, so the pre-roll question has a different answer at
-// either end of it - which is the whole point of asking it as a window.
+// Both sized against the take's real duration rather than a round number. The ramp runs slow then fast, so the pre-roll question has a different answer at
+// either end.
 const RAMP = {
   rate: 1,
   keys: [
@@ -716,9 +526,7 @@ const RAMP = {
     { t: 10, value: 15 },
   ],
 };
-// A four-second freeze in the middle. Source time stops, so no capture frame is
-// crossed and the surface memory holds whatever it held when the freeze began -
-// which is why a pre-roll here has to reach back through the whole hold.
+// A four-second freeze: source time stops, so a pre-roll here reaches back through it.
 const HOLD = {
   rate: 1,
   keys: [
@@ -728,10 +536,8 @@ const HOLD = {
     { t: 11, value: 16 },
   ],
 };
-// A speed ramp drawn with ease handles rather than as straight segments, so the
-// slope is changing at every position rather than only at the knees. This is the
-// shape a hand-drawn ramp actually has, and the one where a tangent at the target
-// is furthest from the truth.
+// Drawn with ease handles, so the slope changes everywhere - the case where a tangent at
+// the target is furthest off.
 const EASED_RAMP = {
   rate: 1,
   keys: [
@@ -740,8 +546,6 @@ const EASED_RAMP = {
   ],
 };
 const FLAT = { rate: 1, keys: [] };
-
-// --------------------------------------------------------------- in-page helpers
 
 const INSTALL = `(() => {
   const k = globalThis.__kinect;
@@ -807,12 +611,9 @@ const INSTALL = `(() => {
   return true;
 })()`;
 
-// ------------------------------------------------------------------- the page
-
 const { chromium } = await loadPlaywright();
-// The full chromium build rather than the headless shell: the shell can land on
-// SwiftShader, which has no EXT_color_buffer_float, and a run that silently fell
-// back to a software rasteriser would agree with itself for the wrong reason.
+// The full chromium build rather than the headless shell, which can land on SwiftShader
+// with no EXT_color_buffer_float and agree with itself for the wrong reason.
 const browser = await chromium.launch({ channel: 'chromium', headless: !HEADED });
 const context = await browser.newContext({
   viewport: { width: STAGE.width, height: STAGE.height + CHROME_H_GUESS },
@@ -821,9 +622,7 @@ const context = await browser.newContext({
 
 const page = await context.newPage();
 const errors = [];
-// Every recorded error carries the section that was running when it arrived. An
-// error with no section attached is a sentence you then have to bisect the run to
-// place, and this check has already spent a round doing exactly that.
+// With the section attached, so a sentence in the log does not have to be bisected for.
 let section = 'startup';
 const say = console.log.bind(console);
 console.log = (...parts) => {
@@ -833,10 +632,8 @@ console.log = (...parts) => {
 };
 const note = (text) => errors.push(`${section} | ${String(text).split('\n')[0]}`);
 
-// Errors a section provokes on purpose. Registered rather than filtered at the end,
-// and each one has to actually arrive: a fragment that matched nothing means the
-// section stopped provoking what it was written to provoke, which is the same
-// silence as a mutation that no longer matches its anchor.
+// Each has to actually arrive: a fragment that matched nothing means the section stopped
+// provoking what it was written to provoke.
 const expected = [];
 const expectError = (fragment, why) => expected.push({ fragment, why, seen: false });
 page.on('pageerror', (err) => note(err));
@@ -844,10 +641,8 @@ page.on('console', (msg) => { if (msg.type() === 'error') note(msg.text()); });
 page.on('response', (res) => { if (!res.ok()) note(`${res.status()} ${res.url()}`); });
 await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
 
-// Counted rather than assumed, and read after the page has loaded. A route that
-// matches nothing fulfils nothing and throws no error - the page simply loads the
-// tree's own source - so the only way to tell a mutation that was delivered from one
-// that was never asked for is to watch the interception fire.
+// A route that matches nothing fulfils nothing and throws no error - the page just loads
+// the tree's own source - so the interception is counted rather than assumed.
 let mutantServed = 0;
 let mutantPath = null;
 if (MUTATE) {
@@ -860,50 +655,24 @@ if (MUTATE) {
   console.log(`[keyframe] MUTATED BUILD: ${MUTATE} in ${file} at ${mutantPath} - this run is expected to FAIL`);
 }
 
-// The editor, which `/?take=` opened until the main menu took `/`. The take stays in
-// the query and only the path moves - a page opened at the old root would land on the
-// menu, which defines no `__kinect`, so the wait below would spend thirty seconds
-// timing out on a page that was never going to answer.
+// The editor. The old root is the main menu, which defines no `__kinect`, so the wait
+// below would time out against a page that cannot answer.
 await page.goto(`${URL_BASE}/edit?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
 await page.waitForFunction(() => !!globalThis.__kinect);
 
-// **Exit 2, not a failed assertion.** A suite that fails one row on a mutation run reads
-// as a catch, so a mutation the page never asked for has to be the harness declining to
-// run rather than a claim going red - that is what 2 means everywhere else in this
-// suite, and `c507eb7` records the same refusal being added to `library-check` for the
-// same reason. The case it exists for is a module this page does not import: the route
-// is installed, nothing ever requests it, and every row below would pass on the tree's
-// own build while the output said MUTATED at the top.
+// Exit 2 rather than a failed row, because a red row on a mutation run reads as a catch. The case is a module this page never imports.
 if (MUTATE && mutantServed === 0) {
   console.log(`\n[keyframe] DID NOT RUN - ${MUTATE} was staged for ${mutantPath} and the page never `
     + 'requested it, so this run would have measured the unmutated build');
   process.exit(2);
 }
-// **The page frames at the stage this tool asked for.** The editor letterboxes itself to the
-// project's shape, so a viewport alone no longer decides the drawing buffer. Asked for as
-// 16:9 because that is a shape the product actually offers: at 8:5 the editor sits in a
-// framing `restoreProject` refuses, and every undo in this file restores a document written
-// out of that framing.
+// The editor letterboxes to the project's shape, so a viewport alone no longer decides
+// the drawing buffer.
 await page.evaluate(`globalThis.__kinect.setOutputSize?.("${STAGE.width}x${STAGE.height}")`);
-// The transport first, and the furniture after it - which is the fix for a wrong stage
-// this file measured in for as long as it has existed, not a reordering for tidiness.
-//
-// **Two things were wrong and they compounded.** `#timeline` carries `hidden` until the
-// take opens, so a strip measured before this wait reads zero; and the strip was the only
-// furniture measured at all, while the application bar sits above the stage and takes its
-// own height. Both subtract from the same place, so the stage came out `360 - strip -
-// shell` and then letterboxed 16:9 inside it: measured on this rig at **270x152**, which
-// is 0.42 of the size every figure in this file is written in. Nothing failed, because
-// every image here is compared against another image from the same run - what failed was
-// section 6b, whose drag is aimed at the top-down inset by arithmetic in stage pixels, and
-// it failed reporting a feature that works as gone.
+// The transport first, because `#timeline` carries `hidden` until the take opens and a strip measured before this wait reads zero.
 await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
-// The viewport is then sized to whatever furniture actually surrounds the stage, measured
-// off the page. `CHROME_H_GUESS` is a first guess and nothing more: it was 104 while the
-// bar was one row, the bar became two, and the stage quietly came out 570x356 while every
-// number in this file - including the `insetPct` denominator near the end - went on
-// being computed against 640x400. Nothing failed, which is the point: the figures
-// were simply about a smaller picture than the one they named.
+// `CHROME_H_GUESS` is a first guess: it was 104 while the bar was one row, the bar became
+// two, and the stage quietly came out 570x356 against figures written for 640x400.
 {
   const furniture = await page.evaluate(`(() => {
     const strip = document.getElementById('timeline');
@@ -917,14 +686,7 @@ await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), nul
     width: STAGE.width,
     height: STAGE.height + furniture.strip + furniture.shell,
   });
-  // **And then wait for the drawing buffer to follow**, because `setViewportSize`
-  // returning is not the renderer having resized - which is the second way `timeline-check`
-  // has been recorded reading a short stage. The wait is the accommodation and the refusal
-  // below is the guard, so a timeout falls through to it rather than replacing it.
-  //
-  // The predicate answers *false* on a page with no renderer rather than throwing, because
-  // a throw inside `waitForFunction` is not caught by it and the timeout is then never
-  // spent: the failure arrives instantly and reads as a finding.
+// `setViewportSize` returning is not the renderer having resized. The predicate answers false on a page with no renderer rather than throwing, because a throw inside `waitForFunction` is not caught by it.
   await page.waitForFunction((want) => {
     const gl = globalThis.__kinect?.renderer?.getContext?.();
     return !!gl && gl.drawingBufferWidth === want.w && gl.drawingBufferHeight === want.h;
@@ -945,18 +707,7 @@ if (/swiftshader|software|llvmpipe/i.test(gpu.renderer)) {
   throw new Error(`software rasteriser (${gpu.renderer}) - the result would prove nothing`);
 }
 if (!gpu.colorBufferFloat) throw new Error('no EXT_color_buffer_float: the surface memory is not running at float');
-// **And the stage is the stage this file's figures are in, asserted rather than assumed.**
-// Every geometric number here is in stage pixels - the plan's px/m scale, the inset's
-// fractions, the drag offsets section 6b builds - and a stage of another size makes each of
-// them a measurement of somewhere else. That is not a hypothetical: this tool spent its
-// whole life measuring on a 270x152 stage and section 6b spent it dragging outside the
-// inset, reporting the top-down as broken on a build with nothing wrong with it, because
-// nothing here refused a stage it had not got. `timeline-check` has carried this guard from
-// the start and it is what surfaced the same race there.
-//
-// A throw rather than a failed assertion, for the reason every refusal in this suite is
-// one: a red row on a mutation run reads as a catch, and a tool measuring in the wrong
-// units has not tested anything it can report on.
+// Every geometric number here is in stage pixels, so a stage of another size makes each of them a measurement of somewhere else. A throw rather than a row: wrong units test nothing.
 if (gpu.buffer[0] !== STAGE.width || gpu.buffer[1] !== STAGE.height) {
   throw new Error(
     `the stage came out ${gpu.buffer.join('x')} and this file's figures are ${STAGE.width}x${STAGE.height}: `
@@ -970,31 +721,11 @@ console.log(`[keyframe] stage ${gpu.buffer.join('x')}, take ${TAKE}: ${TIMES.len
   + `${SOURCE_DURATION.toFixed(2)}s source at ${((TIMES.length - 1) / SOURCE_DURATION).toFixed(2)} fps mean`);
 
 /**
- * How much footage this file's rows need under them, and the refusal when the take does
- * not hold it.
- *
- * **A take too short for these numbers does not fail them honestly, and one of the two
- * ways it goes wrong is silent.** Section 4e seeks to 12s under a HOLD curve that reaches
- * source 18s, so on a 9.4s take the whole program is 7.7s and the seek clamps there -
- * that reddens, which at least gets looked at. Sections 4f and 6d are the quiet half:
- * their retime keys carry source seconds of 12, 20 and 15, and a curve reaching the end
- * of the footage early collapses the program, which takes the key being dragged off the
- * ruler. `drawLane` hides a key outside the window, a hidden element measures as a
- * zero rectangle, and the drag then presses at the viewport origin - so the gesture never
- * happens. Two rows redden about the drag not moving anything, and **two more pass**,
- * because a key that was never dragged also never slid and never fell under its
- * neighbour. A fixture gap that reddens a row gets investigated; one that greens a row
- * does not, which is why this refuses rather than runs.
- *
- * Measured: all four red rows go green on a 75.6s fixture with nothing in `web/` changed,
- * at the same 132 assertions. The scan is the same one `editor-check` carries and for the
- * same reason - it holds this number against the deepest second the file's own text seeks
- * to, so the declaration cannot quietly fall behind the rows. It cannot see the retime
- * values, which are named above instead, and that is why the declared figure sits above
- * the deepest literal rather than on it. The control is `--take sample`: exit 2 naming the
- * shortfall, where before it ran to the end and reported four failures and two false
- * passes.
- */
+  * How much footage this file's rows need, and the refusal when the take is shorter. A short take goes wrong two ways and one is silent: section 4e clamps and
+  * reddens, while 4f and 6d carry retime keys at source 12, 20 and 15, so a curve reaching the end of the footage early takes the dragged key off the ruler and
+  * two more rows pass because a key never dragged never slid under its neighbour. The scan holds this number against the deepest second the file's own text
+  * seeks to; it cannot see the retime values above.
+  */
 const NEEDS_TAKE_SEC = 24;
 const ownSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
 const deepestSeek = Math.max(...[...ownSource.matchAll(/\.seek\(\s*(\d+(?:\.\d+)?)\s*\)/g)].map((m) => Number(m[1])));
@@ -1012,12 +743,8 @@ if (!(SOURCE_DURATION >= NEEDS_TAKE_SEC)) {
   process.exit(2);
 }
 
-// A build that never settles takes the page down with it rather than failing an
-// assertion, and a stack trace is a worse verdict than a sentence. An evaluator
-// that announced its writes is exactly that shape: each evaluated frame schedules
-// a seek, which renders a pre-roll, which evaluates - so the renderer process runs
-// out of memory long before any assertion here can be reached. Reported as what it
-// is rather than left to crash the tool.
+// An evaluator that announced its writes never settles, and takes the page down rather
+// than failing a row. Reported as what it is rather than left to crash the tool.
 const lost = (err) => {
   const line = String(err?.message ?? err).split('\n')[0];
   console.log(`  FAIL  the page stopped answering, so the run could not finish   ${line}`);
@@ -1034,48 +761,10 @@ const setRetime = (curve) => page.evaluate(`globalThis.__kinect.keyframes.setRet
 const specOf = (name) => page.evaluate(`globalThis.__kinect.params.spec(${src(name)})`);
 
 /**
- * Where to press to reach one key or one ease handle, asked of the document rather
- * than computed from a rectangle - and null when the answer is that nothing on it can
- * be reached.
- *
- * **`page.mouse` presses a coordinate, and a coordinate belongs to whatever is stacked
- * on it.** The centre of an element's box is only its own while nothing else is drawn
- * there, and this strip draws plenty. Playwright's own actionability is no rescue
- * either: `locator.click()` hit-tests the same way, waits thirty seconds to receive
- * pointer events and then throws, which is a crash where a row belongs.
- *
- * **The case this was written for was a product defect and has been fixed, and the
- * measurement is kept rather than deleted.** `#tIn` is a one-pixel line whose grab zone
- * reaches sixteen pixels *inward* at `z-index: 4`, and it spans the whole column from
- * the ruler to the bottom of the last lane - so the zone lay over the lanes and not
- * only over the ruler. Measured at this file's 640-wide viewport on the 243s
- * `fixture-1g`: the bed runs 525 pixels from x 115, the bloom key at 4s draws centred
- * on x 123.6, `#tIn`'s zone covers 114.5 to 126.5, and `elementFromPoint` there answered
- * `#tIn` - so `ui.beds`' `pointerdown` ran `closest('.tkey, .thandle')`, got null, and
- * returned, while the marker's own handler trimmed the clip in to 00:03.986. Nothing was
- * selected, no handle was drawn, and section 6e's first row reddened about a press that
- * had landed on something else. `.tkey` and `.thandle` are `z-index: 5` now, above that
- * zone, so the same key answers for its own centre and this helper reports an offset of
- * zero there.
- *
- * It still walks, because the other overlap it was written against has not gone
- * anywhere - see the identity test below.
- *
- * The predicate here is the page's own, deliberately: a point counts when
- * `elementFromPoint(x, y).closest('.tkey, .thandle')` is *this* element, which is the
- * line `pointerdown` runs. Identity and not class, because adjacent keys overlap - the
- * three in `EASED` sit eight to eleven pixels apart on that bed while a diamond's
- * transparent reach carries thirteen pixels out from its centre, so a scan that took
- * any key would select the wrong one and the rows below would sample a segment the
- * drag never bent.
- *
- * The scan starts at the centre and walks outward, so an element with nothing over it
- * returns exactly the centre it always did. A zero-sized box is refused before the scan
- * rather than pressed: a hidden key or handle measures 0x0 - `repositionLanes` hides one
- * whose time is outside the window - and pressing its "centre" presses the viewport
- * origin, which is the same silent non-gesture the header describes for a key dragged
- * off the ruler.
- */
+  * Where to press to reach one key or one ease handle, asked of the document rather than computed from a rectangle, and null when nothing on it can be reached.
+  * The predicate is the page's own line, `elementFromPoint(x, y).closest('.tkey, .thandle')` being this element - identity and not class, because adjacent keys
+  * overlap. A zero-sized box is refused rather than pressed: a hidden key measures 0x0 and pressing its centre presses the viewport origin.
+  */
 const lanePressPoint = (owner, which, index) => page.evaluate(`(() => {
   const lane = [...document.querySelectorAll('#tBeds .tlane')].find((l) => l.dataset.owner === ${src(owner)});
   const el = lane && lane.querySelectorAll(${src(which)})[${src(index)}];
@@ -1099,18 +788,7 @@ const lanePressPoint = (owner, which, index) => page.evaluate(`(() => {
   return null;
 })()`);
 
-// Applying one of the shipped looks, which every section below that needs persistence
-// switched on used to do by clicking `#modes button[data-mode="4"]`.
-//
-// The mechanical translation would have been `params.set('readBlackwall', 1)` and it
-// would have been wrong everywhere it appears. What those clicks were reaching for is
-// stated in the comment above each of them - "the one preset that switches both
-// accumulators on at once" - and the accumulators are `trails`, `fade` and `wake`, none
-// of which is the reading. Selecting the crimson shading with the whole grade at zero
-// would leave every pre-roll cost in this file at nothing, and the sections measuring
-// what a pre-roll costs would have gone green measuring a renderer with no persistence
-// in it. The looks are read out of the documents that ship them for the same reason
-// they were clicked rather than typed: so no look value is invented here.
+// Read out of the documents that ship them, so no look value is invented here. `readBlackwall` is the reading and not the accumulator, so a shading picked with the grade at zero leaves every pre-roll cost at nothing.
 const applyLook = (look) => page.evaluate(`globalThis.__kinect.applyPreset(${src(look)})`);
 const shippedDoc = (name) => JSON.parse(
   readFileSync(new URL(`../presets-builtin/${name}.json`, import.meta.url), 'utf8'),
@@ -1119,26 +797,13 @@ const BLACKWALL_DOC = shippedDoc('blackwall');
 const BLACKWALL_LOOK = BLACKWALL_DOC.values;
 const RGB_LOOK = shippedDoc('rgb').values;
 
-// ============================ 0. the evaluator asks for nothing, probed first
-//
-// Ahead of everything else, and deliberately so. `params.set` announces every
-// write, the timeline answers an announcement by scheduling an accurate seek, and
-// an evaluator writing its track values without the suppression has every frame
-// schedule a seek, which renders a pre-roll, which evaluates, which schedules
-// more. That does not fail an assertion - it takes the renderer process down with
-// it, several minutes later, somewhere further along. So the cheapest form of the
-// claim runs before anything expensive, and a failure stops the run here rather
-// than dragging a dead page through five more sections.
+// Cheapest claim first: an evaluator writing without the suppression has every frame schedule a seek that renders a pre-roll that evaluates, which takes the renderer down minutes later somewhere else.
 console.log('\n== 0. an evaluated frame schedules no work of its own ==');
 {
   await setRetime(FLAT);
   await setTracks({ bloom: [{ t: 0, value: 0.5 }, { t: 4, value: 3 }] });
-  // On a budget, because the failure this probe exists to catch does not return an
-  // answer at all: the transport's own settle helper waits on a queue that is
-  // growing faster than it drains, so the page neither answers nor errors until the
-  // renderer runs out of memory some minutes later. A minute is far more than a
-  // healthy build needs - the same probe answers in well under a second - and it
-  // turns a ten-minute death into a sentence.
+  // On a budget, because that failure returns no answer at all: the settle helper waits on
+  // a queue growing faster than it drains. A healthy build answers in under a second.
   const probe = await Promise.race([
     new Promise((resolve) => { setTimeout(() => resolve('timeout'), 60000); }),
     page.evaluate(`(async () => {
@@ -1168,14 +833,10 @@ console.log('\n== 0. an evaluated frame schedules no work of its own ==');
   }
 }
 
-// ===================================== 1. the three interpolations are the curves
 
 console.log('\n== 1. scalar with ease handles, step, and pose ==');
 
-// Deliberately not linear: an ease-out into an ease-in, so the curve is a long way
-// from the straight line between the same two values through most of the segment.
-// A check run on default handles would agree with a lerp everywhere and prove
-// nothing about handles at all.
+// An ease-out into an ease-in: default handles would agree with a lerp and prove nothing.
 const EASED = [
   { t: 0, value: 0, easeOut: [[0.75, 0]], easeIn: LIN_IN },
   { t: 4, value: 5, easeOut: [[0.2, 0.9]], easeIn: [[0.25, 1]] },
@@ -1186,23 +847,14 @@ const STEPS = [
   { t: 3, value: true },
   { t: 7.5, value: false },
 ];
-// Four keys unevenly spaced in time, so the non-uniform tangents matter: two of
-// them are 1.2s apart and two are 5s apart, and the uniform formula would give the
-// tight pair the same tangent as the loose one and lurch out of it.
-// Every orientation is a real rotation and no two are the same, which took three
-// rounds to become true: with identity quaternions throughout, a page that never
-// slerped at all returned the right answer everywhere. They are also about two
-// different axes, so a slerp that interpolated component-wise - the plausible wrong
-// implementation - leaves the unit sphere between them and reads as a roll.
+// Unevenly spaced, so the non-uniform tangents matter. Every orientation is a real rotation about one of two axes - identity quaternions let a page that never slerped pass, and one axis lets a component-wise slerp pass as a roll.
 const PATH = [
   { t: 0, value: { position: [-1.2, 0.1, 1.4], quaternion: quatAbout([0, 1, 0], -55), fov: 50 } },
   { t: 1.2, value: { position: [-0.5, 0.5, 0.9], quaternion: quatAbout([0, 1, 0], -18), fov: 50 } },
   { t: 6.2, value: { position: [0.6, 0.35, 0.8], quaternion: quatAbout([1, 0.4, 0], 34), fov: 42 } },
   { t: 9, value: { position: [1.3, 0.05, 1.5], quaternion: quatAbout([0, 1, 0], 61), fov: 60 } },
-  // The last pair is deliberately more than a half turn apart the naive way round,
-  // so its dot product is negative and slerp has to take the shorter arc by negating
-  // one of them. Without it every consecutive pair here was positive - 0.948, 0.928,
-  // 0.879 - and a page that dropped the flip passed the whole section.
+  // More than a half turn apart the naive way round, so the dot is negative and slerp has
+  // to take the shorter arc. Without it a page that dropped the flip passed the section.
   { t: 12, value: { position: [1.6, 0.2, 0.9], quaternion: quatAbout([0, 1, 0], -170), fov: 55 } },
 ];
 
@@ -1224,9 +876,7 @@ const PATH = [
   const bloomSpec = await specOf('bloom');
   const expectedBloom = at.map((t) => scalarAt(EASED, t));
   const bloomErr = worst(read.bloom.map((v, i) => Math.abs(v - expectedBloom[i])));
-  // The falsification control: the same keys read as a straight lerp. If the page
-  // ignored its handles this would be the answer, so the two have to be far apart
-  // or the comparison above is not about handles.
+  // The control: the same keys read as a straight lerp, which has to be far from them.
   const lerped = at.map((t) => scalarAt(EASED.map((k) => ({ ...k, easeOut: LIN_OUT, easeIn: LIN_IN })), t));
   const lerpGap = worst(read.bloom.map((v, i) => Math.abs(v - lerped[i])));
 
@@ -1240,8 +890,7 @@ const PATH = [
 
   const expectedStep = at.map((t) => stepValueAt(STEPS, t));
   const stepWrong = read.additive.filter((v, i) => v !== expectedStep[i]).length;
-  // A step track's control is any interpolation at all: the value has to be one of
-  // the two the keys hold and nothing between them, at every position.
+  // A step track's control is any interpolation at all: never a value between the keys.
   const between = read.additive.filter((v) => typeof v !== 'boolean').length;
   console.log(`  additive, 3 step keys: ${read.additive.length - stepWrong} of ${at.length} positions `
     + `hold the earlier key; ${between} landed on something that is not a boolean`);
@@ -1253,9 +902,7 @@ const PATH = [
     v.position.map((x, axis) => Math.abs(x - expectedPose[i].position[axis])),
   )));
   const fovErr = worst(read.camera.map((v, i) => Math.abs(v.fov - expectedPose[i].fov)));
-  // The control: the same keys with straight lines between them. A Catmull-Rom
-  // agrees with a lerp at every key and departs between them, so this is the whole
-  // of the difference the spec asked for.
+  // A Catmull-Rom agrees with a lerp at every key and departs between them.
   const straight = at.map((t) => {
     const i = before(PATH, t);
     if (i < 0 || i >= PATH.length - 1) return PATH[Math.max(0, Math.min(PATH.length - 1, i))].value.position;
@@ -1272,10 +919,8 @@ const PATH = [
     `worst ${poseErr.toExponential(2)} m`);
   check(fovErr < VALUE_EPS, 'and carries fov with it', `worst ${fovErr.toExponential(2)}`);
 
-  // Orientation, on its own, because it was the gap. Two measurements: how far the
-  // page's quaternion is from this tool's slerp, and how far a page that never
-  // interpolated at all would be - the second is what the first was silently
-  // passing against while every test rotation was the identity.
+  // And how far a page that never interpolated would be, which is what the row above was
+  // silently passing against while every test rotation was the identity.
   const angleErr = worst(read.camera.map((v, i) => quatAngle(v.quaternion, expectedPose[i].quaternion)));
   const held = at.map((t) => {
     const i = before(PATH, t);
@@ -1286,12 +931,7 @@ const PATH = [
   console.log(`  orientation across the same ${at.length} positions: worst ${angleErr.toExponential(1)}° from `
     + `this tool's own slerp; holding the earlier key instead would be ${heldGap.toFixed(1)}° out, `
     + `and every quaternion is unit to ${unit.toExponential(1)}`);
-  // A thousandth of a degree, not the 1e-9 the positions get. Both sides compute the
-  // same arc, but three reaches it through `atan2` where this tool reaches it
-  // through `acos`, and two float paths to one angle do not agree to the last bit.
-  // The number that makes the threshold meaningful is the control below it: the
-  // wrong answer is 51.9° out, so this sits five orders inside the gap it has to
-  // separate rather than being chosen to let the result through.
+  // A thousandth of a degree rather than 1e-9: three reaches the arc through `atan2` and this file through `acos`. The wrong answer is 51.9 degrees out, five orders outside this.
   check(angleErr < 1e-3, 'and slerps its orientation along the shorter arc',
     `worst ${angleErr.toExponential(2)}° against a 1e-3° tolerance`);
   check(heldGap > 5,
@@ -1299,9 +939,8 @@ const PATH = [
     `${heldGap.toFixed(1)}° apart`);
   check(unit < 1e-9, 'and stays on the unit sphere, which a component-wise lerp would not',
     `worst ${unit.toExponential(2)} off unit`);
-  // And the fixture has a pair that needs the shorter arc at all. Without one the
-  // whole slerp comparison passes on a page that never negates, because every
-  // direct path is already the short one.
+  // And the fixture has a pair needing the shorter arc: without one the comparison passes
+  // on a page that never negates.
   const dots = PATH.slice(1).map((key, i) => PATH[i].value.quaternion
     .reduce((sum, x, j) => sum + x * key.value.quaternion[j], 0));
   console.log(`  consecutive dot products ${dots.map((d) => d.toFixed(3)).join(' ')} - `
@@ -1314,12 +953,9 @@ const PATH = [
     `${straightGap.toFixed(3)} m apart`);
 }
 
-// ---------------- 1b. the spline is anchored to something outside both implementations
 
-// On evenly spaced keys the non-uniform form and the textbook uniform Catmull-Rom
-// are the same curve. That is what makes the page's tangents-over-time formulation
-// a generalisation rather than a different spline wearing the name, and it ties the
-// result to a formula neither this tool nor the page invented.
+// On evenly spaced keys the two forms are the same curve, which ties the result to a
+// formula neither this tool nor the page invented.
 console.log('\n== 1b. evenly spaced keys agree with the textbook uniform formula ==');
 {
   const EVEN = [[-1.3, 0.2, 0.15], [-0.55, 0.5, 0.55], [0.5, 0.35, 0.45], [1.25, 0.1, 0.1]];
@@ -1339,31 +975,12 @@ console.log('\n== 1b. evenly spaced keys agree with the textbook uniform formula
     `worst ${err.toExponential(2)} m`);
 }
 
-// ---------------- 1c. the camera's handles shape when it arrives, not where it goes
 
-// The camera track used to ignore its handles entirely: `poseAt` computed the raw
-// fraction of the way through a segment and handed it straight to the spline, the
-// slerp and the fov lerp, so the five preset buttons were disabled for a pose key and
-// a hand-edited document could not have eased one either. What it cost was a move
-// that departs and arrives at speed - measured on three keys dollying 4m over 4s, the
-// camera stepped from 0 to 0.6262 m/s in one frame at the first key and from 0.3125
-// to 0 at the last, because `tangentAt` mirrors the end key one segment outside the
-// path while the evaluator holds the end value beyond it.
-//
-// **The claim that needs enforcing is not "the numbers changed".** It is that the
-// handles moved the timing and left the route alone, which is the whole reason the
-// composition track can have a lane at all without contradicting the design's rule
-// that a camera move cannot be judged from a graph. So the rows below come in pairs:
-// each measurement of agreement is followed by the reading a build that got it wrong
-// would produce, and the last pair is the important one - every pose the eased run
-// visits has to lie on the curve the linear run draws, and a control that fails that
-// same test proves the measure can tell.
+// The claim is that the handles moved the timing and left the route alone, so the rows come in pairs: each measurement followed by the reading a build that got it wrong would produce.
 console.log('\n== 1c. the camera\'s handles shape when it arrives, not where it goes ==');
 {
-  // `smooth` on the first and the last key and nothing in between - the two presses
-  // `docs/reference.md` describes, rather than a shape invented for the check. The
-  // interior keys stay linear on purpose: easing every key would stop the camera dead
-  // at each one, which is a different edit and not the one anybody wants.
+  // The two presses `docs/reference.md` describes. Easing every key would stop the camera
+  // dead at each one.
   const SMOOTH_OUT = [[0.42, 0]];
   const SMOOTH_IN = [[0.58, 1]];
   const RAMPED = PATH.map((k, i) => ({
@@ -1386,9 +1003,7 @@ console.log('\n== 1c. the camera\'s handles shape when it arrives, not where it 
   const fovErr = worst(read.map((v, i) => Math.abs(v.fov - wantEased[i].fov)));
   const angErr = worst(read.map((v, i) => quatAngle(v.quaternion, wantEased[i].quaternion)));
 
-  // The control for all three at once: the same keys with the handles taken off. That
-  // is exactly what the page did before this feature, so a build that still ignores
-  // its handles reads as this and every row above it collapses.
+  // The control for all three at once: the same keys with the handles taken off.
   const wantRaw = at.map((t) => poseValueAt(PATH, t));
   const rawPosGap = worst(read.map((v, i) => worst(
     v.position.map((x, axis) => Math.abs(x - wantRaw[i].position[axis])),
@@ -1402,34 +1017,19 @@ console.log('\n== 1c. the camera\'s handles shape when it arrives, not where it 
     + `${rawFovGap.toFixed(2)} fov and ${rawAngGap.toFixed(1)}° away`);
   check(posErr < VALUE_EPS, 'a pose track eases its position through the handles it carries',
     `worst ${posErr.toExponential(2)} m`);
-  // Not `VALUE_EPS`, and the reason is the same one the orientation row below carries.
-  // Both sides solve the same cubic for the eased fraction and they reach it by
-  // different routes - the page runs Newton and falls back to bisection, this file
-  // bisects throughout - so the two agree in `u` to about 1.4e-10 rather than to the
-  // last bit. Position hardly notices because a segment spans about a metre; fov spans
-  // 18 units across this fixture, so the same disagreement arrives eighteen times
-  // larger and lands at 2.5e-9, just outside 1e-9. The threshold is set against the
-  // control rather than against the result: ignoring the handles reads 0.93 fov out,
-  // so 1e-7 sits six orders inside the gap it has to separate.
+  // Not `VALUE_EPS`: the page runs Newton with a bisection fallback and this file bisects throughout, so `u` agrees to about 1.4e-10 and fov to 2.5e-9. Ignoring the handles reads 0.93 fov out.
   check(fovErr < 1e-7, 'and its field of view with the same fraction',
     `worst ${fovErr.toExponential(2)} against a 1e-7 tolerance, where the control is ${rawFovGap.toFixed(2)}`);
-  // The orientation row is the one that separates "eased" from "eased position only",
-  // which was the plausible half-implementation: a camera whose position ramps while
-  // its aim does not is sliding down a path it is no longer pointed along.
+  // The row separating "eased" from "eased position only", where the camera slides down a
+  // path it is no longer pointed along.
   check(angErr < 1e-3, 'and slerps its orientation at that same eased fraction, not the raw one',
     `worst ${angErr.toExponential(2)}°`);
   check(rawPosGap > 0.02 && rawAngGap > 1 && rawFovGap > 0.5,
     'and the handles are doing the work, because ignoring them lands somewhere else in all three',
     `${rawPosGap.toFixed(3)} m, ${rawAngGap.toFixed(1)}°, ${rawFovGap.toFixed(2)} fov`);
 
-  // Every key still holds its own pose exactly. An ease that shifted a key would be a
-  // timing control that edits the shot, which is the thing this must never become.
-  // Asked at each key's own time rather than fished out of the sweep above. The first
-  // version indexed `at` with `findIndex`, and `at` is 97 samples on a 0.125s grid
-  // while the keys sit at 1.2s and 6.2s among others - so `findIndex` answered -1 for
-  // the two interior keys and the `got ? ... : 0` arm scored them as perfectly held.
-  // A row claiming "every key" was enforcing three of five, and the two it skipped were
-  // the ones an ease is most likely to drag off their marks.
+  // Asked at each key's own time rather than fished out of the sweep, whose 0.125s grid
+  // misses keys at 1.2s and 6.2s entirely and scored them as perfectly held.
   const atKeys = await page.evaluate(
     `${src(RAMPED.map((k) => k.t))}.map((t) => globalThis.__kinect.keyframes.valueAt('camera', t))`,
   );
@@ -1439,27 +1039,11 @@ console.log('\n== 1c. the camera\'s handles shape when it arrives, not where it 
   check(keyErr < VALUE_EPS, `and all ${RAMPED.length} keys still hold the pose they were given`,
     `worst ${keyErr.toExponential(2)} m across every key time`);
 
-  // **The route is the same route.** Every position the eased run passes through has
-  // to be one the unmapped curve passes through too, at some other moment - that is
-  // what "remaps time and nothing else" means, and it is the property the lane's whole
-  // justification rests on. Measured as the distance from each eased sample to the
-  // nearest point on a densely sampled unmapped curve.
+  // Measured as the distance from each eased sample to the nearest point on a densely
+  // sampled unmapped curve.
   const dense = [];
   for (let i = 0; i <= 3200; i++) dense.push(poseValueAt(PATH, (i / 3200) * 12).position);
-  // To the nearest point on the *polyline*, not to the nearest sample. The first
-  // version of this measured sample-to-sample and read 6.26e-3 m against a correct
-  // build, which is a picture of how far apart the samples are rather than of how far
-  // the run left the curve: `dense` is uniform in time and the camera is not uniform
-  // in speed, so the fast stretch between the 1.2s and 6.2s keys gets the sparsest
-  // samples exactly where a wrong answer would hide. Projecting onto the segment
-  // between two samples takes that floor out, and what is left shrinks with the square
-  // of the density rather than linearly.
-  //
-  // That last sentence is measured rather than assumed, because it is the difference
-  // between a residual that is the instrument and a residual that is the build: at 800
-  // samples this reads 2.03e-5 m and at 3200 it reads 1.36e-6, a factor of 14.9 where
-  // pure chord error predicts 16. A real displacement of the path would not have moved
-  // when the sampling did.
+  // To the nearest point on the polyline, not the nearest sample: `dense` is uniform in time and the camera is not uniform in speed, so sample-to-sample reads the sampling rather than the path.
   const distToSegment = (p, a, b) => {
     const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     const ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
@@ -1478,11 +1062,8 @@ console.log('\n== 1c. the camera\'s handles shape when it arrives, not where it 
   };
   const offPath = worst(read.map((v) => nearest(v.position)));
 
-  // And the control for that measure, because "every sample is near some point of a
-  // densely sampled curve" is a test a surprising number of wrong answers pass. The
-  // straight-line traversal of the same keys is a genuinely different route, and it
-  // has to read far - otherwise `offPath` is measuring the density of `dense` rather
-  // than the shape of anything.
+  // The control, because "every sample is near some point of a dense curve" is a test many
+  // wrong answers pass.
   const straightPath = at.map((t) => {
     const i = before(PATH, t);
     if (i < 0 || i >= PATH.length - 1) {
@@ -1504,7 +1085,6 @@ console.log('\n== 1c. the camera\'s handles shape when it arrives, not where it 
     `${straightOff.toFixed(3)} m off the curve`);
 }
 
-// ============================== 2. evaluating writes those values through the registry
 
 console.log('\n== 2. evaluation at a program position writes what the tracks say ==');
 {
@@ -1512,10 +1092,8 @@ console.log('\n== 2. evaluation at a program position writes what the tracks say
   await setTracks({ bloom: EASED, additive: STEPS, camera: PATH });
   await settle();
 
-  // Reached by seeking rather than by calling the seam bare, because the indexed
-  // source refuses to render a frame it has not fetched - correctly, and that
-  // refusal is step 2's. The position read back is the transport's own, since the
-  // playhead is an integer output frame and 0.9s is not one.
+  // By seeking rather than calling the seam bare: the indexed source refuses to render a
+  // frame it has not fetched. The position read back is the transport's own.
   const probes = [0.9, 2.7, 5.4, 8.1];
   const read = await page.evaluate(`(async () => {
     const k = globalThis.__kinect;
@@ -1568,9 +1146,7 @@ console.log('\n== 2. evaluation at a program position writes what the tracks say
     'and every one of them reaches the object the renderer reads, not just the registry',
     `${landingBad} disagreements between registry and landing site`);
 
-  // The falsification control. The same reader against the values from a
-  // *different* program position has to disagree - otherwise a page that wrote
-  // one constant everywhere would pass everything above.
+  // The control: the same reader against a different program position has to disagree.
   const shifted = read.filter((row, i) => {
     const other = probes[(i + 1) % probes.length];
     return Math.abs(row.bloom - snap(scalarAt(EASED, other))) < halfStep(bloomSpec);
@@ -1579,12 +1155,8 @@ console.log('\n== 2. evaluation at a program position writes what the tracks say
     'and the values are position-dependent, so a constant would not have passed the above',
     `${shifted} of ${probes.length} positions also match a different position's value`);
 
-  // The suppression, measured around bare renders at a position already resident so
-  // the seek that fetched it is not inside the window. `params.set` announces every
-  // write and the timeline answers an announcement with an accurate seek, so an
-  // evaluator writing three values per frame without the suppression would schedule
-  // three seeks per frame - each of which renders a pre-roll, which evaluates,
-  // which schedules more. It never settles, and the symptom is a slow tab.
+  // Around bare renders at a position already resident, so the seek that fetched it is not
+  // inside the window.
   const delta = await page.evaluate(`(async () => {
     const k = globalThis.__kinect;
     const kf = globalThis.__kf;
@@ -1610,18 +1182,15 @@ console.log('\n== 2. evaluation at a program position writes what the tracks say
     `${delta.settled.renders} renders for 6 asked for, ${delta.settled.seeks} seeks`);
 }
 
-// =============================== 3. a keyframed look seeks the way it plays
 
 console.log('\n== 3. a keyframed look: the same program position, reached two ways ==');
 
-// Blackwall selected the way a user selects it, so no look value is invented here.
-// It is the one preset that switches both accumulators on at once, which is what
-// makes a pre-roll cost anything at all.
+// The one preset that switches both accumulators on at once, which is what makes a
+// pre-roll cost anything.
 await applyLook(BLACKWALL_LOOK);
 
-// Tracks that move the two things a pre-roll is sized by, plus the camera. `wake`
-// keyed means the pre-roll length itself changes with the playhead, which is the
-// interesting case - a seek has to compute it at the target rather than once.
+// A keyed `wake` makes the pre-roll length itself move, so a seek has to compute it at
+// the target rather than once.
 const LOOK_TRACKS = {
   wake: [
     { t: 0, value: 0, easeOut: [[0.6, 0]], easeIn: LIN_IN },
@@ -1636,11 +1205,8 @@ const LOOK_TRACKS = {
   camera: PATH,
 };
 
-// One arm: pin the camera, reach a program position one of the two ways, read the
-// image back. Everything the verdict rests on comes back with it - the counters the
-// arm actually moved, the camera it ended on, and what the transport says about the
-// seek it ran. The arguments go in as source rather than through `JSON.stringify`,
-// for the reason `src` exists.
+// One arm: pin the camera, reach a program position one of the two ways, read the image back. Everything the verdict rests on comes back with it - the counters
+// the arm actually moved, the camera it ended on, and what the transport says about the seek it ran.
 const arm = (label, kind, targetSec, frames = null) => page.evaluate(`(async () => {
   const k = globalThis.__kinect;
   const kf = globalThis.__kf;
@@ -1702,11 +1268,8 @@ const arm = (label, kind, targetSec, frames = null) => page.evaluate(`(async () 
   check(apart.max >= CONTROL_MIN && apart.pct >= CONTROL_MIN_PCT,
     'the control lands somewhere else, so the equality above is about something', show(apart));
 
-  // And a pre-roll is genuinely required, and the computed length covers what is
-  // required. Not "the computed length is exactly what is needed": a ghost is drawn
-  // while `age < fade + wake * strength` and strength is under 1 for most rays, so
-  // the computed length is the worst case and the needed one is shorter. Measured
-  // by walking down until the equality breaks, rather than asserted either way.
+  // The computed length is the worst case, since a ghost draws while
+  // `age < fade + wake * strength`. Measured by walking down until the equality breaks.
   let needed = plan.frames;
   for (let n = plan.frames; n >= 0; n--) {
     await arm('trial', 'seek', TARGET, n);
@@ -1721,26 +1284,11 @@ const arm = (label, kind, targetSec, frames = null) => page.evaluate(`(async () 
     `${plan.frames} computed against ${needed} needed`);
 }
 
-// ---------------- 3b. a seek from a cheap position to an expensive one
 
-// Every arm above reaches its target warm: the seek follows a playback or a prior
-// seek at the same position, so the uniforms already hold the target's look before
-// the pre-roll is even sized. That is the shape of an easy check, and it hid a real
-// bug for a whole round - `preroll` read fade, wake and damp straight off the
-// uniforms, which is the look at wherever the playhead was *parked*, so a scrub
-// release that jumped from a cheap position to an expensive one sized its warm-up
-// for the cheap one and landed short of its own playback.
-//
-// So this arm is deliberately cold. Park at a position where the keyed parameters
-// are at their cheapest, seek in one jump to where they are dearest, and compare
-// against the playback that walked there. The plan the cold seek computes has to be
-// the plan the warm one computes, because the look at the target does not depend on
-// how the playhead got there.
+// Deliberately cold. Every arm above reaches its target warm, which hid a real bug for a round: `preroll` read fade, wake and damp off the uniforms, so a jump from a cheap position to an expensive one sized its warm-up for the cheap one.
 console.log('\n== 3b. a seek that jumps from a cheap look to an expensive one ==');
 {
-  // Keyed so that the cheap end really is cheap: no persistence and no trails at
-  // the head, both substantial at the target. Anything less and the two plans
-  // differ by too little for the difference to be visible in pixels.
+  // Anything less and the two plans differ by too little to see in pixels.
   const COLD = {
     trails: [{ t: 0, value: 0 }, { t: 8, value: 0.9 }],
     wake: [{ t: 0, value: 0 }, { t: 8, value: 1500 }],
@@ -1795,25 +1343,14 @@ console.log('\n== 3b. a seek that jumps from a cheap look to an expensive one ==
   await setTracks({});
 }
 
-// ---------------- 3c. and one whose pre-roll window crosses a dearer region
 
-// Target-sampling fixed §3b, and then the question is whether sampling at the
-// target is *correct* or merely better than sampling at the playhead. For the
-// surface half it is correct: the state texture's contents do not depend on fade or
-// wake, and the draw decision reads the uniforms at the frame being drawn, so
-// covering fade plus wake ending at the target is exactly sufficient.
-//
-// For the trails half it is not, and this is the case that shows why. Three's pass
-// is `max(new, damp * old)` applied per output frame with that frame's damp, so
-// what survives from before a pre-roll is the product of damp across the window -
-// which `damp_at_target ^ n` is only while damp is constant. Keyed high right up to
-// the target and low at it, the closed form asks for a fraction of what is needed.
+// Whether sampling at the target is correct or merely better. For the surface half it is; for the trails half it is not, because three's pass is
+// `max(new, damp * old)` per output frame, so what survives is the product of damp across the window and `damp_at_target ^ n` matches only while damp is constant.
 console.log('\n== 3c. a pre-roll whose window is dearer than its target ==');
 {
   await setRetime(FLAT);
   await applyLook(RGB_LOOK);
-  // Fade and wake at zero and unkeyed, so the surface half computes 0 and cannot
-  // mask the trails half by being the larger of the two.
+  // Fade and wake at zero and unkeyed, so the surface half cannot mask the trails half.
   await page.evaluate(`globalThis.__kinect.params.apply(${src({ fade: 0, wake: 0 })})`);
   const dampTrack = [{ t: 0, value: 0.95 }, { t: 7.8, value: 0.95 }, { t: 8.0, value: 0.5 }];
   await setTracks({ trails: dampTrack });
@@ -1872,7 +1409,6 @@ console.log('\n== 3c. a pre-roll whose window is dearer than its target ==');
   await settle();
 }
 
-// ============================== 4. the retime curve, a ramp and a hold
 
 console.log('\n== 4. program time maps to source time through the curve ==');
 {
@@ -1899,8 +1435,7 @@ console.log('\n== 4. program time maps to source time through the curve ==');
     const sourceErr = worst(read.source.map((v, i) => Math.abs(v - wantSource[i])));
     const wantBracket = read.source.map((s) => bracketOf(s));
     const bracketBad = read.bracket.filter((b, i) => b !== wantBracket[i]).length;
-    // The program length is the point at which the curve first reaches the end of
-    // the take, computed here from the tool's own curve by bisection.
+    // The program length is where the curve first reaches the end of the take, by bisection.
     let lo = 0;
     let hi = 200;
     for (let i = 0; i < 60; i++) {
@@ -1929,18 +1464,12 @@ console.log('\n== 4. program time maps to source time through the curve ==');
   check(gap > 1, 'and a page ignoring its keys would land somewhere else entirely', `${gap.toFixed(2)}s apart`);
 }
 
-// ---------------- 4b. a hold really holds
 
 console.log('\n== 4b. a hold freezes source time, and the image with it ==');
 {
   await setRetime(HOLD);
   await setTracks({});
-  // Blackwall, but with every term that reads program time turned off - the scan
-  // sweep, the grain, the scanlines, the RGB split and the glitch all take
-  // `uniforms.time`, which is program time and keeps running under a freeze. The
-  // persistence stays on, so the surface memory is still in the picture and this
-  // is not a claim about a renderer that had stopped working. The other side of
-  // that - that the program-time terms *do* keep moving - is the second half below.
+  // Every term that reads program time turned off - scan, grain, scanlines, RGB split and glitch all take `uniforms.time`, which keeps running under a freeze. Persistence stays on.
   await applyLook(BLACKWALL_LOOK);
   const TIME_FREE = { scan: 0, 'grain.amount': 0, 'raster.amount': 0, 'rgbsplit.amount': 0, 'glitch.amount': 0, 'noise.amount': 0, trails: 0 };
   await page.evaluate(`globalThis.__kinect.params.apply(${src(TIME_FREE)})`);
@@ -1995,10 +1524,8 @@ console.log('\n== 4b. a hold freezes source time, and the image with it ==');
   check(past.max >= CONTROL_MIN && past.pct >= CONTROL_MIN_PCT,
     'while a position past it is a different image, so this can tell them apart', show(past));
 
-  // The other side of it, and it is a property rather than a caveat. Program time
-  // is the coordinate; a hold freezes the *footage* by holding source time still,
-  // and everything the look drives off program time carries on. Turning the scan
-  // sweep and the grain back on has to make the same four positions differ.
+  // A hold freezes the footage by holding source time still, and everything the look drives
+  // off program time carries on.
   await page.evaluate(`(async () => {
     const k = globalThis.__kinect;
     const kf = globalThis.__kf;
@@ -2018,15 +1545,11 @@ console.log('\n== 4b. a hold freezes source time, and the image with it ==');
     show(lively));
 }
 
-// ---------------- 4c. the pre-roll is a window on the curve, not a tangent
 
 console.log('\n== 4c. the pre-roll asks how far back the curve covers a source span ==');
 {
-  // Three shapes, and the probes are placed where the answer is interesting rather
-  // than evenly. Inside one straight segment the tangent is the curve, so the two
-  // arithmetics agree and prove nothing - the discriminating positions are the ones
-  // whose pre-roll window reaches back *across* a change of slope, and the S-curve,
-  // where the slope is changing everywhere.
+  // Placed where the answer is interesting: inside one straight segment the tangent is the
+  // curve, so the discriminating positions reach back across a change of slope.
   const CASES = [
     { label: 'ramp, slow side', curve: RAMP, at: 4.0 },
     { label: 'ramp, fast side', curve: RAMP, at: 9.0 },
@@ -2071,9 +1594,7 @@ console.log('\n== 4c. the pre-roll asks how far back the curve covers a source s
       `${r.label}: and the frames it counted really do cover fade plus wake`,
       `${r.covers.toFixed(4)}s of ${r.got.span.toFixed(3)}s`);
   }
-  // The control, and the whole reason the seam grew a window. On a constant slope
-  // the two agree; on a curve they must not, and inside a hold the tangent answers
-  // "no frames needed" for the case that needs the most.
+  // On a constant slope the two agree; inside a hold the tangent answers "no frames".
   const differing = rows.filter((r) => r.tangent !== r.want).length;
   const holdRow = rows.find((r) => r.label === 'hold, inside it');
   console.log(`  ${differing} of ${rows.length} configurations disagree with the tangent arithmetic; `
@@ -2085,12 +1606,10 @@ console.log('\n== 4c. the pre-roll asks how far back the curve covers a source s
     `tangent ${holdRow.tangent}, window ${holdRow.want}`);
 }
 
-// ---------------- 4d. and the seek it sizes lands where the playback does
 
 console.log('\n== 4d. a seek across a ramp and across a hold reproduces its playback ==');
 {
-  // The ramp target sits just past the knee, so its pre-roll window reaches back
-  // across a change of slope - the case a tangent at the target gets wrong.
+  // Just past the knee, so the pre-roll window reaches back across a change of slope.
   for (const [label, curve, target] of [['ramp', RAMP, 6.1], ['hold', HOLD, 6.0]]) {
     await setRetime(curve);
     await setTracks(LOOK_TRACKS);
@@ -2099,10 +1618,7 @@ console.log('\n== 4d. a seek across a ramp and across a hold reproduces its play
 
     const played = await arm(`${label}-played`, 'playback', target);
     const seeked = await arm(`${label}-seeked`, 'seek', target);
-    // The control is the pre-roll the tangent arithmetic would have asked for -
-    // not zero. That makes this the direct test of the carried finding: the old
-    // number has to produce a visibly different image, or replacing it changed
-    // nothing that matters.
+    // The control is the pre-roll the tangent arithmetic would have asked for, not zero.
     const span = await page.evaluate(
       'globalThis.__kinect.uniforms.fadeTime.value + globalThis.__kinect.uniforms.wakeTime.value',
     );
@@ -2125,39 +1641,19 @@ console.log('\n== 4d. a seek across a ramp and across a hold reproduces its play
   }
 }
 
-// ================= 4e. a curve that moves while a seek is fetching
 
-// A seek plans which source frames it needs, awaits them, and renders. The curve
-// can move inside that await - and when it does, the plan describes a program the
-// page no longer has, so the render walks the source backwards and the pair source
-// refuses. Found by dragging a retime key in the real editor, where every pointer
-// move rewrites the curve mid-fetch.
-//
-// **The hazard is older than the curve, and this is the half worth being explicit
-// about.** The speed slider writes `retime.rate` from an `input` handler, outside
-// the transport's exclusive queue, so a committed step 4 could reach the same
-// state - a rate change landing while a seek was awaiting its frames. It is far
-// harder to hit there because one slider move is one mutation rather than sixty,
-// which is why it was never seen. So the first arm here moves `rate` and nothing
-// else: it is step 4's path, exercised deliberately rather than waited for.
-//
-// The window is entered on purpose rather than raced for. `ensure` is wrapped so
-// the curve changes exactly as the fetch resolves, which is the one instant that
-// matters and the one a timing test would hit by luck.
+// A seek plans which source frames it needs, awaits them, and renders; the curve can move inside that await, and then the render walks the source backwards and
+// the pair source refuses. The first arm moves `rate` alone, which is step 4's own path, and `ensure` is wrapped so the curve changes exactly as the fetch resolves.
 console.log('\n== 4e. the retime curve moving while a seek is fetching ==');
 {
   await setTracks({});
   await applyLook(BLACKWALL_LOOK);
-  // Drained before the curve is touched. Selecting a mode schedules an accurate
-  // seek, and rewriting the curve while *that* one is fetching is the same
-  // contention this section is about - manufactured by the check rather than by
-  // the claim, so what would fail is an operation nobody is testing.
+  // Drained first: rewriting the curve while a mode's own seek is fetching is contention
+  // the check manufactured, and what fails is an operation nobody is testing.
   await settle();
 
-  // The second arm goes from one keyed curve to another rather than from no keys to
-  // keys, so the retime lane exists on both sides of it. A lane appearing mid-seek
-  // resizes the stage, and two images of different sizes cannot be compared at all -
-  // which would make this a check about layout wearing a re-planning claim's name.
+  // From one keyed curve to another rather than from no keys to keys: a lane appearing
+  // mid-seek resizes the stage, and two images of different sizes cannot be compared.
   for (const [label, before, after] of [
     ['rate, the step 4 path', { rate: 1, keys: [] }, { rate: 0.25, keys: [] }],
     ['keys, the step 5 path', RAMP, HOLD],
@@ -2217,13 +1713,8 @@ console.log('\n== 4e. the retime curve moving while a seek is fetching ==');
         keys: k.timeline.retime.keys.length,
       };
     })()`);
-    // Checked as a position rather than as pixels. An earlier version of this
-    // section compared the interrupted seek's image against a clean one and the
-    // verdict moved between runs - the two operations reach the same place through
-    // different amounts of queued work, and the harness could not hold them still
-    // enough for a pixel equality to mean anything. Sections 3 and 4d carry the
-    // pixel claim for ordinary seeks; what this section is for is that an
-    // interrupted one lands rather than refusing, and where it lands is a number.
+    // As a position rather than as pixels: the two operations reach the same place through
+    // different amounts of queued work, so a pixel equality moved between runs.
     const wantSource = retimeAt(after, got.at);
     const drift = Math.abs(got.sourceAt - wantSource);
     console.log(`  ${label}: the curve was rewritten on fetch ${got.hits > 0 ? 'yes' : 'NO'}, `
@@ -2234,9 +1725,8 @@ console.log('\n== 4e. the retime curve moving while a seek is fetching ==');
       `${got.hits} interruptions`);
     check(got.threw === null, `${label}: the seek re-planned around it instead of refusing`,
       got.threw ?? '');
-    // The load-bearing one, and the one an easier check gets wrong. A stand-down
-    // asks for a repaint that arrives at the same place a moment later, so every
-    // downstream reading looks right while the operation under test did nothing.
+    // The load-bearing one: a stand-down asks for a repaint that arrives at the same place a
+    // moment later, so every downstream reading looks right while nothing under test ran.
     check(got.landed === true && got.overtaken === 0,
       `${label}: and the seek itself landed rather than standing down for a repaint`,
       `landed ${got.landed}, ${got.overtaken} stand-downs`);
@@ -2249,16 +1739,8 @@ console.log('\n== 4e. the retime curve moving while a seek is fetching ==');
   await setRetime(FLAT);
 }
 
-// ============ 4f. a downhill curve cannot be authored, and one cannot kill the page
 
-// Source time running backwards is unrenderable here, and not by omission: both
-// accumulators advance one source frame at a time and neither can be walked back,
-// so a descending segment asks the pair source to go backwards and it refuses. The
-// refusal used to arrive from inside the animation loop, which three then stops
-// driving - no playback, no scrubbing, no repaint, permanently, and with nothing
-// persisted that is the editing session. Two claims, and both are needed: the
-// editing doors must not be able to author one, and the loop must survive one that
-// arrives anyway.
+// Both accumulators advance one source frame at a time, so a descending segment asks the pair source to go backwards and it refuses - and that refusal used to arrive from inside the animation loop, which three then stops driving.
 console.log('\n== 4f. a retime curve that runs downhill ==');
 {
   await setTracks({});
@@ -2275,7 +1757,6 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
   })()`);
   console.log(`  a falling curve through setRetime: ${refused ? 'refused' : 'ACCEPTED'}`);
   check(refused !== null, 'a curve that falls is refused rather than stored', refused ?? 'accepted');
-  // The control: a hold is equal values, which is legal and must not be refused.
   const holdOk = await page.evaluate(`(() => {
     try {
       globalThis.__kinect.keyframes.setRetime(${src(HOLD)});
@@ -2284,11 +1765,7 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
   })()`);
   check(holdOk === true, 'while a hold, which is equal values, still is not');
 
-  // The other way to author a descent, and the one a values-only check cannot see:
-  // keys that ascend, with an outgoing handle that overshoots past the later value
-  // and comes back down inside the segment. On this fixture a shallow one hides
-  // inside single capture brackets, so `mixT` walks backwards within a pair and the
-  // reverse renders with nothing refusing it at all.
+  // The other way to author a descent, invisible to a values-only check: ascending keys with an outgoing handle that overshoots, shallow enough to hide inside single capture brackets.
   const HANDLE_DESCENT = { rate: 1, keys: [
     { t: 0, value: 0, easeOut: [[0.3, 1.6]], easeIn: [[2 / 3, 2 / 3]] },
     { t: 8, value: 6, easeOut: [[1 / 3, 1 / 3]], easeIn: [[2 / 3, 2 / 3]] },
@@ -2299,15 +1776,7 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
       return null;
     } catch (err) { return String(err.message ?? err); }
   })()`);
-  // What that curve would have done, sampled by this tool from its own evaluator, so
-  // the refusal is shown to be refusing something real rather than being cautious.
-  //
-  // Measured as the largest drawdown - how far the curve falls below a level it has
-  // already reached - rather than as a peak followed by a minimum. The descent here
-  // is a dip in the middle of the segment and the curve still ends at its highest
-  // value, so "the maximum, then the minimum after it" finds nothing at all and
-  // reports a working refusal as refusing nothing. Sampled finely, because a narrow
-  // dip falls between coarse samples.
+  // The largest drawdown rather than a peak followed by a minimum: the descent is a dip mid-segment and the curve still ends at its highest value, so "maximum then minimum" finds nothing.
   const sampled = [];
   for (let i = 0; i <= 320; i++) sampled.push(scalarAt(HANDLE_DESCENT.keys, (i / 320) * 8, true));
   let high = -Infinity;
@@ -2327,8 +1796,8 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
   check(handleRefused !== null,
     'and a handle outside the unit box is refused, not only falling key values',
     handleRefused ?? 'accepted');
-  // The control: the same keys with an in-box handle are still accepted, so this is
-  // a bound on the handle rather than a ban on easing the retime at all.
+  // The control: an in-box handle is still accepted, so this bounds the handle rather than
+  // banning easing the retime at all.
   const easedOk = await page.evaluate(`(() => {
     try {
       globalThis.__kinect.keyframes.setRetime({ rate: 1, keys: [
@@ -2352,8 +1821,8 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
   })()`);
   await page.mouse.move(lane.x, lane.y);
   await page.mouse.down();
-  // All the way to the floor of the lane and past it, which without a clamp asks
-  // for a value under the key before it.
+  // Past the floor of the lane, which without a clamp asks for a value under the key
+  // before it.
   await page.mouse.move(lane.x, lane.bottom + 40, { steps: 6 });
   await page.mouse.up();
   await settle();
@@ -2418,10 +1887,7 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
     + `${survived.afterCrash.playing ? 'still playing' : 'paused'}, note `
     + `"${survived.afterCrash.note.slice(0, 60)}"`);
   console.log(`  with a sane curve back, the animation loop rendered ${survived.alive} frames`);
-  // The control on the control: the transport really was playing when it met the
-  // curve, so "it paused" is a thing that happened rather than a thing that never
-  // started. Renders are the wrong measure of that - it refuses on the first step,
-  // which is the point.
+  // Renders are the wrong measure of that: it refuses on the first step.
   check(survived.startedPlaying === true,
     'playback really was running when it met the curve',
     `rendered ${survived.afterCrash.rendered} frames before refusing`);
@@ -2429,14 +1895,11 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
     'a curve that cannot be walked pauses the transport rather than running into it');
   check(survived.afterCrash.note.length > 0, 'and says why on the strip rather than only in the console',
     survived.afterCrash.note);
-  // This section provokes exactly one error and it is the one under test, so the
-  // run-wide no-errors assertion is told to expect it - and told to fail if it
-  // does not arrive.
+  // One error, and the run-wide assertion is told to expect it and to fail without it.
   expectError('the retime curve runs backwards here',
     'the refusal a downhill curve produces, caught by the loop rather than by the page dying');
-  // The load-bearing one. Everything above can be true of a page whose animation
-  // loop has already stopped being driven, because a paused transport renders
-  // nothing either way.
+  // The load-bearing one: everything above is also true of a page whose animation loop has
+  // stopped being driven, because a paused transport renders nothing either way.
   check(survived.alive > 0,
     'and the animation loop is still being driven afterwards, which is the whole of the claim',
     `${survived.alive} frames rendered after`);
@@ -2444,7 +1907,6 @@ console.log('\n== 4f. a retime curve that runs downhill ==');
   await settle();
 }
 
-// ============================================ 5. undo is document state only
 
 console.log('\n== 5. undo restores the document and never the view ==');
 {
@@ -2522,10 +1984,8 @@ console.log('\n== 5. undo restores the document and never the view ==');
 
   // (d) and none of it is in the snapshot, so an undo cannot put it back.
   const snapshot = await project();
-  // A v3 document is `{ look: { mode, params, tracks }, composition: { retime, camera } }`.
-  // Read flat, `snapshot.params` is undefined and the `in` below throws rather than
-  // failing, which is how this arrived: as "the page stopped answering" three sections
-  // after the shape actually changed.
+  // A v3 document is `{ look: { mode, params, tracks }, composition: { retime, camera } }`,
+  // and read flat the `in` below throws rather than failing.
   check(!('renderScale' in snapshot.look.params) && !('spin' in snapshot.look.params),
     'the snapshot holds no view state at all', Object.keys(snapshot.look.params).join(' '));
 
@@ -2560,8 +2020,7 @@ console.log('\n== 5. undo restores the document and never the view ==');
     };
   })()`);
   await settle();
-  // Look tracks and the retime curve sit on opposite sides of the v3 split - tracks are
-  // look, the curve is composition - so the two readings below come from two places.
+  // Tracks are look and the curve is composition, so the two readings come from two places.
   const undoneTracks = undone.project.look.tracks;
   const undoneRetime = undone.project.composition.retime;
   console.log(`  a track and a retime curve pushed one level (${depthWithKeys}), then undone: `
@@ -2578,28 +2037,8 @@ console.log('\n== 5. undo restores the document and never the view ==');
   check(String(undone.camBefore) === String(undone.camAfter), 'and did not walk the orbit backwards',
     `${undone.camBefore} -> ${undone.camAfter}`);
 
-  // (f) the look really comes back, not just the key list.
-  //
-  // **Half of what this row used to assert has lost its subject rather than its
-  // anchor, and it is deleted rather than re-pointed.** It read the clip's mode either
-  // side of a click on the Blackwall button and asserted that selecting a mode was one
-  // undo level "not twelve" - because `setMode(4)` wrote the mode plus twelve look
-  // values, and the whole danger was that thirteen writes in one gesture might not come
-  // back together. There is no mode and no bundled write: picking a reading writes one
-  // registry parameter, which undoes exactly like the slider beside it. Re-anchoring
-  // this onto whatever is nearest would have kept a green row that tested nothing.
-  //
-  // What survives is the property that outlived the mode - a bulk write is one level,
-  // and undo restores every value in it - and its subject is a preset now.
-  //
-  // Driven through `applyStoredPreset`, which is the door the apply button uses, and
-  // **not** through the `applyPreset` underneath it. That distinction cost a red row
-  // to find and is worth the sentence: `applyPreset` writes the values and commits
-  // nothing, so a first draft of this measured 13 values moved in **0** undo levels
-  // and read exactly like a program that had lost its undo. The commit belongs to the
-  // gesture rather than to the write - which is right, because a track writing values
-  // every frame must not push a level - so a check that reaches past the gesture is
-  // asserting against a path no user takes.
+  // (f) the look really comes back, not just the key list. Driven through `applyStoredPreset`, the door the apply button uses, and not the `applyPreset`
+  // underneath it: that one writes the values and commits nothing. The commit belongs to the gesture, because a track writing values every frame must not push a level.
   const bulkUndo = await page.evaluate(`(async () => {
     const k = globalThis.__kinect;
     const LOOK = ${JSON.stringify(BLACKWALL_LOOK)};
@@ -2620,8 +2059,8 @@ console.log('\n== 5. undo restores the document and never the view ==');
   const moved = Object.keys(bulkUndo.before).filter((n) => bulkUndo.before[n] !== bulkUndo.after[n]);
   console.log(`  applying the Blackwall look moved ${moved.length} of ${bulkUndo.watched} values `
     + `in ${bulkUndo.pushed} level: ${moved.map((n) => `${n} ${bulkUndo.before[n]}->${bulkUndo.after[n]}`).join(' ')}`);
-  // The control for the two rows below, and it is why `moved` is counted rather than
-  // assumed: a preset that wrote nothing would undo perfectly and pass both of them.
+  // `moved` is counted rather than assumed: a preset that wrote nothing would undo
+  // perfectly and pass both rows below.
   check(moved.length > 0, 'applying a look actually moves values', `${moved.length} moved`);
   check(bulkUndo.pushed === 1, `and it is one undo level, not ${bulkUndo.watched}`, `${bulkUndo.pushed}`);
   check(JSON.stringify(bulkUndo.back) === JSON.stringify(bulkUndo.before),
@@ -2629,7 +2068,6 @@ console.log('\n== 5. undo restores the document and never the view ==');
     `${JSON.stringify(bulkUndo.back)} against ${JSON.stringify(bulkUndo.before)}`);
 }
 
-// ================================= 6. the two surfaces, and where the furniture is
 
 console.log('\n== 6. look in lanes, composition in the world ==');
 {
@@ -2658,25 +2096,14 @@ console.log('\n== 6. look in lanes, composition in the world ==');
     `${empty} lanes`);
 }
 
-// ---------------- 6b. a camera node is a thing in space you can drag
 
 console.log('\n== 6b. dragging a path node in the top-down moves it across the floor ==');
 {
   await setTracks({ camera: PATH });
   await settle();
   const NODE = 1;
-  // Driven with the real pointer rather than with synthesised events. A dispatched
-  // PointerEvent carries no active pointer id, so the capture the drag takes out
-  // throws and the gesture never starts - which would have this check measuring
-  // the absence of its own input rather than the absence of the feature.
-  // **Canvas-local, and `page.mouse` is viewport-relative.** These were the same
-  // number while the stage filled the window from its corner; the editor letterboxes
-  // itself to the export aspect now, so the canvas is centred in whatever the stage
-  // area leaves over and the two differ by that offset. Without it the drag lands on
-  // empty background and the node does not move, which reads as the feature being
-  // gone rather than as the pointer having missed - four rows here failed exactly
-  // that way. The other drag in this file takes its point from a DOM rect and is
-  // already in viewport coordinates.
+  // A dispatched PointerEvent carries no active pointer id, so the capture the drag takes out throws and the gesture never starts. Canvas-local, where
+  // `page.mouse` is viewport-relative: the editor letterboxes to the export aspect, so without the offset the drag lands on background.
   const canvasAt = await page.evaluate(`(() => {
     const r = document.getElementById('stage').getBoundingClientRect();
     return { x: r.left, y: r.top };
@@ -2699,9 +2126,7 @@ console.log('\n== 6b. dragging a path node in the top-down moves it across the f
   const lane = await page.evaluate("globalThis.__kinect.keyframes.lanes().find((l) => l.owner === 'camera')");
 
   const d = [0, 1, 2].map((i) => after[i] - before[i]);
-  // The plan is drawn to a known scale, so how far the node should have gone is
-  // arithmetic rather than a guess: 18 pixels right and 12 up, over the pixels per
-  // metre the inset uses.
+  // Drawn to a known scale: 18 pixels right and 12 up, over the inset's pixels per metre.
   const inset = await page.evaluate('globalThis.__kinect.keyframes.chrome.inset()');
   const perMetre = inset.h / 7;
   console.log(`  node ${NODE} moved from ${before.map((x) => x.toFixed(3)).join(', ')} to `
@@ -2722,26 +2147,16 @@ console.log('\n== 6b. dragging a path node in the top-down moves it across the f
   check(lane.keys === PATH.length, 'and the path still has all its keys', `${lane.keys}`);
 }
 
-// ---------------- 6d. a retime key dragged vertically stays where it is in time
 
-// The retime curve is the one track whose value changes how long the program is,
-// so its lane is the one place where editing a key rescales the ruler the key is
-// drawn on. Left alone that is a feedback loop rather than a rescale: drag a key
-// down, the clip slows, the program lengthens, the ruler rescales, the key moves
-// under a pointer that never moved sideways, and the new position reads back as a
-// later program time - which slows it further. Measured before the ruler was
-// frozen for the length of a drag: twelve pixels of vertical drag walked one key
-// from 15.0s to 48.3s in four moves.
+// The retime curve is the one track whose value changes how long the program is, so editing a key rescales the ruler it is drawn on. Left alone that is a feedback
+// loop: drag down, the clip slows, the program lengthens, the ruler rescales, and the key moves under a pointer that never moved sideways.
 console.log('\n== 6d. a retime key dragged down changes the speed, not when it is ==');
 {
   await setTracks({});
   await setRetime({ rate: 1, keys: [{ t: 0, value: 0 }, { t: 15, value: 15 }] });
   await settle();
-  // Drained again after the curve is set, not only before. The first version of
-  // this section dragged a key while a repaint left over from an earlier section
-  // was still fetching, and that repaint was overtaken three times and stood down -
-  // correct behaviour, reported correctly, and nothing to do with the claim here.
-  // A user with a fast hand can reproduce it; a check should not manufacture it.
+  // Drained again after the curve is set: a repaint left over from an earlier section gets
+  // overtaken here, which is correct behaviour and nothing to do with the claim.
   await settle();
   const lane = await page.evaluate(`(() => {
     const el = [...document.querySelectorAll('#tBeds .tlane')].find((l) => l.dataset.owner === 'retime');
@@ -2754,19 +2169,8 @@ console.log('\n== 6d. a retime key dragged down changes the speed, not when it i
       value: globalThis.__kinect.timeline.retime.keys[1].value,
     };
   })()`);
-  // **The walk is in seconds converted to pixels, not in pixels.** The retime lane draws
-  // zero to the capture's own length across its forty pixels, so what a pixel is worth
-  // depends on the fixture: on the roughly 50s take this was written against, the old
-  // fixed walk of 3, 6, 9 and 12 pixels was worth 15 seconds, which took a key sitting at
-  // 15 exactly to zero. (That length was written here as a fact about "the sample this
-  // tree holds" and `captures/` is gitignored, so it described a file no checkout has to
-  // have - the header carries the rest of that correction.) That is the floor - a curve
-  // flat at zero never advances the source, so the
-  // program length stops being "longer" and falls back to the last key's own time - and
-  // the row below read the collapse as the clip failing to slow down. So the drop is
-  // three quarters of wherever the key is, in four equal steps, and the pixels for it
-  // come from where the page actually drew the key: `value / (1 - frac)` is the top of
-  // the lane's range read back off the drawing rather than assumed.
+  // The walk is in seconds converted to pixels, not in pixels: the lane draws zero to the capture's own length across forty pixels, so what a pixel is worth depends
+  // on the fixture. The pixels come from where the page actually drew the key, read back off the drawing rather than assumed.
   const frac = (lane.y - lane.top) / lane.height;
   const perPx = (lane.value / Math.max(1e-6, 1 - frac)) / lane.height;
   const dropPx = (lane.value * 0.75) / Math.max(1e-9, perPx);
@@ -2791,8 +2195,6 @@ console.log('\n== 6d. a retime key dragged down changes the speed, not when it i
   const slid = worst(walk.map((w) => Math.abs(w.t - 15)));
   check(slid < 0.01, 'the key holds its program time through a vertical drag',
     `worst ${slid.toFixed(4)}s of slide`);
-  // The control: the drag has to have done something, or holding still would be
-  // the answer to everything above.
   check(Math.abs(walk[3].value - walk[0].value) > 1,
     'while its value moved, so the drag was doing something',
     `${walk[0].value.toFixed(2)} to ${walk[3].value.toFixed(2)}`);
@@ -2802,21 +2204,16 @@ console.log('\n== 6d. a retime key dragged down changes the speed, not when it i
   await setRetime(FLAT);
 }
 
-// ---------------- 6e. the panel writes keys, through the controls a hand uses
 
-// Two things that had no coverage at all, and both are gesture wiring - the class
-// that has produced five of this build's bugs, every one of them found by driving
-// the page rather than by reasoning about it. So the keyframe button is clicked and
-// the ease handle is dragged with a real pointer, not with dispatched events.
+// Both are gesture wiring, so the button is clicked and the handle dragged with a real
+// pointer rather than with dispatched events.
 console.log('\n== 6e. keying from the panel, and dragging a handle ==');
 {
   await setRetime(FLAT);
   await setTracks({});
   await applyLook(BLACKWALL_LOOK);
   await settle();
-  // Bloom now lives on the Look inspector. The look above opens Optical through the
-  // document-derived group rule; this selects the parent surface a hand must cross
-  // before the diamond is visible.
+  // The parent surface a hand must cross before the bloom diamond is visible.
   await page.click('#panelTabLook');
 
   // (a) the keyframe button, clicked.
@@ -2843,11 +2240,9 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
     'holding the value the parameter already had, so keying changes no image',
     `${afterClick.keys[0].value} against ${afterClick.value}`);
 
-  // (b) the Final Cut rule: with keys on the track, moving the slider writes the
-  // key at the playhead rather than shifting the whole curve. Untested until now,
-  // and the failure it guards against is specific - the evaluator rewrites every
-  // keyed parameter on the next render, so a bare `params.set` would be overwritten
-  // and the slider would appear to spring back on its own.
+  // (b) the Final Cut rule: with keys on the track, the slider writes the key at the
+  // playhead. The evaluator rewrites every keyed parameter on the next render, so a bare
+  // `params.set` is overwritten and the slider springs back on its own.
   await seekTo(8.0);
   await page.click('.kf[aria-label="bloom keyframe"]');
   await settle();
@@ -2885,13 +2280,12 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
     `${fc.keys.length} keys`);
   check(planted !== undefined && Math.abs(planted.value - 1.25) < 0.03,
     'holding the value that was dragged to', `${planted?.value}`);
-  // The one that matters. A bare `params.set` passes everything above and then the
-  // evaluator puts the old curve back on the very next frame.
+  // The one that matters: a bare `params.set` passes everything above and is then undone by
+  // the evaluator on the very next frame.
   check(Math.abs(fc.value - 1.25) < 0.03 && Math.abs(fc.slider - 1.25) < 0.03,
     'and it stays there through the render that follows, rather than springing back',
     `parameter ${fc.value}, slider ${fc.slider}`);
-  // The control: with no keys, the same drag must write no key at all, or "it
-  // writes a key" would be true of a track that keys everything you touch.
+  // The control: with no keys the same drag must write no key at all.
   await page.evaluate('globalThis.__kinect.keyframes.setTracks({})');
   await settle();
   await page.evaluate(`(() => {
@@ -2905,28 +2299,14 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   check(unkeyed === 0, 'while the same drag on an unkeyed track writes no key at all',
     `${unkeyed} tracks`);
 
-  // (c) an ease handle, dragged with the pointer.
-  //
-  // Both presses go through `lanePressPoint` rather than through the middle of a
-  // rectangle, for the reason written above it: the middle of the key at 4s belonged to
-  // `#tIn`'s grab zone at this viewport until the keys were stacked above it, and the
-  // three keys here still overlap each other by more than a diamond's reach.
-  //
-  // One press and no retry, which is not thrift. A second press on the same key inside
-  // `DOUBLE_CLICK_MS` is the gesture that *deletes* it, so a loop that clicked again
-  // when the selection had not taken would remove the key the rest of this section is
-  // about and then measure whatever was left.
+  // Both presses go through `lanePressPoint`, because the three keys here overlap each other by more than a diamond's reach. One press and no retry: a second press inside `DOUBLE_CLICK_MS` deletes the key.
   await setTracks({ bloom: EASED });
   await settle();
   const keyAt = await lanePressPoint('bloom', '.tkey', 1);
   if (keyAt) await page.mouse.click(keyAt.x, keyAt.y);
   await settle();
   const at = keyAt ? await lanePressPoint('bloom', '.thandle', 0) : null;
-  // Counted only when there is nothing to press, so the red row can say which of the
-  // two things went wrong: a lane that drew no handle at all, or one that drew a
-  // handle nobody can reach. The old read took `querySelector('.thandle')` as proof of
-  // the first and measured whatever it found - and a handle that is present but hidden
-  // measures 0x0, so the drag pressed the viewport origin and the row passed.
+  // Counted only when there is nothing to press, so the red row can say which went wrong: a lane that drew no handle, or a handle nobody can reach.
   const drawn = keyAt && at === null
     ? await page.evaluate(`(() => {
       const lane = [...document.querySelectorAll('#tBeds .tlane')].find((l) => l.dataset.owner === 'bloom');
@@ -2938,22 +2318,16 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
       : at ? `pressed ${keyAt.offset.toFixed(1)}px off centre`
         : drawn === 0 ? 'no handle drawn'
           : `${drawn} drawn and none of them reachable`);
-  // The three claims below are about a drag, and with no handle to press there was no
-  // drag for them to be about. They are filed red rather than skipped, because a
-  // section that quietly drops rows reports a smaller count for a broken build than for
-  // a working one - and this suite reads names and counts off a run to decide what
-  // happened. Their labels live in one place so the two paths cannot drift apart.
+  // Filed red rather than skipped: a section that drops rows reports a smaller count for a
+  // broken build than for a working one, and this suite reads names and counts off a run.
   const DRAG_ROWS = [
     'dragging an ease handle rewrites it',
     'and the curve between the keys follows it, which is what a handle is for',
     'while every key value stays exactly where it was, because an ease bends timing and not values',
   ];
   if (at === null) {
-    // A missed selection is a row, never a crash. This read `at.x` unguarded, so the
-    // run died one line after the FAIL above with "Cannot read properties of null" -
-    // which takes the page down and leaves every section after this one unrun, and a
-    // crash carrying no verdict is the shape this repo has twice recorded being
-    // written down as a finding.
+    // A missed selection is a row, never a crash: an unguarded `at.x` takes the page down and
+    // leaves every section after this one unrun.
     for (const row of DRAG_ROWS) check(false, row, 'did not run: there was no handle to drag');
   } else {
     const curveBefore = await page.evaluate(
@@ -2977,10 +2351,8 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
     console.log(`  handle dragged 30px left and 8px down: `
       + `${JSON.stringify(JSON.parse(handleBefore).easeOut)} -> `
       + `${JSON.stringify(JSON.parse(handleAfter).easeOut)}`);
-    // Sampled inside the segment the dragged handle actually shapes. The first handle
-    // drawn belongs to the selected key's *outgoing* side, so it bends the segment
-    // after it and not the one before - sampling the wrong side reads zero change and
-    // reports a working handle as broken.
+    // Inside the segment the dragged handle shapes - it belongs to the key's outgoing side,
+    // and sampling the wrong side reads zero change.
     console.log(`  and the curve it shapes, between 4s and 9s, moved ${moved.toFixed(3)}`);
     check(handleBefore !== handleAfter, DRAG_ROWS[0]);
     check(moved > 0.01, DRAG_ROWS[1], `${moved.toFixed(4)} of change`);
@@ -2992,7 +2364,6 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   await setTracks({});
 }
 
-// ---------------- 6c. and none of it is in the rendered frame
 
 console.log('\n== 6c. the furniture draws outside the frame ==');
 {
@@ -3020,8 +2391,7 @@ console.log('\n== 6c. the furniture draws outside the frame ==');
   check(chromeDiff.max === 0,
     'and the rendered frame is byte-identical either way, so none of it is in the image',
     show(chromeDiff));
-  // The control: something covering 8% of the stage would be unmissable if it were
-  // in there, which is what makes the equality above worth having.
+  // 8% of the stage would be unmissable if it were in the frame.
   check(insetPct > 5, 'and it is large enough that it could not have been missed',
     `${insetPct.toFixed(1)}% of the stage`);
 }

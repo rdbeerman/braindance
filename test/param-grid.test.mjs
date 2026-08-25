@@ -1,16 +1,6 @@
-// How far the registry rounds a value after snapping it onto its slider's grid.
-//
-// `normalise` in `web/main.js` snaps onto `step` and then rounds to the decimals `min` and
-// `step` imply, and the rounding is what keeps a value set headlessly and the same value
-// set by dragging a slider from landing a hair apart. The snapping needs the registry and
-// a document; the decimal count is a pure function of a number, and it is the half that
-// was wrong - so it is the half that is held here, under bare node, where the cases can be
-// written out rather than driven.
-//
-// **The defect this file exists for is the exponent spelling.** `String(x)` stops writing
-// a decimal point below 1e-6, so a step of `1e-7` read as zero decimals and every value
-// that parameter ever held was rounded to a whole number: the slider moved, the readout
-// showed a number, and the range had two positions in it.
+// How far the registry rounds a value after snapping it onto its slider's grid. The defect this
+// exists for is the exponent spelling: `String(1e-7)` has no decimal point, so that step read as
+// zero decimals and every value it held was rounded to a whole number.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,15 +11,11 @@ test('a decimal spelling is counted after the point', () => {
   assert.equal(decimalsOf(0.5), 1);
   assert.equal(decimalsOf(0.01), 2);
   assert.equal(decimalsOf(0.005), 3);
-  // The finest step the shipped set declares, and the finest a decimal spelling reaches
-  // before JavaScript switches notation on it.
   assert.equal(decimalsOf(0.000001), 6);
   assert.equal(decimalsOf(-0.25), 2);
 });
 
 test('an exponent spelling is counted through the exponent', () => {
-  // The case that shipped wrong. `String(1e-7)` is "1e-7" and carries no point at all,
-  // so the rule that looked for one answered zero.
   assert.equal(String(1e-7).includes('.'), false, 'the premise: this number has no decimal point in it');
   assert.equal(decimalsOf(1e-7), 7);
   assert.equal(decimalsOf(1.5e-7), 8);
@@ -38,31 +24,19 @@ test('an exponent spelling is counted through the exponent', () => {
 });
 
 test('a number with nothing after the point needs no places', () => {
-  // The other direction of the same spelling, and the one a naive fix gets backwards: a
-  // large number written with an exponent has no fraction to keep, and asking `toFixed`
-  // for a negative count throws.
   assert.equal(decimalsOf(1e21), 0);
   assert.equal(decimalsOf(1.5e21), 0);
   assert.equal(decimalsOf(100), 0);
 });
 
+// `toFixed` throws a RangeError above 100 places and the caller rounds with it. The install
+// door refuses a step finer than 1e-6, so the cap is about parameters declared inside this repo.
 test('the count stays inside what toFixed will accept', () => {
-  // `toFixed` throws a RangeError above 100 places, and the caller rounds with it. The
-  // install door refuses a step finer than 1e-6 long before this, so the cap is about the
-  // parameters declared inside this repo rather than about a package.
   assert.equal(decimalsOf(1e-300), 100);
   assert.doesNotThrow(() => (0.5).toFixed(decimalsOf(1e-300)));
 });
 
 test('past the cap the rounding rewrites a bound rather than refusing it', () => {
-  // **What the cap costs, written down because there is exactly one reader left.** The
-  // install door refuses a `min`, `max` or `def` needing more places than the finest step it
-  // takes, so no package can reach this any more - and a parameter declared inside this repo
-  // comes through no door at all, which is the population this arm is about.
-  //
-  // Rounding at the hundredth place is not a small correction to a number that lives past it.
-  // Both readings are here because they fail differently and only one of them looks like a
-  // rounding: a bound can move to a different number of the same size, or it can vanish.
   assert.equal(Number((1.5e-100).toFixed(decimalsOf(1.5e-100))), 2e-100,
     'a bound needing 101 places is written to 100, so it is a different bound');
   assert.equal(Number((1e-101).toFixed(decimalsOf(1e-101))), 0,
@@ -70,9 +44,6 @@ test('past the cap the rounding rewrites a bound rather than refusing it', () =>
   assert.equal(Number((1e-100).toFixed(decimalsOf(1e-100))), 1e-100,
     'while a bound the cap can still express is itself, which is what says the two above are the cap rather than toFixed');
 
-  // And what a floor past the cap does to every *other* value, which is the reading the
-  // door's refusal is written from: the places `min` implies are used for the whole
-  // parameter, so a floor nobody can express moves a default nobody touched.
   assert.equal(snapScalar({ min: 1e-101, max: 3, step: 0.05 }, 0.7), 0.7000000000000001,
     'a floor past the cap moves a value that is exactly on the grid');
   assert.equal(snapScalar({ min: 0, max: 3, step: 0.05 }, 0.7), 0.7,
@@ -80,10 +51,8 @@ test('past the cap the rounding rewrites a bound rather than refusing it', () =>
 });
 
 test('the rounding the registry performs keeps a fine grid rather than collapsing it', () => {
-  // The rule as `normalise` composes it, written out here because the composition is what
-  // the defect was about: a correct decimal count that nothing rounded with would have
-  // been just as invisible. This is the arithmetic of `normalise`'s scalar branch with the
-  // registry taken out of it.
+  // `normalise`'s scalar branch with the registry taken out of it: a correct decimal count
+  // that nothing rounded with would have been just as invisible, so the composition is the claim.
   const snap = (spec, v) => {
     const clamped = Math.min(spec.max, Math.max(spec.min, v));
     const snapped = spec.min + Math.round((clamped - spec.min) / spec.step) * spec.step;
@@ -93,8 +62,6 @@ test('the rounding the registry performs keeps a fine grid rather than collapsin
   const fine = { min: 0, max: 1, step: 1e-7 };
   assert.equal(snap(fine, 0.0000003), 0.0000003);
   assert.equal(snap(fine, 0.5000001), 0.5000001);
-  // The falsification: a build that answered zero decimals for this step - which is what
-  // shipped - rounds both of those to whole numbers, so the range has 0 and 1 in it.
   const collapsed = (spec, v) => Number((spec.min + Math.round((v - spec.min) / spec.step) * spec.step).toFixed(0));
   assert.equal(collapsed(fine, 0.5000001), 1, 'the premise: rounding to no places is what destroyed the range');
 });

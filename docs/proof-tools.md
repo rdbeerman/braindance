@@ -789,6 +789,17 @@ node tools/monitor-check.mjs --mutate colour-off-keeps-the-texture # ... the clo
 node tools/sensor-view-check.mjs                          # the intrinsics a take was shot with, against a build that assumes them
 node tools/sensor-view-check.mjs --mutate fov-hardcoded   # ... and must FAIL mutated
 node tools/sensor-view-check.mjs --mutate no-repaint      # ... and must FAIL mutated
+node tools/sensor-view-check.mjs --mutate tanv-uses-fx    # ... the vertical half-angle taken off `fx` rather than
+                                                          #     `fy`, which is the one substitution a square sensor
+                                                          #     would hide. Bit-identical on every take and on arm B,
+                                                          #     so it is the control saying arm C is load-bearing
+node tools/sensor-view-check.mjs --mutate sensor-view-keys-camera # ... the sensor-view button writing a camera key as
+                                                          #     well as moving the view, so a look at the intrinsics
+                                                          #     becomes an edit to the clip
+node tools/sensor-view-check.mjs --mutate keyframes-on-every-surface # ... the key button built whether or not the
+                                                          #     surface is the editor. It must redden the recorder
+                                                          #     rows and leave the editor's alone, or it cannot say
+                                                          #     which of the two broke
 node tools/level-check.mjs                                # levelling: the room turns, and the crop, the top-down and the sensor view keep their meaning
 node tools/level-check.mjs --mutate tilt-ignored          # ... and must FAIL mutated
 node tools/level-check.mjs --mutate crop-follows-tilt     # ... and must FAIL mutated
@@ -2574,8 +2585,8 @@ property key is, so a keyword at column zero that depth calls nested reddens a r
 file. The arm is planted rather than argued about, and it uses the one case the lexer leaves
 ambiguous on purpose — a `/` after `}`, read as division, which scans the pattern's body as code
 and counts the `{` inside it. Probed by deleting the `depth--` from the closing brace: the row
-names `web/curve.js:194` and `web/scene.js:152`, which are the two `export { … }` lists that
-would otherwise have vanished.
+names the trailing `export { … }` lists in `web/curve.js` and `web/scene.js`, which are the two
+that would otherwise have vanished.
 
 **The exemption table cannot rot, and both halves of that needed an arm.** Every entry has to
 still name something this tree exports *and* still cover something a rule flagged — an entry
@@ -2730,7 +2741,7 @@ tree it fails, and telling a definition from a reference needs a scope analysis 
 search.
 
 **Its first catch was real, and it arrived one commit late.** On the tree as it stood after the
-six imports came off, the export half reddened `web/curve.js:66`: `easeSlopeAt` was let out
+six imports came off, the export half reddened `easeSlopeAt` in `web/curve.js`: it was let out
 through the trailing export list, its last importer was the dead import in `main.js`, and removing
 that one left an export with no consumer anywhere in the checkout. Fixed by taking the name off
 the list — `scalarSlopeAt` calls the function four lines down, so it is a name coming off a

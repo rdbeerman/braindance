@@ -1,23 +1,6 @@
-// The door a sensor frame reaches the GPU through, driven under bare node.
-//
-// The whole of `web/gpu-textures.js` runs headless: `THREE.DataTexture` is a typed array
-// with some flags on it until a renderer uploads it, so the pair, the swap and the
-// expansion of a decimated block back onto the sensor's own grid can all be exercised
-// with no canvas, no context and no sensor. That is worth having because the same claims
-// are otherwise held only by `monitor-check`, which needs a fake grabber, a browser and
-// two rounds of a live socket to say the same thing in ninety seconds.
-//
-// **The expansion's oracle is written out longhand rather than read back from the
-// module**, for the reason `test/world-tilt.test.mjs` gives about its own: a test that
-// asked the implementation which texel it copied from would agree with it by construction
-// and could never see the mapping shift. `monitor-check --mutate expand-shifts-by-a-block`
-// is the same claim driven through a picture, and `--mutate bind-ignores-grid` is the
-// claim that the expansion happens inside the door at all - which this file cannot see,
-// because it only ever calls the door.
-//
-// What this cannot see is anything about pixels: a texture bound correctly and sampled
-// with the wrong intrinsics is green here and wrong on screen, which is what the browser
-// tools are for.
+// The door a sensor frame reaches the GPU through, driven headless: a `DataTexture` is a typed
+// array with flags until a renderer uploads it. It says nothing about pixels - a texture bound
+// correctly and sampled with the wrong intrinsics is green here and wrong on screen.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,7 +21,8 @@ const block = (k) => {
   return { data: out, w, h };
 };
 
-/** Where the shipped rule says a full-grid texel takes its sample from, at divisor `k`. */
+/** Where the shipped rule says a full-grid texel takes its sample from, written out longhand
+ *  so this cannot agree with the module by construction. */
 const sampledAt = (row, col, k, w) => ((row / k) | 0) * w + ((col / k) | 0);
 
 test('the cells the cloud composes are the textures the door owns, and depth starts empty', () => {
@@ -52,8 +36,8 @@ test('the cells the cloud composes are the textures the door owns, and depth sta
 test('a full-rate block lands one sample per texel, and the pair swaps under it', () => {
   const wasCurrent = cells.depthCurr.value;
   const willBeCurrent = cells.depthPrev.value;
-  // `needsUpdate` is write-only on a three.js texture, so what a bind asking for an
-  // upload actually looks like is the version behind it moving.
+  // `needsUpdate` is write-only on a three.js texture, so a bind asking for an upload only
+  // shows as the version behind it moving.
   const version = willBeCurrent.version;
   const { data } = block(1);
   bindDepth(data);
@@ -90,8 +74,6 @@ test('a block on no grid at all is refused, and nothing is half written', () => 
     () => bindDepth(new Uint16Array(1234)),
     /1234 samples is not the 512x424 grid at any divisor/,
   );
-  // The swap happens before the expansion, so the refusal costs the caller the pair's
-  // direction - what it must not cost is a texture with a wrong scene in the head of it.
   const held = [cells.depthPrev.value, cells.depthCurr.value].map((t) => t.image.data);
   assert.ok(held.some((d) => d.every((v, i) => v === before[i])), 'the frame that had bound is intact');
 });

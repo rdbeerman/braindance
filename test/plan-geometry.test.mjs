@@ -1,16 +1,6 @@
-// The top-down inset's coordinate change, and the projection beside it, called directly.
-//
-// **What this covers that `level-check` does not.** Its four plan arms - `plan-ignores-tilt`,
-// `plan-skips-vertical-crop`, `plan-box-ignores-tilt`, `plan-x-not-mirrored` - are all
-// about `drawPlanCloud`, which reads a depth frame off the CPU and paints into a 2D
-// context, and none of them come here. What is here is the pair of directions of one
-// coordinate change, and the property nothing in the repo asserted while they sat two
-// hundred lines apart: that `planPoint` and `planWorld` are inverses. A drag on the plan
-// reads a pointer through `planWorld` and the node is drawn back through `planPoint`, so
-// the two disagreeing is a node that slides out from under the cursor - visible on screen
-// and invisible to every check that only ever draws.
-//
-// Run by `npm run test:unit`, which needs no server, no sensor and no browser.
+// The top-down inset's coordinate change, and the projection beside it, called directly. A drag
+// reads the pointer through `planWorld` and draws the node back through `planPoint`, so the two
+// disagreeing is a node that slides out from under the cursor.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,10 +10,8 @@ import {
   planScale, planPoint, planWorld, projectThrough,
 } from '../web/plan-geometry.js';
 
-// The rect `main.js` builds out of `INSET` for a 1920x1080 stage: the inset sits in the
-// top-right corner, one margin in from both edges. Written out here rather than imported,
-// because `insetRect` reads the renderer and this file has none - so this is the shape of
-// what it returns rather than the thing itself.
+// The rect `main.js` builds out of `INSET` for a 1920x1080 stage, written out rather than
+// imported because `insetRect` reads the renderer and this file has none.
 const rect = {
   x: 1920 - INSET.w - INSET.margin, y: INSET.margin, w: INSET.w, h: INSET.h, stage: { w: 1920, h: 1080 },
 };
@@ -35,15 +23,11 @@ test('the constants are the sizes the plan was drawn for', () => {
   assert.ok(TOP_SPAN > 0, `${TOP_SPAN}`);
   assert.ok(Number.isInteger(PLAN_STRIDE) && PLAN_STRIDE >= 1, `${PLAN_STRIDE}`);
   assert.ok(FRUSTUM_LEN > 0, `${FRUSTUM_LEN}`);
-  // The centre is deeper into the room than the sensor, which is the whole reason it is
-  // not the origin: at z 0 the sensor sits on the frame's edge and the plan is unreadable.
   assert.ok(TOP_CENTRE.z < 0, `${TOP_CENTRE.z}`);
 });
 
 test('the plan is scaled off its height, so TOP_SPAN metres fill the shorter axis', () => {
   assert.ok(near(planScale(rect), rect.h / TOP_SPAN), `${planScale(rect)}`);
-  // Twice as tall a box shows the same metres at twice the pixels, which is what makes
-  // the span a property of the room rather than of the inset.
   assert.ok(near(planScale({ ...rect, h: rect.h * 2 }), 2 * planScale(rect)));
 });
 
@@ -53,11 +37,10 @@ test('the centre of the world lands in the centre of the box', () => {
   assert.ok(near(p.y, rect.y + rect.h / 2), `${p.y}`);
 });
 
+// Canvas y grows downward, so a point further from the sensor draws at a smaller y. Backwards,
+// this mirrors the plan front to back and reads as a room turned inside out.
 test('screen up is deeper into the room, and screen right is world +x', () => {
   const middle = planPoint(rect, TOP_CENTRE.x, TOP_CENTRE.z);
-  // Canvas y grows downward, so a point further from the sensor - more negative z - has
-  // to draw above the centre, which is a smaller y. Getting this backwards mirrors the
-  // plan front to back and reads as a room turned inside out.
   const deeper = planPoint(rect, TOP_CENTRE.x, TOP_CENTRE.z - 1);
   assert.ok(deeper.y < middle.y, `${deeper.y} against ${middle.y}`);
   const right = planPoint(rect, TOP_CENTRE.x + 1, TOP_CENTRE.z);
@@ -70,8 +53,6 @@ test('planPoint and planWorld are inverses, which is what a drag on the plan nee
     const back = planWorld(rect, p.x, p.y);
     assert.ok(near(back.x, x) && near(back.z, z), `${x},${z} came back ${back.x},${back.z}`);
   }
-  // And the other way round, starting from a pixel: a pointer lands on a pixel first and
-  // the node is drawn back from the world position that pixel meant.
   for (const [px, py] of [[rect.x, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x + 40, rect.y + 91]]) {
     const w = planWorld(rect, px, py);
     const p = planPoint(rect, w.x, w.z);
@@ -90,11 +71,9 @@ test('a point straight ahead projects to the middle of the stage', () => {
   assert.ok(near(p.x, 960, 1e-6) && near(p.y, 540, 1e-6), `${p.x},${p.y}`);
 });
 
+// `project` divides by w, w is negative behind the camera, and the division flips the sign - so
+// a point at your back arrives on screen in front of you. That is why the function has a z test.
 test('a point behind the camera is null rather than a mirrored point in front of it', () => {
-  // The one case the arithmetic cannot answer by rule: `project` divides by w, w is
-  // negative behind the camera, and the division flips the sign - so a point at your back
-  // arrives on screen in front of you, plausibly placed and completely wrong. This is why
-  // the function has a z test in it at all.
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.05, 60);
   camera.position.set(0, 0, 0);
   camera.lookAt(0, 0, -1);
@@ -102,7 +81,6 @@ test('a point behind the camera is null rather than a mirrored point in front of
   const stage = { x: 0, y: 0, w: 1920, h: 1080 };
   assert.equal(projectThrough([0, 0, 2], camera, stage), null);
   assert.equal(projectThrough([0.4, 0.3, 5], camera, stage), null);
-  // And past the far plane, which is the other side of the same unit cube.
   assert.equal(projectThrough([0, 0, -100], camera, stage), null);
 });
 

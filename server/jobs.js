@@ -1,81 +1,31 @@
-// The render queue: jobs on disk, claimed by workers, one at a time.
-//
-// A job is a project file plus a capture named by content hash plus output
-// settings, which is what makes it self-contained - the same three things
-// `server/export.js` has been stamping onto every export since step 6, because
-// step 6 knew this step was coming. Nothing here re-derives them.
-//
-// **The renderer class is the whole reason this is a queue rather than a list.**
-// Bit-exactness was measured between headed and headless Chrome on one GPU and
-// does not survive a different one: the Pi rasterises through ANGLE/V3D and the
-// Mac through ANGLE/Metal, and those are different rasterisers rather than two
-// speeds of one. Since a project names its capture by hash precisely so a
-// re-render reproduces the original, a queue that silently handed a re-render to
-// a different class of machine would break the property the model rests on. So a
-// mismatch is refused and *recorded*, never quietly re-dispatched.
+// The render queue: jobs on disk, claimed by workers, one at a time. A job is a project body, a
+// capture named by content hash and output settings, so it is self-contained. It is pinned to the
+// renderer class that ran it, because bit-exactness does not survive a different GPU and a project
+// names its capture by hash so that a re-render reproduces the original.
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { validateExport } from './export.js';
 import { listJsonNames } from './library.js';
-// The one statement of what the dot in a look name means. The page derives a document's
-// `requires` from these namespaces on the way out and `enqueue` derives a job's envelope
-// from the same names on the way in, so a second spelling here would be two machines
-// disagreeing about which effect `sparkle.amount` belongs to.
 import { effectIdsIn, requiresEntryRefusal, requiresListRefusal } from '../web/format.js';
 
 export const JOB_VERSION = 1;
 
-// A job id is generated here rather than accepted from a caller, so it can never
-// name a path. The same rule the capture ids follow, reached the same way.
 const VALID_JOB_ID = /^job-[0-9a-f]{16}$/;
 
-// Where a job can be. `queued` is claimable, `running` is somebody's, and the two
-// terminal states are terminal - a worker reporting on a job that already finished
-// is a worker that lost a race, and it is told so rather than allowed to overwrite.
 export const STATES = ['queued', 'running', 'done', 'failed'];
 
 const isTerminal = (state) => state === 'done' || state === 'failed';
 
-/**
- * Whether a worker of class `have` may run a job pinned to class `want`.
- *
- * An unpinned job - `want` null - is claimable by anyone, and that is the common
- * case rather than the exception: a job created before anything has rendered it
- * has no class to pin to, and the claim is what stamps one on. Pinning matters on
- * the *second* pass, when the record exists to be reproduced.
- *
- * Compared as exact strings on purpose. The renderer string is a driver's own
- * description of itself and the failure being guarded against is two rasterisers
- * that nearly agree, so anything fuzzier than equality would admit exactly the
- * pair this is for.
- */
+// Whether a worker of class `have` may run a job pinned to `want`. Exact strings, because the
+// failure guarded against is two rasterisers that nearly agree.
 export const rendererMatches = (want, have) => want === null || want === undefined || want === have;
 
-// How long a renderer class may be, and that it is a string at all.
-//
-// **The comparison above is `===`, so anything that is not a string pins a job to
-// something no worker can ever equal.** `{"renderer":{}}` was accepted on the
-// strength of being truthy and stamped into the record; the record is JSON, so the
-// next read produces a *different* object and the identity can never hold again -
-// a job queued, unclaimable, forever, and unclaimable in the one way the queue
-// reports as "pinned to a different class" rather than as a fault. Checked
-// wherever a class arrives rather than at the claim alone, because `enqueue` pins
-// one too and that is the same field reached by a different door. The bound is
-// generous against a real one - `ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro,
-// Unspecified Version)` is seventy-odd characters - and finite against a caller,
-// because it lands in a file and in every listing of the queue.
+// The comparison above is `===`, so a non-string pins a job to something no worker can equal.
 const MAX_RENDERER_CHARS = 256;
 const validRenderer = (v) => typeof v === 'string' && v.length > 0 && v.length <= MAX_RENDERER_CHARS;
 
-// How long a claim may go without saying anything before it is treated as gone.
-//
-// **A timeout on its own would be a guess about how long a render takes**, and
-// this design says out loud that renders are slower than real time and may run for
-// hours - so the thing that expires is not the job, it is the *silence*. A worker
-// that is alive says so while it renders, and this is only how long a dead one
-// stays believed. Generous against the worker's own interval rather than against
-// any render.
+// What expires is the silence rather than the job, because a render may run for hours.
 export const STALE_MS = 120_000;
 
 export class JobStore {
@@ -83,31 +33,15 @@ export class JobStore {
     this.dir = dir;
     this.now = now;
     this.staleMs = staleMs;
-    // **Every state transition goes through here, one at a time.**
-    //
-    // `claim` lists, picks and writes, and `finish` reads, checks and writes,
-    // and both of those have an `await` between the decision and the write. In one
-    // Node process that is not a theoretical race: two requests arriving together
-    // interleave at exactly that await, so two workers both saw a job `queued`,
-    // both wrote it `running`, and both got a 200 for the same job - and two
-    // finish reports both read a `running` record, both passed the terminal-state
-    // guard, and the second one silently replaced the first one's outcome.
-    //
-    // A promise chain rather than a lock file because this is one process by
-    // construction: the queue lives beside the server that serves it. A lock file
-    // would be the right answer for two servers on one directory, and that is not
-    // a thing this program can currently be.
+    // Every state transition goes through here, one at a time: `claim` and `finish` both have
+    // an `await` between the decision and the write, so without this two workers claim one job.
     this.gate = Promise.resolve();
-    // Serialises `fn` against every other transition. The chain is advanced even
-    // when `fn` rejects, or one refused claim would wedge the queue forever.
+    // The chain advances even when `fn` rejects, or one refused claim would wedge the queue.
     this.serialise = (fn) => {
       const run = this.gate.then(fn, fn);
       this.gate = run.then(() => {}, () => {});
       return run;
     };
-    // Same counter the document stores keep, for the same reason: a handler that
-    // writes a job and puts the bytes back is invisible to a before-and-after
-    // reading of the contents, and this is the quantity no restore can undo.
     this.writes = 0;
   }
 
@@ -116,22 +50,15 @@ export class JobStore {
     return join(this.dir, `${id}.json`);
   }
 
-  // Content-addressed off the record itself, so an id carries nothing a path
-  // parser could act on. It does NOT make two enqueues of the same edit distinct -
-  // identical bodies inside one millisecond hash identically, and the second used
-  // to overwrite the first - which is why `enqueue` salts on collision rather than
-  // trusting this to be unique.
+    // Two enqueues inside one millisecond hash the same, which is why `enqueue` salts.
   idFor(record) {
     const h = createHash('sha256').update(JSON.stringify(record)).digest('hex');
     return `job-${h.slice(0, 16)}`;
   }
 
   async list() {
-    // The queue's directory is made on the first enqueue, so absent really is empty -
-    // but only absent. This used to swallow every failure, and the two callers that
-    // matter make that dangerous rather than merely quiet: `claim` reads an unreadable
-    // directory as "nothing queued" and parks the worker, and `enqueue` reads it as
-    // "no job like this one" and writes a duplicate. Both look like a queue working.
+    // Absent really is empty, but only absent: swallowing every failure parked the worker on an
+    // unreadable directory and let `enqueue` write a duplicate into it.
     const files = await listJsonNames(this.dir, { what: 'job queue directory' });
     const out = [];
     for (const file of files) {
@@ -146,9 +73,7 @@ export class JobStore {
     return JSON.parse(await readFile(this.pathFor(id), 'utf8'));
   }
 
-  // Written aside and renamed, the same as every other record in this program: a
-  // crash partway through must not leave a file that parses and describes a job
-  // nobody enqueued.
+  // Written aside and renamed, or a crash leaves a file describing a job nobody enqueued.
   async #put(job) {
     const path = this.pathFor(job.id);
     this.writes++;
@@ -159,21 +84,9 @@ export class JobStore {
     return job;
   }
 
-  /**
-   * Enqueue a render.
-   *
-   * `project` and `capture` are required and `renderer` is not, because the whole
-   * point of recording the class from the first job is that the first job does not
-   * have one yet. A capture that is not a content hash is refused here: "reproduces
-   * the original" is a claim about identified footage, and a job naming a take by
-   * id would reproduce whatever is at that id today.
-   */
+  /** Enqueue a render. A capture named by anything but content hash is refused. */
   async enqueue({ project, deliverable = null, capture, renderer = null, output, width, height, fps, codec = 'h264', suppressEffects = [] }) {
-    // The project is the document *body* - what `serialiseProject()` returns and
-    // what `restoreProject` takes - not the `{ name, rev, body }` envelope the
-    // document store hands back. One shape, checked here, because accepting both
-    // would be a fork in the one field that decides what gets rendered, and the
-    // loader's seventeen refusals are written against the body.
+    // The document *body*, never the store's `{ name, rev, body }` envelope.
     if (!project || typeof project !== 'object' || Array.isArray(project)) {
       throw new Error('a job needs a project document body');
     }
@@ -186,71 +99,19 @@ export class JobStore {
     if (typeof capture !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(capture)) {
       throw new Error(`a job names its capture by content hash, got ${JSON.stringify(capture)}`);
     }
-    // A job may be enqueued with no class at all - that is the common case, and the
-    // claim is what stamps one on - but a class that is *given* here is pinned from
-    // the start, so it is the same field under the same rule as the claim's.
     if (renderer !== null && renderer !== undefined && !validRenderer(renderer)) {
       throw new Error(
         `a job pins its renderer class as a string of at most ${MAX_RENDERER_CHARS} characters, `
         + `got ${JSON.stringify(renderer)} - and a pin nothing can equal is a job nothing can claim`,
       );
     }
-    // **The effects the job's look is built from, lifted out of the document at the
-    // door.** A worker has to answer "can this machine render this at all" before it
-    // opens a page, and a job whose answer lives inside a document body is a job the
-    // queue cannot reason about - it could not report a blocked job, and a claim could
-    // not be routed by what a machine has installed the way it is already routed by the
-    // rasteriser it has.
-    //
-    // **It is derived from the look's own namespaces and never copied**, and the
-    // distinction is the whole of this rule. `enqueue` takes no `requires` argument, so
-    // for a long time the comment here read "never accepted from the caller" and the line
-    // under it copied `project.requires` - which *is* caller data, because the caller
-    // hands over the whole body. A job posted with a document naming `sparkle.amount` and
-    // an empty `requires` therefore recorded an empty list, the worker's door read that
-    // list, found nothing missing, resolved a take, launched a browser and spent a minute
-    // of GPU before `restoreProject` refused the document from the other end. That is the
-    // failure the door was built to move, and it was reachable through the one field
-    // nobody was deriving.
-    //
-    // What is derived here is the id **set**, which is all the server can know: the dot
-    // in a look name is the effect it belongs to and `effectIdsIn` is the one statement of
-    // that split, shared with the page rather than spelled again. Versions cannot be
-    // derived - the machine that queued the job is the one that knew which build of the
-    // effect the look was authored against - so the entries are taken from the document
-    // whole, and a document whose list does not name the set its own values name is
-    // refused rather than corrected. Refused, because the two readings disagreeing means
-    // the body is hand-edited or damaged, and a queue that quietly rewrote the claim would
-    // be the second implementation of `refuseRequires`, one machine away from the loader
-    // that has to agree with it.
+    // Derived from the look's own namespaces rather than copied from `project.requires`, which is
+    // caller data - an empty list used to be recorded as one, and the refusal then arrived from
+    // `restoreProject` a browser and a minute of GPU later.
     const look = project.look && typeof project.look === 'object' && !Array.isArray(project.look)
       ? project.look : {};
     const shape = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o) : []);
     const used = effectIdsIn([...shape(look.params), ...shape(look.tracks)]);
-    // **The list's own shape, asked here rather than left to the machine that opens the
-    // document.** This read used to be `Array.isArray(project.requires) ? … : []`, which is
-    // a shape rule with no refusal in it: a `requires` that was an object read as claiming
-    // nothing, and an entry that was `{}`, or carried no version, or named something that
-    // could never be a package id, or carried a stray key beside the two that belong, read
-    // as claiming nothing about any id. The two comparisons below then agreed with it,
-    // because they are about which ids are claimed and an unreadable claim names none - so
-    // the job was queued with an envelope built out of a list nobody could read, the
-    // worker's own door found nothing missing in it, and the refusal arrived from
-    // `restoreProject` a take resolve, a browser and a minute of GPU later. That is the
-    // journey this door exists to shorten, reached through the one field it was not
-    // reading.
-    //
-    // The rule is the loader's own rather than a second statement of it: `refuseRequires`
-    // in `web/main.js` asks `requiresEntryRefusal` these same questions of these same
-    // entries, and two spellings of one shape at two doors is what `web/format.js` exists
-    // to refuse. What is *not* shared is the repeat rule below, because the two ends say
-    // different things about it - the loader is talking about a document that cannot
-    // describe one look, and this is talking about a version a render would land on by
-    // position.
-    //
-    // Asked before the comparisons rather than after, on the door's own ordering: shape
-    // before vocabulary, so a malformed list is reported as a malformed list instead of as
-    // a document that disagrees with itself.
     if (project.requires !== undefined) {
       const listShape = requiresListRefusal('a job\'s project', project.requires);
       if (listShape) throw new Error(listShape);
@@ -259,20 +120,9 @@ export class JobStore {
         if (bad) throw new Error(bad);
       }
     }
-    // Absent stays allowed and is the only thing left to allow for, because everything
-    // else has just been refused by name. A second `Array.isArray` here would be a guard
-    // standing behind a door that has already answered.
     const carried = project.requires ?? [];
     const claimed = carried.map((e) => (e && typeof e === 'object' ? e.id : undefined));
-    // **One id, one entry, and the two comparisons below cannot ask it.** `unlisted` reads
-    // membership and `unclaimed` reads a set, so a list carrying `sparkle` twice satisfies
-    // both of them exactly as well as a list carrying it once - and the envelope built at the
-    // bottom of this door then resolves each used id with `find`, which takes the first entry
-    // and drops the rest. Two entries claiming different *versions* of one effect is the
-    // shape that costs something: the queue records one of them by position, the worker's door
-    // reads the recorded one, and whichever the document meant is a coin toss nobody spelled.
-    // The loader refuses this document too, on the machine that opens it - which is a minute
-    // of GPU and a render later, and is the failure this whole door exists to move.
+    // The comparisons below read membership and a set, so neither can see a repeated id.
     const duplicated = [...new Set(
       claimed.filter((id, at) => typeof id === 'string' && claimed.indexOf(id) !== at),
     )];
@@ -297,11 +147,7 @@ export class JobStore {
       );
     }
     const requires = used.map((id) => ({ ...carried.find((e) => e?.id === id) }));
-    // And what this job is allowed to render without. Unlike `requires` this *is* the
-    // caller's, because it is a decision rather than a fact: somebody has said this
-    // render may go ahead on a machine missing that effect. Held to the id shape the
-    // packages use, because a name that could not be an effect id can never match one
-    // and would be a suppression that silently covers nothing.
+    // Unlike `requires` this is the caller's, because it is a decision rather than a fact.
     if (!Array.isArray(suppressEffects)
       || !suppressEffects.every((id) => typeof id === 'string' && /^[a-z][a-z0-9]*$/.test(id))) {
       throw new Error(
@@ -309,18 +155,11 @@ export class JobStore {
         + 'an id is lowercase letters and digits, the prefix an effect\'s parameters carry',
       );
     }
-    // All the export rules run at enqueue, so the queue refuses work it already
-    // knows cannot run. The worker and the export socket must not be the place a
-    // bad width, an odd h264 dimension, or an unknown codec is first discovered.
     const { width: w, height: h, fps: f } = validateExport({ name: output, width, height, fps, codec });
     return this.serialise(async () => {
       const live = await this.list();
-      // **Two jobs writing one file is one job's work thrown away.** Both render to
-      // `exports/<output>.mp4` and the second rename replaces the first, along with
-      // its sidecar - so a queue of two finished jobs leaves one video and two
-      // records claiming to describe it. Refused while the other is still going to
-      // write; a finished or failed job's name is free again, because replacing an
-      // export you already have is what re-exporting means.
+      // Two jobs writing one file is one job's work thrown away. A finished job's name is free
+      // again, because replacing an export you already have is what re-exporting means.
       const holder = live.find((j) => j.output === String(output) && (j.state === 'queued' || j.state === 'running'));
       if (holder) {
         throw new Error(`output ${JSON.stringify(String(output))} is already reserved by ${holder.id} (${holder.state}), and two jobs writing one file is one render thrown away`);
@@ -349,30 +188,17 @@ export class JobStore {
         attempts: 0,
         lease: null,
       };
-      // The id is content-addressed, and two identical enqueues inside one
-      // millisecond hash identically - so the second silently wrote over the first
-      // and a queue of two held one job. The salt is the collision counter rather
-      // than a random value, because the id has to stay a function of the record
-      // for the same reason every other identity in this program does.
+      // The salt is the collision counter rather than random, keeping the id a
+      // function of the record.
       let id = this.idFor({ ...body, salt: 0 });
       for (let salt = 1; live.some((j) => j.id === id); salt++) id = this.idFor({ ...body, salt });
       return this.#put({ id, ...body });
     });
   }
 
-  /**
-   * Hand the oldest claimable job to a worker of this renderer class.
-   *
-   * Returns the job, or a refusal naming what blocked it. **A queue with work in
-   * it that this worker cannot run is a different answer from an empty queue**,
-   * and both used to be "null" in the first draft of this - which is exactly the
-   * silent-mismatch failure the class pinning exists to prevent, reappearing as
-   * an absence rather than a wrong image.
-   */
+  // Hand the oldest claimable job to a worker of this class, or a refusal naming what blocked it -
+  // a queue this worker cannot run is a different answer from an empty queue.
   claim({ worker, renderer }) {
-    // Held to a string before the transition rather than merely to being present:
-    // this value is what gets written into the record as the pin, and a pin nothing
-    // can equal is a job the queue can never hand out again. See `validRenderer`.
     if (!validRenderer(renderer)) {
       return Promise.reject(new Error(
         'a worker claims with the renderer class it will render on, as a string of at most '
@@ -389,38 +215,21 @@ export class JobStore {
       const job = mine[0];
       job.state = 'running';
       job.claimed = this.now();
-      // Stamped on the claim too, so a worker that dies before its first heartbeat
-      // still gets the full window rather than being stale the instant it starts.
+      // So a worker that dies before its first heartbeat still gets the full window.
       job.heartbeat = job.claimed;
       job.worker = worker ?? null;
       job.attempts += 1;
-      // A token the finisher has to present. Without it any caller could report on
-      // a job it never claimed - and `POST /jobs/<id>/finish` with `{"state":"done"}`
-      // straight after an enqueue marked a job done that no worker had ever
-      // touched, which is a render that never happened wearing a successful record.
-      // Random rather than derived from the record, because the read routes strip
-      // it but keep every other field a forger would need to recompute it.
+      // A token the finisher has to present, random rather than derived because the read routes
+      // strip it and keep every other field a forger would need.
       job.lease = randomBytes(16).toString('hex');
-      // Stamped on the claim, not on completion. A job that dies mid-render has still
-      // told us which class of machine it was attempted on, and that is the provenance
-      // the field exists for.
       job.renderer = renderer;
       await this.#put(job);
       return { job, blocked: [], queued: all.length };
     });
   }
 
-  /**
-   * Report an outcome, against the lease the claim handed out.
-   *
-   * **A job finishes only from `running`, and only for the claim that owns it.**
-   * Terminal-state-only was the first version of this guard and it was too weak in
-   * two directions at once: a `queued` job could be marked done by anyone who knew
-   * its id, without any worker ever having claimed it, and two reports that both
-   * read a `running` record both passed the guard so the second overwrote the
-   * first. The lease closes the first; running inside the same gate as `claim`
-   * closes the second.
-   */
+  // Report an outcome against the lease the claim handed out. Running inside the gate is what
+  // stops two reports both passing the terminal-state guard.
   finish(id, { state, error = null, output = null, frames = null, lease = null }) {
     return this.serialise(async () => {
       if (state !== 'done' && state !== 'failed') throw new Error(`a job finishes done or failed, not ${state}`);
@@ -432,12 +241,8 @@ export class JobStore {
       if (job.state !== 'running') {
         throw new Error(`job ${id} is ${job.state}, so nothing is rendering it and there is no outcome to report`);
       }
-      // **`job.lease &&` was the first version of this and it was permissive in
-      // the one direction that matters**: a running record whose lease is null or
-      // missing accepted a report from anybody, and a record is a file on disk
-      // that a hand or an older build can write. A running job has a lease by
-      // construction, so its absence is a broken record rather than a job to be
-      // helpful about.
+      // `job.lease &&` accepted a report from anybody when the lease was missing, and a record is
+      // a file a hand or an older build can write.
       if (typeof job.lease !== 'string' || job.lease === '') {
         throw new Error(`job ${id} says it is running with no lease, which is not a state a claim can produce - the record is unusable rather than finishable`);
       }
@@ -448,43 +253,19 @@ export class JobStore {
       job.error = error;
       job.finished = this.now();
       job.lease = null;
-      // `output` from the worker is the absolute artifact path the encoder landed.
-      // It is kept in `artifactPath` so the output *name* stays the requested base
-      // name and a retried job can ask for the same name without `export.js`
-      // rejecting an absolute path as a bad export name.
+      // Kept apart from `output` so the output *name* stays the base name a retry can ask for.
       if (typeof output === 'string' && output.length > 0) job.artifactPath = output;
-      // What the encoder actually took, reported by the worker rather than derived
-      // here. The take's own frame count is NOT this number - the sample was shot
-      // on a degraded link at about 9.3fps and an export at 30 makes far more
-      // frames than the take holds - so anything comparing a file against "the
-      // clip" has to compare against this.
       if (Number.isFinite(frames)) job.frames = frames;
       return this.#put(job);
     });
   }
 
-  /**
-   * Put a finished-or-running job back on the queue.
-   *
-   * The renderer stays pinned, which is the point: a retry of a job that has been
-   * rendered once has to land on the same class of machine or it is not a retry,
-   * it is a different render of the same edit.
-   */
+  // Put a finished-or-running job back on the queue, still pinned to its renderer class.
   requeue(id) {
     return this.serialise(async () => {
       const job = await this.read(id);
-      // **A running job is refused rather than duplicated - unless it has gone
-      // quiet, and that exception is not optional.** Refusing every running job
-      // was the first version of this and it deadlocked: a worker killed
-      // mid-render left the job `running` forever, `finish` wanted the lease that
-      // died with it, `claim` skipped it because it was not queued, and its output
-      // name stayed reserved so not even a replacement could be enqueued under it.
-      // Nothing in the program could reach that job again.
-      //
-      // What expires is the silence rather than the job. A live worker heartbeats
-      // while it renders, so a claim that has said nothing for `staleMs` is a dead
-      // one - and reclaiming it cannot duplicate a live render, because a live
-      // render would have spoken.
+      // A running job is refused unless it has gone quiet: refusing every one of them left a
+      // worker killed mid-render holding its job and its output name forever.
       if (job.state === 'running') {
         const quietFor = this.now() - (job.heartbeat ?? job.claimed ?? 0);
         if (quietFor < this.staleMs) {
@@ -494,9 +275,6 @@ export class JobStore {
           );
         }
       }
-      // The name may have been reserved by another job while this one was away,
-      // and putting it back on the queue would create two live owners. The same
-      // check `enqueue` makes, now run on the way back in.
       const live = await this.list();
       const holder = live.find((j) => j.id !== id && j.output === job.output
         && (j.state === 'queued' || j.state === 'running'));
@@ -510,20 +288,12 @@ export class JobStore {
       job.error = null;
       job.lease = null;
       job.heartbeat = null;
-      // A previous artifact path, if any, is no longer the one this retry will
-      // write - the worker reports the new path when it finishes.
       job.artifactPath = null;
       return this.#put(job);
     });
   }
 
-  /**
-   * A claim saying it is still there.
-   *
-   * Held to the same lease `finish` is, because otherwise anyone could keep a dead
-   * worker's job looking alive forever - which is the deadlock this exists to end,
-   * reintroduced from the other side.
-   */
+  // A claim saying it is still there, held to the same lease `finish` is.
   heartbeat(id, { lease = null } = {}) {
     return this.serialise(async () => {
       const job = await this.read(id);

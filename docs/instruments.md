@@ -2653,6 +2653,31 @@ beside it: the tool passed all 91 rows with the race in it, and would have gone 
 until a contended machine turned a margin negative and reddened a decimation row about a
 viewer that had not finished booting.
 
+**Then a run came in at 1050ms and the margin was 150ms — and the cause is a cold start rather
+than a busy machine, which took a replication to establish.** The entry above closes by saying
+nobody had produced a run where the old sleep would have failed. One turned up: the first
+`monitor-check` of a session printed **1050ms to the handle, 235ms to the first depth frame and
+62ms to the colour uniform**, against the sleeps of 1200 and 2000 the repair replaced. So the
+first section cleared its old fixed wait by about 150ms.
+
+**The obvious explanation was wrong and was written down here before it was checked.** Six
+agents were working the repo at the time and this page briefly said the figure was a margin
+measured under load. Replicated deliberately at loadavg 6.24 and 5.84 with 27 to 31 processes
+alive, the first wait came back at **16ms and 18ms** — inside the idle band. Contention at that
+level does not move this number, so the six agents were not the cause. What distinguishes the
+slow run is that it was the session's first: cold Chromium launch, cold page cache over a 139MB
+capture, cold module cache. n=4 with the cold run discarded by the usual convention leaves n=1
+for the cold figure, the comparison is sequential rather than interleaved, and all four runs
+carried the health number at 91 assertions and 0 failed.
+
+**Which is a better argument for the repair than the one it replaced**, because a cold first run
+is a condition anybody can reproduce and a machine that happened to be busy is not. The residual
+is that a proper cold-versus-warm A/B needs a quiet machine and a dropped page cache; the number
+above is the observation that prompted it, not that experiment. **The cause of a number is part
+of the number** — this one was one replication away from being filed under the wrong mechanism,
+and the replication was run by the person who took the reading rather than the one who wanted it
+to mean something.
+
 **The second sleep was covering something a boot probe would not have found**, and that is
 the half worth carrying to the next tool. That section drives the real divisor control, and
 `sendMonitor` in `web/main.js` returns without sending unless the socket is `OPEN` — so a

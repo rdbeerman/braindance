@@ -1,22 +1,6 @@
-// A take is a file. Start opens one, stop closes it and scans it, and that
-// identity - take is file is gallery entry is hash - is what the project model,
-// the frame API and the library all already assume.
-//
-// Two rules make the invariant everything downstream rests on hold: one take is
-// one continuous stream, with one hello at its head and monotonic timestamps.
-//
-// **The take is fed parsed messages rather than raw chunks.** A chunk boundary
-// falls anywhere, so a recorder that opened a file mid-chunk would cut a frame in
-// half and a recorder that closed one mid-chunk would leave a header with no
-// payload. Messages are already reassembled a few lines upstream, so recording
-// whole ones costs nothing and the bytes written are the grabber's own.
-//
-// **A grabber restart ends the take and opens the next one.** The server respawns
-// the grabber with backoff because the sensor dropping off the bus under load is a
-// designed-for condition, and without this rule that would append a second hello
-// and a timestamp discontinuity into the middle of a take file. Nothing is
-// discarded, only split: a recording interrupted this way is two fully usable
-// takes, which is what a raw-capture tool should do with good footage.
+// A take is a file. Start opens one, stop closes it and scans it, and that identity - take is file
+// is gallery entry is hash - is what the project model, the frame API and the library assume. One
+// take is one continuous stream, one hello, monotonic stamps; a grabber restart splits it.
 
 import { createWriteStream, openSync, readdirSync } from 'node:fs';
 import { once } from 'node:events';
@@ -25,16 +9,8 @@ import { encodeMessage, TYPE_HELLO } from './protocol.js';
 import { buildIndex, forgetCapture } from './capture.js';
 import { appendMarks, remaining, MIN_TAKE_SEC, durationLabel } from './library.js';
 
-/**
- * `2026-07-31-take3` — the date it was shot, and which take of that day.
- *
- * Synchronous, and that is the point rather than an economy. Opening a take has to
- * complete inside the same turn as the hello that triggered it, or frames arriving
- * behind that hello are handed to a recorder with no file yet and dropped - so the
- * take would silently begin a few frames late, which is precisely the footage this
- * tool exists to keep. One `readdir` of a captures directory, once per take, is not
- * a cost worth paying for that.
- */
+// `2026-07-31-take3`. Synchronous, because opening a take must finish in the same turn as the
+// hello or the frames behind it find no file.
 function nextTakeId(dir, atLeast = 0) {
   const now = new Date();
   const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -50,83 +26,18 @@ function nextTakeId(dir, atLeast = 0) {
   return { id: `${day}-take${highest + 1}`, n: highest + 1 };
 }
 
-// How many names a take will try before giving up. Bounded rather than open, so a
-// directory that answers EEXIST to everything ends in a stated failure instead of a
-// spin - and generous, because each attempt is one `open` and the case it exists for
-// is a handful of names being taken, not thousands.
 const MAX_NAME_ATTEMPTS = 64;
 
-/**
- * How much of a take may sit in memory while the disk catches up.
- *
- * `stream.write` returning false used to be discarded outright, so a card that
- * stalls turned straight into unbounded heap - and the kill that follows loses every
- * frame buffered, which is enormously more than dropping a few would have cost.
- * Sixty-four megabytes is about 130 frames at the measured 486KB, four seconds at
- * full rate: long enough to ride out a stutter, short enough that the loss when it
- * is not a stutter is bounded and visible.
- *
- * Dropping rather than blocking, which is the same decision `broadcastFrame` makes
- * for a browser that falls behind. A take is append-only and every frame carries its
- * own stamp, so a take with a gap in it is still a valid take that replays at the
- * cadence it was shot at - where a recorder that blocked would stall the parse loop
- * and take the live monitor down with it.
- */
+// Past this, `write` drops rather than blocking: a gap still replays, where blocking would stall
+// the parse loop and take the live monitor with it.
 export const MAX_TAKE_BUFFER = 64 * 1024 * 1024;
 
-/**
- * Moves a take's counters up to what has actually reached the file.
- *
- * `frames` and `bytes` used to count what `write` accepted. On a stalling card that
- * is what is sitting in memory rather than what is on disk, so the monitor read
- * perfectly healthy for exactly as long as the failure was invisible, and the OOM
- * kill then lost the difference. `bytesWritten` is the stream's own count of bytes
- * the descriptor took, and the queue of frame end-offsets turns that into a frame
- * count.
- *
- * **`write` runs this on every frame, and that is what bounds the queue to the
- * buffer ceiling rather than to the length of the take.** It used to run only when
- * something asked for state, so nothing removed an entry until an operator opened
- * the monitor - and the drain that finally ran was `shift()` in a loop, which is
- * quadratic in however many frames had piled up. Measured on 486KB frames,
- * interleaved, three repetitions per length, median: 48.9ms at 27,000 frames and
- * 3,677ms at 216,000, growing about 4.1x per doubling where a moving head index
- * over the same queue stayed under a quarter of a millisecond throughout. That
- * stall is synchronous, so nothing services stdin while it runs, backpressure
- * reaches the grabber, and the grabber then cannot service USB in time - 52 skipped
- * depth packets per 12s against 2, about 11% of a take, footage no download
- * recovers. Walking up to an unattended node and opening the monitor was the whole
- * of the trigger.
- *
- * So the head moves and the array does not. The consumed prefix is dropped in a
- * single copy, and only once it is at least as long as what remains, which copies
- * at most one element per element ever queued and leaves the array itself bounded
- * by the frames not yet durable instead of growing with the take.
- */
-/**
- * The grabber's hello with `startedAt` replaced by when *this* take began.
- *
- * **It fails soft, and that is the whole of why it is a function rather than three
- * lines at the call site.** The hello is the one message a take cannot do without -
- * `describeTake` refuses to open a take that has none, and the intrinsics that
- * unproject the cloud are in it - so a payload this cannot parse has to be written
- * through exactly as it arrived rather than dropped or replaced. The date is worth
- * having and it is not worth a take for. A parse failure here means the sensor is
- * emitting something this build does not understand, which is a condition the format
- * generation exists to catch at the point of opening rather than one to lose footage
- * over at the point of writing.
- *
- * Re-encoded to UTF-8 from the parsed object rather than patched as text, because a
- * regular expression over JSON is a decoder written by somebody who did not want to
- * write a decoder, and this string carries the numbers the picture is built from.
- */
+// Fails soft, because the hello is the one message a take cannot do without, so an unparsable one
+// is passed through unchanged.
 function stampHello(helloPayload, startedAt) {
   const raw = Buffer.from(helloPayload);
   try {
     const hello = JSON.parse(raw.toString('utf8'));
-    // An array or a string parses perfectly well and is not a hello. Assigning a key
-    // onto one would produce a payload that still parses downstream and describes
-    // nothing, which is worse than passing the original through untouched.
     if (hello === null || typeof hello !== 'object' || Array.isArray(hello)) return raw;
     return Buffer.from(JSON.stringify({ ...hello, startedAt }), 'utf8');
   } catch {
@@ -149,15 +60,8 @@ function settle(take) {
   take.bytes = written;
 }
 
-/**
- * Writes the marks pressed during a take into the sidecar beside it.
- *
- * The marks hang off **the take** rather than off the recorder, and that placement
- * is the whole of it. Held on the recorder they outlived the take that produced
- * them: a take that failed mid-write nulled itself without flushing, and the marks
- * were still in the list when the *next* take closed - so take one lost its mark and
- * take two got it, stamped in source milliseconds from a start it never had.
- */
+// Marks hang off the take rather than the recorder, or a take that failed mid-write leaves them
+// for whichever take closes next.
 async function flushMarks(take) {
   if (!take.pendingMarks.length) return;
   try {
@@ -172,35 +76,20 @@ export class Recorder {
     this.dir = dir;
     this.onChange = onChange;
     this.rateOf = rateOf;
-    // Why this server cannot record at all, as a sentence for the operator, or null
-    // for one that can. Asked each time rather than fixed at construction, for the
-    // same reason `rateOf` is: one of the two answers is not known at startup. A
-    // replay server is decided by its flag, but a machine with no sensor on it is
-    // only discovered by a grabber failing to find one, which happens seconds later
-    // - and a constant captured before that would have the editing station claim it
-    // could roll.
+    // Asked each time rather than fixed at construction, because a machine with no sensor is only
+    // discovered seconds in, by a grabber failing to find one.
     this.cannotRecord = cannotRecord;
-    // Armed and recording are different states and the split is why. A restart
-    // closes the take while the operator's intention to be recording is unchanged,
-    // so the next hello has to open take four without anyone pressing anything.
+    // Armed and recording are different states: a restart closes the take while the operator's
+    // intention is unchanged, so the next hello opens the next take with nobody pressing.
     this.armed = false;
     this.take = null;
-    // **The take that has stopped but is not finished yet.** `close` nulls `this.take`
-    // before it awaits the flush and builds the index, which it has to - the marks and
-    // the mid-write handler both depend on the open take being gone the moment it stops
-    // - and the effect was that every question about "is the recorder still holding
-    // this file" answered no while the recorder was still holding it. On a slow disk
-    // the index build is seconds, and a gallery that refreshed inside that window drew
-    // Download, Rename and Remove over a take whose sidecar and hash did not exist yet.
-    // The take is kept here for exactly as long as the close is running, so `openPath`
-    // can go on telling the truth about a file this process still owns.
+    // `close` nulls `this.take` before it awaits the flush, so without this "is the recorder still
+    // holding this file" answered no while it still was.
     this.finalizing = null;
   }
 
   get state() {
     const take = this.take;
-    // Read through the settle, so the numbers the monitor shows are bytes that
-    // reached the file rather than bytes this process is holding.
     if (take) settle(take);
     return {
       armed: this.armed,
@@ -209,73 +98,32 @@ export class Recorder {
       startedAt: take?.startedAt ?? null,
       frames: take?.frames ?? 0,
       bytes: take?.bytes ?? 0,
-      // Frames the disk could not take. Nonzero is a real loss and the surface says
-      // so; the alternative was an unbounded queue and a kill.
       dropped: take?.dropped ?? 0,
       buffered: take ? take.stream.writableLength : 0,
       cannotRecord: this.cannotRecord(),
-      // **The take this process still owns, which is a longer window than `recording`
-      // and a different question from it.** `recording` is what the recorder panel
-      // shows and it goes false the instant a take stops, which is right for a panel.
-      // A gallery tile asks something else - may I offer Open, Download, Rename and
-      // Remove on this file yet - and the honest answer stays no until the index and
-      // the hash exist. Reported as the id rather than as a flag so the reading is
-      // absolute: a surface can compare it against the take it drew and know whether
-      // it is looking at the same world, where two flags only ever say that something
-      // moved between two observations it happened to make.
+      // A longer window than `recording`: a gallery tile may not offer Download or Remove until
+      // the index and the hash exist. An id, so a surface can compare it against what it drew.
       writingId: take?.id ?? this.finalizing?.id ?? null,
     };
   }
 
-  /**
-   * The file a take is being written into right now, or null - and "right now" runs
-   * to the end of the close rather than to the end of the writing. See `finalizing`.
-   *
-   * **A known remaining hole, written down rather than left to be rediscovered: this is
-   * one path and a grabber restart can own two.** `split()` closes the old take without
-   * being awaited and the replacement's hello opens the next one about 250ms later,
-   * while `armed` is still true on purpose - so for the rest of that index build
-   * `this.take` is the new take, wins here, and the old one stops being covered exactly
-   * while it is still being read. sha256 over a 138MB capture is well past 250ms, so the
-   * window is real on the restart path even though the stop path is now closed.
-   *
-   * Closing it means every caller asking `owns(path)` rather than comparing against one
-   * value - `beingRecorded`, `scanTakes` and `renameTake` are the three - which is a
-   * wider change than the one this note sits inside, and it is deliberately not being
-   * made silently in passing.
-   */
+  // A known hole: this is one path and a grabber restart can own two, because `split()` closes the
+  // old take unawaited while the replacement's hello opens the next about 250ms later.
   get openPath() {
     return this.take?.path ?? this.finalizing?.path ?? null;
   }
 
-  /**
-   * Arms recording and opens a take if the sensor has already said hello.
-   *
-   * Refuses outright when the disk cannot hold a sensible minimum, because a take
-   * that never started is a decision and a take that dies at eighty percent is a
-   * loss - and with manual-only deletion the card genuinely does fill, unattended,
-   * mid-shoot.
-   */
+  // Refuses when the disk cannot hold a sensible minimum, because with manual-only deletion the
+  // card genuinely does fill mid-shoot.
   async start(helloPayload) {
-    // A server with nothing to record from refuses at the door rather than arming
-    // and waiting for a hello that means something else. On a replay server the
-    // frames arrive from a file on a loop, so their stamps repeat - and one take is
-    // one continuous stream with monotonic stamps, which the index, the retime curve
-    // and `mixT` all rest on. What a recording of a replay would produce is a
-    // near-copy of a take that already exists, under a new name and a different
-    // hash, which is precisely the ambiguity reconciling by content hash exists to
-    // remove.
+    // A replay server refuses at the door: its frames come off a file on a loop, so their stamps
+    // repeat, and one take is one continuous stream with monotonic stamps.
     const blocked = this.cannotRecord();
     if (blocked) throw new Error(blocked);
     if (this.armed) return this.state;
-    // The rate the library is reporting, not a constant. The refusal and the
-    // readout have to divide by the same number or the monitor says one thing and
-    // the recorder acts on another - and the rate genuinely varies, since a node
-    // shooting at 15fps writes half of what one at 30 does.
+    // The rate the library reports, not a constant: the refusal and the readout have to divide by
+    // the same number.
     const left = await remaining(this.dir, this.rateOf());
-    // A directory that is not there is a different refusal from a directory that is
-    // full, and saying "0s left at current settings" for it would send the operator
-    // to delete footage that does not exist.
     if (left.error) throw new Error(`refusing to start a take: ${left.error}`);
     if (left.secondsLeft < MIN_TAKE_SEC) {
       throw new Error(
@@ -289,32 +137,13 @@ export class Recorder {
     return this.state;
   }
 
-  /**
-   * Opens the next take. The hello goes in first, so the file has exactly one.
-   *
-   * **Synchronous from end to end, and nothing here awaits.** This runs off the
-   * hello, and the frames of that same take are already arriving behind it in the
-   * same stream - so any await between "a hello was seen" and "`this.take` exists"
-   * is a window in which `write` finds no take and returns, losing the opening
-   * frames of the recording. `createWriteStream` returns a writable immediately and
-   * buffers until the descriptor is there, so the bytes are safe without waiting
-   * for the `open` event; what must not wait is the assignment below.
-   */
+  // Hello first, so the file has exactly one. Synchronous end to end, because the frames of this
+  // take arrive behind the hello and any await is a window where `write` finds no take.
   open(helloPayload) {
     if (this.take) return;
 
-    // `wx`, so a take never appends to or truncates a file that is already there:
-    // two takes in one file share a hash and a gallery entry, which the project
-    // model cannot express. Opened with `openSync` rather than left to the stream,
-    // because that puts the refusal *here* - in the same turn, before a hello has
-    // been buffered and before frames start landing in a stream that will never have
-    // a file behind it.
-    //
-    // **A name already taken is not a reason to stop recording.** It means something
-    // else got there first - a second server on the same captures directory, most
-    // likely - so the answer is the next name and not a disarmed recorder. A
-    // recorder that quietly stops is the one failure this tool cannot have; refusing
-    // to start is at least a decision somebody can see, and this is not even that.
+    // `wx`, so a take never appends to or truncates a file already there: two takes in one file
+    // share a hash and a gallery entry. A taken name just means the next name.
     let take = null;
     let floor = 0;
     for (let attempt = 0; attempt < MAX_NAME_ATTEMPTS && !take; attempt++) {
@@ -324,18 +153,13 @@ export class Recorder {
         take = { id, path, fd: openSync(path, 'wx') };
       } catch (err) {
         if (err.code !== 'EEXIST') {
-          // ENOSPC, EACCES, a captures directory that is not there: genuinely fatal
-          // and nothing a different name would fix. Loud, and disarmed - continuing
-          // to look armed while writing nothing is the failure this whole branch is
-          // arranged to avoid.
+          // ENOSPC, EACCES, a missing captures directory: fatal, and no other name would fix it.
+          // Disarmed, because looking armed while writing nothing is the failure to avoid.
           console.error(`[recorder] cannot open ${path}: ${err.message} - recording is off`);
           this.armed = false;
           this.onChange(this.state);
           return;
         }
-        // Advanced rather than merely re-scanned. A directory that cannot be listed
-        // at all answers the same name every time, so a retry that only re-scanned
-        // would ask for the taken name until it ran out of attempts.
         console.warn(`[recorder] ${id} is already taken, trying the next name`);
         floor = n;
       }
@@ -348,51 +172,23 @@ export class Recorder {
     }
 
     const stream = createWriteStream(null, { fd: take.fd, autoClose: true });
-    // Past the open, an error is a write that failed - a full disk, a card pulled -
-    // and there is no next name that helps. The bytes already written are still a
-    // usable take because the format is append-only, so this ends the take and says
-    // so rather than pretending it is still recording.
+    // Past the open, an error is a failed write and no next name helps. What already landed is
+    // still a usable take.
     stream.on('error', (err) => {
       console.error(`[recorder] take ${take.id} failed mid-write: ${err.message} - recording is off`);
       if (this.take?.stream === stream) {
         const failed = this.take;
         this.take = null;
         this.armed = false;
-        // The marks pressed during this take go into *this* take's sidecar, even
-        // though it ended badly. Nulling the take without flushing them left them
-        // sitting in a list that the next take then closed and wrote out, so take one
-        // lost the moment somebody flagged and take two gained one at a source time
-        // meaningless there. A take that lost its file is still a take with moments
-        // in it.
+        // Into *this* take's sidecar, even though it ended badly: nulling the take without
+        // flushing left them for the next take, at a source time meaningless there.
         settle(failed);
         flushMarks(failed);
         this.onChange(this.state);
       }
     });
-    // **The take's own wall clock, written into the take's own hello.**
-    //
-    // The sensor says hello once per grabber process and its `startedAt` is when that
-    // process came up, so every take shot in one session carried a byte-identical
-    // stamp - and none of them carried when its own take was shot. Two takes nine
-    // minutes apart came back from `describeTake` with the same `capturedAt`, which is
-    // the field the gallery sorts on and prints. The comment above that field says it
-    // exists because `steady_clock` stamps are useless for sorting a library; it was
-    // right about the need and the value it reached for could not meet it.
-    //
-    // Stamped here because here is the only place that knows. `open` runs once per
-    // take, off the hello that opens it, and the clock two lines below is already this
-    // take's own - so the fix is to write that number rather than to invent one. In the
-    // file rather than in the `.idx`, because a `.idx` is a cache of a scan and the next
-    // reader rebuilds it, which would take the stamp with it; and rather than in a
-    // sidecar, because a take downloaded across the link without its neighbours would
-    // arrive with its date gone. The hello is the one part of a take that already
-    // travels inside the take.
-    //
-    // The key is the grabber's rather than a new one beside it, and that is the part
-    // worth knowing on the way past: `startedAt` now means when the grabber came up on
-    // the wire and when this take began in a file. One reader in the tree consumes it -
-    // `describeTake`, for exactly this field - so nothing else can read the difference,
-    // and `docs/architecture.md` carries the distinction.
+    // The take's own wall clock: the sensor says hello once per grabber process, so every take in
+    // a session used to carry one identical stamp and the gallery sorted on it.
     const startedAt = Date.now();
     const stamped = stampHello(helloPayload, startedAt);
     const helloMessage = encodeMessage(TYPE_HELLO, stamped);
@@ -406,35 +202,25 @@ export class Recorder {
       bytes: 0,
       dropped: 0,
       stalling: false,
-      // Cumulative bytes handed to the stream, and the end offset of every frame not
-      // yet known to have reached the file. The hello counts toward the offsets
-      // because `bytesWritten` counts it too, and it is not a frame so it is not
-      // queued. `inFlightHead` is how far into that queue the drain has got - see
-      // `settle`, where moving it rather than the array is the whole of the fix.
+      // Cumulative bytes handed to the stream, and the end offset of every frame not yet known to
+      // have reached the file. `inFlightHead` is how far into that queue the drain has got.
       accepted: helloMessage.length,
       inFlight: [],
       inFlightHead: 0,
-      // Marks live on the take, not on the recorder - see `flushMarks`.
       pendingMarks: [],
     };
     console.log(`[recorder] take ${take.id} open`);
     this.onChange(this.state);
   }
 
-  /** One whole grabber message into the open take. */
   write(raw) {
     const take = this.take;
     if (!take) return;
-    // Drained on the frame path rather than only when something asks for state, and
-    // that placement is what makes the queue bounded by the ceiling below instead of
-    // by the length of the take. `settle` carries the measurement and the mechanism.
+    // Drained on the frame path rather than only when something asks for state, which is what
+    // bounds the queue by the buffer ceiling below instead of by the length of the take.
     settle(take);
-    // The return value of `write` used to be discarded and nothing read
-    // `writableLength`, so a disk that could not keep up became heap that grew until
-    // the process was killed - losing every buffered frame at once, having reported
-    // itself healthy throughout. Past the ceiling this drops instead, loudly and
-    // counted, which bounds the loss to what the gap costs and puts it on the
-    // monitor while it is happening.
+    // A discarded `write` return value made a slow disk into heap that grew until the process was
+    // killed, having reported itself healthy throughout.
     if (take.stream.writableLength > MAX_TAKE_BUFFER) {
       take.dropped++;
       if (!take.stalling) {
@@ -443,13 +229,9 @@ export class Recorder {
           `[recorder] take ${take.id}: ${(take.stream.writableLength / 1e6).toFixed(0)}MB waiting on the disk, `
           + 'over the buffer ceiling - dropping frames until it catches up',
         );
-        // Pushed at the transition rather than left to the panel's five-second poll.
-        // Footage is being lost for every one of those five seconds, and a node with
-        // nobody watching it is exactly where this starts - so the one moment worth
-        // interrupting for is the moment it starts. The recovery deliberately does
-        // not push: nothing is being lost while the disk catches up, so a readout
-        // that stays red until the next poll costs nothing, where a readout that
-        // stays green costs the take.
+        // Pushed at the transition rather than left to the panel's five-second poll, because
+        // footage is lost for every one of those seconds and a readout that stays
+        // green costs the take.
         this.onChange(this.state);
       }
       return;
@@ -463,18 +245,12 @@ export class Recorder {
     take.inFlight.push(take.accepted);
   }
 
-  /**
-   * Closes the take and scans it. The scan is what writes the sidecar index and
-   * the content hash, which is what makes the take a gallery entry - so a take is
-   * not finished until it has one.
-   */
+  // The scan writes the sidecar index and the content hash, which is what makes the take a gallery
+  // entry, so a take is not finished until it has one.
   async close(reason) {
     const take = this.take;
     if (!take) return null;
     this.take = null;
-    // Handed straight over, in the same statement that gives it up: between these two
-    // lines is the only moment this object could be asked about the take and answer
-    // that nobody owns it, and there is no await in it.
     this.finalizing = take;
     take.stream.end();
     let closeError = null;
@@ -482,26 +258,12 @@ export class Recorder {
       await once(take.stream, 'close');
     } catch (err) {
       closeError = err;
-      // **`events.once` attaches its own error listener and rejects on it**, so a
-      // card pulled or a disk filling during this last flush used to throw straight
-      // out of `close` - past the index, past the hash, past the broadcast below.
-      // The take was then a capture file with no sidecar, no content hash and so no
-      // gallery entry, while every monitor stayed showing a recording that had
-      // already ended. None of that is in question because of a failed flush: the
-      // format is append-only and everything before the failing write is on disk, so
-      // the take is worth closing out either way. The mid-write handler above has
-      // already said which take failed and why; this only says how far it got.
+      // `events.once` attaches its own error listener and rejects on it, so a card pulled during
+      // this last flush used to throw straight out of `close`, past the index and the hash.
       console.error(`[recorder] take ${take.id}: the file did not close cleanly (${err.message}) - indexing what landed`);
     }
-    // Marks pressed during the take were held until the file existed under its final
-    // name. A sidecar written beside a file that had not been closed yet would be a
-    // sidecar for a take whose hash was not computed.
-    //
-    // Past the catch rather than inside a branch of it, because a close that failed
-    // is exactly when this must still run: the take has already been nulled above, so
-    // a flush skipped here is the orphaning the mid-write handler had - the marks
-    // travel forward into whichever take closes next, stamped in source milliseconds
-    // from a start that take never had.
+    // Past the catch rather than inside a branch of it: the take has already been nulled, so a
+    // flush skipped here sends the marks forward into whichever take closes next.
     let index;
     try {
       settle(take);
@@ -509,13 +271,8 @@ export class Recorder {
       forgetCapture(take.path);
       index = await buildIndex(take.path);
     } finally {
-      // **Given up in a `finally` rather than on the line after, because the failing
-      // case is the one that matters.** An index build that threw - the disk that ate
-      // the flush above is the likeliest reason - would otherwise leave this process
-      // claiming a file it had stopped working on for as long as it lived, and every
-      // gallery tile for that take refusing Open, Download, Rename and Remove forever
-      // with no way back but a restart. A close that failed still ends the recorder's
-      // ownership: whatever landed is on disk and nothing here will touch it again.
+      // In a `finally`, or an index build that threw leaves this process claiming a file it had
+      // stopped working on, with the gallery refusing Open and Remove until a restart.
       this.finalizing = null;
     }
     console.log(
@@ -523,13 +280,6 @@ export class Recorder {
       + (take.dropped ? `, ${take.dropped} frames dropped to a slow disk` : ''),
     );
     this.onChange(this.state);
-    // **And now the failure is raised, after the take has been closed out rather
-    // than instead of it.** Doing the work and then swallowing the error would be
-    // the opposite mistake to the one above: `stop()` would answer as though the
-    // shoot ended cleanly, and the operator would be told a take is safe at the one
-    // moment they most need to hear that the card gave out. The two obligations are
-    // not in tension once the ordering is right - everything above is what the take
-    // needs, and this is what the caller needs.
     if (closeError) throw closeError;
     return {
       id: take.id,
@@ -548,38 +298,19 @@ export class Recorder {
     return done;
   }
 
-  /**
-   * The grabber died or was restarted. The take ends here and the next hello opens
-   * the next one, which preserves one-take-one-continuous-stream without throwing
-   * away the footage that already landed.
-   */
+  /** The grabber died or restarted: the take ends here and the next hello opens the next one. */
   async split() {
     if (!this.take) return null;
     return this.close('grabber restarted');
   }
 
-  /**
-   * A hello arrived. Opens a take if recording is armed and none is open.
-   *
-   * Called synchronously from the message loop and synchronous itself, so the very
-   * next frame in the same chunk lands in the file. Deferring this by so much as a
-   * microtask loses every frame the parser had already assembled behind the hello.
-   */
+  // Synchronous, so the very next frame in the same chunk lands in the file.
   onHello(helloPayload) {
     if (this.armed && !this.take) this.open(helloPayload);
   }
 
-  /**
-   * Flags the moment while it is still happening. Stamped in **source
-   * milliseconds** from the take's first frame, because a mark describes the
-   * footage rather than any edit of it - it survives retiming and is shared by
-   * every project built on that take.
-   *
-   * Stamped raw and never pre-rolled. People press a few hundred milliseconds
-   * after the thing happens, so every mark lands slightly late, and a constant
-   * baked in at capture time would be a guess: marks are approximate signposts you
-   * scrub around, so one that is a few frames late has already done its job.
-   */
+  // Stamped in source milliseconds from the take's first frame, because a mark describes the
+  // footage rather than any edit of it. Never pre-rolled: marks are approximate signposts.
   mark(sourceMs, label) {
     const take = this.take;
     if (!take) throw new Error('nothing is recording, so there is no moment to flag');

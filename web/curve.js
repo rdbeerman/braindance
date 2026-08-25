@@ -1,28 +1,11 @@
-// The scalar curve maths the keyframe tracks are evaluated through.
-//
-// Split out of `main.js` because it is the part of the editor that is only arithmetic:
-// no renderer, no DOM, no registry, no three.js. That is what makes it the first thing in
-// this tree a test can import and call directly - everything else in the viewer needs a
-// WebGL context and a page around it before it will answer a question.
-//
-// The lines below moved out of `main.js` without a character changed, and the exports
-// are one statement at the foot rather than a keyword on each declaration, because the
-// proof tools match this tree by exact source text.
+// The scalar curve maths the keyframe tracks are evaluated through, split out of `main.js`
+// because it is the part of the editor that is only arithmetic - no renderer, no DOM, no
+// three.js - and so the first thing here a test can import and call directly.
 
-// The handles of a linear segment. Named rather than written out at the four
-// places a key is made, because a key created with anything else silently eases.
-//
-// A *list* of control points per side rather than one, and the single-element list
-// here is the whole of what a document written before that carried. The list is what
-// lets a segment be a cubic, a quintic or anything between without a second curve
-// family beside this one - see `SEGMENT_POINT_CEILING` for the far end and `elevate`
-// for how a side grows without the picture moving.
-//
-// Linearity is a property of the points and not of their count: a Bezier whose
-// control points all sit on a line lies on that line, so any set of interior points
-// with x equal to y is the identity ease at any degree. That is why `lin` can go on
-// meaning "no easing" after a side has grown, and why the two constants below did not
-// have to become functions of the degree.
+// The handles of a linear segment, named rather than written out at the four places a key is
+// made, because a key created with anything else silently eases. Linearity is a property of the
+// points and not of their count, so these stay right after a side has grown: any interior point
+// with x equal to y is the identity ease at any degree.
 const EASE_OUT_LINEAR = [[1 / 3, 1 / 3]];
 const EASE_IN_LINEAR = [[2 / 3, 2 / 3]];
 
@@ -38,23 +21,16 @@ const EASE_IN_LINEAR = [[2 / 3, 2 / 3]];
  */
 const copyHandle = (h) => h.map((p) => [p[0], p[1]]);
 
-// How many control points one side of a segment may hold. A ceiling rather than a
-// preference: de Casteljau is quadratic in the point count and a high-degree Bezier
-// loses its locality entirely - every control point pulls on every part of the curve,
-// so past about here another handle stops being a control anybody can aim. Four a
-// side is a degree-9 segment, which is more shape than a camera move has ever needed.
+// How many control points one side of a segment may hold. A ceiling rather than a preference:
+// de Casteljau is quadratic in the point count and a high-degree Bezier loses its locality, so
+// past about here another handle stops being a control anybody can aim.
 const SEGMENT_POINT_CEILING = 4;
 
 /**
- * One control ordinate of a segment's timing curve, by index over the whole list.
- *
- * The ends are pinned at (0,0) and (1,1) and are implied rather than stored, which is
- * what lets a handle be a point instead of a point plus a promise about where the
- * segment starts. `a` is the leading run - the `easeOut` of the key being left - and
- * `b` is the trailing run, the `easeIn` of the key being arrived at. Reading them
- * through here rather than concatenating them into one array is what keeps evaluation
- * allocation-free: this runs per track per frame, and a pair of throwaway arrays per
- * evaluation is garbage the render loop would be collecting.
+ * One control ordinate of a segment's timing curve, by index over the whole list. The ends are
+ * pinned at (0,0) and (1,1) and are implied rather than stored. `a` is the `easeOut` of the key
+ * being left and `b` the `easeIn` of the key being arrived at, read through here rather than
+ * concatenated because this runs per track per frame and the arrays would be garbage.
  */
 const ctrl = (a, b, k, axis) => {
   if (k === 0) return 0;
@@ -62,11 +38,9 @@ const ctrl = (a, b, k, axis) => {
   return k <= a.length ? a[k - 1][axis] : b[k - 1 - a.length][axis];
 };
 
-// The de Casteljau working buffers, module-scoped and reused for the reason above.
-// Two of them because `bezSlopeAxis` needs its own while a value is being computed
-// beside it, and neither function calls itself or the other, so a shared buffer can
-// never be walked over mid-evaluation. They are sized to the ceiling twice over plus
-// the two implied ends, so nothing here ever grows one.
+// The de Casteljau working buffers, module-scoped and reused for the reason above. Two of them
+// because `bezSlopeAxis` needs its own while a value is being computed beside it. Sized to the
+// ceiling twice over plus the two implied ends, so nothing here ever grows one.
 const work = new Float64Array(2 * SEGMENT_POINT_CEILING + 2);
 const dwork = new Float64Array(2 * SEGMENT_POINT_CEILING + 2);
 
@@ -81,12 +55,9 @@ function bezAxis(a, b, axis, u) {
 }
 
 /**
- * The same coordinate's derivative with respect to `u`.
- *
- * A Bezier's derivative is a Bezier one degree down over the scaled differences of
- * the control points, which is why this is the same loop over a different filling
- * rather than a formula per degree - a formula per degree is what the fixed cubic
- * had, and it is what stopped the curve being able to grow.
+ * The same coordinate's derivative with respect to `u`. A Bezier's derivative is a Bezier one
+ * degree down over the scaled differences of the control points, which is why this is the same
+ * loop over a different filling rather than a formula per degree.
  */
 function bezSlopeAxis(a, b, axis, u) {
   const n = 1 + a.length + b.length;
@@ -100,10 +71,10 @@ function bezSlopeAxis(a, b, axis, u) {
 }
 
 /**
- * The Bezier parameter at which the curve's x reaches `x`. Newton first because it
- * converges in two or three steps over most of the range, then bisection, because
- * Newton stalls exactly where an ease handle is interesting: a hold at the start
- * of a segment is a near-zero derivative, and dividing by it walks off the curve.
+ * The Bezier parameter at which the curve's x reaches `x`. Newton first because it converges
+ * in two or three steps over most of the range, then bisection, because Newton stalls exactly
+ * where an ease handle is interesting: a hold at the start of a segment is a near-zero
+ * derivative, and dividing by it walks off the curve.
  */
 function easeParam(a, b, x) {
   if (x <= 0) return 0;
@@ -138,23 +109,11 @@ function easeAt(a, b, x) {
 /**
  * The same segment with one more control point on `side`, and the *identical* curve.
  *
- * This is Bezier degree elevation, and that it is exact is the whole reason a control
- * for adding a point can be offered at all. A press that gave you another handle and
- * also moved the camera would be two edits wearing one button, and the one nobody
- * asked for is the one that ruins a take - so the point appears, every other point
- * shifts to the place that keeps the curve where it was, and not a rendered frame
- * changes. `test/curve.test.mjs` holds it to that rather than this comment doing.
- *
- * The elevated interior runs one longer than it did, and which side gets the extra
- * one is the caller's press: the leading run keeps `a.length + 1` of them when the
- * outgoing side grew, and the trailing run takes the rest. Splitting it that way is
- * what keeps `easeOut` and `easeIn` two different numbers rather than two halves of
- * one, which is the distinction the whole preset table is written against.
- *
- * Removing a point has no such function and deliberately gets none. A degree-n curve
- * is not generally a degree-(n-1) curve, so `-pt` drops a control point and the shape
- * follows it - which is what removing a handle looks like everywhere else and is the
- * honest behaviour rather than a least-squares fit nobody could predict.
+ * Bezier degree elevation is exact, which is the whole reason a control for adding a point can
+ * be offered at all: the point appears, every other point shifts to keep the curve where it
+ * was, and not a rendered frame changes. Which side gets the extra one is the caller's press.
+ * Removing a point gets no such function, because a degree-n curve is not generally a
+ * degree-(n-1) curve and the shape following the handle is the honest behaviour.
  */
 function elevate(a, b, side) {
   const n = 1 + a.length + b.length;
@@ -172,13 +131,9 @@ function easeSlopeAt(a, b, x) {
   const u = easeParam(a, b, x);
   const dx = bezSlopeAxis(a, b, 0, u);
   if (dx > 1e-6) return bezSlopeAxis(a, b, 1, u) / dx;
-  // A vertical tangent is a legitimate handle placement, and the analytic ratio is
-  // infinite there. It used to report zero, which is the opposite of the truth and
-  // the wrong kind of wrong: this is the slope step 6's audio gate reads to decide
-  // whether the take is playing at 1.0, and a zero at the steepest point of a ramp
-  // would unmute exactly where it has to mute. Measured over a small window
-  // instead - large, finite, and in the right direction, which is what every
-  // caller can actually use.
+  // A vertical tangent is a legitimate handle placement and the analytic ratio is infinite
+  // there. Measured over a small window instead - large, finite and in the right direction.
+  // It used to report zero, which would unmute the audio gate exactly where it has to mute.
   const h = 1e-4;
   const lo = Math.max(0, x - h);
   const hi = Math.min(1, x + h);
@@ -198,10 +153,9 @@ function keyBefore(keys, t) {
   return lo;
 }
 
-// Outside the keys a look track holds its end values and the retime curve keeps
-// going. That difference is not a preference: a look with one bloom key is a
-// constant bloom, while a retime that flattened past its last key would freeze
-// the program there and make the take's tail unreachable.
+// Outside the keys a look track holds its end values and the retime curve keeps going: a look
+// with one bloom key is a constant bloom, while a retime that flattened past its last key
+// would freeze the program and make the take's tail unreachable.
 const HOLD_ENDS = 'hold';
 const EXTEND_ENDS = 'extend';
 
@@ -221,9 +175,8 @@ function scalarAt(keys, t, ends) {
   const a = keys[i];
   const b = keys[i + 1];
   const span = b.t - a.t;
-  // Coincident keys are a legal transient while one is being dragged onto
-  // another, and the later value is what a step would give, so it is what this
-  // gives rather than a division by zero.
+  // Coincident keys are a legal transient while one is dragged onto another, and the later
+  // value is what a step would give.
   if (span <= 0) return b.value;
   return a.value + (b.value - a.value) * easeAt(a.easeOut, b.easeIn, (t - a.t) / span);
 }
@@ -253,13 +206,10 @@ function stepAt(keys, t) {
   return keys[i < 0 ? 0 : i].value;
 }
 
-// Catmull-Rom, written in its Hermite form with tangents divided by the *time*
-// between the neighbouring keys rather than by an assumed even spacing. The
-// textbook uniform formula is the same curve when keys are evenly spaced and a
-// different one when they are not: it reads the parameter as an index, so two
-// keys 0.2s apart and two keys 3s apart get the same tangent and the camera
-// lurches out of the tight pair. Keys land wherever the edit wants them, so the
-// non-uniform form is the only one that means what the spec says it means.
+// Catmull-Rom in its Hermite form, with tangents divided by the *time* between the
+// neighbouring keys rather than by an assumed even spacing. The uniform formula reads the
+// parameter as an index, so a tight pair and a wide one get the same tangent and the camera
+// lurches out of the tight one.
 function hermite(p0, p1, m0, m1, span, u) {
   const u2 = u * u;
   const u3 = u2 * u;
@@ -271,15 +221,10 @@ function hermite(p0, p1, m0, m1, span, u) {
 }
 
 /**
- * The tangent at key `i`, in metres per program second.
- *
- * At the ends the missing neighbour is the end key mirrored one segment *outside*
- * the path rather than the end key sitting on top of itself. That is what makes
- * this the non-uniform generalisation of the textbook formula rather than a
- * near-miss of it: with the duplicate at the same instant the end tangent comes
- * out twice what the uniform Catmull-Rom gives, so the curve would leave its first
- * key at double speed and the two forms would disagree on evenly spaced keys - the
- * one case where they have to agree exactly.
+ * The tangent at key `i`, in metres per program second. At the ends the missing neighbour is
+ * the end key mirrored one segment *outside* the path rather than sitting on top of itself:
+ * with the duplicate at the same instant the end tangent comes out twice what uniform
+ * Catmull-Rom gives, and the two forms have to agree exactly on evenly spaced keys.
  */
 function tangentAt(keys, i, axis) {
   const n = keys.length;
@@ -299,36 +244,14 @@ function tangentAt(keys, i, axis) {
 /**
  * Whether a handle is one this evaluator can be asked to render, and why not if not.
  *
- * **The invariants exist in the drag handler that creates a value and existed nowhere in
- * the loader that reads one back**, which is the shape of the gap this closes: a handle
- * dragged in the editor is clamped as it is written, and a handle arriving in a file went
- * through a check on its *shape* alone - an array of finite pairs, within the count
- * ceiling - while the docstring above that check claimed handles "are checked when
- * present, because a handle outside the unit box bends a curve back on itself". A
- * document is a caller like any other and it was the one caller taken on trust.
+ * A document is a caller like any other and was the one caller taken on trust. Both refusals
+ * are about silence: a point outside the segment pulls the curve past an end it is pinned to,
+ * and y outside its bound sends `hermite` past the key on an axis that is already a fraction.
  *
- * Both refusals are about silence rather than about crashes, which is why they are worth
- * a door of their own. A point outside the segment pulls the curve past an end it is
- * pinned to, and y outside its bound sends `hermite` past the key on an axis that is
- * already a fraction, so a camera sails through the pose it was keyed at and swings back
- * to it.
- *
- * **What this deliberately does not ask is whether the abscissae are ordered, and it
- * used to.** Descending control x is *sufficient* for a fold and never necessary - a
- * crossed polygon whose curve stays single-valued is a legal state, `elevate` produces
- * one out of the ordinary `easeOut [[0.9, 0.1]]` / `easeIn [[0.1, 0.9]]` pair, and the
- * per-side ordering rule refused it, so the editor could save a document the next
- * reload declined to open. It was also too loose on the same axis: asked one side at a
- * time it could not see a fold spanning the `easeOut`/`easeIn` boundary, which is the
- * fold its own sentence was written about. The real invariant is a property of the
- * whole segment's Bezier and lives in `foldRefusal` below, asked once per segment with
- * both handles in hand.
- *
- * The y bound is a parameter rather than a constant here because it is not one number:
- * a look scalar may legitimately overshoot - a value that swings past its key and comes
- * back is an ordinary creative choice - while a pose and the retime may not, for reasons
- * that read alike and are not the same. `web/main.js` owns that table and passes the
- * bound in, so this stays a statement about curves and the two ends stay one rule.
+ * Ordering of the abscissae is deliberately not asked here - it is sufficient for a fold and
+ * never necessary, and `foldRefusal` below asks the real invariant with both handles in hand.
+ * The y bound is a parameter because a look scalar may legitimately overshoot where a pose and
+ * the retime may not, and `web/main.js` owns that table.
  *
  * Returns null when there is nothing wrong, and a sentence naming the term when there is.
  */
@@ -347,50 +270,24 @@ function handleRefusal(points, loY, hiY) {
 }
 
 /**
- * Whether a segment's timing curve folds - whether x(u) ever runs backwards - and a
- * sentence naming where when it does.
+ * Whether a segment's timing curve folds - whether x(u) ever runs backwards - and a sentence
+ * naming where when it does.
  *
- * Asked of the composed segment rather than of either handle, because the fold is a
- * property neither side holds alone: `a` is the outgoing handle of the key being left
- * and `b` the incoming handle of the key being arrived at, and a polygon that ascends
- * within each side can still descend across the join. Asked about the *curve* rather
- * than the control polygon, because ordered control x is sufficient for monotonicity
- * and never necessary - the legal crossed polygons `elevate` produces are exactly the
- * states an ordering rule wrongly refuses.
- *
- * A fold is worth refusing because it fails silently: `easeParam`'s bisection still
- * terminates on a folding curve and still returns a `u` inside `[0, 1]`, so the take
- * renders deterministically, repeatably, and at the wrong times. A curve whose x merely
- * *stalls* is not a fold - a plateau is a hold, the bisection lands inside it, and
- * refusing one would take a legitimate handle placement away - so the question is
- * strictly "does dx/du go negative", not "does it reach zero".
- *
- * Answered exactly rather than by sampling. dx/du is itself a Bezier over the scaled
- * differences of the control x, so the convex-hull property decides most polygons in
- * one look - coefficients all non-negative can never dip below zero - and de Casteljau
- * subdivision splits the rest until a piece's endpoint goes negative (a witness, since
- * an endpoint is a point *on* the curve) or every piece's hull clears. A sampling loop
- * would have been shorter and would have made the refusal a fact about the sample
- * count; a fold narrower than the depth bound here is narrower than 2^-40 of a
- * segment, which no renderer resolves and no handle can author.
+ * Asked of the composed segment, because a polygon that ascends within each side can still
+ * descend across the join, and asked of the *curve* rather than the control polygon, because
+ * ordered control x is sufficient for monotonicity and never necessary. A fold is worth
+ * refusing because it fails silently: the bisection still terminates and the take renders
+ * deterministically at the wrong times. Answered exactly by de Casteljau subdivision rather
+ * than by sampling, which would make the refusal a fact about the sample count.
  */
 function foldRefusal(a, b) {
   const n = 1 + a.length + b.length;
   const d = [];
   for (let i = 0; i < n; i++) d.push(n * (ctrl(a, b, i + 1, 0) - ctrl(a, b, i, 0)));
-  // Both tests carry one tolerance, and it is doing two jobs. A piece's first and
-  // last coefficients are values *on* the curve, computed through enough averaging
-  // that a legitimate tangent - dx/du touching zero, which `easeSlopeAt` names as a
-  // placement worth keeping - can land a machine epsilon below it, so the endpoint
-  // test must not read that as a fold. And the hull test needs the same allowance or
-  // it cannot terminate cheaply: the convex-hull property bounds the curve *below* by
-  // the least coefficient, so a piece whose coefficients all clear -1e-9 holds dx/du
-  // above -1e-9 everywhere and can run x backwards by less than a billionth of a
-  // segment - a plateau in every sense that renders. Without that allowance a segment
-  // sitting exactly on the boundary, which is the state `foldFreeX`'s bisection
-  // deliberately produces, recurses the full depth over an interval the strict test
-  // can never decide - measured at 1.4s for one call against microseconds for every
-  // ordinary one.
+  // Both tests carry one tolerance and it is doing two jobs. A legitimate tangent - dx/du
+  // touching zero - can land a machine epsilon below it, so the endpoint test must not read
+  // that as a fold; and the hull test needs the same allowance or it cannot terminate cheaply,
+  // measured at 1.4s for one call on a segment sitting exactly on the boundary.
   const witness = (coef, lo, hi, depth) => {
     if (coef.every((c) => c >= -1e-9)) return null;
     if (coef[0] < -1e-9) return lo;
@@ -418,23 +315,11 @@ function foldRefusal(a, b) {
 /**
  * How far a control point's x may actually move toward `to` before the segment folds.
  *
- * The neighbour span the drag already applies is the ordering rule, and ordering is
- * sufficient for a fold-free curve only when the polygon starts ordered. The legal
- * crossed polygons `elevate` produces do not, and from one of those an adversarial
- * sequence of drags - each individually inside its span - reaches a genuine fold:
- * measured with a seeded search, six in-span drags from the twice-elevated crossed
- * pair fold the curve, and about a sixth of the folded states ascend within each side,
- * so no per-side reading of any strictness would have seen them coming. The span stays,
- * because it is cheap and right about the ordinary polygon; this is the last word,
- * asked of the curve itself.
- *
- * Sliding to the boundary rather than refusing the move, for the reason
- * `clampRetimeKey` gives about its own clamp: a drag that stops early reads as the
- * curve resisting, where a pointer event that throws reads as the editor breaking. The
- * boundary is found by bisection from the last fold-free x, which the caller holds by
- * induction - every earlier drag came through here. A starting state that already
- * folds has nothing fold-free to preserve, so the drag is let through rather than
- * fought; the loader refuses such a document at its own door.
+ * The neighbour span the drag already applies is an ordering rule, which is sufficient only
+ * when the polygon starts ordered - and the crossed polygons `elevate` produces do not. Six
+ * in-span drags from a twice-elevated crossed pair reach a genuine fold. Slides to the
+ * boundary rather than refusing, because a drag that stops early reads as the curve resisting
+ * where a pointer event that throws reads as the editor breaking.
  */
 function foldFreeX(a, b, side, index, from, to) {
   const probe = (x) => {
