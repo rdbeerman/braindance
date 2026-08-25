@@ -1822,17 +1822,7 @@ function addEffectToRack(id) {
     groupOverrideDirty = true;
   }
   refreshPanel();
-
-  const first = effectParamNames(id)[0];
-  const group = PANEL_GROUPS.find((entry) => entry.key === PARAMS[first]?.group);
-  const dialog = document.getElementById('effectRackDialog');
-  if (dialog.open) dialog.close();
-  if (group) setPanelTab(group.tab);
-  requestAnimationFrame(() => {
-    const control = panelControls.get(first);
-    control?.scrollIntoView({ block: 'center' });
-    control?.focus({ preventScroll: true });
-  });
+  paintEffectRackDialog();
   return true;
 }
 
@@ -4127,12 +4117,6 @@ const ui = {
   exportNameChip: document.getElementById('tExportNameChip'),
   exportSave: document.getElementById('tExportSave'),
   exportTrim: document.getElementById('tExportTrim'),
-  inOut: document.getElementById('tInOut'),
-  outOut: document.getElementById('tOutOut'),
-  clipLen: document.getElementById('tClipLen'),
-  setIn: document.getElementById('tSetIn'),
-  setOut: document.getElementById('tSetOut'),
-  clearRange: document.getElementById('tClearRange'),
   ease: document.getElementById('tEase'),
   prevKey: document.getElementById('tPrevKey'),
   nextKey: document.getElementById('tNextKey'),
@@ -4157,8 +4141,6 @@ const ui = {
   pickCount: document.getElementById('ppCount'),
   pickCancel: document.getElementById('ppCancel'),
   pickGo: document.getElementById('ppGo'),
-  project: document.getElementById('tProject'),
-  projectOpen: document.getElementById('tProjectOpen'),
   resume: document.getElementById('tResume'),
   resumeWhen: document.getElementById('tResumeWhen'),
   resumeOpen: document.getElementById('tResumeOpen'),
@@ -7810,7 +7792,7 @@ const shell = shellElements({
   lookExport: 'menuLookExport',
   state: 'menuState',
   effectRackOpen: 'effectRackOpen',
-  effectRackDialog: 'effectRackDialog',
+  effectRackPanel: 'effectRackPanel',
   effectRackClose: 'effectRackClose',
   effectRackSearch: 'effectRackSearch',
   effectRackList: 'effectRackList',
@@ -7890,11 +7872,21 @@ function openDialog(dialog) {
 
 shell.projectSettings.addEventListener('click', () => openDialog(shell.projectDialog));
 shell.effectRackOpen.addEventListener('click', () => {
+  const panel = shell.effectRackPanel;
+  if (!panel.hidden) {
+    panel.hidden = true;
+    effectRackConfirming = null;
+  } else {
+    effectRackConfirming = null;
+    shell.effectRackSearch.value = '';
+    paintEffectRackDialog();
+    panel.hidden = false;
+    shell.effectRackSearch.focus();
+  }
+});
+shell.effectRackClose.addEventListener('click', () => {
+  shell.effectRackPanel.hidden = true;
   effectRackConfirming = null;
-  shell.effectRackSearch.value = '';
-  paintEffectRackDialog();
-  openDialog(shell.effectRackDialog);
-  shell.effectRackSearch.focus();
 });
 shell.effectRackSearch.addEventListener('input', () => {
   effectRackConfirming = null;
@@ -8079,8 +8071,6 @@ shell.state.addEventListener('click', () => {
 });
 
 shell.exportClose.addEventListener('click', () => ui.exportDialog.close());
-shell.effectRackClose.addEventListener('click', () => shell.effectRackDialog.close());
-shell.effectRackDialog.addEventListener('close', () => { effectRackConfirming = null; });
 shell.projectClose.addEventListener('click', () => shell.projectDialog.close());
 shell.projectDone.addEventListener('click', () => shell.projectDialog.close());
 shell.obsClose.addEventListener('click', () => shell.obsDialog.close());
@@ -8561,6 +8551,7 @@ globalThis.__kinect = {
   /** The interaction layer's own state, for a check that drives controls and reads back. */
   editor: {
     clipRange: () => ({ in: clipIn, out: clipOut }),
+    setClipRange: (inVal, outVal) => { setClipInOut({ in: inVal, out: outVal }); history.commit(); },
     // The speed slider's travel is logarithmic, so its `value` is a position and not a rate.
     rateSlider: { toValue: sliderFromRate, toRate: rateFromSlider },
     /** The strip's height and what bounds it, so a check can drive the splitter. */

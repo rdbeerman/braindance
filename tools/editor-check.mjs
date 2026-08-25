@@ -1369,10 +1369,16 @@ const DRIVER_RULES = [
   },
   {
     key: 'shelldialogs',
-    what: 'a control in the Project settings, Export, OBS, effect-rack, or state dialog',
+    what: 'a control in the Project settings, Export, OBS, or state dialog',
     by: 'section 1 opens each application dialog, drives every enabled control, and '
       + 'asserts every format the export dialog offers is one the server encodes',
-    match: (row) => inGroup(row, '#projectDialog', '#exportDialog', '#obsDialog', '#effectRackDialog'),
+    match: (row) => inGroup(row, '#projectDialog', '#exportDialog', '#obsDialog'),
+  },
+  {
+    key: 'effectrack',
+    what: 'a control in the effect rack sidebar',
+    by: 'section 1 opens the effect rack, searches, adds every effect, and removes one',
+    match: (row) => inGroup(row, '#effectRackPanel'),
   },
   {
     key: 'paneltabs',
@@ -1464,9 +1470,6 @@ const DRIVER_IDS = {
   tRateKey: 'section 5 - plants and removes a retime key',
   // `tFps` is deliberately not here: it moved into Project settings with the rate itself, so
   // the `shelldialogs` rule covers it and section 1 drives it.
-  tSetIn: 'section 3 - sets the range from the playhead',
-  tSetOut: 'section 3 - sets the range from the playhead',
-  tClearRange: 'section 3 - puts the range back to the whole clip',
   tMark: 'library-check writes a mark and reads the sidecar back',
   tDeleteKey: 'section 5 - removes the selected key',
   tAddPoint: 'section 5 - grows a segment\'s degree and reads the curve back unmoved',
@@ -1474,8 +1477,6 @@ const DRIVER_IDS = {
   tPrevKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tNextKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tPreset: 'library-check applies a preset and compares the look',
-  tProject: 'section 13 - selects the project built on other footage and opens it, which is what makes the refusal',
-  tProjectOpen: 'section 13 - the press that produces the longest refusal this program writes',
   tPresetSave: 'library-check',
   tPresetExport: 'section 9 - exports the look and reads the file the browser wrote',
   tPresetImport: 'section 9 - opens the picker the file input is the other half of',
@@ -1768,7 +1769,7 @@ try {
     `grain row hidden=${trackCleared}`);
 
   await page.locator('#effectRackOpen').click();
-  check(await page.evaluate('document.getElementById("effectRackDialog").open'),
+  check(await page.evaluate('!document.getElementById("effectRackPanel").hidden'),
     'the add button opens the installed-effect search');
   await page.locator('#effectRackSearch').fill('halation');
   const searched = await page.evaluate(`(() => ({
@@ -1783,7 +1784,7 @@ try {
   const couldAddHalation = await halationAdd.count() === 1;
   if (couldAddHalation) await halationAdd.click();
   else {
-    await page.locator('#effectRackClose').click();
+    await page.locator('#effectRackOpen').click();
     await page.evaluate("document.querySelector('[data-group-toggle=halation]')?.click()");
   }
   await page.waitForTimeout(50);
@@ -1794,17 +1795,13 @@ try {
     return {
       hidden: row?.hidden ?? null,
       stored,
-      focused: document.activeElement?.id ?? null,
-      dialogOpen: document.getElementById('effectRackDialog').open,
+      rackOpen: !document.getElementById('effectRackPanel').hidden,
     };
   })()`);
   check(couldAddHalation && halationAdded.hidden === false
-    && halationAdded.stored.includes('halation') && !halationAdded.dialogOpen,
-  'Add closes the search and retains the effect in the sidebar without changing its value',
+    && halationAdded.stored.includes('halation') && halationAdded.rackOpen,
+  'Add retains the effect in the sidebar with the picker still open',
   `add=${couldAddHalation}, hidden=${halationAdded.hidden}, stored=${JSON.stringify(halationAdded.stored)}`);
-  check(halationAdded.focused === 'halation.amount',
-    'and the first control receives the caret, so Add lands where the work starts',
-    `focused ${JSON.stringify(halationAdded.focused)}`);
 
   await page.evaluate(`(() => {
     const input = document.getElementById('halation.amount');
@@ -1900,7 +1897,7 @@ try {
 
   let rackAdds = 0;
   for (let i = 0; i <= rackFresh.ids.length; i++) {
-    if (!await page.evaluate('document.getElementById("effectRackDialog").open')) {
+    if (await page.evaluate('document.getElementById("effectRackPanel").hidden')) {
       await page.locator('.paneltab[data-panel-tab="look"]').click();
       await page.locator('#effectRackOpen').click();
     }
@@ -1909,7 +1906,7 @@ try {
     await next.click();
     rackAdds++;
   }
-  if (!await page.evaluate('document.getElementById("effectRackDialog").open')) {
+  if (await page.evaluate('document.getElementById("effectRackPanel").hidden')) {
     await page.locator('.paneltab[data-panel-tab="look"]').click();
     await page.locator('#effectRackOpen').click();
   }
@@ -1968,8 +1965,7 @@ try {
       groups: ['#appBar', '#panel', '#panelTabs', '#lookPresetGroup', '#cameraGroup', '#navRow',
         '#recordGroup', '#recLookGroup', '#sensorGroup', '#monitorGroup',
         '#programOutGroup', '#presetPick', '#projectDialog', '#exportDialog', '#obsDialog',
-        '#effectRackDialog',
-        '#panelDock', '.appmenu']
+        '#effectRackPanel', '#panelDock', '.appmenu']
         .filter((g) => el.closest(g)),
       kf: el.classList.contains('kf'),
       mark: el.classList.contains('tmk'),
@@ -1990,7 +1986,7 @@ try {
       : DRIVER_RULES.map((r) => `${r.key} ${sweep.filter((row) => r.match(row)).length}`).join(', '));
 
   const unknown = sweep.filter((row) => !covered(row));
-  const DIALOG_GROUPS = ['#presetPick', '#exportDialog', '#obsDialog', '#effectRackDialog'];
+  const DIALOG_GROUPS = ['#presetPick', '#exportDialog', '#obsDialog'];
   const inDialog = sweep.filter((r) => DIALOG_GROUPS.some((group) => r.groups.includes(group))).length;
   const inTbar = sweep.filter((r) => r.inTbar).length;
   note(`${sweep.length} interactive controls on the editor`,
@@ -2030,12 +2026,12 @@ try {
   check(composition.length > 0 && withControls.length === 0,
     'and no composition parameter has one, because composition is edited in the world',
     withControls.length ? `${withControls.join(', ')} has a control` : `${composition.length} checked: ${composition.join(', ')}`);
-  check(sweep.some((r) => r.id === 'tPlay') && sweep.some((r) => r.id === 'tSetIn'),
+  check(sweep.some((r) => r.id === 'tPlay') && sweep.some((r) => r.id === 'tIn'),
     'the strip is among what was swept', `${sweep.filter((r) => r.inTbar).map((r) => r.id).filter(Boolean).slice(0, 6).join(', ')}...`);
 
   await page.locator('#effectRackClose').click();
-  check(await page.evaluate('!document.getElementById("effectRackDialog").open'),
-    'the effect search closes from its corner after its generated controls were swept');
+  check(await page.evaluate('document.getElementById("effectRackPanel").hidden'),
+    'the effect search closes after its generated controls were swept');
 
   // Measured at both ends of the travel, because one end is a dead zone - a nav at the foot of
   // the column is visible there and fails only at the top.
@@ -2885,7 +2881,7 @@ try {
     }
     return n;
   }).toString()})(${JSON.stringify(id)})`);
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await settle();
   const grabOutAtEnd = await grabWidth('tOut');
   const grabIn = await grabWidth('tIn');
@@ -2899,13 +2895,13 @@ try {
   const markersUsable = boxes.in !== null && boxes.out !== null;
   await page.evaluate('__kinect.timeline.transport().seek(30)');
   await settle();
-  await page.locator('#tSetOut').click();
+  await focusStage();
+  await page.keyboard.press('o');
   await settle();
   const beforeDrag = await range();
   let afterDrag = beforeDrag;
   if (!markersUsable) {
     check(false, 'dragging the out marker left shortens the export range', 'there is no marker to drag');
-    check(false, 'and the numeric readout followed it', 'not reached - the marker is absent');
     check(false, 'and what the export leaves out is drawn, in proportion to what it leaves out',
       'not reached - the marker is absent');
   } else {
@@ -2921,8 +2917,6 @@ try {
     afterDrag = await range();
     check(afterDrag.out < beforeDrag.out - 1, 'dragging the out marker left shortens the export range',
       `${beforeDrag.out.toFixed(3)}s -> ${afterDrag.out.toFixed(3)}s`);
-    check((await text('#tOutOut')).trim() !== 'end' && (await text('#tOutOut')).includes(':'),
-      'and the numeric readout followed it', `out reads ${(await text('#tOutOut')).trim()}, length ${(await text('#tClipLen')).trim()}`);
 
     const shade = await page.evaluate(`(() => {
       const bed = document.getElementById('tBeds').getBoundingClientRect();
@@ -2947,10 +2941,10 @@ try {
     `${(await lanes()).length} lanes, in ${afterLanes.in ? 'present' : 'GONE'}, out ${afterLanes.out ? 'present' : 'GONE'}`);
   check(near((await range()).out ?? -1, afterDrag.out ?? -1, 1e-6),
     'and the range they show is unchanged by it', JSON.stringify(await range()));
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await settle();
   check((await range()).out === null && (await range()).in === 0,
-    '"whole clip" puts the range back, and back to null rather than to the duration',
+    'clearing the range puts it back, and back to null rather than to the duration',
     JSON.stringify(await range()));
 
   console.log('\n[4] the speed control holds the frame you are looking at');
@@ -3151,10 +3145,11 @@ try {
   await settle();
   await page.evaluate(`__kinect.timeline.transport().seek(1.5)`);
   await settle();
-  await page.locator('#tSetIn').click();
+  await focusStage();
+  await page.keyboard.press('i');
   await page.evaluate(`__kinect.timeline.transport().seek(7)`);
   await settle();
-  await page.locator('#tSetOut').click();
+  await page.keyboard.press('o');
   await page.evaluate(`__kinect.timeline.transport().seek(4)`);
   await settle();
 
@@ -3924,16 +3919,17 @@ try {
     const smallest = sizes.slice().sort((a, b) => (a.w * a.h) - (b.w * b.h))[0];
     await page.evaluate(`__kinect.setOutputSize(${JSON.stringify(`${smallest.w}x${smallest.h}`)})`);
     await settle();
-    // The trim is set with the dialog shut, because that is the only order the surface allows:
-    // the export is a modal and `#tSetIn` sits on the strip behind it.
+    // The trim is set with the dialog shut, because the modal blocks the keyboard shortcuts
+    // that target the stage behind it.
     await page.locator('#exportClose').click();
     await page.waitForFunction('!document.getElementById("exportDialog").open');
     await page.evaluate('__kinect.timeline.transport().seek(0)');
     await settle();
-    await page.locator('#tSetIn').click();
+    await focusStage();
+    await page.keyboard.press('i');
     await page.evaluate('__kinect.timeline.transport().seek(0.2)');
     await settle();
-    await page.locator('#tSetOut').click();
+    await page.keyboard.press('o');
     await settle();
     await page.locator('#outputMenuButton').click();
     await page.locator('#menuExport').click();
@@ -4083,7 +4079,6 @@ try {
       in: t.clipInSec,
       out: t.clipOutSec,
       duration: t.duration,
-      readout: document.getElementById('tInOut').textContent.trim(),
     };
   })()`);
   check(adopted.in <= adopted.out,
@@ -4093,17 +4088,7 @@ try {
   check((pastRange.in ?? -1) <= adopted.duration + 1e-6 && (pastRange.out ?? -1) <= adopted.duration + 1e-6,
     '  and the document it wrote names times the take has, both ends of it',
     `${JSON.stringify(pastRange)} against a ${adopted.duration.toFixed(3)}s program`);
-  const readoutSec = (text) => {
-    const [m, s] = text.split(':');
-    return Number(m) * 60 + Number(s);
-  };
-  // A millisecond of slack rather than a float epsilon: `timecode` rounds to three decimals, so a
-  // duration that rounds up would fail an exact comparison against a correct build.
-  check(readoutSec(adopted.readout) <= adopted.duration + 1e-3,
-    '  and the readout beside the markers names a time the take has, rather than one it does not',
-    `#tInOut reads ${adopted.readout} of a ${adopted.duration.toFixed(3)}s program`);
-
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await settle();
   const beforeBad = await page.evaluate(`(() => {
     const t = __kinect.timeline.transport();
@@ -4170,7 +4155,10 @@ try {
   await settle();
   await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
   await page.evaluate('__kinect.keyframes.setTracks({})');
-  await page.locator('#tClearRange').click();
+  // And the trim, which nothing below resets: leaving it at the near deliverable's range
+  // moved section 8's crop numbers, and those rows read as a rendering change rather than
+  // as a leftover from up here.
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await page.evaluate(`__kinect.timeline.transport().seek(${playheadBefore})`);
   await settle();
 
@@ -4179,7 +4167,7 @@ try {
   // The scene is put back to a plain one first: the sections above leave an animated `bloom`
   // track behind, and bloom lifts most of the frame over any sensible threshold - measured at
   // 903477 lit pixels against the 194911 the same shot gives with a default look.
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await page.evaluate('__kinect.setOutputSize("1920x1080")');
   await page.evaluate('__kinect.keyframes.setTracks({})');
   await page.evaluate('__kinect.keyframes.setRetime({ rate: 1, keys: [] })');
@@ -5173,7 +5161,8 @@ try {
   await settle();
   await page.evaluate('__kinect.timeline.transport().seek(10)');
   await settle();
-  await page.locator('#tSetIn').click();
+  await focusStage();
+  await page.keyboard.press('i');
   await settle();
   const onCut = await page.evaluate(`(() => ({
     programSec: __kinect.timeline.transport().programSec,
@@ -5196,7 +5185,7 @@ try {
   check(boundarySeeks <= 2,
     '  and twelve slider steps from there still cost one accurate seek, not one per step',
     `${boundarySeeks} seeks`);
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
   await settle();
 
@@ -5232,18 +5221,18 @@ try {
     'f fits the whole clip back on the ruler', JSON.stringify(await page.evaluate('__kinect.editor.view.window()')));
   await page.evaluate('__kinect.timeline.transport().seek(4)');
   await settle();
-  await page.locator('#tSetIn').click();
+  await focusStage();
+  await page.keyboard.press('i');
   await page.evaluate('__kinect.timeline.transport().seek(9)');
   await settle();
-  await page.locator('#tSetOut').click();
-  await focusStage();
+  await page.keyboard.press('o');
   await page.keyboard.press('z');
   await settle();
   const framed = await page.evaluate('__kinect.editor.view.window()');
   check(framed.startSec < 4 && framed.endSec > 9 && framed.spanSec < framed.duration / 2,
     'z frames the trimmed range, which is the window an edit is actually made in',
     `${framed.startSec.toFixed(2)}s..${framed.endSec.toFixed(2)}s around in 4s / out 9s`);
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await page.evaluate('__kinect.editor.view.fit()');
   await settle();
 
@@ -6091,8 +6080,7 @@ try {
       `chip ${offeredAnyway.shown ? 'shown' : 'hidden'}, "${offeredAnyway.when}"`);
     await reopen();
 
-    await page.selectOption('#tProject', OTHER);
-    await page.click('#tProjectOpen');
+    await page.evaluate(`__kinect.library.loadProject(${JSON.stringify(OTHER)})`);
     await page.waitForFunction("document.getElementById('tNote').textContent.includes('different footage')",
       null, { timeout: 15000 }).catch(() => {});
     const noteBox = await page.evaluate(`(() => {
@@ -6291,10 +6279,11 @@ try {
     })()`);
     await page.evaluate(`__kinect.timeline.transport().seek(${trim.inAt})`);
     await settle();
-    await page.click('#tSetIn');
+    await focusStage();
+    await page.keyboard.press('i');
     await page.evaluate(`__kinect.timeline.transport().seek(${trim.outAt})`);
     await settle();
-    await page.click('#tSetOut');
+    await page.keyboard.press('o');
     await settle();
     const trimmed = await page.evaluate('({ in: __kinect.timeline.transport().clipInSec, out: __kinect.timeline.transport().clipOutSec })');
     const marksNow = await page.evaluate('__kinect.library.markTicks().length');
