@@ -485,6 +485,25 @@ export function doorRefusal(candidate, { beside = [], spines }) {
           + 'is absent at, so a build with the package installed and every value at default has to draw exactly what a build without it draws';
       }
     }
+    if (spec.reading !== undefined && typeof spec.reading !== 'boolean') {
+      return `${name} declares reading as ${JSON.stringify(spec.reading)} - reading membership is a yes or a no`;
+    }
+    if (spec.reading && (spec.kind !== 'scalar' || spec.role !== 'master' || bind.on !== 'points'
+        || spec.def !== 0 || spec.min !== 0 || spec.max !== 1)) {
+      return `${name} declares itself a reading, but a package reading is a scalar point-uniform master on the `
+        + '0..1 weight range with an inert default of 0 - the five reading weights are summed as a ratio, so a '
+        + 'different shape would not have the meaning the registry gives it';
+    }
+    if (spec.under !== undefined) {
+      if (typeof spec.under !== 'string' || !VALID_PARAM_KEY.test(spec.under)) {
+        return `${name} declares under as ${JSON.stringify(spec.under)} - it names another parameter key in the same package`;
+      }
+      const parent = manifest.params[spec.under];
+      if (!parent || parent === spec || parent.role !== 'master') {
+        return `${name} declares itself under ${JSON.stringify(spec.under)}, which is not another master in ${id} - `
+          + 'the parent is the term whose non-zero value reveals this row';
+      }
+    }
   }
   if (masters > 1) {
     return `effect ${id} declares ${masters} parameters with the role master - one package is absent at one term, `

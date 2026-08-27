@@ -109,6 +109,8 @@ export const tableFromPackages = (packages, order) => {
     };
     if (p.bind.transform !== undefined) entry.transform = p.bind.transform;
     if (p.bind.gates !== undefined) entry.gates = p.bind.gates;
+    if (p.reading !== undefined) entry.reading = p.reading;
+    if (p.under !== undefined) entry.under = `${name.slice(0, name.indexOf('.'))}.${p.under}`;
     table[name] = Object.freeze(entry);
   }
   return Object.freeze(table);

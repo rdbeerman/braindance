@@ -160,8 +160,18 @@ export function buildPointCloud(sourceCells, program) {
     // alone is the boot state.
     readRgb: { value: 1 },
     readDepth: { value: 0 },
-    // What the RGB and Depth readings are made of. The ghost, contour and blackwall
-    // readings are now effect packages with their own uniform tables.
+    // Ghost, Contour, and Blackwall declare these uniforms in their packages. The cells stay
+    // here because this table is the only channel into the assembled cloud shader.
+    ghost: { value: 0 },
+    ghostRim: { value: 0.7 },
+    ghostFill: { value: 0.35 },
+    contour: { value: 0 },
+    contourBands: { value: 12 },
+    contourWidth: { value: 0.08 },
+    blackwall: { value: 0 },
+    blackwallSweep: { value: 0.28 },
+    blackwallScan: { value: 0 },
+    // What the two core readings are made of.
     rgbSaturation: { value: 1 },
     depthGamma: { value: 1 },
     denoise: { value: 1 },

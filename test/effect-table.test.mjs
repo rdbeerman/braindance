@@ -59,3 +59,12 @@ test('the order may not name a parameter no installed package declares', () => {
     'a name in the order with no declaration behind it is a registry entry that cannot be assembled',
   );
 });
+
+test('reading and dependent-row semantics cross the package boundary with local names expanded', () => {
+  const reading = pkg('spectral', ['amount', 'bias']);
+  Object.assign(reading.manifest.params.amount, { reading: true, role: 'master' });
+  reading.manifest.params.bias.under = 'amount';
+  const table = tableFromPackages([reading], ['spectral.amount', 'spectral.bias']);
+  assert.equal(table['spectral.amount'].reading, true);
+  assert.equal(table['spectral.bias'].under, 'spectral.amount');
+});

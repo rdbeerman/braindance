@@ -65,6 +65,9 @@ test('the door names what it refuses, one rule at a time', () => {
     // The second master is inert and in range, so the row reaches the master count rather than
     // being answered by the bounds rule above it.
     ['a second master', 'rain', (c) => { Object.assign(c.manifest.params.speed, { role: 'master', def: 0, min: 0 }); }, /2 parameters with the role master/],
+    ['a reading flag that is not boolean', 'ghost', (c) => { c.manifest.params.amount.reading = 'yes'; }, /declares reading as "yes"/],
+    ['a reading that is not the inert master', 'ghost', (c) => { c.manifest.params.rim.reading = true; }, /declares itself a reading/],
+    ['a dependent row naming no master', 'ghost', (c) => { c.manifest.params.rim.under = 'missing'; }, /not another master in ghost/],
     ['a binding no program declares', 'thermal', (c) => { c.manifest.params.amount.bind.uniform = 'thermalll'; }, /declares no such uniform/],
     ['a uniform no parameter writes', 'rain', (c) => { c.chunks['decl.frag.glsl'] += 'uniform float rainStray;\n'; }, /"rainStray" and binds no parameter/],
     ['a chunk file naming a path', 'thermal', (c) => { c.manifest.chunks[0].file = '../out.glsl'; c.chunks['../out.glsl'] = ''; }, /"\.\.\/out\.glsl"/],

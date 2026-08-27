@@ -277,7 +277,7 @@ cleaning up the sensor's edge noise (sigma ~= 3.5 + 1.3*d mm, so 4.6mm at 0.75m 
 frame time, for the reason [rendering cost](performance.md#rendering-cost) gives.
 
 Two controls decide how much white lands on the geometry, and they are the first to reach
-for if the look is blown out. **`scan`** keys off distance rather than screen position, so
+for if the look is blown out. **`blackwall.scan`** keys off distance rather than screen position, so
 it crosses an angled surface as a drifting diagonal band; wide and hot it reads as a light
 leak, so it is kept narrow and cyan. **`rim`** brightens depth discontinuities and gives the
 subject its edge, but under additive blending plus bloom it washes broad surfaces white, so
@@ -670,7 +670,7 @@ They are settings of `raster.amount` rather than terms beside it, so only the ma
 grade pass — raise the angle with the master at zero and nothing happens, which is deliberate,
 since switching a full-screen pass on to draw nothing is the no-op the gate exists to refuse.
 The angle is one parameter behind a two-component uniform, computed in double on the way
-through for the reason `contourWidth`'s two band edges are: taking the sine in the shader is
+through for the reason `contour.width`'s two band edges are: taking the sine in the shader is
 allowed to be a couple of thousandths off, and a raster meant to run along y then leaks a
 whisker of x.
 
@@ -738,13 +738,15 @@ Nothing in the format marks the difference and nothing should — they are all d
 the split is editorial. A preset naming two values is equally valid, and applying it leaves
 everything else where the grade left it.
 
-**All ten name the whole look**: the 36 core values every look owes regardless of which
-effects it uses, plus every parameter of each effect the document itself touches — so picking
-one gives you that look whatever was on screen before it. Applying a whole look resets every
-effect the document does not claim back to that effect's own defaults, which is what makes
-leaving an effect out and writing it in at its defaults describe the same look; a document
-naming four core-only readings owes 36 values, and one naming Blackwall's five effects owes
-36 plus their 14. Framing — levelling, the clip planes, the crop box — is the shot rather
+**All ten name the whole look**: the 27 bare core values every look owes, plus every parameter
+of each effect the document itself touches — so picking one gives you that look whatever was
+on screen before it. The all-or-none reading rule means all ten also name the three reading
+packages, Ghost, Contour and Blackwall, with all nine of their parameters. A shipped whole look
+therefore names at least 36 values. `blackwall.json` claims five more effects whose fourteen
+parameters bring it to 50. Applying a whole look resets every effect the document does not
+claim back to that effect's own defaults, which is what makes leaving an ordinary effect out
+and writing it in at its defaults describe the same look. Framing — levelling, the clip planes,
+the crop box — is the shot rather
 than the look, so no shipped document names it and picking one never reframes what you
 framed. `none` is the one entry that does reach the framing, because it is the way back to
 the defaults rather than an eleventh look. `library-check` holds the rule against the
@@ -753,12 +755,14 @@ effect fails only the documents whose `requires` already claims that effect — 
 nothing has reached yet fails nothing, because nothing claims it.
 
 Saving and exporting both ask which values go in, every box ticked by default, so a sparse
-preset takes deliberate effort. A whole-look save still sheds what it can: an effect sitting
-wholly at its own defaults leaves no trace in the saved file, because the whole-look apply
-above restores that same effect to those same defaults whenever the document does not claim
-it — lossless by construction rather than by argument. A subset save sheds nothing, because a
-picked value at its default is still a value somebody chose. The boxes derive from the
-registry, so a parameter added later appears under its own heading by existing.
+preset takes deliberate effort. A whole-look save still sheds what it can: an ordinary effect
+sitting wholly at its own defaults leaves no trace in the saved file, because the whole-look
+apply above restores that same effect to those same defaults whenever the document does not
+claim it. The three reading packages stay whole even at their defaults, because a document
+naming `readRgb` and `readDepth` must also carry the other three reading weights. A subset save
+sheds nothing, because a picked value at its default is still a value somebody chose. The
+boxes derive from the registry, so a parameter added later appears under its own heading by
+existing.
 
 **The five reading weights tick and untick together.** A file naming any reading has to name
 all five, because the ones it omits stay at whatever the clip was already wearing, and two

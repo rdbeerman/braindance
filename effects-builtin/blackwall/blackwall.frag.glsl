@@ -30,4 +30,3 @@
     alphaFactor += (0.30 + 0.70 * rim * rimAmount + 0.45 * scan * blackwallScan) * blackwall;
     readSum += blackwall;
   }
-

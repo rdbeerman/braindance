@@ -558,7 +558,7 @@ console.log('\n== 1c. the image at a program position is the frame the index nam
   // Depth mode with interpolation off, so the image is a function of the current
   // depth texture and nothing else - no colour, no blend against the previous
   // frame, no age term, no clock.
-  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, scan: 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
+  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, 'blackwall.scan': 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
   const look = { ...FLAT, interpolate: false };
   const PAIR = 100;
   const CURRENT = PAIR + 1;
@@ -1024,7 +1024,7 @@ for (const rate of [0.5, 1.0, 2.0]) {
 
 console.log('\n== 4b. 60 fps out of a capture whose median gap is 64ms ==');
 {
-  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, scan: 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
+  const FLAT = { ...DEPTH_LOOK, fade: 0, wake: 0, trails: 0, bloom: 0, 'glitch.amount': 0, 'blackwall.scan': 0, 'noise.amount': 0, 'rgbsplit.amount': 0, 'raster.amount': 0, 'grain.amount': 0, 'vignette.amount': 0, 'duotone.amount': 0 };
   const walk = `(async (o) => {
     const k = globalThis.__kinect;
     const tl = globalThis.__tl;
@@ -1051,7 +1051,7 @@ console.log('\n== 4b. 60 fps out of a capture whose median gap is 64ms ==');
     if (on[i].applied === on[i - 1].applied) pairs.push([i - 1, i]);
   }
   const distinct = pairs.filter(([a, b]) => on[a].hash !== on[b].hash).length;
-  console.log(`  method: Depth mode with fade, wake, trails, bloom, glitch, scan, noise and the whole`);
+  console.log(`  method: Depth mode with fade, wake, trails, bloom, glitch, Blackwall scan, noise and the whole`);
   console.log('  grade at zero, so the blend fraction is the only thing left that can move the image.');
   console.log(`  24 output frames at 60 fps from 6.0s: ${pairs.length} consecutive pairs land on the`);
   console.log(`  same two source frames, ${distinct} of them producing a different image.`);

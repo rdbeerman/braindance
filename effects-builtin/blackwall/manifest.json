@@ -19,6 +19,7 @@
         "on": "points",
         "uniform": "blackwall"
       },
+      "reading": true,
       "role": "master"
     },
     "sweep": {

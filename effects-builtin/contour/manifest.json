@@ -19,6 +19,7 @@
         "on": "points",
         "uniform": "contour"
       },
+      "reading": true,
       "role": "master"
     },
     "bands": {

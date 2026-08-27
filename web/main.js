@@ -151,11 +151,12 @@ const EDITING = location.pathname === '/edit';
  */
 const PROGRAM_OUT = location.pathname === '/program';
 
-// In one place, because the write below and the project picker have to agree about it.
+// In one place, because the auto-save writer and the recovery offer have to agree about it.
 const WORKING_PROJECT = '__working__';
 
 // Which project the menu's Editor entry resumes. Client state rather than document state.
 const LAST_OPENED = 'kinect.lastOpened';
+let openedProjectName = null;
 
 function rememberOpened() {
   if (!openTakeHash) return;
@@ -163,7 +164,7 @@ function rememberOpened() {
     localStorage.setItem(LAST_OPENED, JSON.stringify({
       takeHash: openTakeHash,
       takeId: openTakeId,
-      project: ui.project?.value || null,
+      project: openedProjectName,
     }));
   } catch {
     // Private browsing, or a full quota. Resuming is a convenience, so this stays quiet.
@@ -555,10 +556,13 @@ const effectSlice = (first, last) => {
   }
   return Object.fromEntries(names.slice(from, to + 1).map((name) => {
     const bind = EFFECT_PARAMS[name];
-    return [name, {
+    const entry = {
       def: bind.def, min: bind.min, max: bind.max, step: bind.step, kind: bind.kind,
       tag: 'look', group: bind.group, label: bind.label, apply: effectApply(bind),
-    }];
+    };
+    if (bind.reading !== undefined) entry.reading = bind.reading;
+    if (bind.under !== undefined) entry.under = bind.under;
+    return [name, entry];
   }));
 };
 
@@ -739,8 +743,9 @@ function missingReadings(values) {
 /** Everything the registry has to be true of, asked of the table that has just been built. */
 function refuseRegistryDisagreement() {
   for (const name of READINGS) {
-    if (!Object.hasOwn(uniforms, name)) {
-      throw new Error(`the reading ${name} has no uniform: its slider would move nothing`);
+    const uniform = effectOf(name) === null ? name : EFFECT_PARAMS[name]?.uniform;
+    if (!uniform || !Object.hasOwn(uniforms, uniform)) {
+      throw new Error(`the reading ${name} binds no point uniform: its slider would move nothing`);
     }
   }
 
@@ -1082,9 +1087,9 @@ const panelGroupParams = new Map();
 const panelGroupElements = new Map();
 const panelEffectRows = new Map();
 // Rows whose visibility depends on a parent parameter being non-zero. Keyed by the
-// parent name (e.g. 'readGhost'), value is an array of row elements. When the parent
+// parent name (e.g. 'ghost.amount'), value is an array of row elements. When the parent
 // is 0 the rows are hidden; when it's positive they're shown. This is how reading
-// tuning parameters (ghostRim, contourBands, etc.) appear only when their reading is
+// tuning parameters (ghost.rim, contour.bands, etc.) appear only when their reading is
 // active.
 const panelUnderRows = new Map();
 
@@ -1186,7 +1191,7 @@ function buildPanel() {
       panelEffectRows.get(owner).push(mountedRow);
     }
     // A row that depends on another parameter being non-zero. The reading tuning params
-    // are hidden until their reading is active, so ghostRim only appears when readGhost > 0.
+    // are hidden until their reading is active, so ghost.rim only appears when ghost.amount > 0.
     if (spec.under) {
       if (!panelUnderRows.has(spec.under)) panelUnderRows.set(spec.under, []);
       panelUnderRows.get(spec.under).push(mountedRow);
@@ -2077,6 +2082,10 @@ function serialiseProjectBody({ suppressed = null } = {}) {
   // The save rule: an effect held at defaults with nothing keyed is not a use of it.
   for (const id of effectIds()) {
     const mine = effectParamNames(id);
+    // A reading package stays whole even at its defaults. Version 6 requires all five reading
+    // weights, and a document that sheds three because they moved behind package ids is a
+    // document this same build refuses on restore.
+    if (mine.some((n) => PARAMS[n].reading)) continue;
     const keyed = mine.some((n) => tracks.get(n)?.keys.length);
     const moved = mine.some((n) => lookParams[n] !== PARAMS[n].def);
     if (keyed || moved) continue;
@@ -5542,6 +5551,7 @@ function presetFromCurrentLook(names) {
   if (wholeLookTag(values)) {
     for (const id of effectIdsIn(Object.keys(values))) {
       const mine = effectParamNames(id);
+      if (mine.some((n) => PARAMS[n].reading)) continue;
       if (mine.every((n) => values[n] === PARAMS[n].def)) {
         for (const n of mine) delete values[n];
       }
@@ -6150,15 +6160,7 @@ function offerWorkingDocument(projects) {
 }
 
 async function refreshProjects() {
-  const list = await documentsIn('projects');
-  if (ui.project) {
-    ui.project.replaceChildren(new Option('—', ''));
-    for (const doc of list) {
-      if (doc.name === WORKING_PROJECT) continue;
-      ui.project.appendChild(new Option(doc.name, doc.name));
-    }
-  }
-  return list;
+  return documentsIn('projects');
 }
 
 async function refreshDeliverables() {
@@ -7690,7 +7692,7 @@ ui.presetFile.addEventListener('change', () => {
 
 /** Save the open edit under a name the operator gives. File > Save as and Shift+Cmd+S. */
 async function saveProjectAs() {
-  const name = prompt('save this edit as', ui.project?.value || `${openTakeId ?? 'clip'}-edit`);
+  const name = prompt('save this edit as', openedProjectName || `${openTakeId ?? 'clip'}-edit`);
   if (!name) return;
   try {
     // The take is named by content hash, which makes a project a self-contained render job.
@@ -7702,24 +7704,13 @@ async function saveProjectAs() {
     });
     const saved = await res.json();
     if (saved.error) throw new Error(saved.error);
-    await refreshProjects();
-    if (ui.project) ui.project.value = saved.name;
+    openedProjectName = saved.name;
     say(`saved ${saved.name} · ${saved.bytes} bytes`);
     rememberOpened();
   } catch (err) {
     showTimelineError(err);
   }
 }
-
-ui.projectOpen?.addEventListener('click', async () => {
-  const name = ui.project?.value;
-  if (!name) return;
-  try {
-    await loadProjectNamed(name);
-  } catch (err) {
-    showTimelineError(err);
-  }
-});
 
 ui.resumeOpen?.addEventListener('click', async () => {
   try {
@@ -8139,7 +8130,8 @@ async function loadProjectNamed(name, offered = null) {
   applyDeliverable(activeDeliverable);
   await timeline.seek(timeline.programSec);
   if (resume && gen === transportGen) timeline.play();
-  if (ui.project) ui.project.value = name;
+  // The working document is crash recovery, not a named edit for the menu to reopen directly.
+  openedProjectName = name === WORKING_PROJECT ? null : name;
   say(`opened ${name}`);
   rememberOpened();
   return doc;
@@ -8267,6 +8259,7 @@ async function openTake(id) {
   placeChrome();
   openTakeId = id;
   openTakeHash = source.index.hash;
+  openedProjectName = null;
   rememberOpened();
   await fitCropToTake(id, params.get('near'), params.get('far'))
     .catch((err) => { say(`the crop box could not be fitted to this take: ${err.message}`); });

@@ -3150,7 +3150,8 @@ async function runChecks() {
     // A look nothing defaults to, so a restore that did nothing cannot pass.
     const SCRAMBLE = {
       pointSize: 21.6, opacity: 0.62, exposure: 2.35, bloom: 1.35, trails: 0.62,
-      'rgbsplit.amount': 2.4, 'raster.amount': 0.44, 'grain.amount': 0.31, scan: 0.62, rim: 0.28, fade: 340, wake: 720,
+      'rgbsplit.amount': 2.4, 'raster.amount': 0.44, 'grain.amount': 0.31,
+      'blackwall.scan': 0.62, rim: 0.28, fade: 340, wake: 720,
     };
     // The deterministic drive rather than the timeline.
     const times = await page.evaluate(`(() => {
@@ -3349,7 +3350,7 @@ async function runChecks() {
       ['a parameter named constructor in the values', 'p.look.params.constructor = 1;'],
       ['a parameter named __proto__ in the values',
         "Object.defineProperty(p.look.params, '__proto__', { value: 1, enumerable: true, configurable: true, writable: true });"],
-      ['a reading that is not a number', 'p.look.params.readBlackwall = "1";'],
+      ['a reading that is not a number', 'p.look.params["blackwall.amount"] = "1";'],
       ['a retime rate of zero or less', 'p.composition.retime.rate = 0;'],
       ['a preset stamp that is not a name and a rev', 'p.appliedPreset = { name: 42 };'],
       // The record a deliverable's embedded document carries.
@@ -3501,7 +3502,7 @@ async function runChecks() {
     const TUNED = { bloom: 2.4, trails: 0.11, 'rgbsplit.amount': 4.2, 'grain.amount': 0.77, pointSize: 30.5 };
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
-      k.params.apply({ readRgb: 0, readBlackwall: 1 });
+      k.params.apply({ readRgb: 0, 'blackwall.amount': 1 });
       k.params.apply(${JSON.stringify(TUNED)});
       const res = await fetch('/presets/hand-tuned', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -3514,9 +3515,9 @@ async function runChecks() {
     const doc = JSON.parse(onDisk);
     check(doc.version === PROJECT_VERSION, 'a preset carries the format version too',
       `version ${doc.version}`);
-    check(doc.values.readBlackwall === 1 && doc.values.readRgb === 0,
+    check(doc.values['blackwall.amount'] === 1 && doc.values.readRgb === 0,
       'the reading travels inside the values, like every other look parameter',
-      `readBlackwall ${doc.values.readBlackwall} readRgb ${doc.values.readRgb}`);
+      `blackwall.amount ${doc.values['blackwall.amount']} readRgb ${doc.values.readRgb}`);
     check(!('mode' in doc), 'and there is no mode field left beside them');
     check(doc.values.bloom === TUNED.bloom && doc.values.pointSize === TUNED.pointSize,
       'and the look values it was saved with');
@@ -3526,7 +3527,7 @@ async function runChecks() {
     // Applied onto a clip that has been moved away from it.
     const applied = await retryOnContextLoss('applying the preset', () => page.evaluate(`(async () => {
       const k = globalThis.__kinect;
-      k.params.apply({ readBlackwall: 0, readRgb: 1 });
+      k.params.apply({ 'blackwall.amount': 0, readRgb: 1 });
       k.params.apply({ bloom: 0, trails: 0, 'rgbsplit.amount': 0, 'grain.amount': 0, pointSize: 9 });
       const before = { pose: k.params.get('camera'), values: k.params.values(k.params.names('look')) };
       const docRes = await fetch('/presets/hand-tuned');
@@ -3542,9 +3543,9 @@ async function runChecks() {
       && applied.after['grain.amount'] === TUNED['grain.amount'] && applied.after.pointSize === TUNED.pointSize,
       'applying a preset restores the values it was saved with, not a built-in look',
       `bloom ${applied.after.bloom} rgbsplit.amount ${applied.after['rgbsplit.amount']} pointSize ${applied.after.pointSize}`);
-    check(applied.after.readBlackwall === 1 && applied.after.readRgb === 0,
+    check(applied.after['blackwall.amount'] === 1 && applied.after.readRgb === 0,
       'and it restores the reading, which needs no special case to travel',
-      `readBlackwall ${applied.after.readBlackwall}`);
+      `blackwall.amount ${applied.after['blackwall.amount']}`);
     check(eq(applied.pose, applied.before.pose), 'and it does not move the camera');
 
     const diskRev = `sha256:${createHash('sha256').update(onDisk).digest('hex')}`;

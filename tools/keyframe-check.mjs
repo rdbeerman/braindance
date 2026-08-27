@@ -809,7 +809,7 @@ const lanePressPoint = (owner, which, index) => page.evaluate(`(() => {
   return null;
 })()`);
 
-// Read out of the documents that ship them, so no look value is invented here. `readBlackwall` is
+// Read out of the documents that ship them, so no look value is invented here. `blackwall.amount` is
 // the reading and not the accumulator, so a shading picked with the grade at zero leaves every
 // pre-roll cost at nothing.
 const applyLook = (look) => page.evaluate(`globalThis.__kinect.applyPreset(${src(look)})`);
@@ -1510,7 +1510,7 @@ console.log('\n== 4b. a hold freezes source time, and the image with it ==');
   // Every term that reads program time turned off - scan, grain, scanlines, RGB split and glitch
   // all take `uniforms.time`, which keeps running under a freeze. Persistence stays on.
   await applyLook(BLACKWALL_LOOK);
-  const TIME_FREE = { scan: 0, 'grain.amount': 0, 'raster.amount': 0, 'rgbsplit.amount': 0, 'glitch.amount': 0, 'noise.amount': 0, trails: 0 };
+  const TIME_FREE = { 'blackwall.scan': 0, 'grain.amount': 0, 'raster.amount': 0, 'rgbsplit.amount': 0, 'glitch.amount': 0, 'noise.amount': 0, trails: 0 };
   await page.evaluate(`globalThis.__kinect.params.apply(${src(TIME_FREE)})`);
   await settle();
 
@@ -1569,7 +1569,7 @@ console.log('\n== 4b. a hold freezes source time, and the image with it ==');
     const k = globalThis.__kinect;
     const kf = globalThis.__kf;
     const t = k.timeline.transport();
-    k.params.apply({ scan: 0.35, 'grain.amount': 0.22, 'raster.amount': 0.35 });
+    k.params.apply({ 'blackwall.scan': 0.35, 'grain.amount': 0.22, 'raster.amount': 0.35 });
     await k.timeline.settled();
     for (const [i, p] of ${src(inside)}.entries()) {
       await t.seek(p);

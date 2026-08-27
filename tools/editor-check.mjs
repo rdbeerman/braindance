@@ -539,12 +539,12 @@ const MUTATIONS = {
   },
 
   // Must redden: section 1's row "every parameter the registry declares has a control on the
-  // panel" - and that row alone, naming ghostFill.
+  // panel" - and that row alone, naming ghost.fill.
   'panel-row-skips-parameter': {
     file: 'web/main.js',
     edits: [
       ['    if (spec.group !== group.key) continue;',
-        "    if (spec.group !== group.key || name === 'ghostFill') continue;"],
+        "    if (spec.group !== group.key || name === 'ghost.fill') continue;"],
       ['  if (panelRowsEmitted !== owned.length) {', '  if (panelRowsEmitted !== owned.length - 1) {'],
     ],
   },
@@ -1814,8 +1814,10 @@ try {
   } else {
     await page.evaluate(`document.querySelector('button[aria-label="halation.amount keyframe"]').click()`);
   }
-  if (couldAddHalation) await page.locator('#effectRackOpen').click();
-  else await page.evaluate("document.getElementById('effectRackOpen').click()");
+  if (await page.evaluate('document.getElementById("effectRackPanel").hidden')) {
+    if (couldAddHalation) await page.locator('#effectRackOpen').click();
+    else await page.evaluate("document.getElementById('effectRackOpen').click()");
+  }
   await page.locator('#effectRackSearch').fill('halation');
   await page.locator('[data-effect-remove="halation"]').click();
   const confirmation = await page.evaluate(`(() => ({
@@ -1914,21 +1916,21 @@ try {
     const k = globalThis.__kinect;
     let stored = [];
     try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
-    const hidden = k.effectIds().filter((id) => k.effectParamNames(id).some((name) => {
+    const unavailable = k.effectIds().filter((id) => k.effectParamNames(id).every((name) => {
       const row = document.getElementById(name)?.closest('.row, .checkrow');
       return !row || row.hidden;
     }));
     return {
       ids: [...k.effectIds()].sort(),
       stored: [...stored].sort(),
-      hidden,
+      unavailable,
       removes: document.querySelectorAll('#effectRackList [data-effect-remove]').length,
     };
   })()`);
   check(JSON.stringify(rackComplete.stored) === JSON.stringify(rackComplete.ids)
-    && rackComplete.hidden.length === 0 && rackComplete.removes === rackComplete.ids.length,
+    && rackComplete.unavailable.length === 0 && rackComplete.removes === rackComplete.ids.length,
   'adding the remaining installed effects makes every one available to the sidebar and the control sweep',
-  `${rackAdds} added in the loop, ${rackComplete.hidden.length} hidden, `
+  `${rackAdds} added in the loop, ${rackComplete.unavailable.length} unavailable, `
     + `${rackComplete.removes} remove controls for ${rackComplete.ids.length} effects`);
 
   // One mark planted first, because a mark tick is a control that exists only when the take has a
@@ -1948,6 +1950,8 @@ try {
     const els = [...document.querySelectorAll('.appbar input, .appbar select, .appbar button, .appbar a, '
       + '.tbar input, .tbar select, .tbar button, .tbar a, '
       + '#panel input, #panel select, #panel button, #panel a, #panel [role=option], '
+      + '#effectRackPanel input, #effectRackPanel select, #effectRackPanel button, '
+      + '#effectRackPanel a, #effectRackPanel [role=option], '
       + '.tlanes input, .tlanes select, .tlanes button, .tlanes a, '
       + 'dialog input, dialog select, dialog button, dialog a')];
     return els.map((el) => ({
@@ -2026,8 +2030,36 @@ try {
   check(composition.length > 0 && withControls.length === 0,
     'and no composition parameter has one, because composition is edited in the world',
     withControls.length ? `${withControls.join(', ')} has a control` : `${composition.length} checked: ${composition.join(', ')}`);
-  check(sweep.some((r) => r.id === 'tPlay') && sweep.some((r) => r.id === 'tIn'),
+  check(sweep.some((r) => r.id === 'tPlay') && sweep.some((r) => r.id === 'tRate'),
     'the strip is among what was swept', `${sweep.filter((r) => r.inTbar).map((r) => r.id).filter(Boolean).slice(0, 6).join(', ')}...`);
+
+  // The census racks every installed effect so its generated controls exist for the sweep. That
+  // is local panel state, not project state, and leaving it behind changes every later claim about
+  // a fresh inspector. Remove through the real controls so the cleanup also proves that an idle
+  // effect needs no destructive confirmation.
+  let rackRemoves = 0;
+  while (await page.locator('[data-effect-remove]').count() > 0) {
+    await page.locator('[data-effect-remove]').first().click();
+    rackRemoves++;
+  }
+  const rackClean = await page.evaluate(`(() => {
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
+    return {
+      stored,
+      visible: globalThis.__kinect.effectIds().filter((id) =>
+        globalThis.__kinect.effectParamNames(id).some((name) => {
+          const row = document.getElementById(name)?.closest('.row, .checkrow');
+          return row && !row.hidden;
+        })),
+      confirms: document.querySelectorAll('[data-effect-confirm-remove]').length,
+    };
+  })()`);
+  check(rackRemoves === rackComplete.ids.length && rackClean.stored.length === 0
+    && rackClean.visible.length === 0 && rackClean.confirms === 0,
+  'the sweep removes every idle effect through the rack and leaves later sections a fresh sidebar',
+  `${rackRemoves} removed, stored ${JSON.stringify(rackClean.stored)}, `
+    + `${rackClean.visible.length} effects still visible, ${rackClean.confirms} confirmations`);
 
   await page.locator('#effectRackClose').click();
   check(await page.evaluate('document.getElementById("effectRackPanel").hidden'),
@@ -5238,7 +5270,7 @@ try {
 
   console.log('\n[11] the strip is bounded, and the splitter is what bounds it');
   const LANED = ['bloom', 'grain.amount', 'raster.amount', 'rgbsplit.amount', 'glitch.amount', 'trails', 'rim',
-    'thermal.amount', 'edges.amount', 'scan', 'noise.amount', 'denoise', 'exposure'];
+    'thermal.amount', 'edges.amount', 'blackwall.scan', 'noise.amount', 'denoise', 'exposure'];
   // The value each key holds is asked of the registry rather than assumed, because `denoise` is a
   // step parameter and a key holding 0.2 makes `normalise` throw the moment anything
   // evaluates the track.
@@ -5457,7 +5489,7 @@ try {
     }
   };
   try {
-    const known = { bloom: 2.75, 'grain.amount': 0.66, readBlackwall: 1, readRgb: 0 };
+    const known = { bloom: 2.75, 'grain.amount': 0.66, 'blackwall.amount': 1, readRgb: 0 };
     await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(known)})`);
     // Moved again after the apply and never saved, which is what makes the row below able to fail:
     // `exportPresetFile` takes its name from the picker and its values from the live look, and a
@@ -5538,9 +5570,9 @@ try {
     await importFile(edited);
     await page.waitForFunction("document.getElementById('tNote').textContent.startsWith('imported')", null, { timeout: 15000 });
     await settle();
-    const back = await page.evaluate("(() => { const k = globalThis.__kinect; return JSON.stringify({ bloom: k.params.get('bloom'), grain: k.params.get('grain.amount'), readBlackwall: k.params.get('readBlackwall'), stamp: k.library.appliedPreset() }); })()");
+    const back = await page.evaluate("(() => { const k = globalThis.__kinect; return JSON.stringify({ bloom: k.params.get('bloom'), grain: k.params.get('grain.amount'), blackwall: k.params.get('blackwall.amount'), stamp: k.library.appliedPreset() }); })()");
     const landed = JSON.parse(back);
-    check(landed.bloom === 4.4 && landed.grain === 0.13 && landed.readBlackwall === 1,
+    check(landed.bloom === 4.4 && landed.grain === 0.13 && landed.blackwall === 1,
       'and importing it puts the edited look on screen', `bloom ${landed.bloom} grain ${landed.grain}`);
     check(landed.stamp?.name === NAME_EDITED,
       'and stamps the clip with where it came from', JSON.stringify(landed.stamp?.name));
@@ -6080,31 +6112,27 @@ try {
       `chip ${offeredAnyway.shown ? 'shown' : 'hidden'}, "${offeredAnyway.when}"`);
     await reopen();
 
-    await page.evaluate(`__kinect.library.loadProject(${JSON.stringify(OTHER)})`);
-    await page.waitForFunction("document.getElementById('tNote').textContent.includes('different footage')",
-      null, { timeout: 15000 }).catch(() => {});
-    const noteBox = await page.evaluate(`(() => {
-      const note = document.getElementById('tNote');
-      return {
-        text: note.textContent,
-        title: note.title,
-        overflows: note.scrollWidth > note.clientWidth + 1,
-        scrollWidth: note.scrollWidth,
-        clientWidth: note.clientWidth,
-        clipped: getComputedStyle(note).textOverflow,
-      };
+    const projectControls = await page.evaluate(`(() => ({
+      picker: Boolean(document.getElementById('tProject')),
+      open: Boolean(document.getElementById('tProjectOpen')),
+    }))()`);
+    check(!projectControls.picker && !projectControls.open,
+      'the saved-project controls left with the timeline information bar rather than surviving as an unreachable fragment',
+      `picker=${projectControls.picker}, open=${projectControls.open}`);
+    const foreignRefusal = await page.evaluate(`(async () => {
+      try {
+        await __kinect.library.loadProject(${JSON.stringify(OTHER)});
+        return null;
+      } catch (err) {
+        return String(err);
+      }
     })()`);
-    check(noteBox.overflows && noteBox.text.length > 120,
-      'the refusal is genuinely wider than the space it is written into, which is what the title is for',
-      `${noteBox.text.length} characters, ${noteBox.scrollWidth}px of content in ${noteBox.clientWidth}px`);
-    check(noteBox.title === noteBox.text && /different footage/.test(noteBox.title),
-      'and the whole of it is reachable off the note\'s title, which is the only surface it fits on',
-      `title "${noteBox.title.slice(0, 60)}..." against text "${noteBox.text.slice(0, 60)}..."`);
-    check(noteBox.clipped === 'ellipsis',
-      'and it is cut with an ellipsis rather than allowed to push the rest of the bar off the edge',
-      `text-overflow ${noteBox.clipped}`);
-    // The refusal above is this section's own doing and `showTimelineError` logs every note it
-    // writes, so the mark moves past it.
+    check(/different footage/.test(foreignRefusal ?? ''),
+      'the project loader still refuses a document built on different footage',
+      foreignRefusal ?? 'no refusal');
+    // The presets refusal above deliberately produces the network error Chrome reports. The
+    // remaining error sweep begins after it, so only failures the later gestures did not ask for
+    // can redden that sweep.
     errorsBefore = errors.length;
 
     // ---- reload two: different footage under the same name
@@ -6802,6 +6830,7 @@ try {
           markVisible: vis(mark),
           mark: mark ? mark.textContent : null,
           tab: g.dataset.panelTab,
+          rendered: vis(g),
           inDom: rows(g).length,
           onScreen: rows(g).filter(vis).length,
         };
@@ -6830,10 +6859,14 @@ try {
     const defaultOf = (name) => page.evaluate(
       `__kinect.params.normalise(${JSON.stringify(name)}, __kinect.params.spec(${JSON.stringify(name)}).default)`);
 
-    // The store cleared once, here, where it is the only safe place: nothing has pressed a toggle
-    // yet, so the page is holding no overrides in memory and the two cannot come apart.
-    await freshLook();
+    // Section 1 opens every generated group while it sweeps the controls. Clear that fixture and
+    // boot the page from the empty store, because deleting storage alone does not clear the live
+    // override map that was built from it.
     await page.evaluate("localStorage.removeItem('kinect.panelGroupsOpen')");
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
+    await page.waitForFunction('!!globalThis.__kinect.timeline.transport()', null, { timeout: 30000 });
+    await freshLook();
     await page.evaluate('__kinect.timeline.transport().seek(3)');
     await settle();
 
@@ -6882,19 +6915,19 @@ try {
 
     await freshLook();
     await settle();
-    const rimDefault = await defaultOf('ghostRim');
-    const rimSpec = await page.evaluate("__kinect.params.spec('ghostRim')");
+    const styleDefault = await defaultOf('thermal.amount');
+    const styleSpec = await page.evaluate("__kinect.params.spec('thermal.amount')");
     // Whichever end of the travel the default is not, so this cannot become a write of the value
     // that was already there - which would leave the group untouched and the row below asserting
     // the state it started in.
-    await page.evaluate(`__kinect.params.set('ghostRim', ${rimDefault === rimSpec.max ? rimSpec.min : rimSpec.max})`);
+    await page.evaluate(`__kinect.params.set('thermal.amount', ${styleDefault === styleSpec.max ? styleSpec.min : styleSpec.max})`);
     await settle();
-    const rimNow = await page.evaluate("__kinect.params.get('ghostRim')");
+    const styleNow = await page.evaluate("__kinect.params.get('thermal.amount')");
     const readingsQuiet = await page.evaluate(`__kinect.readings().every((n) =>
       __kinect.params.get(n) === __kinect.params.normalise(n, __kinect.params.spec(n).default))`);
-    check(rimNow !== rimDefault && readingsQuiet,
+    check(styleNow !== styleDefault && readingsQuiet,
       'one style parameter moved with every reading left at its default, or the row below tests nothing',
-      `ghostRim reads ${rimNow} against a default of ${rimDefault}, readings untouched: ${readingsQuiet}`);
+      `thermal.amount reads ${styleNow} against a default of ${styleDefault}, readings untouched: ${readingsQuiet}`);
     const tuned = await groupOf('style');
     check(!tuned.shut && tuned.onScreen === tuned.inDom,
       'moving a style parameter opens the style group, so the open set is the whole diff',
@@ -6995,33 +7028,33 @@ try {
     if (!(await groupOf('post')).shut) await page.click('[data-group-toggle=post]');
     await settle();
 
-    // ---- 15g. moving a treatment opens the style group
-    // `readGhost` rather than `readRgb`, and the difference is the whole trap: `readRgb` defaults
+    // ---- 15g. moving a package parameter opens that package's group
+    // `ghost.amount` rather than `readRgb`, and the difference is the whole trap: `readRgb` defaults
     // to 1, so "open when a reading is non-zero" fires on a page nobody has touched.
     await freshLook();
     await settle();
-    const styleQuiet = await groupOf('style');
-    await page.evaluate("__kinect.params.set('readGhost', 0.7)");
+    const ghostQuiet = await groupOf('ghost');
+    await page.evaluate("__kinect.params.set('ghost.amount', 0.7)");
     await settle();
-    const styleLive = await groupOf('style');
-    check(styleQuiet.shut && !styleLive.shut && styleLive.onScreen === styleLive.inDom,
-      'moving a treatment (readGhost) opens the style group',
-      `shut with the readings at their defaults: ${styleQuiet.shut}, after readGhost moved: ${styleLive.shut}`);
-    const untouched = (await groups()).filter((g) => g.collapsible && g.key !== 'style');
+    const ghostLive = await groupOf('ghost');
+    check(ghostQuiet.shut && !ghostLive.shut && ghostLive.onScreen === ghostLive.inDom,
+      'moving ghost.amount opens the Ghost package group',
+      `shut with the readings at their defaults: ${ghostQuiet.shut}, after ghost.amount moved: ${ghostLive.shut}`);
+    const untouched = (await groups()).filter((g) => g.collapsible && g.key !== 'ghost');
     check(untouched.every((g) => g.shut),
-      'and leaves the three groups the reading has nothing to do with shut',
+      'and leaves every group the reading has nothing to do with shut',
       untouched.map((g) => `${g.key}:${g.shut ? 'shut' : 'OPEN'}`).join(' '));
 
-    await page.click('[data-group-toggle=style]');
+    await page.click('[data-group-toggle=ghost]');
     await settle();
-    const styleShut = await groupOf('style');
-    const styleStored = JSON.parse((await stored()) ?? '{}');
-    check(styleShut.shut && styleStored.style === false,
+    const ghostShut = await groupOf('ghost');
+    const ghostStored = JSON.parse((await stored()) ?? '{}');
+    check(ghostShut.shut && ghostStored.ghost === false,
       'shutting a group while it is in use stays shut and is written down',
-      `shut=${styleShut.shut}, stored ${JSON.stringify(styleStored)}`);
-    check(styleShut.markVisible && styleShut.mark === '1',
+      `shut=${ghostShut.shut}, stored ${JSON.stringify(ghostStored)}`);
+    check(ghostShut.markVisible && ghostShut.mark === '1',
       'and it is marked as in use with a count of what it is holding',
-      `mark visible=${styleShut.markVisible}, reads "${styleShut.mark}"`);
+      `mark visible=${ghostShut.markVisible}, reads "${ghostShut.mark}"`);
 
     // ---- 15i. the override outlives the page that wrote it
     // This page reloaded rather than a second page opened beside it, because `page.route` is
@@ -7031,10 +7064,10 @@ try {
     await page.evaluate("__kinect.params.set('bloom', 1.5)");
     await settle();
     if (!(await groupOf('post')).shut) await page.click('[data-group-toggle=post]');
-    if ((await groupOf('style')).shut) await page.click('[data-group-toggle=style]');
+    if ((await groupOf('points')).shut) await page.click('[data-group-toggle=points]');
     await settle();
     const beforeReload = JSON.parse((await stored()) ?? '{}');
-    check(beforeReload.post === false && beforeReload.style === true,
+    check(beforeReload.post === false && beforeReload.points === true,
       'a group shut while it is in use and a quiet one pinned open are two disagreements to survive, or the rows below test nothing',
       `stored ${JSON.stringify(beforeReload)}`);
     await page.reload({ waitUntil: 'load' });
@@ -7048,14 +7081,14 @@ try {
     // agreement rather than on movement deletes the collapse during the boot pass, when the look
     // is at its defaults because no document has arrived yet, and writes the pruned map back.
     const carriedStore = JSON.parse((await stored()) ?? '{}');
-    check(carriedStore.post === false && carriedStore.style === true,
+    check(carriedStore.post === false && carriedStore.points === true,
       'the store the page booted from still holds both, so nothing pruned them against a document that had not loaded yet',
       `stored ${JSON.stringify(carriedStore)}`);
-    const pinCarried = await showGroup('style');
+    const pinCarried = await showGroup('points');
     const quietAfter = await page.evaluate(`(() => {
       const k = globalThis.__kinect;
       const known = new Set(k.params.names());
-      const group = [...document.querySelectorAll('#panel .group[data-group]')].find((g) => g.dataset.group === 'style');
+      const group = [...document.querySelectorAll('#panel .group[data-group]')].find((g) => g.dataset.group === 'points');
       const names = [...group.querySelectorAll('input')].map((i) => i.id).filter((n) => known.has(n));
       return { names: names.length, quiet: names.every((n) => k.params.get(n) === k.params.normalise(n, k.params.spec(n).default)) };
     })()`);
@@ -7079,7 +7112,8 @@ try {
     await freshLook();
     await settle();
     const driven = [];
-    for (const g of (await groups()).filter((x) => x.collapsible)) {
+    const renderedToggles = (await groups()).filter((x) => x.collapsible && x.rendered);
+    for (const g of renderedToggles) {
       await showGroup(g.key);
       const before = await groupOf(g.key);
       await page.click(`[data-group-toggle=${g.key}]`);
@@ -7093,7 +7127,7 @@ try {
         honest: after.expanded === String(after.onScreen > 0),
       });
     }
-    check(driven.length === collapsible.length && driven.every((d) => d.moved && d.honest),
+    check(driven.length === renderedToggles.length && driven.every((d) => d.moved && d.honest),
       'every collapsible group the page renders was pressed here and its rows answered',
       driven.map((d) => `${d.key}:${d.from}->${d.to}${d.honest ? '' : ' (aria disagrees)'}`).join(' '));
 
@@ -7137,6 +7171,9 @@ try {
     // pin the drive, and a panel left with four groups open is a different page from the one they
     // were measured on.
     await page.evaluate("localStorage.removeItem('kinect.panelGroupsOpen')");
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
+    await page.waitForFunction('!!globalThis.__kinect.timeline.transport()', null, { timeout: 30000 });
     await freshLook();
   }
 
@@ -7168,6 +7205,7 @@ try {
           name,
           tag: spec.tag,
           kind: spec.kind,
+          under: spec.under ?? null,
           control: input ? input.type : null,
           tab: group ? group.dataset.panelTab || null : null,
           group: group ? group.dataset.group || null : null,
@@ -7230,6 +7268,32 @@ try {
       if (spec.kind === 'step') return !def;
       return def + spec.step <= spec.max ? def + spec.step : def - spec.step;
     })()`);
+    const rackAllEffects = async () => {
+      await page.locator('.paneltab[data-panel-tab="look"]').click();
+      await page.locator('#effectRackOpen').click();
+      await page.locator('#effectRackSearch').fill('');
+      for (;;) {
+        const next = page.locator('[data-effect-add]').first();
+        if (await next.count() === 0) break;
+        await next.click();
+      }
+      await page.locator('#effectRackClose').click();
+      await settle();
+    };
+    const clearRackAndOverrides = async () => {
+      await page.locator('.paneltab[data-panel-tab="look"]').click();
+      await page.locator('#effectRackOpen').click();
+      await page.locator('#effectRackSearch').fill('');
+      while (await page.locator('[data-effect-remove]').count() > 0) {
+        await page.locator('[data-effect-remove]').first().click();
+      }
+      await page.locator('#effectRackClose').click();
+      await page.evaluate("localStorage.removeItem('kinect.panelGroupsOpen')");
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
+      await page.waitForFunction('!!globalThis.__kinect.timeline.transport()', null, { timeout: 30000 });
+      await freshLook();
+    };
 
     await freshLook();
     await page.locator('.paneltab[data-panel-tab="look"]').click();
@@ -7283,10 +7347,16 @@ try {
         ? offeredAtRest.map((p) => `${p.name} offered=${p.offered} disabled=${p.disabled} value ${p.value} against ${p.def}`).join(', ')
         : `${quiet.length} rows, all unoffered and disabled, all on their defaults`);
 
-    const shownAtRest = quiet.filter((p) => p.rowOnScreen);
-    check(shownAtRest.length >= 10 && shownAtRest.every((p) => p.onScreen === false),
+    // The fresh Look groups are correctly collapsed. Use the non-collapsing Framing group for
+    // the rendered-state arm, then return to Look before driving its preset picker.
+    await page.locator('.paneltab[data-panel-tab="framing"]').click();
+    await settle();
+    const shownAtRest = carried(await resetState()).filter((p) => p.rowOnScreen);
+    check(shownAtRest.length >= 8 && shownAtRest.every((p) => p.onScreen === false),
       'and a reset that is not offered is not on the screen either, so the attribute is the rendered state',
       `${shownAtRest.filter((p) => p.onScreen === false).length} of ${shownAtRest.length} rows on screen show nothing`);
+    await page.locator('.paneltab[data-panel-tab="look"]').click();
+    await settle();
 
     // ---- 17c. the door this control has to read, and it is not its own
     // Everything above and below could be satisfied by a button that remembered its own clicks.
@@ -7402,12 +7472,19 @@ try {
     };
 
     // Every one of them, and the count is what makes the driver rule honest: section 1 credits
-    // all fifty-one of these controls to this section by their `data-reset` attribute.
+    // this generated set of controls to this section by their `data-reset` attribute.
     await freshLook();
+    await rackAllEffects();
+    // A tuning row declared `under` is deliberately hidden while its master is zero. Put every
+    // parent one step up, then drive tuning rows before their masters so every rendered reset is
+    // reached without weakening that visibility rule.
+    const underParents = [...new Set(scalars.map((p) => p.under).filter(Boolean))];
+    for (const parent of underParents) await driveSlider(parent, await oneStepOff(parent));
     await settle();
     const unarmed = [];
     const byTab = new Map();
-    for (const p of scalars) {
+    const resetOrder = [...scalars].sort((a, b) => Number(Boolean(b.under)) - Number(Boolean(a.under)));
+    for (const p of resetOrder) {
       if (!byTab.has(p.tab)) byTab.set(p.tab, []);
       byTab.get(p.tab).push(p.name);
     }
@@ -7442,6 +7519,9 @@ try {
       stillOffered.length
         ? `${stillOffered.length} still offered: ${stillOffered.slice(0, 6).map((p) => `${p.name} offered=${p.offered} disabled=${p.disabled}`).join(', ')}`
         : `${afterPresses.length} rows unoffered and disabled again`);
+    // Racking package effects can hold a shared core group open. Clear that panel fixture before
+    // asking whether a core value alone opens and then closes its own group.
+    await clearRackAndOverrides();
     await page.locator('.paneltab[data-panel-tab="look"]').click();
     await settle();
 
@@ -7601,8 +7681,10 @@ try {
         // caret that is exactly on it. Measured: the drops-focus control came back NOT
         // CAUGHT at 415 assertions and none failed while this line coalesced. The suite
         // notes carry the same trap costing the gallery two red rows about nothing.
-        focus: document.activeElement?.dataset?.name
-          || document.activeElement?.id || document.activeElement?.tagName || 'nothing',
+        focus: document.activeElement?.classList?.contains('pickeroption')
+          ? document.activeElement.dataset.name
+          : (document.activeElement?.id || document.activeElement?.tagName || 'nothing'),
+        focusIsOption: Boolean(document.activeElement?.classList?.contains('pickeroption')),
       };
     })()`);
 
@@ -7620,9 +7702,10 @@ try {
     check(open.add && open.add[0] === 24 && open.add[1] === 24,
       'and it carries the 24x24 add button the design draws',
       open.add ? `${open.add[0]}x${open.add[1]}` : 'no add button');
-    check(open.hidden === false && open.expanded === 'true' && open.names.includes(open.focus),
+    check(open.hidden === false && open.expanded === 'true' && open.focusIsOption
+      && open.names.includes(open.focus),
       'opening it says so and hands the caret to an entry rather than leaving it on the trigger',
-      `expanded ${open.expanded}, focus on ${open.focus}`);
+      `expanded ${open.expanded}, focus on ${open.focus || '(none)'}`);
 
     await page.keyboard.press('ArrowDown');
     const down = (await shape()).focus;
@@ -7630,7 +7713,7 @@ try {
     const up = (await shape()).focus;
     check(down !== up && open.names.includes(down) && open.names.includes(up),
       'the arrow keys walk the entries, which is the whole of what a native option gave away',
-      `down to ${down}, back up to ${up}`);
+      `down to ${down || '(none)'}, back up to ${up || '(none)'}`);
 
     const wanted = open.names.find((n) => n !== up && n.length > 1) ?? open.names[0];
     for (const ch of wanted.slice(0, 2)) await page.keyboard.press(ch);

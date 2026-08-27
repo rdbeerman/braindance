@@ -9,4 +9,3 @@
     alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * ghost;
     readSum += ghost;
   }
-

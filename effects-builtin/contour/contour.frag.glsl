@@ -8,4 +8,3 @@
     alphaFactor += (0.15 + 0.85 * line) * contour;
     readSum += contour;
   }
-

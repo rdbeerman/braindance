@@ -2006,17 +2006,12 @@ with the precondition green every time and both final baselines passing all of t
 subsets would already be suggestive; four is the statement, because **an ordering bug picks
 the same row.** A run that reddens only these is a re-run, not a finding.
 
-Two things make it worse than ordinary noise here. A polluted `projects/` store is the first
+One thing makes it worse than ordinary noise here. A polluted `projects/` store is the first
 suspect and the cheapest to rule out, because anything that has been driving the editor by
 hand against the same server leaves real autosaves and deliverables behind it; take the
-re-run against a clean store rather than the one that just failed. And the same block can
-**crash rather than fail**: observed once as `DID NOT RUN - page.selectOption: Timeout
-30000ms exceeded` at 313 of 396, on `page.selectOption('#tProject', OTHER)` with Playwright
-reporting `did not find some options` — section 13's own fixture stubs `/presets` to 500,
-reopens twice, then expects the project picker to carry the name it planted. It was transient,
-with four later runs through the same block on the same build going through. Per the rule at
-the top of this file that is a crash to investigate and never a catch, and it is exactly the
-shape that reads as a catch to anything counting exit codes.
+re-run against a clean store rather than the one that just failed. The saved-project picker
+left with the timeline information bar, so section 13 now asserts that no fragment of those
+controls remains and drives the auto-save recovery and project loader directly.
 
 **Two `editor-check` sweeps must never run at once, and neither may `web/` be edited under
 one.** This cost two whole measurements in one session. A sweep straddling a `web/main.js`
