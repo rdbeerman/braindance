@@ -1921,8 +1921,14 @@ function paramTouched(name) {
   return params.get(name) !== groupDefaults.get(name);
 }
 
+/** A group stays open while it carries work or belongs to a racked effect. */
 function revealsItself(key) {
-  return (panelGroupParams.get(key) ?? []).some(paramTouched);
+  const names = panelGroupParams.get(key) ?? [];
+  if (names.some(paramTouched)) return true;
+  return names.some((name) => {
+    const id = effectOf(name);
+    return id !== null && rackedEffects.has(id);
+  });
 }
 
 /** What the document says about a group, which is the derived half of whether it is open. */

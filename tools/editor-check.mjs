@@ -414,8 +414,8 @@ const MUTATIONS = {
   'group-never-reveals': {
     file: 'web/main.js',
     edits: [[
-      'function revealsItself(key) {\n  return (panelGroupParams.get(key) ?? []).some(paramTouched);',
-      'function revealsItself(key) {\n  if (key) return false;\n  return (panelGroupParams.get(key) ?? []).some(paramTouched);',
+      'function revealsItself(key) {\n  const names = panelGroupParams.get(key) ?? [];',
+      'function revealsItself(key) {\n  if (key) return false;\n  const names = panelGroupParams.get(key) ?? [];',
     ]],
   },
 
