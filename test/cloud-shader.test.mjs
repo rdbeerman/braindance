@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 
 import { cloudSpine } from '../web/cloud-shader.js';
 import { gradeSpine } from '../web/grade-shader.js';
+import { moshSpine } from '../web/mosh-shader.js';
 import { assembleShaders } from '../web/shader-assembly.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -21,6 +22,7 @@ const BUILTIN = join(ROOT, 'effects-builtin');
 const TABLES = {
   cloud: { file: 'point-cloud.js', open: '\n  uniforms = {\n', close: '\n  };\n', key: /^ {4}([A-Za-z_]\w*):/gm, floor: 60 },
   grade: { file: 'post-chain.js', open: '\nconst GRADE_UNIFORMS = {\n', close: '\n};\n', key: /^ {2}([A-Za-z_]\w*):/gm, floor: 8 },
+  mosh: { file: 'post-chain.js', open: '\nconst MOSH_UNIFORMS = {\n', close: '\n};\n', key: /^ {2}([A-Za-z_]\w*):/gm, floor: 4 },
 };
 
 const shippedPackages = () => readdirSync(BUILTIN, { withFileTypes: true })
@@ -34,7 +36,9 @@ const shippedPackages = () => readdirSync(BUILTIN, { withFileTypes: true })
     return { id, manifest, chunks };
   });
 
-const PROGRAMS = assembleShaders({ cloud: cloudSpine, grade: gradeSpine }, shippedPackages());
+const PROGRAMS = assembleShaders(
+  { cloud: cloudSpine, grade: gradeSpine, mosh: moshSpine }, shippedPackages(),
+);
 
 /** Every name a `uniform` line declares, split on commas because one line carries several. */
 const declaredInGlsl = (program) => {

@@ -829,7 +829,7 @@ const EXEMPTIONS = [
     binding: 'TOP_CENTRE',
     why: 'The world x/z the plan view is centred on. Read by the two directions of the same coordinate change and by nothing else, and a pair of numbers rather than a point because it is not a place in three dimensions.',
   },
-  // Four entries rather than one, because an exemption follows a binding rather than a kind.
+  // One entry per binding, because an exemption follows a binding rather than a kind.
   {
     module: 'web/post-chain.js',
     binding: 'renderPass',
@@ -840,6 +840,12 @@ const EXEMPTIONS = [
     binding: 'afterimage',
     why: 'The trails pass. `enabled` and `uniforms.damp` are written by the trails parameter\'s apply, together and in one line, because a damp of zero is a pass not worth running.',
   },
+  {
+    module: 'web/post-chain.js',
+    binding: 'mosh',
+    why: 'The feedback pass. `enabled` is written by the datamosh master the way the trails\' is, `uniforms.time` and `uniforms.moshIFrame` by the render loop once a frame, and `uniforms.resolution` by the resize - and its two history targets are read out by name where the accumulator reset clears them.',
+  },
+  // Four entries rather than three, because the fourth pass arrived with the same interface.
   {
     module: 'web/post-chain.js',
     binding: 'bloom',

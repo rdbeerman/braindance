@@ -20,6 +20,7 @@ import { EffectStore } from './effect-store.js';
 import { RESERVED_EFFECT_IDS, doorRefusal, forkRefusal } from './effect-door.js';
 import { cloudSpine } from '../web/cloud-shader.js';
 import { gradeSpine } from '../web/grade-shader.js';
+import { moshSpine } from '../web/mosh-shader.js';
 import { Recorder } from './recorder.js';
 import { JobStore } from './jobs.js';
 import { Webcam } from './webcam.js';
@@ -119,9 +120,9 @@ const PRESETS = new DocumentStore(
   PROJECT_VERSION,
   resolve(flag('--builtin-presets', join(ROOT, 'presets-builtin'))),
 );
-// The two spines every program is assembled from, named once because the install door and the
+// The spines every program is assembled from, named once because the install door and the
 // store's own boot gate both read them.
-const SPINES = { cloud: cloudSpine, grade: gradeSpine };
+const SPINES = { cloud: cloudSpine, grade: gradeSpine, mosh: moshSpine };
 // Constructed here and *settled* in `listen`'s callback: the process that loses the bind must
 // exit before it renames anything of the winner's.
 const EFFECTS = new EffectStore(

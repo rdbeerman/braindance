@@ -48,6 +48,24 @@ same A/B the frame rate moved with whatever else the machine was doing, while th
 for a 40-move drag came back 1818, 1818 and 1869 — the amplification is deterministic and the
 rate is not, so the count is what carries an argument and the rate is what makes it legible.
 
+## `gl.finish()` does not fence on ANGLE's Metal backend
+
+A timing loop needs the GPU to have finished before the clock is read, and `gl.finish()` is the
+call that is supposed to say so. On this rig it does not. Fifty renders of a 434,176-point cloud
+into a 1052x592 buffer, with `gl.finish()` after the loop, timed **0.022 ms per render** - about
+forty times faster than the 0.83 ms the same pass measures under the paced harness in
+`docs/performance.md`. What was being timed is the JavaScript that queues the work.
+
+The renderer string is not the tell here either: `WEBGL_debug_renderer_info` reported
+`ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Max)`, so this is the real GPU submitting real
+commands and answering the clock before it has drawn any of them. `gl.getParameter(gl.RENDERER)`
+without the extension answers `WebKit WebGL`, which reads like a software fallback and is not one.
+
+**So a wall clock around a render loop measures nothing on this machine.** The numbers in
+`docs/performance.md` come from renders paced by the animation loop, where the compositor forces
+the frame to complete, and a new timing harness has to do the same rather than reaching for a
+fence.
+
 ## A tight loop cannot measure an allocation
 
 Two arms that both hit the allocator back to back are not an A/B of allocation cost.

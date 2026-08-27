@@ -36,9 +36,21 @@ const SUBSTEPS = Number(flag('--substeps', '4'));
 
 // The shipped Blackwall document, read rather than restated: a copy of these values typed in
 // here would be a second source of truth for a look.
+const NETRUN_MOSH = {
+  'datamosh.amount': 1,
+  'datamosh.reach': 16,
+  'datamosh.decay': 0.92,
+  'datamosh.splay': 1,
+  'datamosh.line': 0.55,
+  'datamosh.grain': 3,
+  'datamosh.refresh': 1.2,
+};
 const BLACKWALL_LOOK = JSON.parse(
   readFileSync(new URL('../presets-builtin/blackwall.json', import.meta.url), 'utf8'),
 ).values;
+
+// Blackwall with the smear over it, which is the look every section here runs.
+const NETRUN_LOOK = { ...BLACKWALL_LOOK, ...NETRUN_MOSH };
 
 // Playwright is a tool the proofs reach for rather than a dependency, so it is resolved
 // wherever it sits.
@@ -148,7 +160,10 @@ const runAfter = `async ({ substeps, tailOnly }) => {
     out,
     drawRange: k.geometry.drawRange.count,
     damp: k.afterimage.uniforms.damp.value,
-    passes: { afterimage: k.afterimage.enabled, bloom: k.bloom.enabled, grade: k.grade.enabled },
+    passes: {
+      afterimage: k.afterimage.enabled, mosh: k.mosh.enabled,
+      bloom: k.bloom.enabled, grade: k.grade.enabled,
+    },
     ghosts: k.stateStats().ghostsDrawn,
   };
 }`;
@@ -275,9 +290,12 @@ async function openPage() {
   }
   if (!gpu.colorBufferFloat) throw new Error('no EXT_color_buffer_float: the surface memory is not running at float');
 
-  // Blackwall, read out of the document that ships it rather than typed in here. It is the one
-  // preset that switches on both accumulators at once, which is why this section names a look.
-  await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(BLACKWALL_LOOK)})`);
+  // Blackwall, read out of the document that ships it rather than typed in here, with the
+  // datamosh raised over it. Blackwall was chosen because it is the one preset that switches on
+  // both of the accumulators it knew about; the mosh pass is a third, and a third accumulator no
+  // named look enables is the object every observation here would skip. The terms are spelled
+  // out rather than read off a preset because no shipped document carries them yet.
+  await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(NETRUN_LOOK)})`);
 
   await page.evaluate(async () => {
     const buffer = await (await fetch('/__pinned.bin')).arrayBuffer();
@@ -338,6 +356,7 @@ console.log(`\n[determinism] ${runA.out.length} images per run, `
   + `drawRange=${runA.drawRange} (ghost half ${runA.drawRange > 512 * 424 ? 'drawn' : 'OFF'})`);
 console.log(`[determinism] surface memory ${runA.ghosts}% of pixels ghosting at the end of the run, `
   + `afterimage ${p.afterimage ? `on damp=${runA.damp}` : 'OFF'}, `
+  + `mosh ${p.mosh ? 'on' : 'OFF'}, `
   + `bloom ${p.bloom ? 'on' : 'OFF'}, grade ${p.grade ? 'on' : 'OFF'}`);
 console.log(`[determinism] distinct images within run 1: ${varied}/${runA.out.length}`
   + `${varied < runA.out.length / 2 ? '  <-- input barely moves, the run proves little' : ''}`);
@@ -378,6 +397,6 @@ if (pageErrors.length) console.log(`\n[determinism] page errors:\n  ${pageErrors
 
 const pass = ab.same && ac.same && !ad.same
   && varied > runA.out.length / 2
-  && p.afterimage && p.bloom && p.grade && runA.ghosts > 0;
+  && p.afterimage && p.mosh && p.bloom && p.grade && runA.ghosts > 0;
 console.log(`\n[determinism] ${pass ? 'PASS' : 'FAIL'}`);
 process.exit(pass ? 0 : 1);

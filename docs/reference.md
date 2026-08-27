@@ -336,9 +336,35 @@ frames and not a duration: at 0.9 the trail is down to 12% after twenty of them,
 0.83s of a 24fps deliverable and 0.33s of a 60fps one. `fade` and `wake` are in milliseconds
 for the reason [surface memory](architecture.md#surface-memory) gives, and this term is the
 exception to that rather than a second expression of it — so a look graded at one output rate
-does not keep its trail at another. It is the only term this applies to, because
-`AfterimagePass` in `web/post-chain.js` is the only pass in the chain that carries anything
-from one render to the next.
+does not keep its trail at another. It applies to `reach` and `decay` under Datamosh as well and
+to nothing else: those two passes are the only ones in the chain that carry anything from one
+render to the next, and both count what they carry in renders.
+
+**`datamosh.amount`** is the picture dissolving into vertical needles, and it is the one pass in
+the chain that reads the frame it drew last time. Every frame the picture is pulled a little way
+along Y and what it leaves behind does not clear, so a highlight stretches into a streak that
+grows for as long as the pass remembers. `amount` is the master and the one worth keyframing: at
+zero the pass is switched off and costs nothing, so the dissolve arrives and clears on one track.
+
+`reach px` is how far the picture is pulled each rendered frame, in pixels at the 1080p reference,
+and `decay` is what fraction of the trail survives a frame — the two together set how long a
+needle is. The blend is a per-channel maximum rather than a mix, so a highlight leaves a needle
+and the dark between the needles stays dark; a mix feeds the whole frame back into itself and
+greys it over in about a second.
+
+`splay` is which of the two readings of "vertically" you want. At 0 the whole frame drags one way,
+which is the picture melting; at 1 it is pulled *away* from `line`, so everything above that
+height streaks upward and everything below it streaks down, and the frame comes apart from the
+middle out. `line` is where that split sits, as a fraction of frame height from the bottom.
+`grain px` is how wide a column of the picture pulling by one amount is: at 1 the frame is a field
+of separate needles, and at 16 it comes apart in ribbons. Ragged rather than a clean stretch is
+the whole difference between this and a vertical zoom.
+
+`refresh s` is the one control that is not only a look: it is how long the pass is allowed to
+remember, and every that many seconds of program time the picture snaps back to the frame it was
+handed. That snap is the pulse the look wants and it is also what makes the timeline work — a seek
+decodes forward from the last one, the way seeking to a keyframe does — so a long refresh is a
+long dissolve *and* a long pre-roll on every scrub.
 
 ## The edit, and what comes out of it
 

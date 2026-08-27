@@ -212,9 +212,13 @@ try {
   await page.waitForFunction('Boolean(globalThis.__kinect)', null, { timeout: 20000 });
 
   /** All four assembled shader strings, as one, for the marker rows. */
+  // Every program the page reports rather than the two it used to have. A chunk belongs to one
+  // spine and the spines are a set this build can grow: naming them here meant the mosh pass's
+  // text was searched for in the two programs it can never be in, and the row asking whether a
+  // hollowed package's text comes back said it never did.
   const assembled = () => page.evaluate(() => {
     const p = globalThis.__kinect.effects.programs();
-    return `${p.cloud.vertexShader}${p.cloud.fragmentShader}${p.grade.vertexShader}${p.grade.fragmentShader}`;
+    return Object.values(p).map((x) => `${x.vertexShader}${x.fragmentShader}`).join('');
   });
 
   if (MUTATE) {

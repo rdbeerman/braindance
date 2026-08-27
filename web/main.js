@@ -24,7 +24,8 @@ import {
 import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
 import {
-  EFFECT_BIND_TRANSFORMS, effectBindUniformType, tableFromPackages, withEffectGroups,
+  EFFECT_BIND_TRANSFORMS, EFFECT_GATED_TABLES, EFFECT_BOUNDED_TABLES, effectBindUniformType,
+  tableFromPackages, withEffectGroups,
 } from './effect-manifests.js';
 import { bloomChainSize } from './bloom-pass.js';
 import {
@@ -34,7 +35,8 @@ import {
   statePrev, stateNext, buildSurfaceMemory, stepSurfaceMemory, refuseAgeCeiling,
 } from './surface-memory.js';
 import {
-  composer, renderPass, afterimage, bloom, grade, buildPostChain, setGradeProgram,
+  composer, renderPass, afterimage, mosh, bloom, grade, buildPostChain, setGradeProgram,
+  setMoshProgram,
 } from './post-chain.js';
 import {
   geometry, uniforms, material, cloud, buildPointCloud, setAdditive, setCloudProgram,
@@ -42,6 +44,8 @@ import {
 } from './point-cloud.js';
 import { cloudSpine } from './cloud-shader.js';
 import { gradeSpine } from './grade-shader.js';
+import { moshSpine } from './mosh-shader.js';
+import { moshFramesBack, moshRefreshes } from './mosh-pass.js';
 import { assembleShaders } from './shader-assembly.js';
 
 const revSignature = (effects) => effects.map((e) => `${e.id} ${e.rev}`).join('\n');
@@ -141,8 +145,8 @@ async function fetchEffectPackages() {
 // `let`, because `PUT` and `DELETE /effects/:id` rebuild the set in place.
 let effectPackages = await fetchEffectPackages();
 
-// Every program this page compiles, in one call, so a refusal covers both spines.
-const SPINES = { cloud: cloudSpine, grade: gradeSpine };
+// Every program this page compiles, in one call, so a refusal covers every spine.
+const SPINES = { cloud: cloudSpine, grade: gradeSpine, mosh: moshSpine };
 let shaderPrograms = assembleShaders(SPINES, effectPackages);
 
 // Which of the two surfaces this page is, decided by the path.
@@ -202,7 +206,7 @@ function applyWorldTilt() {
   setNavigationUp(WORLD_UP);
 }
 
-buildPostChain(shaderPrograms.grade);
+buildPostChain(shaderPrograms.grade, shaderPrograms.mosh);
 
 let renderScale = 1;
 
@@ -397,6 +401,7 @@ function resize() {
   const chain = bloomChainSize(buf.x, buf.y);
   bloom.setSize(chain.width, chain.height);
   grade.uniforms.resolution.value.set(buf.x, buf.y);
+  mosh.uniforms.resolution.value.set(buf.x, buf.y);
   uniforms.bufferHeight.value = buf.y;
   // Everything above reallocates the drawing buffer and nothing above redraws into it.
   const buffer = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -412,7 +417,7 @@ addEventListener('resize', () => {
 resize();
 
 function postEnabled() {
-  return afterimage.enabled || bloom.enabled || grade.enabled;
+  return afterimage.enabled || mosh.enabled || bloom.enabled || grade.enabled;
 }
 
 // Two vertices per point while the surface memory is shedding, one otherwise.
@@ -421,15 +426,63 @@ function updateDrawRange() {
   geometry.setDrawRange(0, shedding ? POINTS * 2 : POINTS);
 }
 
-/** The grade terms whose being up makes the pass worth running, read off the packages. */
-let GRADE_GATES;
-const gradeGatesOf = (packages) => packages.flatMap((pkg) => Object.values(pkg.manifest.params ?? {})
-  .filter((p) => p.bind?.on === 'grade' && p.bind.gates)
-  .map((p) => p.bind.uniform));
+// Which uniform table each binding writes into. A map rather than a ternary per site, so a
+// build that grows a fourth table adds one entry here instead of another branch at five sites -
+// and a table nothing resolves throws on the write rather than landing the value in undefined.
+// Built here rather than at the top of the file because every one of the three is a live
+// binding the boot sequence above has just assigned.
+const UNIFORM_TABLES = Object.freeze({
+  points: uniforms, grade: grade.uniforms, mosh: mosh.uniforms,
+});
 
-function gradeNeeded() {
-  return GRADE_GATES.some((name) => grade.uniforms[name].value !== 0);
+/** The pass a gating term on each table holds open. */
+const PASS_OF_TABLE = Object.freeze({ grade, mosh });
+
+/** The terms whose being up makes each gated pass worth running, read off the packages. */
+let PASS_GATES;
+const passGatesOf = (packages) => Object.fromEntries(EFFECT_GATED_TABLES.map((table) => [
+  table,
+  packages.flatMap((pkg) => Object.values(pkg.manifest.params ?? {})
+    .filter((p) => p.bind?.on === table && p.bind.gates)
+    .map((p) => p.bind.uniform)),
+]));
+
+function passNeeded(table) {
+  const held = UNIFORM_TABLES[table];
+  return PASS_GATES[table].some((name) => held[name].value !== 0);
 }
+
+/**
+ * The dotted registry names of the terms that hold a pass with memory open.
+ *
+ * Read off the manifests rather than written down, for the reason `passGatesOf` is: a package id
+ * hard-coded in here is a fork installed under another name whose pre-roll silently stops being
+ * computed, with nothing red anywhere.
+ */
+const moshMastersOf = (packages) => packages.flatMap((pkg) => Object.entries(pkg.manifest.params ?? {})
+  .filter(([, p]) => EFFECT_BOUNDED_TABLES.includes(p.bind?.on) && p.bind.gates)
+  .map(([short]) => `${pkg.id}.${short}`));
+
+/** The term saying how long the mosh pass's memory lasts, by both its names, or null. */
+const moshBoundOf = (packages) => packages.flatMap((pkg) => Object.entries(pkg.manifest.params ?? {})
+  .filter(([, p]) => EFFECT_BOUNDED_TABLES.includes(p.bind?.on) && p.bind.bounds)
+  .map(([short, p]) => ({ name: `${pkg.id}.${short}`, uniform: p.bind.uniform })))[0] ?? null;
+
+let MOSH_MASTERS = [];
+let MOSH_BOUND = null;
+
+/** Whether the mosh pass is doing anything at a program position, and for how long it remembers. */
+const moshLiveAt = (programSec) => MOSH_MASTERS.some((name) => valueAtProgram(name, programSec) !== 0);
+const moshPeriodAt = (programSec) => (MOSH_BOUND ? valueAtProgram(MOSH_BOUND.name, programSec) : 0);
+
+// The look terms a draft puts down for the length of its one frame. Three of them are the core's
+// own accumulators and the rest are whatever the packages brought that accumulates, because a
+// draft is one frame rendered out of order and a term whose value depends on the frame before it
+// has nothing to read.
+const BYPASSED_CORE = Object.freeze(['fade', 'wake', 'trails']);
+let BYPASSED = [...BYPASSED_CORE];
+let BYPASS_ZERO = Object.fromEntries(BYPASSED.map((name) => [name, 0]));
+let BYPASSED_SET = new Set(BYPASSED);
 
 /** How far outside the cloud the fitted faces sit, as a share of the extent they bound. */
 const CROP_FIT_PAD = 0.15;
@@ -473,6 +526,8 @@ const EFFECT_PARAM_ORDER = [
   'halation.amount', 'halation.radius', 'halation.threshold', 'halation.tint',
   'stock.amount', 'stock.balance', 'stock.split', 'stock.latitude',
   'vignette.amount',
+  'datamosh.amount', 'datamosh.reach', 'datamosh.decay', 'datamosh.splay',
+  'datamosh.line', 'datamosh.grain', 'datamosh.refresh',
 ];
 
 // The list places the shipped set and is never a census of what is installed.
@@ -526,7 +581,7 @@ let PANEL_GROUPS;
 
 /** The write one effect parameter's binding describes, as the closure the registry stores. */
 function effectApply(bind) {
-  const table = () => (bind.on === 'grade' ? grade.uniforms : uniforms);
+  const table = () => UNIFORM_TABLES[bind.on];
   let write;
   if (bind.transform === 'axisDeg') {
     write = (v) => {
@@ -549,7 +604,7 @@ function effectApply(bind) {
     write = (v) => { table()[bind.uniform].value = v; };
   }
   if (!bind.gates) return write;
-  return (v) => { write(v); grade.enabled = gradeNeeded(); };
+  return (v) => { write(v); PASS_OF_TABLE[bind.on].enabled = passNeeded(bind.on); };
 }
 
 /** One run of `EFFECT_PARAMS`, as entries ready to spread into `PARAMS`. */
@@ -713,6 +768,7 @@ const buildParams = () => ({
   crush: { def: 0.018, min: 0, max: 0.2, step: 0.001, kind: 'scalar', tag: 'look',
     group: 'post', label: 'crush',
     apply: (v) => { grade.uniforms.crush.value = v; } },
+  ...effectSlice('datamosh.amount', 'datamosh.refresh'),
 
   denoise: { def: true, kind: 'step', tag: 'look',
     group: 'signal', label: 'cull speckle',
@@ -1251,7 +1307,7 @@ const uniformCellFits = (cell, bind) => Boolean(cell)
 function seedUniformCells() {
   for (const name of Object.keys(EFFECT_PARAMS)) {
     const bind = EFFECT_PARAMS[name];
-    const table = bind.on === 'grade' ? grade.uniforms : uniforms;
+    const table = UNIFORM_TABLES[bind.on];
     if (uniformCellFits(table[bind.uniform], bind)) continue;
     table[bind.uniform] = {
       value: effectBindUniformType(bind.transform) === 'vec2' ? new THREE.Vector2() : 0,
@@ -1266,16 +1322,14 @@ const boundUniforms = (table) => new Map(Object.values(table ?? {})
 /** What each uniform table held before any parameter had ever been written into it. */
 const snapshotUniformValues = (table) => new Map(Object.entries(table)
   .map(([name, cell]) => [name, cell?.value instanceof THREE.Vector2 ? cell.value.clone() : cell?.value]));
-const PRISTINE_UNIFORMS = {
-  points: snapshotUniformValues(uniforms),
-  grade: snapshotUniformValues(grade.uniforms),
-};
+const PRISTINE_UNIFORMS = Object.fromEntries(Object.entries(UNIFORM_TABLES)
+  .map(([table, held]) => [table, snapshotUniformValues(held)]));
 
 /** Every uniform a parameter used to write and none writes now, put back where it started. */
 function restoreDepartedUniforms(was, now) {
   for (const [key, bind] of was) {
     if (now.has(key)) continue;
-    const table = bind.on === 'grade' ? grade.uniforms : uniforms;
+    const table = UNIFORM_TABLES[bind.on];
     const cell = table[bind.uniform];
     if (!cell) continue;
     const pristine = PRISTINE_UNIFORMS[bind.on]?.get(bind.uniform);
@@ -1297,11 +1351,18 @@ function adoptEffectPackages(packages, programs, held = {}) {
   // The materials are mutated rather than replaced: everything downstream holds them.
   setCloudProgram(programs.cloud);
   setGradeProgram(programs.grade);
+  setMoshProgram(programs.mosh);
 
   EFFECT_PARAMS = tableFromPackages(packages, EFFECT_PARAM_ORDER);
   PANEL_GROUPS = withEffectGroups(CORE_PANEL_GROUPS, packages);
-  // Which grade terms hold the pass open, re-derived from the set that just arrived.
-  GRADE_GATES = gradeGatesOf(packages);
+  // Which terms hold each gated pass open, re-derived from the set that just arrived, and
+  // which of them the transport has to put down while it drafts.
+  PASS_GATES = passGatesOf(packages);
+  MOSH_MASTERS = moshMastersOf(packages);
+  MOSH_BOUND = moshBoundOf(packages);
+  BYPASSED = [...BYPASSED_CORE, ...MOSH_MASTERS];
+  BYPASS_ZERO = Object.fromEntries(BYPASSED.map((name) => [name, 0]));
+  BYPASSED_SET = new Set(BYPASSED);
   PARAMS = buildParams();
   READINGS = Object.keys(PARAMS).filter((n) => PARAMS[n].reading);
   refuseRegistryDisagreement();
@@ -1320,7 +1381,7 @@ function adoptEffectPackages(packages, programs, held = {}) {
   }
 
   // Asked again, because a gated parameter's own write cannot answer for a term that left.
-  grade.enabled = gradeNeeded();
+  for (const table of EFFECT_GATED_TABLES) PASS_OF_TABLE[table].enabled = passNeeded(table);
 }
 
 adoptEffectPackages(effectPackages, shaderPrograms);
@@ -3110,6 +3171,14 @@ function advanceSurfaceState(dtSec) {
 
 let lastProgramTime = 0;
 
+// What the mosh pass's last rendered frame was: whether the history behind it is worth reading
+// at all, and the refresh period in force when it was drawn. The second is remembered rather
+// than re-derived because the period keyframes, so the step between two frames is measured with
+// the value each end actually had.
+let moshFresh = true;
+let moshWasLive = false;
+let lastMoshPeriod = 0;
+
 // Screen-space history belongs to the camera pose that produced it.
 let renderedCamera = null;
 const renderedCameraPosition = new THREE.Vector3();
@@ -3155,14 +3224,17 @@ function clearAfterimage() {
   );
 }
 
-// Clears both feedback paths. Neither walks backwards, so a seek pre-rolls forward.
+// Clears every feedback path. None of them walks backwards, so a seek pre-rolls forward.
 function resetAccumulators() {
   counters.resets++;
   clearFeedback(
-    [statePrev, stateNext, afterimage._textureComp, afterimage._textureOld],
+    [statePrev, stateNext, afterimage._textureComp, afterimage._textureOld, ...mosh.history],
     'afterimage internals moved: the accumulator reset is no longer complete',
   );
   lastProgramTime = 0;
+  // Cleared history is black, and a mosh chunk reading it would draw black rather than nothing,
+  // so the next frame is a refresh whatever the period says.
+  moshFresh = true;
 }
 
 // Where an export takes its bytes. One position, since the readback shares the task.
@@ -3195,6 +3267,7 @@ function renderProgramFrame(t) {
     uniforms.spanSec.value = frame.spanSec;
     uniforms.time.value = t;
     grade.uniforms.time.value = t;
+    mosh.uniforms.time.value = t;
     uniforms.rainPhase.value = t;
 
     // Every track, look and camera alike, through the registry rather than onto the uniforms.
@@ -3206,6 +3279,18 @@ function renderProgramFrame(t) {
       clearAfterimage();
       counters.navigationHistoryClears++;
     }
+
+    // Whether this is the frame the mosh pass draws exactly what it was handed. Asked before
+    // `lastProgramTime` moves, because it is a question about the step between two frames: the
+    // period in force at each end, and the two ends of the step. The other two answers are
+    // states the pass cannot be asked about - a cleared history, and a pass that was switched
+    // off while the frames it would have remembered went by.
+    const moshPeriod = MOSH_BOUND ? mosh.uniforms[MOSH_BOUND.uniform].value : 0;
+    mosh.uniforms.moshIFrame.value = (moshFresh || !moshWasLive
+      || moshRefreshes(lastProgramTime, lastMoshPeriod, t, moshPeriod)) ? 1 : 0;
+    moshFresh = false;
+    moshWasLive = mosh.enabled;
+    lastMoshPeriod = moshPeriod;
 
     const dt = Math.max(0, t - lastProgramTime);
     lastProgramTime = t;
@@ -3483,10 +3568,6 @@ class IndexedPairSource extends StampedPairSource {
 // 1% of the previous image. Three's pass zeroes anything under 0.1 outright.
 const AFTERIMAGE_RESIDUAL = 0.01;
 
-const BYPASSED = ['fade', 'wake', 'trails'];
-const BYPASS_ZERO = { fade: 0, wake: 0, trails: 0 };
-const BYPASSED_SET = new Set(BYPASSED);
-
 // The most output frames one tick may render to catch up.
 const CATCHUP_FRAMES = 4;
 // How far behind real time playback has to fall before it says so.
@@ -3572,15 +3653,29 @@ class TimelineTransport {
     const back = retime.framesBackFor(programSec, surfaceSec, this.outputFps, this.lastFrame);
     const back2 = this.trailsFramesBack(programSec);
     const trails = back2.frames;
-    const frames = Math.max(back.frames, trails);
+    const back3 = this.moshFramesBack(programSec);
+    const frames = Math.max(back.frames, trails, back3.frames);
     return {
       surface: back.frames,
       surfaceCovered: back.covered,
       trails,
       trailsCovered: back2.covered,
+      mosh: back3.frames,
+      moshCovered: back3.covered,
       frames,
       sec: frames / this.outputFps,
     };
+  }
+
+  /**
+   * How many output frames back the mosh pass is decoded from: the nearest frame it refreshes on,
+   * which is where its history stops mattering. The walk itself is in `web/mosh-pass.js`, beside
+   * the pass whose memory it bounds and where bare node can reach it.
+   */
+  moshFramesBack(programSec) {
+    return moshFramesBack(
+      programSec, this.outputFps, moshLiveAt, moshPeriodAt, Math.max(1, this.lastFrame),
+    );
   }
 
   /** How many output frames back the afterimage is rebuilt from for nothing before to show. */
@@ -3739,7 +3834,7 @@ class TimelineTransport {
     const target = this.frameAt(programSec);
     const t = target / this.outputFps;
     const source = this.sourceFrameAt(t);
-    if (this.drafted || valueAtProgram('trails', t) > 0
+    if (this.drafted || valueAtProgram('trails', t) > 0 || moshLiveAt(t)
         || target !== this.frame || this.source.applied !== source + 1) {
       return this.seekNow(t);
     }
@@ -7178,7 +7273,8 @@ function drawChrome() {
     chromeCtx.fillText(`${(drawCount / 1000).toFixed(0)}k${shedding ? ' +shed' : ''}`, col2, y); y += lineH;
 
     // Post effects
-    const posts = [afterimage.enabled && 'trail', bloom.enabled && 'bloom', grade.enabled && 'grade'].filter(Boolean);
+    const posts = [afterimage.enabled && 'trail', mosh.enabled && 'mosh',
+      bloom.enabled && 'bloom', grade.enabled && 'grade'].filter(Boolean);
     chromeCtx.fillStyle = '#6d7683';
     chromeCtx.fillText('post', col1, y);
     chromeCtx.fillStyle = '#e8ecf1';
@@ -8352,7 +8448,9 @@ let pinnedPairs = null;
 
 /** Compile every program the look can reach, before the first frame anybody sees. */
 function warmPrograms() {
-  const was = { after: afterimage.enabled, bloom: bloom.enabled, grade: grade.enabled };
+  const was = {
+    after: afterimage.enabled, mosh: mosh.enabled, bloom: bloom.enabled, grade: grade.enabled,
+  };
   const wasAdditive = uniforms.softEdge.value === 1;
   // A shader that will not compile is not an exception anywhere, which is why this hook exists.
   const linkFailures = [];
@@ -8366,6 +8464,7 @@ function warmPrograms() {
   };
   try {
     afterimage.enabled = true;
+    mosh.enabled = true;
     bloom.enabled = true;
     grade.enabled = true;
     // Both blending states: `setAdditive` flips `material.needsUpdate` and blend
@@ -8379,6 +8478,7 @@ function warmPrograms() {
   } finally {
     renderer.debug.onShaderError = priorHook;
     afterimage.enabled = was.after;
+    mosh.enabled = was.mosh;
     bloom.enabled = was.bloom;
     grade.enabled = was.grade;
     resetAccumulators();
@@ -8453,7 +8553,7 @@ if (EDITING && !REQUESTED_TAKE) {
 // Handles for profiling and for poking at the scene from the console.
 globalThis.__kinect = {
   renderer, composer, scene, freeCamera, programCamera, uniforms, material,
-  bloom, afterimage, grade, geometry, resetAccumulators, renderProgramFrame,
+  bloom, afterimage, mosh, grade, geometry, resetAccumulators, renderProgramFrame,
 
   // A getter and not the object: the object is replaced when navigation's up changes.
   get controls() { return controls; },
