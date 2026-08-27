@@ -49,7 +49,9 @@ const MUTATIONS = {
   'install-skips-the-uniform-cells': {
     file: 'web/main.js',
     edits: [[
-      "    table[bind.uniform] = { value: bind.transform === 'axisDeg' ? new THREE.Vector2() : 0 };",
+      "    table[bind.uniform] = {\n"
+        + "      value: effectBindUniformType(bind.transform) === 'vec2' ? new THREE.Vector2() : 0,\n"
+        + '    };',
       '    if (Object.hasOwn(table, bind.uniform)) table[bind.uniform] = { value: 0 };',
     ]],
   },
@@ -1050,14 +1052,20 @@ try {
     const row = document.getElementById('probe.amount')?.closest('.row, .checkrow');
     let stored = [];
     try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
-    return { hidden: row?.hidden ?? null, stored, focused: document.activeElement?.id ?? null };
+    return {
+      hidden: row?.hidden ?? null,
+      stored,
+      focused: document.activeElement?.id ?? null,
+      pickerOpen: !document.getElementById('effectRackPanel').hidden,
+    };
   });
   ok('and Add makes that hot-loaded effect available without a reload or a value change',
-    racked.hidden === false && racked.stored.includes('probe'),
-    `hidden=${racked.hidden}, stored=${JSON.stringify(racked.stored)}, focused=${JSON.stringify(racked.focused)}`);
-  await page.locator('#effectRackOpen').click();
-  await page.locator('[data-effect-remove="probe"]').click();
-  await page.locator('#effectRackClose').click();
+    racked.hidden === false && racked.stored.includes('probe') && racked.pickerOpen,
+    `hidden=${racked.hidden}, stored=${JSON.stringify(racked.stored)}, `
+    + `focused=${JSON.stringify(racked.focused)}, picker open=${racked.pickerOpen}`);
+  if (racked.pickerOpen) await page.locator('[data-effect-remove="probe"]').click();
+  else await page.evaluate("document.querySelector('[data-effect-remove=probe]')?.click()");
+  if (await page.locator('#effectRackPanel').isVisible()) await page.locator('#effectRackClose').click();
   await page.locator('.paneltab[data-panel-tab="record"]').click();
 
   // Then `boot-check`'s own three rows, asked of a page that got here by hotload rather than by

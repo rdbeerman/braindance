@@ -7,7 +7,7 @@
 
 import {
   MANIFEST_FORMAT, EFFECT_PARAM_KINDS, EFFECT_BIND_TABLES, EFFECT_BIND_TRANSFORMS,
-  CORE_PANEL_GROUP_KEYS, HOST_DRIVEN_UNIFORMS,
+  CORE_PANEL_GROUP_KEYS, HOST_DRIVEN_UNIFORMS, effectBindUniformType,
 } from '../web/effect-manifests.js';
 import { assembleShaders } from '../web/shader-assembly.js';
 import { decimalsOf, snapScalar } from '../web/format.js';
@@ -457,8 +457,8 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       return `${name} declares gates as ${JSON.stringify(bind.gates)} - it says whether this term holds the grade pass open, which is a yes or a no`;
     }
     // `gates` is a promise about the *uniform*: `gradeNeeded` walks the gating bindings and reads
-    // the cell each names, so one on another table is collected by nothing, and one beside
-    // `axisDeg` asks whether a direction is zero.
+    // the cell each names, so one on another table is collected by nothing, and one beside a
+    // vector transform asks whether a direction or pair of edges is zero.
     if (bind.gates) {
       if (bind.on !== 'grade') {
         return `${name} declares gates and binds on ${JSON.stringify(bind.on)} - gates says this term holds `
@@ -466,9 +466,9 @@ export function doorRefusal(candidate, { beside = [], spines }) {
           + 'other table is a claim the pass never sees: the control moves, the term is collected by nothing, '
           + 'and the pass opens and shuts on the parameters that did bind there';
       }
-      if (bind.transform === 'axisDeg') {
-        return `${name} declares gates beside the axisDeg transform - axisDeg writes a two-component direction `
-          + 'and the gate asks whether the term is zero, which a direction never is. That pair has no reading: '
+      if (effectBindUniformType(bind.transform) !== 'float') {
+        return `${name} declares gates beside the ${bind.transform} transform - that transform writes a two-component value `
+          + 'and the gate asks whether the term is zero, which a vector never is. That pair has no reading: '
           + 'it held the pass shut for the life of the page under the comparison this build used to make, and '
           + 'holds it open forever under the one it makes now, so it is refused rather than given a meaning '
           + 'that changes when the comparison does';
@@ -483,6 +483,25 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       if (!isInert(spec.def)) {
         return `${name} is ${id}'s master and defaults to ${JSON.stringify(spec.def)} - a master is what the effect `
           + 'is absent at, so a build with the package installed and every value at default has to draw exactly what a build without it draws';
+      }
+    }
+    if (spec.reading !== undefined && typeof spec.reading !== 'boolean') {
+      return `${name} declares reading as ${JSON.stringify(spec.reading)} - reading membership is a yes or a no`;
+    }
+    if (spec.reading && (spec.kind !== 'scalar' || spec.role !== 'master' || bind.on !== 'points'
+        || spec.def !== 0 || spec.min !== 0 || spec.max !== 1)) {
+      return `${name} declares itself a reading, but a package reading is a scalar point-uniform master on the `
+        + '0..1 weight range with an inert default of 0 - the five reading weights are summed as a ratio, so a '
+        + 'different shape would not have the meaning the registry gives it';
+    }
+    if (spec.under !== undefined) {
+      if (typeof spec.under !== 'string' || !VALID_PARAM_KEY.test(spec.under)) {
+        return `${name} declares under as ${JSON.stringify(spec.under)} - it names another parameter key in the same package`;
+      }
+      const parent = manifest.params[spec.under];
+      if (!parent || parent === spec || parent.role !== 'master') {
+        return `${name} declares itself under ${JSON.stringify(spec.under)}, which is not another master in ${id} - `
+          + 'the parent is the term whose non-zero value reveals this row';
       }
     }
   }
@@ -626,12 +645,16 @@ export function doorRefusal(candidate, { beside = [], spines }) {
         + 'the shader goes on reading whatever the array was initialised with';
     }
     // Whether the place is the *shape* of the value, which nothing else here or downstream checks:
-    // `axisDeg` writes two components and every other binding writes one number.
-    const wants = spec.bind.transform === 'axisDeg' ? 'vec2' : 'float';
+    // The transform vocabulary is also the one statement of the value shape each transform
+    // writes. Keeping that answer beside the vocabulary prevents the door and applier drifting.
+    const wants = effectBindUniformType(spec.bind.transform);
     if (!declaredAs.has(wants)) {
+      const writes = wants === 'vec2'
+        ? `the ${spec.bind.transform} transform writes a two-component value`
+        : 'a plain binding writes one number';
       return `${id}.${short} binds the uniform ${JSON.stringify(spec.bind.uniform)}, which the assembled `
         + `${program} program declares as ${[...declaredAs].join(' and ')}, and `
-        + `${spec.bind.transform === 'axisDeg' ? 'the axisDeg transform writes a two-component value' : 'a plain binding writes one number'} - `
+        + `${writes} - `
         + `so this binding needs a ${wants}. The mismatch is not caught anywhere downstream: it is a value `
         + 'uploaded through the wrong setter, on a control that moves and a picture that does not';
     }

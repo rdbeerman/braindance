@@ -50,12 +50,12 @@ const MUTATIONS = {
     fails: 'the readRgb row of 1b, alone - the other four readings are untouched',
   },
   'ghost-alpha-term-dropped': {
-    file: 'web/cloud-shader.js',
+    file: 'effects-builtin/ghost/ghost.frag.glsl',
     edits: [[
-      '    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * readGhost;',
-      '    alphaFactor += (0.25 + 0.75 * rim) * readGhost;',
+      '    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * ghost;',
+      '    alphaFactor += (0.25 + 0.75 * rim) * ghost;',
     ]],
-    fails: 'the readGhost row of 1b, alone - so 1b compares alpha and not just colour',
+    fails: 'the ghost.amount row of 1b, alone - so 1b compares alpha and not just colour',
   },
   'mix-ignores-normalisation': {
     file: 'web/cloud-shader.js',
@@ -65,13 +65,24 @@ const MUTATIONS = {
     ]],
     fails: 'the scale-cancels row of 8b, with every row of 1b still passing',
   },
-  'weight-ignored': {
-    file: 'web/cloud-shader.js',
+  'contour-edges-round-in-float': {
+    file: 'web/main.js',
     edits: [[
-      '  if (readGhost > 0.0) {',
+      "    write = (v) => { table()[bind.uniform].value.set(0.5 - v, 0.5 + v); };",
+      "    write = (v) => { table()[bind.uniform].value.set(\n"
+        + "      Math.fround(Math.fround(0.5) - Math.fround(v)),\n"
+        + "      Math.fround(Math.fround(0.5) + Math.fround(v)),\n"
+        + "    ); };",
+    ]],
+    fails: 'the two contour.width landing rows, naming the edges that must be computed in double',
+  },
+  'weight-ignored': {
+    file: 'effects-builtin/ghost/ghost.frag.glsl',
+    edits: [[
+      '  if (ghost > 0.0) {',
       '  if (false) {',
     ]],
-    fails: 'readGhost, ghostRim and ghostFill in the drop-one sweep, plus readGhost\'s 1b row',
+    fails: 'ghost.amount, ghost.rim and ghost.fill in the drop-one sweep, plus ghost.amount\'s 1b row',
   },
   'duotone-ignored': {
     file: 'effects-builtin/duotone/tone.frag.glsl',
@@ -943,17 +954,17 @@ const LANDING = {
   spin: 'k.controls.autoRotate',
   readRgb: 'k.uniforms.readRgb.value',
   readDepth: 'k.uniforms.readDepth.value',
-  readGhost: 'k.uniforms.readGhost.value',
-  readContour: 'k.uniforms.readContour.value',
-  readBlackwall: 'k.uniforms.readBlackwall.value',
+  'ghost.amount': 'k.uniforms.ghost.value',
+  'contour.amount': 'k.uniforms.contour.value',
+  'blackwall.amount': 'k.uniforms.blackwall.value',
   rgbSaturation: 'k.uniforms.rgbSaturation.value',
   depthGamma: 'k.uniforms.depthGamma.value',
-  ghostRim: 'k.uniforms.ghostRim.value',
-  ghostFill: 'k.uniforms.ghostFill.value',
-  contourBands: 'k.uniforms.contourBands.value',
-  contourWidth: '[k.uniforms.contourLo.value, k.uniforms.contourHi.value]',
-  blackwallSweep: 'k.uniforms.blackwallSweep.value',
-  scan: 'k.uniforms.scanAmount.value',
+  'ghost.rim': 'k.uniforms.ghostRim.value',
+  'ghost.fill': 'k.uniforms.ghostFill.value',
+  'contour.bands': 'k.uniforms.contourBands.value',
+  'contour.width': '[k.uniforms.contourEdges.value.x, k.uniforms.contourEdges.value.y]',
+  'blackwall.sweep': 'k.uniforms.blackwallSweep.value',
+  'blackwall.scan': 'k.uniforms.blackwallScan.value',
   rim: 'k.uniforms.rimAmount.value',
   'thermal.amount': 'k.uniforms.thermal.value',
   'edges.amount': 'k.uniforms.edges.value',
@@ -1057,19 +1068,17 @@ const EXPECT = {
   spin: (v) => v,
   readRgb: (v) => v,
   readDepth: (v) => v,
-  readGhost: (v) => v,
-  readContour: (v) => v,
-  readBlackwall: (v) => v,
+  'ghost.amount': (v) => v,
+  'contour.amount': (v) => v,
+  'blackwall.amount': (v) => v,
   rgbSaturation: (v) => v,
   depthGamma: (v) => v,
-  ghostRim: (v) => v,
-  ghostFill: (v) => v,
-  contourBands: (v) => v,
-  // The same double-precision arithmetic the registry does, so the two agree bit for bit
-  // rather than nearly: in float32 a half minus this width is a different float.
-  contourWidth: (v) => [0.5 - v, 0.5 + v],
-  blackwallSweep: (v) => v,
-  scan: (v) => v,
+  'ghost.rim': (v) => v,
+  'ghost.fill': (v) => v,
+  'contour.bands': (v) => v,
+  'contour.width': (v) => [0.5 - v, 0.5 + v],
+  'blackwall.sweep': (v) => v,
+  'blackwall.scan': (v) => v,
   rim: (v) => v,
   'thermal.amount': (v) => v,
   'edges.amount': (v) => v,
@@ -1181,17 +1190,17 @@ const SCRAMBLE = {
   spin: true,
   readRgb: 0.4,
   readDepth: 0.3,
-  readGhost: 0.2,
-  readContour: 0.15,
-  readBlackwall: 0.6,
+  'ghost.amount': 0.2,
+  'ghost.rim': 1.4,
+  'ghost.fill': 0.7,
+  'contour.amount': 0.15,
+  'contour.bands': 27,
+  'contour.width': 0.27,
+  'blackwall.amount': 0.6,
+  'blackwall.sweep': 0.9,
+  'blackwall.scan': 0.72,
   rgbSaturation: 1.6,
   depthGamma: 0.6,
-  ghostRim: 1.4,
-  ghostFill: 0.7,
-  contourBands: 27,
-  contourWidth: 0.25,
-  blackwallSweep: 0.9,
-  scan: 0.72,
   rim: 0.28,
   // Order matters here and nowhere else in this file: the comparison against the serialised
   // set is a JSON.stringify equality, so these keys sit in the order PARAMS declares them.
@@ -1497,6 +1506,15 @@ const GOLDEN_RENAME = {
   'glyph.tone': 'glyphTone',
   'glyph.hash': 'glyphHash',
   'glyph.rain': 'glyphRain',
+  'ghost.amount': 'readGhost',
+  'ghost.rim': 'ghostRim',
+  'ghost.fill': 'ghostFill',
+  'contour.amount': 'readContour',
+  'contour.bands': 'contourBands',
+  'contour.width': 'contourWidth',
+  'blackwall.amount': 'readBlackwall',
+  'blackwall.sweep': 'blackwallSweep',
+  'blackwall.scan': 'scan',
   'rain.amount': 'rain',
   'rain.speed': 'rainSpeed',
   'rain.span': 'rainSpan',
@@ -1547,9 +1565,9 @@ const GOLDEN_ABSENT = new Set([
   'crop',
   'tilt', 'roll',
   'monDivisor', 'monStride', 'monAcceptCost',
-  'readRgb', 'readDepth', 'readGhost', 'readContour', 'readBlackwall',
-  'rgbSaturation', 'depthGamma', 'ghostRim', 'ghostFill',
-  'contourBands', 'contourWidth', 'blackwallSweep',
+  'readRgb', 'readDepth', 'ghost.amount', 'contour.amount', 'blackwall.amount',
+  'rgbSaturation', 'depthGamma', 'ghost.rim', 'ghost.fill',
+  'contour.bands', 'contour.width', 'blackwall.sweep', 'blackwall.scan',
   'glitch.density', 'glitch.shove', 'glitch.tint', 'glitch.bands', 'glitch.rate',
   'glitch.axis',
   'vignette.amount',
@@ -1658,7 +1676,13 @@ const AGAINST_REV = flag('--against')
 // Each reading, and the mode it was. The old build selects by writing the integer uniform
 // rather than by clicking its button: `setMode` applied a twelve-value preset on the way
 // past, and what is under test is the reading.
-const READING_WAS = { readRgb: 0, readDepth: 1, readGhost: 2, readContour: 3, readBlackwall: 4 };
+const READING_WAS = {
+  readRgb: 0,
+  readDepth: 1,
+  'ghost.amount': 2,
+  'contour.amount': 3,
+  'blackwall.amount': 4,
+};
 
 console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAINST_REV}`);
 
@@ -1820,17 +1844,17 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
     const rasterOld = await hashesFor(
       { source: againstSource, viewportSize: COMPARISON_VIEW, comparisonShell: true },
       'k.uniforms.mode.value = $MODE;',
-      { readBlackwall: 4 },
+      { 'blackwall.amount': 4 },
       RASTER_OLD_LOOK,
     );
     const rasterNew = await hashesFor(
       { viewportSize: COMPARISON_VIEW, comparisonShell: true },
       'k.readings().forEach((n) => k.params.set(n, 0)); k.params.set($READING, 1);',
-      { readBlackwall: 4 },
+      { 'blackwall.amount': 4 },
       RASTER_NEW_LOOK,
     );
-    const a = rasterOld.out.readBlackwall;
-    const b = rasterNew.out.readBlackwall;
+    const a = rasterOld.out['blackwall.amount'];
+    const b = rasterNew.out['blackwall.amount'];
     const first = a.findIndex((h, i) => h !== b[i]);
     check(eq(a, b),
       `and the raster at the shipped look's 0.35 is bit-identical to the one line it replaced, at ${AGAINST_REV}`,
@@ -1838,13 +1862,13 @@ console.log(`\n[registry] each reading renders what its mode rendered, at ${AGAI
         ? `${a.length} frames, angle 0 pitch 1.3 hardness 0`
         : `${a.filter((h, i) => h !== b[i]).length} of ${a.length} frames differ, first at `
           + `${first}: ${a[first].slice(0, 12)} vs ${b[first].slice(0, 12)}`);
-    const flat = rasterNew.out.readBlackwall;
+    const flat = rasterNew.out['blackwall.amount'];
     const lit = (await hashesFor(
       { viewportSize: COMPARISON_VIEW, comparisonShell: true },
       'k.readings().forEach((n) => k.params.set(n, 0)); k.params.set($READING, 1);',
-      { readBlackwall: 4 },
+      { 'blackwall.amount': 4 },
       "k.params.set('raster.amount', 0.0); k.params.set('vignette.amount', 0.55);",
-    )).out.readBlackwall;
+    )).out['blackwall.amount'];
     check(!eq(flat, lit),
       'and the raster is actually drawing at that value, so the equality above is about something',
       `${flat.filter((h, i) => h !== lit[i]).length} of ${flat.length} frames differ with the master off`);
@@ -2277,13 +2301,13 @@ console.log('\n[registry] a preset can only be applied by a user action');
       // one applied a twelve-value preset behind it, so it could never be a track. A
       // reading writes one number, which is what a track does every frame, so refusing
       // it here would be refusing the dissolve this change exists to allow.
-      try { k.params.set('readBlackwall', 1); seen.reading = 'written'; }
+      try { k.params.set('blackwall.amount', 1); seen.reading = 'written'; }
       catch (e) { seen.reading = String(e); }
     };
     k.drive.stepTo(0);
     k.scene.onBeforeRender = () => {};
 
-    return { outside, applied, seen, bloomAfter: k.params.get('bloom'), readingAfter: k.params.get('readBlackwall') };
+    return { outside, applied, seen, bloomAfter: k.params.get('bloom'), readingAfter: k.params.get('blackwall.amount') };
   })()`);
 
   check(guard.outside === 'applied' && guard.applied === 0.5,
@@ -2293,7 +2317,7 @@ console.log('\n[registry] a preset can only be applied by a user action');
     'an ordinary parameter write during evaluation still works', `bloom=${guard.bloomAfter}`);
   check(guard.seen.reading === 'written' && guard.readingAfter === 1,
     'and a reading is an ordinary write, so a track can dissolve one under the playhead',
-    `readBlackwall=${guard.readingAfter}`);
+    `blackwall.amount=${guard.readingAfter}`);
 
   const selection = await page.evaluate(`(() => {
     const k = globalThis.__kinect;
@@ -2445,7 +2469,13 @@ check(new Set(scrambledRun).size > positions.length / 2, 'the input moves across
 
 console.log('\n[registry] the readings mix as a ratio, so their scale cancels');
 {
-  const RATIO = { readRgb: 0.4, readDepth: 0.3, readGhost: 0.2, readContour: 0, readBlackwall: 0 };
+  const RATIO = {
+    readRgb: 0.4,
+    readDepth: 0.3,
+    'ghost.amount': 0.2,
+    'contour.amount': 0,
+    'blackwall.amount': 0,
+  };
   const scaled = (k) => Object.fromEntries(Object.entries(RATIO).map(([n, v]) => [n, v * k]));
 
   const atOne = await run(scaled(1));
@@ -3054,7 +3084,8 @@ const GLYPH_LOOK = {
   additive: false, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 1, pointSize: 64,
   'lattice.amount': 1, cell: 0.25, 'glyph.amount': 1, 'glyph.tone': 0, 'glyph.hash': 1,
   'glyph.rain': 0, 'rain.amount': 0,
-  readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 4,
+  readRgb: 0, readDepth: 1, 'ghost.amount': 0, 'contour.amount': 0,
+  'blackwall.amount': 0, near: 0.5, far: 4,
 };
 
 console.log('\n[registry] one cell, one character: the mark is a fact about the room');
@@ -3723,8 +3754,8 @@ console.log('\n[registry] and a point that has not faded in yet is not a surface
     // section above already answers.
     const look = { additive: false, denoise: false, wake: 0, opacity: 1, exposure: 1,
       pointSize: 64, 'lattice.amount': 1, cell: 0.15, 'glyph.amount': 0, 'rain.amount': 0,
-      interpolate: false, readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0,
-      readBlackwall: 0, near: 0.5, far: 4.5 };
+      interpolate: false, readRgb: 0, readDepth: 1, 'ghost.amount': 0, 'contour.amount': 0,
+      'blackwall.amount': 0, near: 0.5, far: 4.5 };
     const shot = (grids, fade) => {
       const times = k.drive.pin(pack(grids));
       k.params.reset();
@@ -3799,7 +3830,8 @@ console.log('\n[registry] the rain falls, and its afterglow is above the head');
     // dots and this section is not about characters.
     const look = { additive: false, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 1,
       pointSize: 12, 'lattice.amount': 0, cell: 0.5, 'glyph.amount': 0,
-      readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 4,
+      readRgb: 0, readDepth: 1, 'ghost.amount': 0, 'contour.amount': 0,
+      'blackwall.amount': 0, near: 0.5, far: 4,
       'rain.amount': 0.9, 'rain.speed': 0.55, 'rain.span': 4, 'rain.trail': 1.2 };
     const strip = column(2400, 30);
     const off = field({ look: { ...look, 'rain.amount': 0 }, depth: strip }).slice();
@@ -3906,7 +3938,8 @@ console.log('\n[registry] and the rain\'s head gap is metres of room, not the li
     ${FIELD_HELPERS}
     const look = { additive: false, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 1,
       pointSize: 12, 'lattice.amount': 0, cell: 0.5, 'glyph.amount': 0,
-      readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 4,
+      readRgb: 0, readDepth: 1, 'ghost.amount': 0, 'contour.amount': 0,
+      'blackwall.amount': 0, near: 0.5, far: 4,
       'rain.amount': 0.9, 'rain.speed': 0.55, 'rain.span': 1.3, 'rain.trail': 0.45 };
     const wall = plane(2400);
     const bg = field({ look, depth: empty() }).slice();
@@ -3952,7 +3985,8 @@ console.log('\n[registry] a splat\'s energy is its own, whatever size the sprite
     // readback throws away whatever rounds to zero.
     const look = { additive: true, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 6,
       pointSize: 64, 'lattice.amount': 0, 'glyph.amount': 0, 'rain.amount': 0,
-      readRgb: 1, readDepth: 0, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 2.6 };
+      readRgb: 1, readDepth: 0, 'ghost.amount': 0, 'contour.amount': 0,
+      'blackwall.amount': 0, near: 0.5, far: 2.6 };
     const point = oneTexel(2400);
     const rows = [];
     for (const dist of ${JSON.stringify(DISTANCES)}) {
@@ -3992,7 +4026,8 @@ console.log('\n[registry] the two masters are exactly absent at zero, and so is 
     ${FIELD_HELPERS}
     const look = { additive: true, denoise: false, fade: 0, wake: 0, opacity: 1, exposure: 1,
       pointSize: 40, 'lattice.amount': 0, cell: 0.15, 'glyph.amount': 0, 'rain.amount': 0,
-      readRgb: 0, readDepth: 1, readGhost: 0, readContour: 0, readBlackwall: 0, near: 0.5, far: 4 };
+      readRgb: 0, readDepth: 1, 'ghost.amount': 0, 'contour.amount': 0,
+      'blackwall.amount': 0, near: 0.5, far: 4 };
     const wall = plane(2400);
     const bg = field({ look, depth: empty() }).slice();
     const at = async (over) => {

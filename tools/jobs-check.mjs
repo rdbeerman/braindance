@@ -268,12 +268,31 @@ const get = async (path) => (await fetch(URL_ + path)).json();
 
 const HASH_A = `sha256:${'a'.repeat(64)}`;
 // A document `restoreProject` accepts field for field, with all five readings spelled out
-// because the loader refuses a project that names fewer than five.
+// because the loader refuses a project that names fewer than five. A named package is complete,
+// including the two quiet parameters under each master, because the loader refuses half a package.
+const READING_REQUIRES = [
+  { id: 'ghost', version: '1.0.0' },
+  { id: 'contour', version: '1.0.0' },
+  { id: 'blackwall', version: '1.0.0' },
+];
 const PROJECT = {
   version: PROJECT_VERSION,
+  // The three package readings are values even at their inert defaults. The queue derives this
+  // envelope from every package namespace the document names, so the baseline must claim them.
+  requires: READING_REQUIRES,
   look: {
     params: {
-      readRgb: 1, readDepth: 0, readGhost: 0, readContour: 0, readBlackwall: 0,
+      readRgb: 1,
+      readDepth: 0,
+      'ghost.amount': 0,
+      'ghost.rim': 0.7,
+      'ghost.fill': 0.35,
+      'contour.amount': 0,
+      'contour.bands': 12,
+      'contour.width': 0.08,
+      'blackwall.amount': 0,
+      'blackwall.sweep': 0.28,
+      'blackwall.scan': 0,
     },
     tracks: {},
   },
@@ -291,7 +310,7 @@ const PROJECT = {
 // about a job it cannot draw whole.
 const PARKED_PROJECT = {
   ...PROJECT,
-  requires: [{ id: 'sparkle', version: '1.0.0' }],
+  requires: [...READING_REQUIRES, { id: 'sparkle', version: '1.0.0' }],
   look: {
     params: {
       ...PROJECT.look.params,
@@ -314,7 +333,7 @@ const PARKED_PROJECT = {
 // rain's four parameters is named, because a document naming a subset is one the loader refuses.
 const SKEW_PROJECT = {
   ...PROJECT,
-  requires: [{ id: 'rain', version: '9.9.9' }],
+  requires: [...READING_REQUIRES, { id: 'rain', version: '9.9.9' }],
   look: {
     params: {
       ...PROJECT.look.params,
@@ -496,7 +515,11 @@ try {
   const repeated = await enqueue({
     project: {
       ...PARKED_PROJECT,
-      requires: [{ id: 'sparkle', version: '1.0.0' }, { id: 'sparkle', version: '2.0.0' }],
+      requires: [
+        ...READING_REQUIRES,
+        { id: 'sparkle', version: '1.0.0' },
+        { id: 'sparkle', version: '2.0.0' },
+      ],
     },
     output: 'check-parked-repeated',
   });
@@ -505,23 +528,28 @@ try {
   'a project claiming one effect twice in its requires list is refused at the queue, naming the id',
   `${repeated.status} ${(repeated.body.error ?? JSON.stringify(repeated.body.requires)).slice(0, 130)}`);
   const carriedWhole = await enqueue({
-    project: { ...PARKED_PROJECT, requires: [{ id: 'sparkle', version: '2.5.0', rev: 'abc123' }] },
+    project: {
+      ...PARKED_PROJECT,
+      requires: [...READING_REQUIRES, { id: 'sparkle', version: '2.5.0', rev: 'abc123' }],
+    },
     output: 'check-parked-pinned',
   });
   check(carriedWhole.status === 200
-    && JSON.stringify(carriedWhole.body.requires) === JSON.stringify([{ id: 'sparkle', version: '2.5.0', rev: 'abc123' }]),
+    && JSON.stringify(carriedWhole.body.requires) === JSON.stringify([
+      ...READING_REQUIRES, { id: 'sparkle', version: '2.5.0', rev: 'abc123' },
+    ]),
   'and where the two agree the document\'s own entry is carried whole, version and rev included, because neither is derivable here',
   `${carriedWhole.status} ${JSON.stringify(carriedWhole.body.requires ?? carriedWhole.body.error)}`);
   // The rule is the loader's own, `requiresEntryRefusal` in `web/format.js`, so these rows hold
   // that the queue asks it rather than that a second copy of it agrees.
   const misshapenRequires = [
     ['a requires that is not a list at all', { id: 'sparkle', version: '1.0.0' }, 'requires belong'],
-    ['an entry that is not an object', ['sparkle'], 'requires entry'],
-    ['an entry with nothing in it', [{}], 'not an effect id'],
-    ['an id that could never name a package', [{ id: 'Sparkle!', version: '1.0.0' }], 'not an effect id'],
-    ['an entry carrying no version', [{ id: 'sparkle' }], 'a version is a non-empty string'],
-    ['a rev that is not a string', [{ id: 'sparkle', version: '1.0.0', rev: 7 }], 'a rev is a non-empty string'],
-    ['a stray key beside the two that belong', [{ id: 'sparkle', version: '1.0.0', extra: 'why' }], 'has no place there'],
+    ['an entry that is not an object', [...READING_REQUIRES, 'sparkle'], 'requires entry'],
+    ['an entry with nothing in it', [...READING_REQUIRES, {}], 'not an effect id'],
+    ['an id that could never name a package', [...READING_REQUIRES, { id: 'Sparkle!', version: '1.0.0' }], 'not an effect id'],
+    ['an entry carrying no version', [...READING_REQUIRES, { id: 'sparkle' }], 'a version is a non-empty string'],
+    ['a rev that is not a string', [...READING_REQUIRES, { id: 'sparkle', version: '1.0.0', rev: 7 }], 'a rev is a non-empty string'],
+    ['a stray key beside the two that belong', [...READING_REQUIRES, { id: 'sparkle', version: '1.0.0', extra: 'why' }], 'has no place there'],
   ];
   const misshapenIds = [];
   for (const [what, requires, needle] of misshapenRequires) {
@@ -535,11 +563,16 @@ try {
       `${res.status} ${(res.body.error ?? JSON.stringify(res.body.requires)).slice(0, 110)}`);
   }
   const wellShaped = await enqueue({
-    project: { ...PARKED_PROJECT, requires: [{ id: 'sparkle', version: '1.0.0', rev: 'sha256:beef' }] },
+    project: {
+      ...PARKED_PROJECT,
+      requires: [...READING_REQUIRES, { id: 'sparkle', version: '1.0.0', rev: 'sha256:beef' }],
+    },
     output: 'check-requires-ok',
   });
   check(wellShaped.status === 200
-    && JSON.stringify(wellShaped.body.requires) === JSON.stringify([{ id: 'sparkle', version: '1.0.0', rev: 'sha256:beef' }]),
+    && JSON.stringify(wellShaped.body.requires) === JSON.stringify([
+      ...READING_REQUIRES, { id: 'sparkle', version: '1.0.0', rev: 'sha256:beef' },
+    ]),
   '  while an entry carrying every field the rule allows is taken whole, so the shape rules refuse a shape rather than a list',
   `${wellShaped.status} ${JSON.stringify(wellShaped.body.requires ?? wellShaped.body.error)}`);
 

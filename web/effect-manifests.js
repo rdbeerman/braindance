@@ -22,7 +22,15 @@ export const MANIFEST_FORMAT = 1;
  */
 export const EFFECT_PARAM_KINDS = Object.freeze(['scalar', 'step']);
 export const EFFECT_BIND_TABLES = Object.freeze(['points', 'grade']);
-export const EFFECT_BIND_TRANSFORMS = Object.freeze(['axisDeg', 'degToRad']);
+const EFFECT_BIND_TRANSFORM_TYPES = Object.freeze({
+  axisDeg: 'vec2',
+  centeredEdges: 'vec2',
+  degToRad: 'float',
+});
+export const EFFECT_BIND_TRANSFORMS = Object.freeze(Object.keys(EFFECT_BIND_TRANSFORM_TYPES));
+export const effectBindUniformType = (transform) => (
+  transform === undefined ? 'float' : EFFECT_BIND_TRANSFORM_TYPES[transform] ?? null
+);
 
 /**
  * The uniforms this build's own render loop writes, which is the one exception to the rule that
@@ -109,6 +117,8 @@ export const tableFromPackages = (packages, order) => {
     };
     if (p.bind.transform !== undefined) entry.transform = p.bind.transform;
     if (p.bind.gates !== undefined) entry.gates = p.bind.gates;
+    if (p.reading !== undefined) entry.reading = p.reading;
+    if (p.under !== undefined) entry.under = `${name.slice(0, name.indexOf('.'))}.${p.under}`;
     table[name] = Object.freeze(entry);
   }
   return Object.freeze(table);

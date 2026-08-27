@@ -113,7 +113,7 @@ all of its values and deletes all of its tracks as one undoable edit. The rack c
 local panel preference and is not written into the project.
 
 **The effects those sliders drive are packages on disk, and they follow the same two-root
-rule.** Eighteen ship in `effects-builtin/`, each a manifest beside the GLSL it splices into the
+rule.** Twenty-one ship in `effects-builtin/`, each a manifest beside the GLSL it splices into the
 shaders, and the page assembles both point-cloud programs, the grade pass, the parameter
 registry and the panel out of whatever is installed. `effects/` is the writable root: a package
 installed there under a shipped id shadows it, and deleting that copy brings the shipped one

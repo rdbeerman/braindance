@@ -23,7 +23,9 @@ import {
 } from './plan-geometry.js';
 import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
-import { EFFECT_BIND_TRANSFORMS, tableFromPackages, withEffectGroups } from './effect-manifests.js';
+import {
+  EFFECT_BIND_TRANSFORMS, effectBindUniformType, tableFromPackages, withEffectGroups,
+} from './effect-manifests.js';
 import { bloomChainSize } from './bloom-pass.js';
 import {
   depthCurr, colorPrev, colorCurr, buildTextures, bindDepth, bindColor, plantColor,
@@ -151,11 +153,12 @@ const EDITING = location.pathname === '/edit';
  */
 const PROGRAM_OUT = location.pathname === '/program';
 
-// In one place, because the write below and the project picker have to agree about it.
+// In one place, because the auto-save writer and the recovery offer have to agree about it.
 const WORKING_PROJECT = '__working__';
 
 // Which project the menu's Editor entry resumes. Client state rather than document state.
 const LAST_OPENED = 'kinect.lastOpened';
+let openedProjectName = null;
 
 function rememberOpened() {
   if (!openTakeHash) return;
@@ -163,7 +166,7 @@ function rememberOpened() {
     localStorage.setItem(LAST_OPENED, JSON.stringify({
       takeHash: openTakeHash,
       takeId: openTakeId,
-      project: ui.project?.value || null,
+      project: openedProjectName,
     }));
   } catch {
     // Private browsing, or a full quota. Resuming is a convenience, so this stays quiet.
@@ -455,6 +458,9 @@ async function fitCropToTake(id, near, far) {
 // Where each effect parameter lands in declaration order, which is the panel's layout.
 const EFFECT_PARAM_ORDER = [
   'glyph.amount', 'glyph.tone', 'glyph.hash', 'glyph.rain',
+  'ghost.amount', 'ghost.rim', 'ghost.fill',
+  'contour.amount', 'contour.bands', 'contour.width',
+  'blackwall.amount', 'blackwall.sweep', 'blackwall.scan',
   'noise.amount', 'noise.scale', 'noise.speed', 'lattice.amount',
   'glitch.amount', 'glitch.density', 'glitch.shove', 'glitch.tint',
   'glitch.bands', 'glitch.axis', 'glitch.rate', 'push.amount',
@@ -527,6 +533,10 @@ function effectApply(bind) {
       const r = THREE.MathUtils.degToRad(v);
       table()[bind.uniform].value.set(Math.sin(r), Math.cos(r));
     };
+  } else if (bind.transform === 'centeredEdges') {
+    // Subtract in JavaScript's double precision, then upload the two answers as floats. Doing
+    // this arithmetic in the shader rounds the width first and moves the lower edge by one ulp.
+    write = (v) => { table()[bind.uniform].value.set(0.5 - v, 0.5 + v); };
   } else if (bind.transform === 'degToRad') {
     write = (v) => { table()[bind.uniform].value = THREE.MathUtils.degToRad(v); };
   } else if (bind.transform) {
@@ -552,10 +562,13 @@ const effectSlice = (first, last) => {
   }
   return Object.fromEntries(names.slice(from, to + 1).map((name) => {
     const bind = EFFECT_PARAMS[name];
-    return [name, {
+    const entry = {
       def: bind.def, min: bind.min, max: bind.max, step: bind.step, kind: bind.kind,
       tag: 'look', group: bind.group, label: bind.label, apply: effectApply(bind),
-    }];
+    };
+    if (bind.reading !== undefined) entry.reading = bind.reading;
+    if (bind.under !== undefined) entry.under = bind.under;
+    return [name, entry];
   }));
 };
 
@@ -670,15 +683,11 @@ const buildParams = () => ({
   readDepth: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look', reading: true,
     group: 'colour', label: 'depth',
     apply: (v) => { uniforms.readDepth.value = v; } },
-  readGhost: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look', reading: true,
-    group: 'style', label: 'ghost',
-    apply: (v) => { uniforms.readGhost.value = v; } },
-  readContour: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look', reading: true,
-    group: 'style', label: 'contour',
-    apply: (v) => { uniforms.readContour.value = v; } },
-  readBlackwall: { def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look', reading: true,
-    group: 'style', label: 'blackwall',
-    apply: (v) => { uniforms.readBlackwall.value = v; } },
+  // The three reading effects: ghost, contour, blackwall. Each blends into the colour
+  // the same way RGB and Depth do above, and carries its own tuning parameters.
+  ...effectSlice('ghost.amount', 'ghost.fill'),
+  ...effectSlice('contour.amount', 'contour.width'),
+  ...effectSlice('blackwall.amount', 'blackwall.scan'),
 
   rgbSaturation: { def: 1, min: 0, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'colour', label: 'saturation',
@@ -686,27 +695,6 @@ const buildParams = () => ({
   depthGamma: { def: 1, min: 0.25, max: 4, step: 0.05, kind: 'scalar', tag: 'look',
     group: 'colour', label: 'gamma',
     apply: (v) => { uniforms.depthGamma.value = v; } },
-  ghostRim: { def: 0.7, min: 0.2, max: 3, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'ghost rim',
-    apply: (v) => { uniforms.ghostRim.value = v; } },
-  ghostFill: { def: 0.35, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'ghost fill',
-    apply: (v) => { uniforms.ghostFill.value = v; } },
-  // Bands per metre of depth, so the spacing is a distance rather than a stripe count.
-  contourBands: { def: 12, min: 1, max: 60, step: 1, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'bands /m',
-    apply: (v) => { uniforms.contourBands.value = v; } },
-  // Half the width of the drawn line. The band edges are computed from it, not passed in.
-  contourWidth: { def: 0.08, min: 0.01, max: 0.4, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'thickness',
-    apply: (v) => { uniforms.contourLo.value = 0.5 - v; uniforms.contourHi.value = 0.5 + v; } },
-  blackwallSweep: { def: 0.28, min: 0, max: 2, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'wall sweep',
-    apply: (v) => { uniforms.blackwallSweep.value = v; } },
-
-  scan: { def: 0, min: 0, max: 1.5, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'style', label: 'scan',
-    apply: (v) => { uniforms.scanAmount.value = v; } },
   rim: { def: 0.55, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
     group: 'style', label: 'rim',
     apply: (v) => { uniforms.rimAmount.value = v; } },
@@ -761,8 +749,9 @@ function missingReadings(values) {
 /** Everything the registry has to be true of, asked of the table that has just been built. */
 function refuseRegistryDisagreement() {
   for (const name of READINGS) {
-    if (!Object.hasOwn(uniforms, name)) {
-      throw new Error(`the reading ${name} has no uniform: its slider would move nothing`);
+    const uniform = effectOf(name) === null ? name : EFFECT_PARAMS[name]?.uniform;
+    if (!uniform || !Object.hasOwn(uniforms, uniform)) {
+      throw new Error(`the reading ${name} binds no point uniform: its slider would move nothing`);
     }
   }
 
@@ -889,7 +878,10 @@ function specOf(name) {
 const params = {
   spec(name) {
     const spec = specOf(name);
-    return { default: spec.def, min: spec.min, max: spec.max, step: spec.step, kind: spec.kind, tag: spec.tag };
+    return {
+      default: spec.def, min: spec.min, max: spec.max, step: spec.step,
+      kind: spec.kind, tag: spec.tag, under: spec.under ?? null,
+    };
   },
   names(tag) {
     return Object.keys(PARAMS).filter((n) => !tag || PARAMS[n].tag === tag);
@@ -1103,6 +1095,12 @@ const panelGroupNodes = new Map();
 const panelGroupParams = new Map();
 const panelGroupElements = new Map();
 const panelEffectRows = new Map();
+// Rows whose visibility depends on a parent parameter being non-zero. Keyed by the
+// parent name (e.g. 'ghost.amount'), value is an array of row elements. When the parent
+// is 0 the rows are hidden; when it's positive they're shown. This is how reading
+// tuning parameters (ghost.rim, contour.bands, etc.) appear only when their reading is
+// active.
+const panelUnderRows = new Map();
 
 // One head per group, whether or not the group can be shut.
 function panelHead(group) {
@@ -1138,6 +1136,7 @@ function buildPanel() {
   panelGroupParams.clear();
   panelGroupElements.clear();
   panelEffectRows.clear();
+  panelUnderRows.clear();
   panelTail.clear();
   groupDefaults.clear();
   // `refreshGroups` skips a group whose state string has not moved, so this clears with it.
@@ -1200,6 +1199,12 @@ function buildPanel() {
       if (!panelEffectRows.has(owner)) panelEffectRows.set(owner, []);
       panelEffectRows.get(owner).push(mountedRow);
     }
+    // A row that depends on another parameter being non-zero. The reading tuning params
+    // are hidden until their reading is active, so ghost.rim only appears when ghost.amount > 0.
+    if (spec.under) {
+      if (!panelUnderRows.has(spec.under)) panelUnderRows.set(spec.under, []);
+      panelUnderRows.get(spec.under).push(mountedRow);
+    }
     names.push(name);
   }
   // A heading with nothing under it is a group key misspelled on one side.
@@ -1241,14 +1246,16 @@ let refusedEffectSignature = null;
 
 /** A uniform cell for every binding the registry holds, minted where the tables have none. */
 const uniformCellFits = (cell, bind) => Boolean(cell)
-  && (cell.value instanceof THREE.Vector2) === (bind.transform === 'axisDeg');
+  && (cell.value instanceof THREE.Vector2) === (effectBindUniformType(bind.transform) === 'vec2');
 
 function seedUniformCells() {
   for (const name of Object.keys(EFFECT_PARAMS)) {
     const bind = EFFECT_PARAMS[name];
     const table = bind.on === 'grade' ? grade.uniforms : uniforms;
     if (uniformCellFits(table[bind.uniform], bind)) continue;
-    table[bind.uniform] = { value: bind.transform === 'axisDeg' ? new THREE.Vector2() : 0 };
+    table[bind.uniform] = {
+      value: effectBindUniformType(bind.transform) === 'vec2' ? new THREE.Vector2() : 0,
+    };
   }
 }
 
@@ -1272,7 +1279,9 @@ function restoreDepartedUniforms(was, now) {
     const cell = table[bind.uniform];
     if (!cell) continue;
     const pristine = PRISTINE_UNIFORMS[bind.on]?.get(bind.uniform);
-    if (pristine === undefined) cell.value = bind.transform === 'axisDeg' ? new THREE.Vector2() : 0;
+    if (pristine === undefined) {
+      cell.value = effectBindUniformType(bind.transform) === 'vec2' ? new THREE.Vector2() : 0;
+    }
     else cell.value = pristine instanceof THREE.Vector2 ? pristine.clone() : pristine;
   }
 }
@@ -1810,6 +1819,15 @@ function effectRackEntry(id) {
   return { names, moved, keys };
 }
 
+// Reading tuning rows appear only when their parent reading is active. Called whenever
+// the readings change, which is every look write that touches one of them.
+function refreshUnderRows() {
+  for (const [parent, rows] of panelUnderRows) {
+    const visible = params.get(parent) > 0;
+    for (const row of rows) row.hidden = !visible;
+  }
+}
+
 let effectRackConfirming = null;
 
 function addEffectToRack(id) {
@@ -1822,17 +1840,8 @@ function addEffectToRack(id) {
     groupOverrideDirty = true;
   }
   refreshPanel();
-
-  const first = effectParamNames(id)[0];
-  const group = PANEL_GROUPS.find((entry) => entry.key === PARAMS[first]?.group);
-  const dialog = document.getElementById('effectRackDialog');
-  if (dialog.open) dialog.close();
-  if (group) setPanelTab(group.tab);
-  requestAnimationFrame(() => {
-    const control = panelControls.get(first);
-    control?.scrollIntoView({ block: 'center' });
-    control?.focus({ preventScroll: true });
-  });
+  paintEffectRackDialog();
+  document.getElementById('effectRackSearch')?.focus();
   return true;
 }
 
@@ -1853,6 +1862,7 @@ function removeEffectFromRack(id) {
   requestRepaint();
   history.commit();
   paintEffectRackDialog();
+  document.getElementById('effectRackSearch')?.focus();
   return true;
 }
 
@@ -1896,7 +1906,11 @@ function paintEffectRackDialog() {
     } else if (effectRackConfirming === id) {
       const cancel = panelNode('button', 'dialog-secondary', 'cancel');
       cancel.type = 'button';
-      cancel.addEventListener('click', () => { effectRackConfirming = null; paintEffectRackDialog(); });
+      cancel.addEventListener('click', () => {
+        effectRackConfirming = null;
+        paintEffectRackDialog();
+        document.querySelector(`[data-effect-remove="${CSS.escape(id)}"]`)?.focus();
+      });
       const remove = panelNode('button', 'dialog-secondary', 'reset & remove');
       remove.type = 'button';
       remove.dataset.effectConfirmRemove = id;
@@ -1913,6 +1927,7 @@ function paintEffectRackDialog() {
         if (now.moved.length || now.keys) {
           effectRackConfirming = id;
           paintEffectRackDialog();
+          document.querySelector(`[data-effect-confirm-remove="${CSS.escape(id)}"]`)?.focus();
         } else {
           removeEffectFromRack(id);
         }
@@ -1931,8 +1946,14 @@ function paramTouched(name) {
   return params.get(name) !== groupDefaults.get(name);
 }
 
+/** A group stays open while it carries work or belongs to a racked effect. */
 function revealsItself(key) {
-  return (panelGroupParams.get(key) ?? []).some(paramTouched);
+  const names = panelGroupParams.get(key) ?? [];
+  if (names.some(paramTouched)) return true;
+  return names.some((name) => {
+    const id = effectOf(name);
+    return id !== null && rackedEffects.has(id);
+  });
 }
 
 /** What the document says about a group, which is the derived half of whether it is open. */
@@ -1998,6 +2019,7 @@ function toggleGroup(key) {
 
 function refreshPanel() {
   refreshEffectRack();
+  refreshUnderRows();
   refreshGroups();
 }
 
@@ -2080,6 +2102,10 @@ function serialiseProjectBody({ suppressed = null } = {}) {
   // The save rule: an effect held at defaults with nothing keyed is not a use of it.
   for (const id of effectIds()) {
     const mine = effectParamNames(id);
+    // A reading package stays whole even at its defaults. Version 6 requires all five reading
+    // weights, and a document that sheds three because they moved behind package ids is a
+    // document this same build refuses on restore.
+    if (mine.some((n) => PARAMS[n].reading)) continue;
     const keyed = mine.some((n) => tracks.get(n)?.keys.length);
     const moved = mine.some((n) => lookParams[n] !== PARAMS[n].def);
     if (keyed || moved) continue;
@@ -4127,12 +4153,6 @@ const ui = {
   exportNameChip: document.getElementById('tExportNameChip'),
   exportSave: document.getElementById('tExportSave'),
   exportTrim: document.getElementById('tExportTrim'),
-  inOut: document.getElementById('tInOut'),
-  outOut: document.getElementById('tOutOut'),
-  clipLen: document.getElementById('tClipLen'),
-  setIn: document.getElementById('tSetIn'),
-  setOut: document.getElementById('tSetOut'),
-  clearRange: document.getElementById('tClearRange'),
   ease: document.getElementById('tEase'),
   prevKey: document.getElementById('tPrevKey'),
   nextKey: document.getElementById('tNextKey'),
@@ -4157,8 +4177,6 @@ const ui = {
   pickCount: document.getElementById('ppCount'),
   pickCancel: document.getElementById('ppCancel'),
   pickGo: document.getElementById('ppGo'),
-  project: document.getElementById('tProject'),
-  projectOpen: document.getElementById('tProjectOpen'),
   resume: document.getElementById('tResume'),
   resumeWhen: document.getElementById('tResumeWhen'),
   resumeOpen: document.getElementById('tResumeOpen'),
@@ -4327,9 +4345,6 @@ function paintTimeline(t) {
   ui.source.textContent = timecode(retime.sourceSecAt(program));
   if (!ui.exportName.placeholder) ui.exportName.placeholder = t.source.id;
   paintStripPositions();
-  if (ui.inOut) ui.inOut.textContent = timecode(clipIn);
-  if (ui.outOut) ui.outOut.textContent = clipOut === null ? 'end' : timecode(clipOut);
-  if (ui.clipLen) ui.clipLen.textContent = `${Math.max(0, (clipOut ?? view.duration) - clipIn).toFixed(2)}s`;
   paintDeliverable();
   paintLanes();
   drawChrome();
@@ -4728,19 +4743,18 @@ function setClipRangeFromPlayhead(which) {
   history.commit();
 }
 
-ui.setIn?.addEventListener('click', () => setClipRangeFromPlayhead('in'));
-ui.setOut?.addEventListener('click', () => setClipRangeFromPlayhead('out'));
-ui.clearRange?.addEventListener('click', () => {
+function clearClipRange() {
   // `null` rather than the duration, so the range still means to the end if the program grows.
   setClipInOut({ in: 0, out: null });
   history.commit();
-});
+}
 
 const TYPING_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 const isTyping = (el) => el instanceof HTMLElement && (TYPING_TAGS.has(el.tagName) || el.isContentEditable);
 
 const SHORTCUTS = 'space play/pause · arrows step a frame, with shift a second · '
-  + 'home/end · i/o set in/out, with shift jump to them · del removes the selected key · '
+  + 'home/end · i/o set in/out, with shift jump to them · option-x uses the whole clip · '
+  + 'del removes the selected key · '
   + 'm marks, [/] jump to the previous and next mark · '
   + '+/- zoom the ruler, ,/. pan it, f fits the clip, z frames in..out · '
   + 'cmd-z undoes · h hides the panel';
@@ -4776,6 +4790,11 @@ addEventListener('keydown', (e) => {
   }
   // Everything below is about a clip, and the recorder has none.
   if (!EDITING || !timeline) return;
+  if (e.code === 'KeyX' && e.altKey && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    clearClipRange();
+    return;
+  }
   // Any modifier but shift belongs to the browser or the OS. Shift is a frame against a second.
   const composed = e.key.length === 1 && e.getModifierState('AltGraph');
   if ((e.metaKey || e.ctrlKey || e.altKey) && !composed) return;
@@ -5553,6 +5572,7 @@ function presetFromCurrentLook(names) {
   if (wholeLookTag(values)) {
     for (const id of effectIdsIn(Object.keys(values))) {
       const mine = effectParamNames(id);
+      if (mine.some((n) => PARAMS[n].reading)) continue;
       if (mine.every((n) => values[n] === PARAMS[n].def)) {
         for (const n of mine) delete values[n];
       }
@@ -6161,15 +6181,7 @@ function offerWorkingDocument(projects) {
 }
 
 async function refreshProjects() {
-  const list = await documentsIn('projects');
-  if (ui.project) {
-    ui.project.replaceChildren(new Option('—', ''));
-    for (const doc of list) {
-      if (doc.name === WORKING_PROJECT) continue;
-      ui.project.appendChild(new Option(doc.name, doc.name));
-    }
-  }
-  return list;
+  return documentsIn('projects');
 }
 
 async function refreshDeliverables() {
@@ -7701,7 +7713,7 @@ ui.presetFile.addEventListener('change', () => {
 
 /** Save the open edit under a name the operator gives. File > Save as and Shift+Cmd+S. */
 async function saveProjectAs() {
-  const name = prompt('save this edit as', ui.project?.value || `${openTakeId ?? 'clip'}-edit`);
+  const name = prompt('save this edit as', openedProjectName || `${openTakeId ?? 'clip'}-edit`);
   if (!name) return;
   try {
     // The take is named by content hash, which makes a project a self-contained render job.
@@ -7713,24 +7725,13 @@ async function saveProjectAs() {
     });
     const saved = await res.json();
     if (saved.error) throw new Error(saved.error);
-    await refreshProjects();
-    if (ui.project) ui.project.value = saved.name;
+    openedProjectName = saved.name;
     say(`saved ${saved.name} · ${saved.bytes} bytes`);
     rememberOpened();
   } catch (err) {
     showTimelineError(err);
   }
 }
-
-ui.projectOpen?.addEventListener('click', async () => {
-  const name = ui.project?.value;
-  if (!name) return;
-  try {
-    await loadProjectNamed(name);
-  } catch (err) {
-    showTimelineError(err);
-  }
-});
 
 ui.resumeOpen?.addEventListener('click', async () => {
   try {
@@ -7797,6 +7798,7 @@ const shell = shellElements({
   surfaceName: 'surfaceName',
   saveProject: 'menuSaveProject',
   projectSettings: 'menuProjectSettings',
+  wholeClip: 'menuWholeClip',
   export: 'menuExport',
   obs: 'menuObs',
   cameraReset: 'menuCameraReset',
@@ -7810,7 +7812,7 @@ const shell = shellElements({
   lookExport: 'menuLookExport',
   state: 'menuState',
   effectRackOpen: 'effectRackOpen',
-  effectRackDialog: 'effectRackDialog',
+  effectRackPanel: 'effectRackPanel',
   effectRackClose: 'effectRackClose',
   effectRackSearch: 'effectRackSearch',
   effectRackList: 'effectRackList',
@@ -7839,7 +7841,8 @@ shell.menus = [...document.querySelectorAll('.appmenu')];
 
 shell.surfaceName.textContent = EDITING ? 'Editor' : 'Record';
 for (const control of [
-  shell.saveProject, shell.projectSettings, shell.export, shell.lookImport, shell.lookExport,
+  shell.saveProject, shell.projectSettings, shell.wholeClip, shell.export,
+  shell.lookImport, shell.lookExport,
 ]) {
   control.disabled = !EDITING;
 }
@@ -7889,16 +7892,34 @@ function openDialog(dialog) {
 }
 
 shell.projectSettings.addEventListener('click', () => openDialog(shell.projectDialog));
-shell.effectRackOpen.addEventListener('click', () => {
+function closeEffectRack({ restore = false } = {}) {
+  shell.effectRackPanel.hidden = true;
+  shell.effectRackOpen.setAttribute('aria-expanded', 'false');
+  effectRackConfirming = null;
+  if (restore) shell.effectRackOpen.focus();
+}
+
+function openEffectRack() {
   effectRackConfirming = null;
   shell.effectRackSearch.value = '';
   paintEffectRackDialog();
-  openDialog(shell.effectRackDialog);
+  shell.effectRackPanel.hidden = false;
+  shell.effectRackOpen.setAttribute('aria-expanded', 'true');
   shell.effectRackSearch.focus();
+}
+
+shell.effectRackOpen.addEventListener('click', () => {
+  if (shell.effectRackPanel.hidden) openEffectRack();
+  else closeEffectRack({ restore: true });
 });
+shell.effectRackClose.addEventListener('click', () => closeEffectRack({ restore: true }));
 shell.effectRackSearch.addEventListener('input', () => {
   effectRackConfirming = null;
   paintEffectRackDialog();
+});
+shell.wholeClip.addEventListener('click', () => {
+  closeApplicationMenus();
+  clearClipRange();
 });
 shell.export.addEventListener('click', () => openDialog(ui.exportDialog));
 shell.saveProject.addEventListener('click', () => {
@@ -8079,8 +8100,6 @@ shell.state.addEventListener('click', () => {
 });
 
 shell.exportClose.addEventListener('click', () => ui.exportDialog.close());
-shell.effectRackClose.addEventListener('click', () => shell.effectRackDialog.close());
-shell.effectRackDialog.addEventListener('close', () => { effectRackConfirming = null; });
 shell.projectClose.addEventListener('click', () => shell.projectDialog.close());
 shell.projectDone.addEventListener('click', () => shell.projectDialog.close());
 shell.obsClose.addEventListener('click', () => shell.obsDialog.close());
@@ -8090,6 +8109,11 @@ addEventListener('keydown', (event) => {
   // Asked first, Escape included: a key another control consumed is not this handler's.
   if (event.defaultPrevented) return;
   if (event.key === 'Escape') {
+    if (!shell.effectRackPanel.hidden) {
+      event.preventDefault();
+      closeEffectRack({ restore: true });
+      return;
+    }
     closeApplicationMenus({ restore: true });
     return;
   }
@@ -8142,7 +8166,8 @@ async function loadProjectNamed(name, offered = null) {
   applyDeliverable(activeDeliverable);
   await timeline.seek(timeline.programSec);
   if (resume && gen === transportGen) timeline.play();
-  if (ui.project) ui.project.value = name;
+  // The working document is crash recovery, not a named edit for the menu to reopen directly.
+  openedProjectName = name === WORKING_PROJECT ? null : name;
   say(`opened ${name}`);
   rememberOpened();
   return doc;
@@ -8270,6 +8295,7 @@ async function openTake(id) {
   placeChrome();
   openTakeId = id;
   openTakeHash = source.index.hash;
+  openedProjectName = null;
   rememberOpened();
   await fitCropToTake(id, params.get('near'), params.get('far'))
     .catch((err) => { say(`the crop box could not be fitted to this take: ${err.message}`); });
@@ -8561,6 +8587,7 @@ globalThis.__kinect = {
   /** The interaction layer's own state, for a check that drives controls and reads back. */
   editor: {
     clipRange: () => ({ in: clipIn, out: clipOut }),
+    setClipRange: (inVal, outVal) => { setClipInOut({ in: inVal, out: outVal }); history.commit(); },
     // The speed slider's travel is logarithmic, so its `value` is a position and not a rate.
     rateSlider: { toValue: sliderFromRate, toRate: rateFromSlider },
     /** The strip's height and what bounds it, so a check can drive the splitter. */

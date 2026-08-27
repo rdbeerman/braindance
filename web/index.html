@@ -228,6 +228,7 @@
      stated here - the height belongs to `.kf`/`.reset`, which are the tallest things a
      row holds and therefore what decides it. */
   .row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .row[hidden], .checkrow[hidden] { display: none; }
   .row span { flex: 0 0 74px; color: var(--dim); }
   .row output { flex: 0 0 42px; text-align: right; font-variant-numeric: tabular-nums; }
   #panel .row select,
@@ -344,9 +345,10 @@
   /* Menu items that only apply to the editor: opening a clip, its settings, exporting,
      the top-down inset, and look import/export. The record surface has no clip to
      shape or export, no composition to frame in the top-down, and look management
-     happens through the preset library visible in the Look tab. */
+     happens through the preset library visible in the Effects tab. */
   body:not(.editing) #toLibrary,
   body:not(.editing) #menuProjectSettings,
+  body:not(.editing) #menuWholeClip,
   body:not(.editing) #menuExport,
   body:not(.editing) #menuTopView,
   body:not(.editing) #menuLookImport,
@@ -550,24 +552,69 @@
   #exportDialog { width: min(480px, calc(100vw - 32px)); }
   #obsDialog { width: min(480px, calc(100vw - 32px)); }
   #projectDialog { width: min(480px, calc(100vw - 32px)); }
-  #effectRackDialog { width: min(430px, calc(100vw - 32px)); }
-  .effect-rack-intro {
-    margin: 0 0 14px; color: var(--dim); font-size: 11px; line-height: 1.45;
+  /* Effect picker sidebar - appears to the right of the main panel. */
+  #effectRackPanel {
+    position: fixed; top: 38px; left: 302px; width: min(260px, calc(100vw - 32px));
+    height: calc(100vh - 38px);
+    display: flex; flex-direction: column; overflow: hidden;
+    border: 0; border-right: 1px solid var(--line); border-radius: 0;
+    background: rgba(8, 11, 16, 0.82); backdrop-filter: blur(12px); z-index: 9;
+    font-size: 11px; line-height: 1.4; padding: 0 14px 14px;
+  }
+  #effectRackPanel[hidden] { display: none; }
+  body:not(.editing) #effectRackPanel { background: var(--paper-2); backdrop-filter: none; }
+  body.editing #effectRackPanel { height: calc(100vh - var(--timeline-h) - var(--tlanes-h) - 38px); }
+  body.panelcollapsed #effectRackPanel { left: 16px; }
+  @media (max-width: 562px) {
+    #effectRackPanel, body.panelcollapsed #effectRackPanel {
+      left: 16px; right: 16px; width: auto; z-index: 11;
+    }
+  }
+  .effect-rack-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 10px 0 8px; border-bottom: 1px solid var(--line); margin: 0 -14px 10px;
+    padding-left: 14px; padding-right: 14px;
+  }
+  .effect-rack-head h2 { margin: 0; font-size: 13px; font-weight: 500; letter-spacing: 0.04em; }
+  .effect-rack-head button {
+    width: 24px; height: 24px; padding: 0; border: 0; border-radius: 0;
+    background: transparent; color: var(--dim); font-size: 18px; line-height: 1; cursor: pointer;
+  }
+  .effect-rack-head button:hover { color: var(--ink); }
+  #effectRackSearch {
+    display: block; width: 100%; box-sizing: border-box; margin-bottom: 10px; flex: none;
+    padding: 7px 9px; border: 1px solid var(--line); border-radius: 0;
+    background: transparent; color: var(--ink); font: inherit; font-size: 11px; outline: none;
+  }
+  #effectRackSearch:focus { border-color: rgba(255,255,255,0.25); }
+  #effectRackSearch::placeholder { color: var(--dim); }
+  #effectRackSearch::-webkit-search-cancel-button {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; cursor: pointer;
+    background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14"><path d="M3 3l8 8M11 3l-8 8" stroke="rgba(255,255,255,0.5)" stroke-width="1.5" stroke-linecap="round"/></svg>') center/contain no-repeat;
+  }
+  #effectRackSearch::-webkit-search-cancel-button:hover {
+    background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14"><path d="M3 3l8 8M11 3l-8 8" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>');
   }
   .effect-rack-list {
-    display: grid; gap: 1px; max-height: min(54vh, 520px); overflow-y: auto;
-    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.2) transparent;
   }
   .effect-rack-row {
     display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
-    gap: 12px; min-height: 48px; padding: 7px 0; border-bottom: 1px solid var(--line);
+    gap: 8px; min-height: 44px; padding: 8px 0; border-bottom: 1px solid var(--line);
   }
+  .effect-rack-row:first-child { border-top: 1px solid var(--line); }
   .effect-rack-row:last-child { border-bottom: 0; }
   .effect-rack-name { min-width: 0; }
-  .effect-rack-name b { display: block; color: var(--ink); font-size: 12px; font-weight: 500; }
+  .effect-rack-name b { display: block; color: var(--ink); font-size: 11px; font-weight: 500; }
   .effect-rack-name small { display: block; margin-top: 2px; color: var(--dim); font-size: 9px; }
-  .effect-rack-actions { display: flex; align-items: center; gap: 5px; }
-  .effect-rack-actions .dialog-secondary { min-height: 29px; padding: 0 9px; }
+  .effect-rack-actions { display: flex; align-items: center; gap: 4px; }
+  .effect-rack-actions button {
+    min-height: 26px; padding: 0 10px; border: 1px solid var(--line); border-radius: 0;
+    background: transparent; color: var(--dim); font: inherit; font-size: 10px; cursor: pointer;
+  }
+  .effect-rack-actions button:hover { color: var(--ink); border-color: var(--ink); }
   .effect-rack-empty { padding: 18px 0; color: var(--dim); font-size: 11px; text-align: center; }
   /* The two readouts inside the export dialog - what the chosen deliverable is, and the
      range the press will take. Both are `<b>` in a field rather than an input, because
@@ -1152,6 +1199,7 @@
       <div class="appmenu">
         <button class="appmenu-trigger" id="outputMenuButton" type="button" aria-expanded="false" aria-controls="outputMenu">Output</button>
         <div class="appmenu-popover" id="outputMenu" role="menu" hidden>
+          <button class="menu-command" id="menuWholeClip" type="button" role="menuitem"><span>Whole clip</span><kbd>&#8997;X</kbd></button>
           <button class="menu-command" id="menuExport" type="button" role="menuitem"><span>Export</span><kbd>&#8984;E</kbd></button>
           <div class="menu-separator"></div>
           <button class="menu-command" id="menuObs" type="button" role="menuitem"><span>Output to OBS</span><kbd></kbd></button>
@@ -1223,7 +1271,7 @@
       <button class="paneltab" id="panelTabRecord" type="button" role="tab" data-panel-tab="record" aria-selected="true">Record</button>
       <button class="paneltab" id="panelTabCamera" type="button" role="tab" data-panel-tab="camera" aria-selected="false">Camera</button>
       <button class="paneltab" id="panelTabFraming" type="button" role="tab" data-panel-tab="framing" aria-selected="false">Framing</button>
-      <button class="paneltab" id="panelTabLook" type="button" role="tab" data-panel-tab="look" aria-selected="false">Look</button>
+      <button class="paneltab" id="panelTabLook" type="button" role="tab" data-panel-tab="look" aria-selected="false">Effects</button>
       <button class="paneltab" id="panelTabRegion" type="button" role="tab" data-panel-tab="region" aria-selected="false">Region</button>
     </div>
 
@@ -1318,7 +1366,7 @@
     <div id="gradeAnchor" hidden></div>
     <div class="group" id="effectRackGroup" data-panel-tab="look" hidden>
       <div class="btnrow">
-        <button id="effectRackOpen" type="button">+ add effect</button>
+        <button id="effectRackOpen" type="button" aria-expanded="false" aria-controls="effectRackPanel">+ add effect</button>
       </div>
     </div>
   </div><!-- #panelBody -->
@@ -1348,6 +1396,15 @@
     <button id="dockRec" type="button">record</button>
   </div>
   </div><!-- #panel -->
+
+  <aside id="effectRackPanel" aria-labelledby="effectRackTitle" hidden>
+    <div class="effect-rack-head">
+      <h2 id="effectRackTitle">Effects</h2>
+      <button id="effectRackClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <input id="effectRackSearch" type="search" autocomplete="off" spellcheck="false" placeholder="search">
+    <div class="effect-rack-list" id="effectRackList" aria-label="Installed effects"></div>
+  </aside>
 
   <div id="hint">drag to orbit · scroll to zoom · right-drag to pan · <b>R</b> record · <b>M</b> mark · <b>H</b> hides panel</div>
 
@@ -1439,31 +1496,6 @@
          pre-roll, last cost, undo depth, mark count - are not back, because nothing
          drives them and the design dropped them on purpose; they are a decision rather
          than an oversight, which is the difference this row is drawn along. -->
-    <div class="tbar document">
-      <div class="tchips">
-        <!-- The range the export takes, as numbers rather than only as two lines on
-             the ruler. The markers stay draggable; this is for reading the answer and
-             for setting it exactly where the playhead already is, which a drag cannot
-             do to the frame. -->
-        <span class="tchip">in <b id="tInOut">00:00.000</b><button id="tSetIn" type="button">set</button></span>
-        <span class="tchip">out <b id="tOutOut">end</b><button id="tSetOut" type="button">set</button></span>
-        <span class="tchip">length <b id="tClipLen">&mdash;</b><button id="tClearRange" type="button">whole clip</button></span>
-        <!-- Opening a saved edit onto the take already open. File > Open goes to the
-             gallery, which opens a *take* - a different question from putting one of
-             several edits of this take on screen, and the gallery has no answer to it.
-             `loadProjectNamed` is the door both the resume chip and this button use, so
-             the hash refusal on the way in is one behaviour rather than two.
-
-             The deliverable picker used to sit beside this one and is in `#exportDialog`
-             now, where the rest of the deliverable's fields are. The two are not the same
-             kind of thing despite having looked alike here: a project is what is on screen,
-             which is why its picker stays out in the open, and a deliverable is one of
-             several files you might make from it, which is a question that only comes up
-             at the point of making one. -->
-        <label class="tchip">project<select id="tProject"><option value="">&mdash;</option></select>
-          <button id="tProjectOpen" type="button">open</button></label>
-      </div>
-    </div>
     <!-- The lanes live inside `tRailLanes`/`tLanes` rather than directly in these two
          columns, and that containment is a bug fix rather than tidiness. `rebuildLanes`
          used to clear the columns of every child that was neither `.ruler` nor the
@@ -1510,21 +1542,6 @@
     </div>
   </section>
 
-  <dialog id="effectRackDialog" aria-labelledby="effectRackTitle">
-    <div class="dialog-head">
-      <h2 id="effectRackTitle">Effects</h2>
-      <button class="dialog-close" id="effectRackClose" type="button" aria-label="Close">&times;</button>
-    </div>
-    <p class="effect-rack-intro">Add only the effects you want in the sidebar. Removing an
-      effect resets its values and deletes its keyframes.</p>
-    <div class="dialog-field">
-      <label for="effectRackSearch">Find an effect</label>
-      <div class="dialog-input-row">
-        <input id="effectRackSearch" type="search" autocomplete="off" spellcheck="false">
-      </div>
-    </div>
-    <div class="effect-rack-list" id="effectRackList" aria-label="Installed effects"></div>
-  </dialog>
 
   <!-- What the clip *is*, as opposed to what is made from it. Built like `#exportDialog`
        and `#obsDialog` below - the same head, the same `.dialog-field` rows, the same

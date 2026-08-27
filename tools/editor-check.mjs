@@ -395,6 +395,65 @@ const MUTATIONS = {
     ]],
   },
 
+  // Must redden: the row proving a racked effect's group stays open at its default.
+  'effect-rack-ignores-racked': {
+    file: 'web/main.js',
+    edits: [[
+      "  return names.some((name) => {\n"
+        + "    const id = effectOf(name);\n"
+        + "    return id !== null && rackedEffects.has(id);\n"
+        + "  });",
+      '  return false;',
+    ]],
+  },
+
+  // Must redden: the zero-master row in section 17. The attribute remains true, but the CSS
+  // exposes the row, which is the failure the row reads separately from the DOM state.
+  'under-rows-ignore-hidden': {
+    file: 'web/index.html',
+    edits: [[
+      '  .row[hidden], .checkrow[hidden] { display: none; }\n',
+      '',
+    ]],
+  },
+
+  // Must redden: both user paths in section 3 retain the narrowed range.
+  'whole-clip-does-nothing': {
+    file: 'web/main.js',
+    edits: [[
+      'function clearClipRange() {\n'
+        + '  // `null` rather than the duration, so the range still means to the end if the program grows.\n'
+        + '  setClipInOut({ in: 0, out: null });\n'
+        + '  history.commit();\n'
+        + '}',
+      'function clearClipRange() {\n  history.commit();\n}',
+    ]],
+  },
+
+  // Must redden: the Escape row in section 1. Other focus transfers stay intact, so the failure
+  // names the return path rather than making every rack action lose its caret.
+  'effect-rack-strands-focus': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (restore) shell.effectRackOpen.focus();',
+      '  void restore;',
+    ]],
+  },
+
+  // Must redden: the narrow-viewport and collapsed-panel geometry rows in section 1.
+  'effect-rack-keeps-fixed-left': {
+    file: 'web/index.html',
+    edits: [[
+      '  body.panelcollapsed #effectRackPanel { left: 16px; }\n'
+        + '  @media (max-width: 562px) {\n'
+        + '    #effectRackPanel, body.panelcollapsed #effectRackPanel {\n'
+        + '      left: 16px; right: 16px; width: auto; z-index: 11;\n'
+        + '    }\n'
+        + '  }\n',
+      '',
+    ]],
+  },
+
   // Must redden: one rack row, the confirmed removal's joined value/track/presence assertion.
   'effect-rack-remove-keeps-tracks': {
     file: 'web/main.js',
@@ -410,12 +469,12 @@ const MUTATIONS = {
     ]],
   },
 
-  // Must redden: 14 rows, and the shape of that set is the thing to read rather than the count.
+  // Must redden: 20 rows, and the shape of that set is the thing to read rather than the count.
   'group-never-reveals': {
     file: 'web/main.js',
     edits: [[
-      'function revealsItself(key) {\n  return (panelGroupParams.get(key) ?? []).some(paramTouched);',
-      'function revealsItself(key) {\n  if (key) return false;\n  return (panelGroupParams.get(key) ?? []).some(paramTouched);',
+      'function revealsItself(key) {\n  const names = panelGroupParams.get(key) ?? [];',
+      'function revealsItself(key) {\n  if (key) return false;\n  const names = panelGroupParams.get(key) ?? [];',
     ]],
   },
 
@@ -538,13 +597,14 @@ const MUTATIONS = {
     ]],
   },
 
-  // Must redden: section 1's row "every parameter the registry declares has a control on the
-  // panel" - and that row alone, naming ghostFill.
+  // Must redden: eight rows. The claim-carrying one is section 1's "every parameter the registry
+  // declares has a control on the panel", naming ghost.fill; the rack, reset and under rows are
+  // the dependent actions that can no longer find the deliberately missing control.
   'panel-row-skips-parameter': {
     file: 'web/main.js',
     edits: [
       ['    if (spec.group !== group.key) continue;',
-        "    if (spec.group !== group.key || name === 'ghostFill') continue;"],
+        "    if (spec.group !== group.key || name === 'ghost.fill') continue;"],
       ['  if (panelRowsEmitted !== owned.length) {', '  if (panelRowsEmitted !== owned.length - 1) {'],
     ],
   },
@@ -1369,10 +1429,16 @@ const DRIVER_RULES = [
   },
   {
     key: 'shelldialogs',
-    what: 'a control in the Project settings, Export, OBS, effect-rack, or state dialog',
+    what: 'a control in the Project settings, Export, OBS, or state dialog',
     by: 'section 1 opens each application dialog, drives every enabled control, and '
       + 'asserts every format the export dialog offers is one the server encodes',
-    match: (row) => inGroup(row, '#projectDialog', '#exportDialog', '#obsDialog', '#effectRackDialog'),
+    match: (row) => inGroup(row, '#projectDialog', '#exportDialog', '#obsDialog'),
+  },
+  {
+    key: 'effectrack',
+    what: 'a control in the effect rack sidebar',
+    by: 'section 1 opens the effect rack, searches, adds every effect, and removes one',
+    match: (row) => inGroup(row, '#effectRackPanel'),
   },
   {
     key: 'paneltabs',
@@ -1461,12 +1527,10 @@ const DRIVER_IDS = {
   tRate: 'section 4 - the anchor rows and the seek-storm row',
   tCamView: 'section 1 - looks through the program camera and reads the orbit back',
   effectRackOpen: 'section 1 - opens the installed-effect search, adds every effect, and removes one',
+  menuWholeClip: 'section 3 - clears the range through both its menu command and keyboard shortcut',
   tRateKey: 'section 5 - plants and removes a retime key',
   // `tFps` is deliberately not here: it moved into Project settings with the rate itself, so
   // the `shelldialogs` rule covers it and section 1 drives it.
-  tSetIn: 'section 3 - sets the range from the playhead',
-  tSetOut: 'section 3 - sets the range from the playhead',
-  tClearRange: 'section 3 - puts the range back to the whole clip',
   tMark: 'library-check writes a mark and reads the sidecar back',
   tDeleteKey: 'section 5 - removes the selected key',
   tAddPoint: 'section 5 - grows a segment\'s degree and reads the curve back unmoved',
@@ -1474,8 +1538,6 @@ const DRIVER_IDS = {
   tPrevKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tNextKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tPreset: 'library-check applies a preset and compares the look',
-  tProject: 'section 13 - selects the project built on other footage and opens it, which is what makes the refusal',
-  tProjectOpen: 'section 13 - the press that produces the longest refusal this program writes',
   tPresetSave: 'library-check',
   tPresetExport: 'section 9 - exports the look and reads the file the browser wrote',
   tPresetImport: 'section 9 - opens the picker the file input is the other half of',
@@ -1768,8 +1830,66 @@ try {
     `grain row hidden=${trackCleared}`);
 
   await page.locator('#effectRackOpen').click();
-  check(await page.evaluate('document.getElementById("effectRackDialog").open'),
+  check(await page.evaluate('!document.getElementById("effectRackPanel").hidden'),
     'the add button opens the installed-effect search');
+  const rackOpened = await page.evaluate(`(() => {
+    const open = document.getElementById('effectRackOpen');
+    const panel = document.getElementById('effectRackPanel');
+    return {
+      expanded: open.getAttribute('aria-expanded'),
+      controls: open.getAttribute('aria-controls'),
+      labelledBy: panel.getAttribute('aria-labelledby'),
+      focus: document.activeElement?.id ?? null,
+    };
+  })()`);
+  check(rackOpened.expanded === 'true' && rackOpened.controls === 'effectRackPanel'
+    && rackOpened.labelledBy === 'effectRackTitle' && rackOpened.focus === 'effectRackSearch',
+  'the open rack identifies its trigger, label, state, and first keyboard control',
+  JSON.stringify(rackOpened));
+
+  await page.keyboard.press('Escape');
+  const rackEscaped = await page.evaluate(`(() => ({
+    hidden: document.getElementById('effectRackPanel').hidden,
+    expanded: document.getElementById('effectRackOpen').getAttribute('aria-expanded'),
+    focus: document.activeElement?.id ?? null,
+  }))()`);
+  check(rackEscaped.hidden && rackEscaped.expanded === 'false' && rackEscaped.focus === 'effectRackOpen',
+    'Escape closes the rack and returns the caret to its trigger', JSON.stringify(rackEscaped));
+  await page.locator('#effectRackOpen').click();
+
+  await page.setViewportSize({ width: 520, height: 800 });
+  await settle();
+  const narrowRack = await page.evaluate(`(() => {
+    const panel = document.getElementById('effectRackPanel').getBoundingClientRect();
+    const buttons = [...document.querySelectorAll('#effectRackList button')]
+      .map((button) => button.getBoundingClientRect());
+    return {
+      viewport: innerWidth,
+      left: Math.round(panel.left),
+      right: Math.round(panel.right),
+      buttonRight: Math.round(Math.max(0, ...buttons.map((box) => box.right))),
+      front: document.elementFromPoint(panel.left + 8, panel.top + 8)?.closest('#effectRackPanel')?.id ?? null,
+    };
+  })()`);
+  check(narrowRack.left >= 0 && narrowRack.right <= narrowRack.viewport
+    && narrowRack.buttonRight <= narrowRack.viewport && narrowRack.front === 'effectRackPanel',
+  'the rack and every action stay inside a 520px viewport', JSON.stringify(narrowRack));
+  await page.setViewportSize(VIEWPORT);
+  await settle();
+
+  await focusStage();
+  await page.keyboard.press('h');
+  await settle();
+  const collapsedRack = await page.evaluate(`(() => {
+    const rack = document.getElementById('effectRackPanel').getBoundingClientRect();
+    return { collapsed: document.body.classList.contains('panelcollapsed'), left: Math.round(rack.left) };
+  })()`);
+  check(collapsedRack.collapsed && collapsedRack.left <= 32,
+    'when H collapses the inspector, the open rack moves beside the viewport instead of floating at the old edge',
+    JSON.stringify(collapsedRack));
+  await page.keyboard.press('h');
+  await settle();
+
   await page.locator('#effectRackSearch').fill('halation');
   const searched = await page.evaluate(`(() => ({
     rows: [...document.querySelectorAll('#effectRackList [data-effect-rack]')]
@@ -1783,7 +1903,7 @@ try {
   const couldAddHalation = await halationAdd.count() === 1;
   if (couldAddHalation) await halationAdd.click();
   else {
-    await page.locator('#effectRackClose').click();
+    await page.locator('#effectRackOpen').click();
     await page.evaluate("document.querySelector('[data-group-toggle=halation]')?.click()");
   }
   await page.waitForTimeout(50);
@@ -1794,17 +1914,15 @@ try {
     return {
       hidden: row?.hidden ?? null,
       stored,
-      focused: document.activeElement?.id ?? null,
-      dialogOpen: document.getElementById('effectRackDialog').open,
+      rackOpen: !document.getElementById('effectRackPanel').hidden,
     };
   })()`);
   check(couldAddHalation && halationAdded.hidden === false
-    && halationAdded.stored.includes('halation') && !halationAdded.dialogOpen,
-  'Add closes the search and retains the effect in the sidebar without changing its value',
+    && halationAdded.stored.includes('halation') && halationAdded.rackOpen,
+  'Add retains the effect in the sidebar with the picker still open',
   `add=${couldAddHalation}, hidden=${halationAdded.hidden}, stored=${JSON.stringify(halationAdded.stored)}`);
-  check(halationAdded.focused === 'halation.amount',
-    'and the first control receives the caret, so Add lands where the work starts',
-    `focused ${JSON.stringify(halationAdded.focused)}`);
+  check(await page.evaluate('document.activeElement?.id === "effectRackSearch"'),
+    'and Add leaves the caret on a stable control in the open rack');
 
   await page.evaluate(`(() => {
     const input = document.getElementById('halation.amount');
@@ -1817,8 +1935,10 @@ try {
   } else {
     await page.evaluate(`document.querySelector('button[aria-label="halation.amount keyframe"]').click()`);
   }
-  if (couldAddHalation) await page.locator('#effectRackOpen').click();
-  else await page.evaluate("document.getElementById('effectRackOpen').click()");
+  if (await page.evaluate('document.getElementById("effectRackPanel").hidden')) {
+    if (couldAddHalation) await page.locator('#effectRackOpen').click();
+    else await page.evaluate("document.getElementById('effectRackOpen').click()");
+  }
   await page.locator('#effectRackSearch').fill('halation');
   await page.locator('[data-effect-remove="halation"]').click();
   const confirmation = await page.evaluate(`(() => ({
@@ -1897,10 +2017,20 @@ try {
     && resetRetained.stored.includes('halation'),
   'resetting the last touched value keeps the effect in the sidebar until Remove is pressed',
   `default=${resetRetained.atDefault}, hidden=${resetRetained.hidden}, stored=${JSON.stringify(resetRetained.stored)}`);
+  const rackedDefaultGroup = await page.evaluate(`(() => {
+    let stored = {};
+    try { stored = JSON.parse(localStorage.getItem('kinect.panelGroupsOpen') ?? '{}'); } catch {}
+    const button = document.querySelector('[data-group-toggle="halation"]');
+    return { expanded: button?.getAttribute('aria-expanded') ?? null, stored };
+  })()`);
+  check(rackedDefaultGroup.expanded === 'true'
+    && !Object.hasOwn(rackedDefaultGroup.stored, 'halation'),
+  'a racked effect keeps its group open after its last value returns to default, without leaving an override behind',
+  JSON.stringify(rackedDefaultGroup));
 
   let rackAdds = 0;
   for (let i = 0; i <= rackFresh.ids.length; i++) {
-    if (!await page.evaluate('document.getElementById("effectRackDialog").open')) {
+    if (await page.evaluate('document.getElementById("effectRackPanel").hidden')) {
       await page.locator('.paneltab[data-panel-tab="look"]').click();
       await page.locator('#effectRackOpen').click();
     }
@@ -1909,7 +2039,7 @@ try {
     await next.click();
     rackAdds++;
   }
-  if (!await page.evaluate('document.getElementById("effectRackDialog").open')) {
+  if (await page.evaluate('document.getElementById("effectRackPanel").hidden')) {
     await page.locator('.paneltab[data-panel-tab="look"]').click();
     await page.locator('#effectRackOpen').click();
   }
@@ -1917,21 +2047,21 @@ try {
     const k = globalThis.__kinect;
     let stored = [];
     try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
-    const hidden = k.effectIds().filter((id) => k.effectParamNames(id).some((name) => {
+    const unavailable = k.effectIds().filter((id) => k.effectParamNames(id).every((name) => {
       const row = document.getElementById(name)?.closest('.row, .checkrow');
       return !row || row.hidden;
     }));
     return {
       ids: [...k.effectIds()].sort(),
       stored: [...stored].sort(),
-      hidden,
+      unavailable,
       removes: document.querySelectorAll('#effectRackList [data-effect-remove]').length,
     };
   })()`);
   check(JSON.stringify(rackComplete.stored) === JSON.stringify(rackComplete.ids)
-    && rackComplete.hidden.length === 0 && rackComplete.removes === rackComplete.ids.length,
+    && rackComplete.unavailable.length === 0 && rackComplete.removes === rackComplete.ids.length,
   'adding the remaining installed effects makes every one available to the sidebar and the control sweep',
-  `${rackAdds} added in the loop, ${rackComplete.hidden.length} hidden, `
+  `${rackAdds} added in the loop, ${rackComplete.unavailable.length} unavailable, `
     + `${rackComplete.removes} remove controls for ${rackComplete.ids.length} effects`);
 
   // One mark planted first, because a mark tick is a control that exists only when the take has a
@@ -1951,6 +2081,8 @@ try {
     const els = [...document.querySelectorAll('.appbar input, .appbar select, .appbar button, .appbar a, '
       + '.tbar input, .tbar select, .tbar button, .tbar a, '
       + '#panel input, #panel select, #panel button, #panel a, #panel [role=option], '
+      + '#effectRackPanel input, #effectRackPanel select, #effectRackPanel button, '
+      + '#effectRackPanel a, #effectRackPanel [role=option], '
       + '.tlanes input, .tlanes select, .tlanes button, .tlanes a, '
       + 'dialog input, dialog select, dialog button, dialog a')];
     return els.map((el) => ({
@@ -1968,8 +2100,7 @@ try {
       groups: ['#appBar', '#panel', '#panelTabs', '#lookPresetGroup', '#cameraGroup', '#navRow',
         '#recordGroup', '#recLookGroup', '#sensorGroup', '#monitorGroup',
         '#programOutGroup', '#presetPick', '#projectDialog', '#exportDialog', '#obsDialog',
-        '#effectRackDialog',
-        '#panelDock', '.appmenu']
+        '#effectRackPanel', '#panelDock', '.appmenu']
         .filter((g) => el.closest(g)),
       kf: el.classList.contains('kf'),
       mark: el.classList.contains('tmk'),
@@ -1990,7 +2121,7 @@ try {
       : DRIVER_RULES.map((r) => `${r.key} ${sweep.filter((row) => r.match(row)).length}`).join(', '));
 
   const unknown = sweep.filter((row) => !covered(row));
-  const DIALOG_GROUPS = ['#presetPick', '#exportDialog', '#obsDialog', '#effectRackDialog'];
+  const DIALOG_GROUPS = ['#presetPick', '#exportDialog', '#obsDialog'];
   const inDialog = sweep.filter((r) => DIALOG_GROUPS.some((group) => r.groups.includes(group))).length;
   const inTbar = sweep.filter((r) => r.inTbar).length;
   note(`${sweep.length} interactive controls on the editor`,
@@ -2030,12 +2161,40 @@ try {
   check(composition.length > 0 && withControls.length === 0,
     'and no composition parameter has one, because composition is edited in the world',
     withControls.length ? `${withControls.join(', ')} has a control` : `${composition.length} checked: ${composition.join(', ')}`);
-  check(sweep.some((r) => r.id === 'tPlay') && sweep.some((r) => r.id === 'tSetIn'),
+  check(sweep.some((r) => r.id === 'tPlay') && sweep.some((r) => r.id === 'tRate'),
     'the strip is among what was swept', `${sweep.filter((r) => r.inTbar).map((r) => r.id).filter(Boolean).slice(0, 6).join(', ')}...`);
 
+  // The census racks every installed effect so its generated controls exist for the sweep. That
+  // is local panel state, not project state, and leaving it behind changes every later claim about
+  // a fresh inspector. Remove through the real controls so the cleanup also proves that an idle
+  // effect needs no destructive confirmation.
+  let rackRemoves = 0;
+  while (await page.locator('[data-effect-remove]').count() > 0) {
+    await page.locator('[data-effect-remove]').first().click();
+    rackRemoves++;
+  }
+  const rackClean = await page.evaluate(`(() => {
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
+    return {
+      stored,
+      visible: globalThis.__kinect.effectIds().filter((id) =>
+        globalThis.__kinect.effectParamNames(id).some((name) => {
+          const row = document.getElementById(name)?.closest('.row, .checkrow');
+          return row && !row.hidden;
+        })),
+      confirms: document.querySelectorAll('[data-effect-confirm-remove]').length,
+    };
+  })()`);
+  check(rackRemoves === rackComplete.ids.length && rackClean.stored.length === 0
+    && rackClean.visible.length === 0 && rackClean.confirms === 0,
+  'the sweep removes every idle effect through the rack and leaves later sections a fresh sidebar',
+  `${rackRemoves} removed, stored ${JSON.stringify(rackClean.stored)}, `
+    + `${rackClean.visible.length} effects still visible, ${rackClean.confirms} confirmations`);
+
   await page.locator('#effectRackClose').click();
-  check(await page.evaluate('!document.getElementById("effectRackDialog").open'),
-    'the effect search closes from its corner after its generated controls were swept');
+  check(await page.evaluate('document.getElementById("effectRackPanel").hidden'),
+    'the effect search closes after its generated controls were swept');
 
   // Measured at both ends of the travel, because one end is a dead zone - a nav at the foot of
   // the column is visible there and fails only at the top.
@@ -2885,7 +3044,7 @@ try {
     }
     return n;
   }).toString()})(${JSON.stringify(id)})`);
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await settle();
   const grabOutAtEnd = await grabWidth('tOut');
   const grabIn = await grabWidth('tIn');
@@ -2899,13 +3058,13 @@ try {
   const markersUsable = boxes.in !== null && boxes.out !== null;
   await page.evaluate('__kinect.timeline.transport().seek(30)');
   await settle();
-  await page.locator('#tSetOut').click();
+  await focusStage();
+  await page.keyboard.press('o');
   await settle();
   const beforeDrag = await range();
   let afterDrag = beforeDrag;
   if (!markersUsable) {
     check(false, 'dragging the out marker left shortens the export range', 'there is no marker to drag');
-    check(false, 'and the numeric readout followed it', 'not reached - the marker is absent');
     check(false, 'and what the export leaves out is drawn, in proportion to what it leaves out',
       'not reached - the marker is absent');
   } else {
@@ -2921,8 +3080,6 @@ try {
     afterDrag = await range();
     check(afterDrag.out < beforeDrag.out - 1, 'dragging the out marker left shortens the export range',
       `${beforeDrag.out.toFixed(3)}s -> ${afterDrag.out.toFixed(3)}s`);
-    check((await text('#tOutOut')).trim() !== 'end' && (await text('#tOutOut')).includes(':'),
-      'and the numeric readout followed it', `out reads ${(await text('#tOutOut')).trim()}, length ${(await text('#tClipLen')).trim()}`);
 
     const shade = await page.evaluate(`(() => {
       const bed = document.getElementById('tBeds').getBoundingClientRect();
@@ -2947,11 +3104,38 @@ try {
     `${(await lanes()).length} lanes, in ${afterLanes.in ? 'present' : 'GONE'}, out ${afterLanes.out ? 'present' : 'GONE'}`);
   check(near((await range()).out ?? -1, afterDrag.out ?? -1, 1e-6),
     'and the range they show is unchanged by it', JSON.stringify(await range()));
-  await page.locator('#tClearRange').click();
+  await page.locator('#outputMenuButton').click();
+  await page.locator('#menuWholeClip').click();
   await settle();
-  check((await range()).out === null && (await range()).in === 0,
-    '"whole clip" puts the range back, and back to null rather than to the duration',
-    JSON.stringify(await range()));
+  const menuCleared = await range();
+  check(menuCleared.out === null && menuCleared.in === 0,
+    'the Output menu restores the whole clip, with null rather than the current duration at its end',
+    JSON.stringify(menuCleared));
+
+  await page.evaluate('__kinect.timeline.transport().seek(10)');
+  await settle();
+  await focusStage();
+  await page.keyboard.press('i');
+  await page.evaluate('__kinect.timeline.transport().seek(30)');
+  await settle();
+  await focusStage();
+  await page.keyboard.press('o');
+  await settle();
+  const narrowedForShortcut = await range();
+  check(narrowedForShortcut.in > 0 && narrowedForShortcut.out < takeSec,
+    'the keyboard planted a narrower range before its reset shortcut is asked',
+    JSON.stringify(narrowedForShortcut));
+  await focusStage();
+  await page.keyboard.press('Alt+x');
+  await settle();
+  const shortcutCleared = await range();
+  check(shortcutCleared.out === null && shortcutCleared.in === 0,
+    'Option-X restores the whole clip through the same user action', JSON.stringify(shortcutCleared));
+  // Cleanup is not another claim. On `whole-clip-does-nothing` both user paths have already
+  // reddened; leave the later transport sections their ordinary whole-clip fixture rather than
+  // turning one missing action into unrelated speed and playback failures.
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
+  await settle();
 
   console.log('\n[4] the speed control holds the frame you are looking at');
   // This block runs at the head of the section rather than at its tail, and the placement is
@@ -3151,10 +3335,11 @@ try {
   await settle();
   await page.evaluate(`__kinect.timeline.transport().seek(1.5)`);
   await settle();
-  await page.locator('#tSetIn').click();
+  await focusStage();
+  await page.keyboard.press('i');
   await page.evaluate(`__kinect.timeline.transport().seek(7)`);
   await settle();
-  await page.locator('#tSetOut').click();
+  await page.keyboard.press('o');
   await page.evaluate(`__kinect.timeline.transport().seek(4)`);
   await settle();
 
@@ -3924,16 +4109,17 @@ try {
     const smallest = sizes.slice().sort((a, b) => (a.w * a.h) - (b.w * b.h))[0];
     await page.evaluate(`__kinect.setOutputSize(${JSON.stringify(`${smallest.w}x${smallest.h}`)})`);
     await settle();
-    // The trim is set with the dialog shut, because that is the only order the surface allows:
-    // the export is a modal and `#tSetIn` sits on the strip behind it.
+    // The trim is set with the dialog shut, because the modal blocks the keyboard shortcuts
+    // that target the stage behind it.
     await page.locator('#exportClose').click();
     await page.waitForFunction('!document.getElementById("exportDialog").open');
     await page.evaluate('__kinect.timeline.transport().seek(0)');
     await settle();
-    await page.locator('#tSetIn').click();
+    await focusStage();
+    await page.keyboard.press('i');
     await page.evaluate('__kinect.timeline.transport().seek(0.2)');
     await settle();
-    await page.locator('#tSetOut').click();
+    await page.keyboard.press('o');
     await settle();
     await page.locator('#outputMenuButton').click();
     await page.locator('#menuExport').click();
@@ -4083,7 +4269,6 @@ try {
       in: t.clipInSec,
       out: t.clipOutSec,
       duration: t.duration,
-      readout: document.getElementById('tInOut').textContent.trim(),
     };
   })()`);
   check(adopted.in <= adopted.out,
@@ -4093,17 +4278,7 @@ try {
   check((pastRange.in ?? -1) <= adopted.duration + 1e-6 && (pastRange.out ?? -1) <= adopted.duration + 1e-6,
     '  and the document it wrote names times the take has, both ends of it',
     `${JSON.stringify(pastRange)} against a ${adopted.duration.toFixed(3)}s program`);
-  const readoutSec = (text) => {
-    const [m, s] = text.split(':');
-    return Number(m) * 60 + Number(s);
-  };
-  // A millisecond of slack rather than a float epsilon: `timecode` rounds to three decimals, so a
-  // duration that rounds up would fail an exact comparison against a correct build.
-  check(readoutSec(adopted.readout) <= adopted.duration + 1e-3,
-    '  and the readout beside the markers names a time the take has, rather than one it does not',
-    `#tInOut reads ${adopted.readout} of a ${adopted.duration.toFixed(3)}s program`);
-
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await settle();
   const beforeBad = await page.evaluate(`(() => {
     const t = __kinect.timeline.transport();
@@ -4170,7 +4345,10 @@ try {
   await settle();
   await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
   await page.evaluate('__kinect.keyframes.setTracks({})');
-  await page.locator('#tClearRange').click();
+  // And the trim, which nothing below resets: leaving it at the near deliverable's range
+  // moved section 8's crop numbers, and those rows read as a rendering change rather than
+  // as a leftover from up here.
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await page.evaluate(`__kinect.timeline.transport().seek(${playheadBefore})`);
   await settle();
 
@@ -4179,7 +4357,7 @@ try {
   // The scene is put back to a plain one first: the sections above leave an animated `bloom`
   // track behind, and bloom lifts most of the frame over any sensible threshold - measured at
   // 903477 lit pixels against the 194911 the same shot gives with a default look.
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await page.evaluate('__kinect.setOutputSize("1920x1080")');
   await page.evaluate('__kinect.keyframes.setTracks({})');
   await page.evaluate('__kinect.keyframes.setRetime({ rate: 1, keys: [] })');
@@ -5173,7 +5351,8 @@ try {
   await settle();
   await page.evaluate('__kinect.timeline.transport().seek(10)');
   await settle();
-  await page.locator('#tSetIn').click();
+  await focusStage();
+  await page.keyboard.press('i');
   await settle();
   const onCut = await page.evaluate(`(() => ({
     programSec: __kinect.timeline.transport().programSec,
@@ -5196,7 +5375,7 @@ try {
   check(boundarySeeks <= 2,
     '  and twelve slider steps from there still cost one accurate seek, not one per step',
     `${boundarySeeks} seeks`);
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
   await settle();
 
@@ -5232,24 +5411,24 @@ try {
     'f fits the whole clip back on the ruler', JSON.stringify(await page.evaluate('__kinect.editor.view.window()')));
   await page.evaluate('__kinect.timeline.transport().seek(4)');
   await settle();
-  await page.locator('#tSetIn').click();
+  await focusStage();
+  await page.keyboard.press('i');
   await page.evaluate('__kinect.timeline.transport().seek(9)');
   await settle();
-  await page.locator('#tSetOut').click();
-  await focusStage();
+  await page.keyboard.press('o');
   await page.keyboard.press('z');
   await settle();
   const framed = await page.evaluate('__kinect.editor.view.window()');
   check(framed.startSec < 4 && framed.endSec > 9 && framed.spanSec < framed.duration / 2,
     'z frames the trimmed range, which is the window an edit is actually made in',
     `${framed.startSec.toFixed(2)}s..${framed.endSec.toFixed(2)}s around in 4s / out 9s`);
-  await page.locator('#tClearRange').click();
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await page.evaluate('__kinect.editor.view.fit()');
   await settle();
 
   console.log('\n[11] the strip is bounded, and the splitter is what bounds it');
   const LANED = ['bloom', 'grain.amount', 'raster.amount', 'rgbsplit.amount', 'glitch.amount', 'trails', 'rim',
-    'thermal.amount', 'edges.amount', 'scan', 'noise.amount', 'denoise', 'exposure'];
+    'thermal.amount', 'edges.amount', 'blackwall.scan', 'noise.amount', 'denoise', 'exposure'];
   // The value each key holds is asked of the registry rather than assumed, because `denoise` is a
   // step parameter and a key holding 0.2 makes `normalise` throw the moment anything
   // evaluates the track.
@@ -5468,7 +5647,7 @@ try {
     }
   };
   try {
-    const known = { bloom: 2.75, 'grain.amount': 0.66, readBlackwall: 1, readRgb: 0 };
+    const known = { bloom: 2.75, 'grain.amount': 0.66, 'blackwall.amount': 1, readRgb: 0 };
     await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(known)})`);
     // Moved again after the apply and never saved, which is what makes the row below able to fail:
     // `exportPresetFile` takes its name from the picker and its values from the live look, and a
@@ -5549,9 +5728,9 @@ try {
     await importFile(edited);
     await page.waitForFunction("document.getElementById('tNote').textContent.startsWith('imported')", null, { timeout: 15000 });
     await settle();
-    const back = await page.evaluate("(() => { const k = globalThis.__kinect; return JSON.stringify({ bloom: k.params.get('bloom'), grain: k.params.get('grain.amount'), readBlackwall: k.params.get('readBlackwall'), stamp: k.library.appliedPreset() }); })()");
+    const back = await page.evaluate("(() => { const k = globalThis.__kinect; return JSON.stringify({ bloom: k.params.get('bloom'), grain: k.params.get('grain.amount'), blackwall: k.params.get('blackwall.amount'), stamp: k.library.appliedPreset() }); })()");
     const landed = JSON.parse(back);
-    check(landed.bloom === 4.4 && landed.grain === 0.13 && landed.readBlackwall === 1,
+    check(landed.bloom === 4.4 && landed.grain === 0.13 && landed.blackwall === 1,
       'and importing it puts the edited look on screen', `bloom ${landed.bloom} grain ${landed.grain}`);
     check(landed.stamp?.name === NAME_EDITED,
       'and stamps the clip with where it came from', JSON.stringify(landed.stamp?.name));
@@ -6091,32 +6270,27 @@ try {
       `chip ${offeredAnyway.shown ? 'shown' : 'hidden'}, "${offeredAnyway.when}"`);
     await reopen();
 
-    await page.selectOption('#tProject', OTHER);
-    await page.click('#tProjectOpen');
-    await page.waitForFunction("document.getElementById('tNote').textContent.includes('different footage')",
-      null, { timeout: 15000 }).catch(() => {});
-    const noteBox = await page.evaluate(`(() => {
-      const note = document.getElementById('tNote');
-      return {
-        text: note.textContent,
-        title: note.title,
-        overflows: note.scrollWidth > note.clientWidth + 1,
-        scrollWidth: note.scrollWidth,
-        clientWidth: note.clientWidth,
-        clipped: getComputedStyle(note).textOverflow,
-      };
+    const projectControls = await page.evaluate(`(() => ({
+      picker: Boolean(document.getElementById('tProject')),
+      open: Boolean(document.getElementById('tProjectOpen')),
+    }))()`);
+    check(!projectControls.picker && !projectControls.open,
+      'the saved-project controls left with the timeline information bar rather than surviving as an unreachable fragment',
+      `picker=${projectControls.picker}, open=${projectControls.open}`);
+    const foreignRefusal = await page.evaluate(`(async () => {
+      try {
+        await __kinect.library.loadProject(${JSON.stringify(OTHER)});
+        return null;
+      } catch (err) {
+        return String(err);
+      }
     })()`);
-    check(noteBox.overflows && noteBox.text.length > 120,
-      'the refusal is genuinely wider than the space it is written into, which is what the title is for',
-      `${noteBox.text.length} characters, ${noteBox.scrollWidth}px of content in ${noteBox.clientWidth}px`);
-    check(noteBox.title === noteBox.text && /different footage/.test(noteBox.title),
-      'and the whole of it is reachable off the note\'s title, which is the only surface it fits on',
-      `title "${noteBox.title.slice(0, 60)}..." against text "${noteBox.text.slice(0, 60)}..."`);
-    check(noteBox.clipped === 'ellipsis',
-      'and it is cut with an ellipsis rather than allowed to push the rest of the bar off the edge',
-      `text-overflow ${noteBox.clipped}`);
-    // The refusal above is this section's own doing and `showTimelineError` logs every note it
-    // writes, so the mark moves past it.
+    check(/different footage/.test(foreignRefusal ?? ''),
+      'the project loader still refuses a document built on different footage',
+      foreignRefusal ?? 'no refusal');
+    // The presets refusal above deliberately produces the network error Chrome reports. The
+    // remaining error sweep begins after it, so only failures the later gestures did not ask for
+    // can redden that sweep.
     errorsBefore = errors.length;
 
     // ---- reload two: different footage under the same name
@@ -6291,10 +6465,11 @@ try {
     })()`);
     await page.evaluate(`__kinect.timeline.transport().seek(${trim.inAt})`);
     await settle();
-    await page.click('#tSetIn');
+    await focusStage();
+    await page.keyboard.press('i');
     await page.evaluate(`__kinect.timeline.transport().seek(${trim.outAt})`);
     await settle();
-    await page.click('#tSetOut');
+    await page.keyboard.press('o');
     await settle();
     const trimmed = await page.evaluate('({ in: __kinect.timeline.transport().clipInSec, out: __kinect.timeline.transport().clipOutSec })');
     const marksNow = await page.evaluate('__kinect.library.markTicks().length');
@@ -6813,7 +6988,9 @@ try {
           markVisible: vis(mark),
           mark: mark ? mark.textContent : null,
           tab: g.dataset.panelTab,
+          rendered: vis(g),
           inDom: rows(g).length,
+          available: rows(g).filter((row) => !row.hidden).length,
           onScreen: rows(g).filter(vis).length,
         };
       });
@@ -6841,10 +7018,14 @@ try {
     const defaultOf = (name) => page.evaluate(
       `__kinect.params.normalise(${JSON.stringify(name)}, __kinect.params.spec(${JSON.stringify(name)}).default)`);
 
-    // The store cleared once, here, where it is the only safe place: nothing has pressed a toggle
-    // yet, so the page is holding no overrides in memory and the two cannot come apart.
-    await freshLook();
+    // Section 1 opens every generated group while it sweeps the controls. Clear that fixture and
+    // boot the page from the empty store, because deleting storage alone does not clear the live
+    // override map that was built from it.
     await page.evaluate("localStorage.removeItem('kinect.panelGroupsOpen')");
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
+    await page.waitForFunction('!!globalThis.__kinect.timeline.transport()', null, { timeout: 30000 });
+    await freshLook();
     await page.evaluate('__kinect.timeline.transport().seek(3)');
     await settle();
 
@@ -6883,9 +7064,9 @@ try {
     await page.evaluate("__kinect.params.set('bloom', 1.5)");
     await settle();
     const opened = await groupOf('post');
-    check(!opened.shut && opened.expanded === 'true' && opened.onScreen === opened.inDom,
+    check(!opened.shut && opened.expanded === 'true' && opened.onScreen === opened.available,
       'moving one parameter off its default opens the group that holds it',
-      `post: shut=${opened.shut}, ${opened.onScreen} of ${opened.inDom} rows on screen`);
+      `post: shut=${opened.shut}, ${opened.onScreen} of ${opened.available} available rows on screen, ${opened.inDom} in the registry`);
     const neighbours = (await groups()).filter((g) => g.collapsible && g.key !== 'post');
     check(neighbours.every((g) => g.shut),
       'and only that group, so the rule is about the parameter rather than about the write',
@@ -6893,23 +7074,23 @@ try {
 
     await freshLook();
     await settle();
-    const rimDefault = await defaultOf('ghostRim');
-    const rimSpec = await page.evaluate("__kinect.params.spec('ghostRim')");
+    const styleDefault = await defaultOf('thermal.amount');
+    const styleSpec = await page.evaluate("__kinect.params.spec('thermal.amount')");
     // Whichever end of the travel the default is not, so this cannot become a write of the value
     // that was already there - which would leave the group untouched and the row below asserting
     // the state it started in.
-    await page.evaluate(`__kinect.params.set('ghostRim', ${rimDefault === rimSpec.max ? rimSpec.min : rimSpec.max})`);
+    await page.evaluate(`__kinect.params.set('thermal.amount', ${styleDefault === styleSpec.max ? styleSpec.min : styleSpec.max})`);
     await settle();
-    const rimNow = await page.evaluate("__kinect.params.get('ghostRim')");
+    const styleNow = await page.evaluate("__kinect.params.get('thermal.amount')");
     const readingsQuiet = await page.evaluate(`__kinect.readings().every((n) =>
       __kinect.params.get(n) === __kinect.params.normalise(n, __kinect.params.spec(n).default))`);
-    check(rimNow !== rimDefault && readingsQuiet,
+    check(styleNow !== styleDefault && readingsQuiet,
       'one style parameter moved with every reading left at its default, or the row below tests nothing',
-      `ghostRim reads ${rimNow} against a default of ${rimDefault}, readings untouched: ${readingsQuiet}`);
+      `thermal.amount reads ${styleNow} against a default of ${styleDefault}, readings untouched: ${readingsQuiet}`);
     const tuned = await groupOf('style');
-    check(!tuned.shut && tuned.onScreen === tuned.inDom,
+    check(!tuned.shut && tuned.onScreen === tuned.available,
       'moving a style parameter opens the style group, so the open set is the whole diff',
-      `style: shut=${tuned.shut}, ${tuned.onScreen} of ${tuned.inDom} rows on screen`);
+      `style: shut=${tuned.shut}, ${tuned.onScreen} of ${tuned.available} available rows on screen, ${tuned.inDom} in the registry`);
 
     // ---- 15d. a keyframe counts even where the value does not
     // The whole reason the predicate has a keyframe term, and the one row `reveal-ignores-tracks`
@@ -6929,9 +7110,9 @@ try {
       'the keyed parameter really is sitting on its default at the parked frame, or the row below tests nothing',
       `grain reads ${parked} against a default of ${grainDefault}`);
     const keyed = await groupOf('post');
-    check(!keyed.shut && keyed.onScreen === keyed.inDom,
+    check(!keyed.shut && keyed.onScreen === keyed.available,
       'a keyframe opens the group even where the value it holds is the default',
-      `post: shut=${keyed.shut}, ${keyed.onScreen} of ${keyed.inDom} rows on screen`);
+      `post: shut=${keyed.shut}, ${keyed.onScreen} of ${keyed.available} available rows on screen, ${keyed.inDom} in the registry`);
 
     // ---- 15e. a shut group that is in use says so
     // Pressed rather than assumed shut, because the state it starts in is exactly what
@@ -6983,9 +7164,9 @@ try {
     await settle();
     const pinned = await groupOf('post');
     const pinnedStore = JSON.parse((await stored()) ?? '{}');
-    check(!pinned.shut && pinned.onScreen === pinned.inDom && pinnedStore.post === true,
+    check(!pinned.shut && pinned.onScreen === pinned.available && pinnedStore.post === true,
       'pinning a quiet group open is a disagreement and is written down, or the two rows below test nothing',
-      `open=${!pinned.shut}, ${pinned.onScreen} of ${pinned.inDom} rows on screen, stored ${JSON.stringify(pinnedStore)}`);
+      `open=${!pinned.shut}, ${pinned.onScreen} of ${pinned.available} available rows on screen, stored ${JSON.stringify(pinnedStore)}`);
     await page.evaluate("__kinect.params.set('bloom', 1.5)");
     await settle();
     const caughtUp = await groupOf('post');
@@ -7006,33 +7187,33 @@ try {
     if (!(await groupOf('post')).shut) await page.click('[data-group-toggle=post]');
     await settle();
 
-    // ---- 15g. moving a treatment opens the style group
-    // `readGhost` rather than `readRgb`, and the difference is the whole trap: `readRgb` defaults
+    // ---- 15g. moving a package parameter opens that package's group
+    // `ghost.amount` rather than `readRgb`, and the difference is the whole trap: `readRgb` defaults
     // to 1, so "open when a reading is non-zero" fires on a page nobody has touched.
     await freshLook();
     await settle();
-    const styleQuiet = await groupOf('style');
-    await page.evaluate("__kinect.params.set('readGhost', 0.7)");
+    const ghostQuiet = await groupOf('ghost');
+    await page.evaluate("__kinect.params.set('ghost.amount', 0.7)");
     await settle();
-    const styleLive = await groupOf('style');
-    check(styleQuiet.shut && !styleLive.shut && styleLive.onScreen === styleLive.inDom,
-      'moving a treatment (readGhost) opens the style group',
-      `shut with the readings at their defaults: ${styleQuiet.shut}, after readGhost moved: ${styleLive.shut}`);
-    const untouched = (await groups()).filter((g) => g.collapsible && g.key !== 'style');
+    const ghostLive = await groupOf('ghost');
+    check(ghostQuiet.shut && !ghostLive.shut && ghostLive.onScreen === ghostLive.available,
+      'moving ghost.amount opens the Ghost package group',
+      `shut with the readings at their defaults: ${ghostQuiet.shut}, after ghost.amount moved: ${ghostLive.shut}`);
+    const untouched = (await groups()).filter((g) => g.collapsible && g.key !== 'ghost');
     check(untouched.every((g) => g.shut),
-      'and leaves the three groups the reading has nothing to do with shut',
+      'and leaves every group the reading has nothing to do with shut',
       untouched.map((g) => `${g.key}:${g.shut ? 'shut' : 'OPEN'}`).join(' '));
 
-    await page.click('[data-group-toggle=style]');
+    await page.click('[data-group-toggle=ghost]');
     await settle();
-    const styleShut = await groupOf('style');
-    const styleStored = JSON.parse((await stored()) ?? '{}');
-    check(styleShut.shut && styleStored.style === false,
+    const ghostShut = await groupOf('ghost');
+    const ghostStored = JSON.parse((await stored()) ?? '{}');
+    check(ghostShut.shut && ghostStored.ghost === false,
       'shutting a group while it is in use stays shut and is written down',
-      `shut=${styleShut.shut}, stored ${JSON.stringify(styleStored)}`);
-    check(styleShut.markVisible && styleShut.mark === '1',
+      `shut=${ghostShut.shut}, stored ${JSON.stringify(ghostStored)}`);
+    check(ghostShut.markVisible && ghostShut.mark === '1',
       'and it is marked as in use with a count of what it is holding',
-      `mark visible=${styleShut.markVisible}, reads "${styleShut.mark}"`);
+      `mark visible=${ghostShut.markVisible}, reads "${ghostShut.mark}"`);
 
     // ---- 15i. the override outlives the page that wrote it
     // This page reloaded rather than a second page opened beside it, because `page.route` is
@@ -7042,10 +7223,10 @@ try {
     await page.evaluate("__kinect.params.set('bloom', 1.5)");
     await settle();
     if (!(await groupOf('post')).shut) await page.click('[data-group-toggle=post]');
-    if ((await groupOf('style')).shut) await page.click('[data-group-toggle=style]');
+    if ((await groupOf('points')).shut) await page.click('[data-group-toggle=points]');
     await settle();
     const beforeReload = JSON.parse((await stored()) ?? '{}');
-    check(beforeReload.post === false && beforeReload.style === true,
+    check(beforeReload.post === false && beforeReload.points === true,
       'a group shut while it is in use and a quiet one pinned open are two disagreements to survive, or the rows below test nothing',
       `stored ${JSON.stringify(beforeReload)}`);
     await page.reload({ waitUntil: 'load' });
@@ -7059,18 +7240,18 @@ try {
     // agreement rather than on movement deletes the collapse during the boot pass, when the look
     // is at its defaults because no document has arrived yet, and writes the pruned map back.
     const carriedStore = JSON.parse((await stored()) ?? '{}');
-    check(carriedStore.post === false && carriedStore.style === true,
+    check(carriedStore.post === false && carriedStore.points === true,
       'the store the page booted from still holds both, so nothing pruned them against a document that had not loaded yet',
       `stored ${JSON.stringify(carriedStore)}`);
-    const pinCarried = await showGroup('style');
+    const pinCarried = await showGroup('points');
     const quietAfter = await page.evaluate(`(() => {
       const k = globalThis.__kinect;
       const known = new Set(k.params.names());
-      const group = [...document.querySelectorAll('#panel .group[data-group]')].find((g) => g.dataset.group === 'style');
+      const group = [...document.querySelectorAll('#panel .group[data-group]')].find((g) => g.dataset.group === 'points');
       const names = [...group.querySelectorAll('input')].map((i) => i.id).filter((n) => known.has(n));
       return { names: names.length, quiet: names.every((n) => k.params.get(n) === k.params.normalise(n, k.params.spec(n).default)) };
     })()`);
-    check(!pinCarried.shut && pinCarried.onScreen === pinCarried.inDom
+    check(!pinCarried.shut && pinCarried.onScreen === pinCarried.available
       && quietAfter.names > 0 && quietAfter.quiet,
       'and the page reloaded still finds the pinned one open, on a document holding nothing that would open it',
       `open=${!pinCarried.shut}, ${pinCarried.onScreen} of ${pinCarried.inDom} rows on screen, `
@@ -7090,7 +7271,8 @@ try {
     await freshLook();
     await settle();
     const driven = [];
-    for (const g of (await groups()).filter((x) => x.collapsible)) {
+    const renderedToggles = (await groups()).filter((x) => x.collapsible && x.rendered);
+    for (const g of renderedToggles) {
       await showGroup(g.key);
       const before = await groupOf(g.key);
       await page.click(`[data-group-toggle=${g.key}]`);
@@ -7104,7 +7286,7 @@ try {
         honest: after.expanded === String(after.onScreen > 0),
       });
     }
-    check(driven.length === collapsible.length && driven.every((d) => d.moved && d.honest),
+    check(driven.length === renderedToggles.length && driven.every((d) => d.moved && d.honest),
       'every collapsible group the page renders was pressed here and its rows answered',
       driven.map((d) => `${d.key}:${d.from}->${d.to}${d.honest ? '' : ' (aria disagrees)'}`).join(' '));
 
@@ -7148,6 +7330,9 @@ try {
     // pin the drive, and a panel left with four groups open is a different page from the one they
     // were measured on.
     await page.evaluate("localStorage.removeItem('kinect.panelGroupsOpen')");
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
+    await page.waitForFunction('!!globalThis.__kinect.timeline.transport()', null, { timeout: 30000 });
     await freshLook();
   }
 
@@ -7179,6 +7364,7 @@ try {
           name,
           tag: spec.tag,
           kind: spec.kind,
+          under: spec.under ?? null,
           control: input ? input.type : null,
           tab: group ? group.dataset.panelTab || null : null,
           group: group ? group.dataset.group || null : null,
@@ -7241,6 +7427,32 @@ try {
       if (spec.kind === 'step') return !def;
       return def + spec.step <= spec.max ? def + spec.step : def - spec.step;
     })()`);
+    const rackAllEffects = async () => {
+      await page.locator('.paneltab[data-panel-tab="look"]').click();
+      await page.locator('#effectRackOpen').click();
+      await page.locator('#effectRackSearch').fill('');
+      for (;;) {
+        const next = page.locator('[data-effect-add]').first();
+        if (await next.count() === 0) break;
+        await next.click();
+      }
+      await page.locator('#effectRackClose').click();
+      await settle();
+    };
+    const clearRackAndOverrides = async () => {
+      await page.locator('.paneltab[data-panel-tab="look"]').click();
+      await page.locator('#effectRackOpen').click();
+      await page.locator('#effectRackSearch').fill('');
+      while (await page.locator('[data-effect-remove]').count() > 0) {
+        await page.locator('[data-effect-remove]').first().click();
+      }
+      await page.locator('#effectRackClose').click();
+      await page.evaluate("localStorage.removeItem('kinect.panelGroupsOpen')");
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
+      await page.waitForFunction('!!globalThis.__kinect.timeline.transport()', null, { timeout: 30000 });
+      await freshLook();
+    };
 
     await freshLook();
     await page.locator('.paneltab[data-panel-tab="look"]').click();
@@ -7294,10 +7506,16 @@ try {
         ? offeredAtRest.map((p) => `${p.name} offered=${p.offered} disabled=${p.disabled} value ${p.value} against ${p.def}`).join(', ')
         : `${quiet.length} rows, all unoffered and disabled, all on their defaults`);
 
-    const shownAtRest = quiet.filter((p) => p.rowOnScreen);
-    check(shownAtRest.length >= 10 && shownAtRest.every((p) => p.onScreen === false),
+    // The fresh Look groups are correctly collapsed. Use the non-collapsing Framing group for
+    // the rendered-state arm, then return to Look before driving its preset picker.
+    await page.locator('.paneltab[data-panel-tab="framing"]').click();
+    await settle();
+    const shownAtRest = carried(await resetState()).filter((p) => p.rowOnScreen);
+    check(shownAtRest.length >= 8 && shownAtRest.every((p) => p.onScreen === false),
       'and a reset that is not offered is not on the screen either, so the attribute is the rendered state',
       `${shownAtRest.filter((p) => p.onScreen === false).length} of ${shownAtRest.length} rows on screen show nothing`);
+    await page.locator('.paneltab[data-panel-tab="look"]').click();
+    await settle();
 
     // ---- 17c. the door this control has to read, and it is not its own
     // Everything above and below could be satisfied by a button that remembered its own clicks.
@@ -7413,12 +7631,36 @@ try {
     };
 
     // Every one of them, and the count is what makes the driver rule honest: section 1 credits
-    // all fifty-one of these controls to this section by their `data-reset` attribute.
+    // this generated set of controls to this section by their `data-reset` attribute.
     await freshLook();
+    await rackAllEffects();
+    // A tuning row declared `under` is deliberately hidden while its master is zero. Put every
+    // parent one step up, then drive tuning rows before their masters so every rendered reset is
+    // reached without weakening that visibility rule.
+    const underParents = [...new Set(scalars.map((p) => p.under).filter(Boolean))];
+    const underAtZero = await page.evaluate(`(${((names) => names.map((name) => {
+      const row = document.getElementById(name)?.closest('.row, .checkrow') ?? null;
+      return {
+        name,
+        hidden: row?.hidden ?? null,
+        display: row ? getComputedStyle(row).display : null,
+        visible: row?.checkVisibility({ checkVisibilityCSS: true }) ?? null,
+      };
+    })).toString()})(${JSON.stringify(scalars.filter((p) => p.under).map((p) => p.name))})`);
+    const exposedUnder = underAtZero.filter((row) => !row.hidden || row.display !== 'none' || row.visible);
+    check(underAtZero.length > 0 && exposedUnder.length === 0,
+      'every tuning row declared under a zero master is absent from layout and visibility',
+      exposedUnder.length ? JSON.stringify(exposedUnder) : `${underAtZero.length} rows hidden`);
+    for (const parent of underParents) await driveSlider(parent, await oneStepOff(parent));
     await settle();
     const unarmed = [];
     const byTab = new Map();
-    for (const p of scalars) {
+    const resetOrder = [...scalars].sort((a, b) => Number(Boolean(b.under)) - Number(Boolean(a.under)));
+    for (const p of resetOrder) {
+      if (!p.tab) {
+        unarmed.push(`${p.name} (no panel tab)`);
+        continue;
+      }
       if (!byTab.has(p.tab)) byTab.set(p.tab, []);
       byTab.get(p.tab).push(p.name);
     }
@@ -7453,6 +7695,9 @@ try {
       stillOffered.length
         ? `${stillOffered.length} still offered: ${stillOffered.slice(0, 6).map((p) => `${p.name} offered=${p.offered} disabled=${p.disabled}`).join(', ')}`
         : `${afterPresses.length} rows unoffered and disabled again`);
+    // Racking package effects can hold a shared core group open. Clear that panel fixture before
+    // asking whether a core value alone opens and then closes its own group.
+    await clearRackAndOverrides();
     await page.locator('.paneltab[data-panel-tab="look"]').click();
     await settle();
 
@@ -7474,7 +7719,7 @@ try {
       `bloom offered=${openedBy.offered}, ${bloomGroup} open=${opticalOpen}`);
     // Conditional for the reason `armReset` above is bounded: a press into a control the build is
     // not offering is a thirty-second timeout rather than a finding.
-    if (openedBy.offered === 'yes') await page.click('.reset[data-reset=bloom]');
+    if (openedBy.offered === 'yes' && opticalOpen) await page.click('.reset[data-reset=bloom]');
     await settle();
     const bloomDefault = await page.evaluate(
       "__kinect.params.normalise('bloom', __kinect.params.spec('bloom').default)");
@@ -7612,8 +7857,10 @@ try {
         // caret that is exactly on it. Measured: the drops-focus control came back NOT
         // CAUGHT at 415 assertions and none failed while this line coalesced. The suite
         // notes carry the same trap costing the gallery two red rows about nothing.
-        focus: document.activeElement?.dataset?.name
-          || document.activeElement?.id || document.activeElement?.tagName || 'nothing',
+        focus: document.activeElement?.classList?.contains('pickeroption')
+          ? document.activeElement.dataset.name
+          : (document.activeElement?.id || document.activeElement?.tagName || 'nothing'),
+        focusIsOption: Boolean(document.activeElement?.classList?.contains('pickeroption')),
       };
     })()`);
 
@@ -7631,9 +7878,10 @@ try {
     check(open.add && open.add[0] === 24 && open.add[1] === 24,
       'and it carries the 24x24 add button the design draws',
       open.add ? `${open.add[0]}x${open.add[1]}` : 'no add button');
-    check(open.hidden === false && open.expanded === 'true' && open.names.includes(open.focus),
+    check(open.hidden === false && open.expanded === 'true' && open.focusIsOption
+      && open.names.includes(open.focus),
       'opening it says so and hands the caret to an entry rather than leaving it on the trigger',
-      `expanded ${open.expanded}, focus on ${open.focus}`);
+      `expanded ${open.expanded}, focus on ${open.focus || '(none)'}`);
 
     await page.keyboard.press('ArrowDown');
     const down = (await shape()).focus;
@@ -7641,7 +7889,7 @@ try {
     const up = (await shape()).focus;
     check(down !== up && open.names.includes(down) && open.names.includes(up),
       'the arrow keys walk the entries, which is the whole of what a native option gave away',
-      `down to ${down}, back up to ${up}`);
+      `down to ${down || '(none)'}, back up to ${up || '(none)'}`);
 
     const wanted = open.names.find((n) => n !== up && n.length > 1) ?? open.names[0];
     for (const ch of wanted.slice(0, 2)) await page.keyboard.press(ch);

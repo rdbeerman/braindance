@@ -22,6 +22,7 @@ node tools/index-check.mjs --url http://localhost:8123   # step 2: index, hash, 
 node tools/registry-check.mjs --url http://localhost:8080 # step 3: one registry, sliders as views
 node tools/registry-check.mjs --mutate mix-ignores-normalisation  # ... and must FAIL mutated
 node tools/registry-check.mjs --mutate rgb-contributes-no-alpha   # ... and must FAIL mutated
+node tools/registry-check.mjs --mutate contour-edges-round-in-float # ... contour.width's two edges computed after float rounding
 node tools/registry-check.mjs --mutate duotone-ignored            # ... the tonal transform the rest of the look sits on
 node tools/registry-check.mjs --mutate duotone-ignores-depth      # ... and that it is keyed on depth, which is the whole claim
 node tools/registry-check.mjs --mutate duotone-span-ignored       # ... the width of that key, promoted back to the literal it replaced
@@ -330,12 +331,17 @@ node tools/editor-check.mjs --mutate readings-tick-alone --no-render   # ... and
 node tools/editor-check.mjs --mutate apply-says-nothing --no-render    # ... and that applying one says so, on the control that inherited the gesture
 node tools/editor-check.mjs --mutate effect-rack-shows-every-effect --no-render # ... a fresh sidebar showing every installed package without Add. Reddens eight rack rows
 node tools/editor-check.mjs --mutate effect-rack-ignores-touched --no-render # ... active values and tracks left hidden because they were not added. Reddens three rack rows
+node tools/editor-check.mjs --mutate effect-rack-ignores-racked --no-render # ... a racked effect at its defaults no longer holding its group open. Reddens one rack row
 node tools/editor-check.mjs --mutate effect-rack-remove-keeps-tracks --no-render # ... Remove resetting values while leaving the effect's keyframes behind. Reddens one rack row
 node tools/editor-check.mjs --mutate effect-rack-reset-forgets-effect --no-render # ... reset making the last touched effect disappear under the pointer. Reddens one rack row
-node tools/editor-check.mjs --mutate group-never-reveals --no-render      # ... a panel group is open because the clip says so
+node tools/editor-check.mjs --mutate under-rows-ignore-hidden --no-render # ... rows declared under a zero master remaining visible. Reddens five rows
+node tools/editor-check.mjs --mutate whole-clip-does-nothing --no-render # ... both user paths leaving the trim narrowed. Reddens two rows
+node tools/editor-check.mjs --mutate effect-rack-strands-focus --no-render # ... Escape closing the rack without returning focus. Reddens one row
+node tools/editor-check.mjs --mutate effect-rack-keeps-fixed-left --no-render # ... the rack clipping at 520px and floating after H. Reddens two rows
+node tools/editor-check.mjs --mutate group-never-reveals --no-render      # ... a panel group is open because the clip says so. Reddens twenty rows
 node tools/editor-check.mjs --mutate reveal-ignores-tracks --no-render    # ... and a keyframe counts where the value does not
 node tools/editor-check.mjs --mutate override-prunes-only-on-toggle --no-render # ... and the override the document, not the toggle, has caught up with
-node tools/editor-check.mjs --mutate panel-row-skips-parameter --no-render # ... and must FAIL
+node tools/editor-check.mjs --mutate panel-row-skips-parameter --no-render # ... one registry parameter omitted from the generated panel. Reddens eight rows
 node tools/editor-check.mjs --mutate nav-at-the-foot --no-render       # ... and must FAIL
 node tools/editor-check.mjs --mutate panel-tabs-show-everything --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate dialog-close-strands-focus --no-render # ... and must FAIL
@@ -1387,6 +1393,13 @@ figures off the 640x400 stage they were first taken at. The operational conseque
 point: **a red `readGhost` row is a finding now rather than the weather**, and so is that line's
 byte count climbing.
 
+**`contour.width` lands two edges, computed in JavaScript double before either is uploaded.**
+The registry's one-at-a-time and all-at-once landing rows read both components of
+`contourEdges`. `contour-edges-round-in-float` rounds the operands and subtraction first; it
+reddens those two rows, with the low edge moving from `0.22999999999999998` to
+`0.22999998927116394` at the planted width `0.27`. The rendered golden arm is not the precision
+proof: that one-unit-in-the-last-place change can remain within its documented image tolerance.
+
 **It then had six standing red rows again, deliberately, and it does not any more — the middle
 of that story is the part worth keeping.** Widening the zero-alpha discard from characters to the
 whole hard-edged path moves the four non-additive documents, and section 1b compares this build
@@ -2006,17 +2019,12 @@ with the precondition green every time and both final baselines passing all of t
 subsets would already be suggestive; four is the statement, because **an ordering bug picks
 the same row.** A run that reddens only these is a re-run, not a finding.
 
-Two things make it worse than ordinary noise here. A polluted `projects/` store is the first
+One thing makes it worse than ordinary noise here. A polluted `projects/` store is the first
 suspect and the cheapest to rule out, because anything that has been driving the editor by
 hand against the same server leaves real autosaves and deliverables behind it; take the
-re-run against a clean store rather than the one that just failed. And the same block can
-**crash rather than fail**: observed once as `DID NOT RUN - page.selectOption: Timeout
-30000ms exceeded` at 313 of 396, on `page.selectOption('#tProject', OTHER)` with Playwright
-reporting `did not find some options` — section 13's own fixture stubs `/presets` to 500,
-reopens twice, then expects the project picker to carry the name it planted. It was transient,
-with four later runs through the same block on the same build going through. Per the rule at
-the top of this file that is a crash to investigate and never a catch, and it is exactly the
-shape that reads as a catch to anything counting exit codes.
+re-run against a clean store rather than the one that just failed. The saved-project picker
+left with the timeline information bar, so section 13 now asserts that no fragment of those
+controls remains and drives the auto-save recovery and project loader directly.
 
 **Two `editor-check` sweeps must never run at once, and neither may `web/` be edited under
 one.** This cost two whole measurements in one session. A sweep straddling a `web/main.js`
@@ -2040,6 +2048,27 @@ browser launches at all. Neither is a finding, and neither used to exist: a spec
 nothing and reported `NOT CAUGHT` against the tree's own source. `docs/instruments.md` carries
 the case.
 
+**The effect rack has controls for presence, focus and geometry.**
+`effect-rack-ignores-racked` removes rack membership from the group derivation while leaving Add
+itself working, and reddens the one row that returns a racked effect to its defaults and still
+expects its group open. `effect-rack-strands-focus` removes the common focus-return path and
+reddens the Escape row alone. `effect-rack-keeps-fixed-left` removes both responsive placement
+rules and reddens the 520px and collapsed-panel rows. These are separate mutations because a
+single broken sidebar could otherwise redden all three claims without saying which contract the
+instrument observed.
+
+**Whole clip is driven through both user paths.** Section 3 narrows the trim, selects
+**Output > Whole clip**, narrows it again, and presses Option-X. Both must restore
+`{ in: 0, out: null }`; `whole-clip-does-nothing` leaves the history write in place while removing
+the range change and reddens those two rows. The internal range setter is used only to clean the
+mutation fixture after both assertions, not to establish either result.
+
+**Section 17 reads row hiding as layout, not as an attribute.** Its `under` walk comes from the
+registry metadata, puts each master at its absent value, and requires every dependent row to have
+no rendered box. `under-rows-ignore-hidden` removes the author CSS that gives `hidden` its display
+semantics. It reddens five rows: the claim-carrying dependent-row assertion and four existing rack
+availability rows that use the same mechanism.
+
 **Section 15 grades a feature whose whole design is that it stores almost nothing**, and its
 five controls exist because most of the ways it can be wrong are invisible from the panel.
 Whether a parameter group is open is derived — a group is open when any parameter in it carries
@@ -2049,7 +2078,7 @@ moment the derivation catches up with them.
 
 - **`group-never-reveals`** is the falsification control for the derived half: the predicate
   answers "nobody has been here" whatever the document holds, so a group carrying live values
-  renders shut. It reddens **14 rows** and the shape of that set is what to read. The rows that
+  renders shut. It reddens **20 rows** and the shape of that set is what to read. The rows that
   move a value, key a parameter or move a reading and expect the group to open carry the claim.
   **The mark rows go red with them, and that is correct rather than collateral** — the mark is
   keyed on the same rule the open state is, so a build that cannot tell whether a group is in
@@ -2403,8 +2432,8 @@ not refused then has to land, which is what says the block is keyed to the set r
 latched on the page.
 
 The second is about the uniform table rather than the registry. A cell is a number for a plain
-binding and a two-component vector for an `axisDeg` one, and which it has to be is a fact about
-the manifest — so a fork exchanging two bindings' shapes writes a number over one cell and then
+binding and a two-component vector for an `axisDeg` or `centeredEdges` one, and which it has to be
+is a fact about the manifest — so a fork exchanging two bindings' shapes writes a number over one cell and then
 throws on `.set()` at the other, mid-walk, with the registry already swapped. That throw is what
 the transaction is for, and until this round it met an adoption that minted only *missing* cells:
 the rollback found both present, skipped them, and died on the number the forward attempt had

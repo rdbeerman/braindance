@@ -431,6 +431,13 @@ const PROBE = `(() => {
         // the row classes so this holds no second copy of a class list that could drift
         // from the generator's.
         controls: el.querySelectorAll('input, select').length,
+        // A control can be in the group without being available for this document.
+        // Rack membership and \`under\` both set \`hidden\` on the control's row, while
+        // collapse hides otherwise available rows through the group's \`shut\` class.
+        // Keep those two mechanisms separate: the assertion below asks collapse to
+        // hide the available controls, not to resurrect rows the document withheld.
+        controlsAvailable: [...el.querySelectorAll('input, select')]
+          .filter((control) => !control.closest('.row, .checkrow')?.hidden).length,
         controlsOnScreen: [...el.querySelectorAll('input, select')].filter(vis).length,
         // Whether the collapse rule governs this one at all, so a group with no rows on
         // screen can be told from a group that has been shut.
@@ -939,23 +946,24 @@ try {
   // rack membership.
   const rackEveryEffect = async (page) => {
     const racked = [];
-    for (let guard = 0; guard <= 40; guard += 1) {
-      await page.click('#panelTabs [role="tab"][data-panel-tab="look"]');
-      const door = await page.evaluate(`(() => {
-        const b = document.getElementById('effectRackOpen');
-        return b !== null && b.checkVisibility({ checkVisibilityCSS: true });
-      })()`);
-      if (!door) throw new Error('the rack door is not on this surface, so no package group can be added');
+    await page.click('#panelTabs [role="tab"][data-panel-tab="look"]');
+    const door = await page.evaluate(`(() => {
+      const b = document.getElementById('effectRackOpen');
+      return b !== null && b.checkVisibility({ checkVisibilityCSS: true });
+    })()`);
+    if (!door) throw new Error('the rack door is not on this surface, so no package group can be added');
+    if (await page.evaluate('document.getElementById("effectRackPanel").hidden')) {
       await page.click('#effectRackOpen');
+    }
+    for (let guard = 0; guard <= 40; guard += 1) {
       const next = await page.evaluate(`(() => {
         const add = document.querySelector('#effectRackList button[data-effect-add]');
         return add === null ? null : add.dataset.effectAdd;
       })()`);
       if (next === null) {
-        await page.evaluate(`document.getElementById('effectRackDialog').close()`);
+        await page.click('#effectRackClose');
         return racked;
       }
-      // Adding closes the dialog and moves to the group's own tab, so each one is a fresh open.
       await page.click(`#effectRackList button[data-effect-add="${next}"]`);
       racked.push(next);
     }
@@ -998,6 +1006,7 @@ try {
         blocks: each[0].blocks.map((block) => ({
           ...block,
           visible: each.some((state) => at(state, block.key)?.visible),
+          controlsAvailable: Math.max(...each.map((state) => at(state, block.key)?.controlsAvailable ?? 0)),
           controlsOnScreen: Math.max(...each.map((state) => at(state, block.key)?.controlsOnScreen ?? 0)),
         })),
         recRange: each.some((state) => state.recRange),
@@ -1089,13 +1098,15 @@ try {
       `${recLook.length} look groups off the hidden tab, ${recLook.filter((b) => b.visible).length} reachable, `
       + `unreachable [${recLook.filter((b) => !b.visible).map((b) => b.key).join(' ') || 'none'}]`);
     check(edLook.length > 0 && edLook.every((b) => b.visible)
-      && edOpen.length > 0 && edOpen.every((b) => b.controls > 0 && b.controlsOnScreen === b.controls)
+      && edOpen.length > 0
+      && edOpen.every((b) => b.controlsAvailable > 0 && b.controlsOnScreen === b.controlsAvailable)
       && edShut.every((b) => b.controlsOnScreen === 0),
       'and reachable through the editor inspectors, where grading is the job - measured in controls on screen rather than in headings',
       `${edLook.length} look groups, all ${edLook.filter((b) => b.visible).length} reachable, `
-      + `${sum(edLook, 'controlsOnScreen')} of ${sum(edLook, 'controls')} controls on screen; `
+      + `${sum(edLook, 'controlsOnScreen')} of ${sum(edLook, 'controlsAvailable')} available controls on screen `
+      + `(${sum(edLook, 'controls')} built); `
       + `${edOpen.length} left open by the collapse rule show ${sum(edOpen, 'controlsOnScreen')} of `
-      + `${sum(edOpen, 'controls')}; shut by it: ${edShut.map((b) => b.key).join(' ') || 'none'}`);
+      + `${sum(edOpen, 'controlsAvailable')} available; shut by it: ${edShut.map((b) => b.key).join(' ') || 'none'}`);
     // The closer: everything the rules above do not name is common furniture and has to be on both.
     const commonRec = rec.blocks.filter((b) => !hiddenTabBlocks.has(b.key) && !b.look);
     const commonEd = ed.blocks.filter((b) => !hiddenTabBlocks.has(b.key) && !b.look);

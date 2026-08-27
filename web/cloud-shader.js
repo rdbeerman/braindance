@@ -364,11 +364,10 @@ precision highp float;
 
 uniform sampler2D colorPrev, colorCurr;
 uniform float opacity, exposure, nearClip, farClip, mixT, time;
-uniform float scanAmount, rimAmount, thermal, edges;
+uniform float rimAmount, thermal, edges;
 uniform float duotoneDepth, duotoneHue, duotoneSplit, duotoneSpan, duotoneMotion;
-uniform float readRgb, readDepth, readGhost, readContour, readBlackwall;
-uniform float rgbSaturation, depthGamma, ghostRim, ghostFill;
-uniform float contourBands, contourLo, contourHi, blackwallSweep;
+uniform float readRgb, readDepth;
+uniform float rgbSaturation, depthGamma;
 ` },
     // The uniforms an effect declares for this stage. A term is declared in both stages when
     // both read it, which is why the glyph field's master appears here as well.
@@ -493,56 +492,14 @@ void main() {
     readSum += readDepth;
   }
 
-  if (readGhost > 0.0) {
-    float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
-    // Two controls over one shell: the exponent decides how tightly the glow hugs a depth
-    // discontinuity, and the fill is the shell's blue before any luminance arrives.
-    float rim = pow(vEdge, ghostRim);
-    col += mix(vec3(0.20, 0.45, 0.75) * (ghostFill + lum), vec3(0.75, 0.95, 1.0), rim) * readGhost;
-    alphaFactor += (0.25 + 0.75 * rim + 0.25 * lum) * readGhost;
-    readSum += readGhost;
-  }
-
-  if (readContour > 0.0) {
-    // Bands per metre, and how much of each band the line fills. The two edges arrive as
-    // separate uniforms because subtracting the width here would round differently.
-    float bands = fract(vDepth * contourBands);
-    float line = smoothstep(contourLo, 0.5, bands) * smoothstep(contourHi, 0.5, bands);
-    col += mix(depthRamp(1.0 - t) * 0.18, vec3(1.0), line) * readContour;
-    alphaFactor += (0.15 + 0.85 * line) * readContour;
-    readSum += readContour;
-  }
-
-  if (readBlackwall > 0.0) {
-    // Blackwall: crimson volume, surfaces reading as containment rather than skin.
-    // Depth discontinuities are where the wall "sees" you, so edges burn hottest.
-    float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
-    vec3 deep = vec3(0.28, 0.010, 0.035);
-    vec3 hot  = vec3(1.00, 0.115, 0.140);
-    vec3 bw = mix(deep, hot, pow(1.0 - t, 1.6));
-
-    float rim = pow(vEdge, 0.55);
-    bw = mix(bw, vec3(0.95, 0.34, 0.22), rim * rimAmount);
-
-    // A scan plane sweeping through depth. Narrow and tinted rather than white, or it reads as
-    // a light leak dragging across the geometry. The speed is a parameter and the spacing is not.
-    float sweep = fract(vDepth * 0.55 - time * blackwallSweep);
-    float scan = smoothstep(0.988, 1.0, sweep);
-    bw += vec3(0.10, 0.62, 0.78) * scan * scanAmount;
-
-    bw *= 0.55 + 0.75 * lum;
-
-    // Shed points run hotter than the surface they left, so a wake reads as the
-    // wall having noticed something rather than as leftover geometry.
-    bw = mix(bw, vec3(1.00, 0.42, 0.20), vGhost * 0.55);
-
-    col += bw * readBlackwall;
-    alphaFactor += (0.30 + 0.70 * rim * rimAmount + 0.45 * scan * scanAmount) * readBlackwall;
-    readSum += readBlackwall;
-  }
-
-  // Every weight at zero draws nothing, which is the honest answer. The guard is on the
-  // division alone, so the alpha carries the emptiness out instead of a NaN doing it.
+` },
+    // The reading effects: ghost, contour, blackwall. Each contributes to col,
+    // alphaFactor, and readSum the same way the RGB and Depth readings above do.
+    // Ordered by visual weight: ghost at 100, contour at 200, blackwall at 300.
+    { stage: 'f.reading' },
+    { text: /* glsl */ `\
+  // Every weight at zero draws nothing. Guard only the division so alpha carries the
+  // emptiness out instead of a NaN doing it.
   float norm = readSum > 0.0 ? 1.0 / readSum : 0.0;
   col *= norm;
   float alpha = opacity * alphaFactor * norm;
