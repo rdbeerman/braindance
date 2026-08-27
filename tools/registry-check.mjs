@@ -65,6 +65,17 @@ const MUTATIONS = {
     ]],
     fails: 'the scale-cancels row of 8b, with every row of 1b still passing',
   },
+  'contour-edges-round-in-float': {
+    file: 'web/main.js',
+    edits: [[
+      "    write = (v) => { table()[bind.uniform].value.set(0.5 - v, 0.5 + v); };",
+      "    write = (v) => { table()[bind.uniform].value.set(\n"
+        + "      Math.fround(Math.fround(0.5) - Math.fround(v)),\n"
+        + "      Math.fround(Math.fround(0.5) + Math.fround(v)),\n"
+        + "    ); };",
+    ]],
+    fails: 'the two contour.width landing rows, naming the edges that must be computed in double',
+  },
   'weight-ignored': {
     file: 'effects-builtin/ghost/ghost.frag.glsl',
     edits: [[
@@ -951,7 +962,7 @@ const LANDING = {
   'ghost.rim': 'k.uniforms.ghostRim.value',
   'ghost.fill': 'k.uniforms.ghostFill.value',
   'contour.bands': 'k.uniforms.contourBands.value',
-  'contour.width': 'k.uniforms.contourWidth.value',
+  'contour.width': '[k.uniforms.contourEdges.value.x, k.uniforms.contourEdges.value.y]',
   'blackwall.sweep': 'k.uniforms.blackwallSweep.value',
   'blackwall.scan': 'k.uniforms.blackwallScan.value',
   rim: 'k.uniforms.rimAmount.value',
@@ -1065,7 +1076,7 @@ const EXPECT = {
   'ghost.rim': (v) => v,
   'ghost.fill': (v) => v,
   'contour.bands': (v) => v,
-  'contour.width': (v) => v,
+  'contour.width': (v) => [0.5 - v, 0.5 + v],
   'blackwall.sweep': (v) => v,
   'blackwall.scan': (v) => v,
   rim: (v) => v,
@@ -1184,7 +1195,7 @@ const SCRAMBLE = {
   'ghost.fill': 0.7,
   'contour.amount': 0.15,
   'contour.bands': 27,
-  'contour.width': 0.25,
+  'contour.width': 0.27,
   'blackwall.amount': 0.6,
   'blackwall.sweep': 0.9,
   'blackwall.scan': 0.72,

@@ -182,6 +182,13 @@ whether something is on screen has to name which of the two it means. Which grou
 `editor-check` section 13's subject, because a collapse derived from the document is a different
 feature from a surface that hides the grade, and one row asserting both would go red for either.
 
+That count gained a third term when the effect rack and `under` metadata began withholding rows.
+An open group can correctly show fewer controls than it built: the missing controls are not
+collapsed, they are unavailable in the current document. `sensor-view-check` therefore records
+the built, available and on-screen counts separately. An open group must show every available
+control, while a shut group must show none. Comparing on-screen controls with the built total
+would turn correct row hiding into a failed collapse assertion.
+
 Nothing would have caught it. The row it protects — every control has a driver — went on working,
 because that one ranges over the same widened set and *should*; only the floor was stated in
 units of what the selector happened to return. The repair is one line,

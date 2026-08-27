@@ -1,1 +1,2 @@
-uniform float contour, contourBands, contourWidth;
+uniform float contour, contourBands;
+uniform vec2 contourEdges;

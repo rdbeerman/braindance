@@ -167,7 +167,9 @@ export function buildPointCloud(sourceCells, program) {
     ghostFill: { value: 0.35 },
     contour: { value: 0 },
     contourBands: { value: 12 },
-    contourWidth: { value: 0.08 },
+    // These are the floats obtained by subtracting the default width from a JavaScript double.
+    // They are intentionally not the result of subtracting two floats in the shader.
+    contourEdges: { value: new THREE.Vector2(0.42, 0.58) },
     blackwall: { value: 0 },
     blackwallSweep: { value: 0.28 },
     blackwallScan: { value: 0 },

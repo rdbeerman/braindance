@@ -228,6 +228,7 @@
      stated here - the height belongs to `.kf`/`.reset`, which are the tallest things a
      row holds and therefore what decides it. */
   .row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .row[hidden], .checkrow[hidden] { display: none; }
   .row span { flex: 0 0 74px; color: var(--dim); }
   .row output { flex: 0 0 42px; text-align: right; font-variant-numeric: tabular-nums; }
   #panel .row select,
@@ -347,6 +348,7 @@
      happens through the preset library visible in the Effects tab. */
   body:not(.editing) #toLibrary,
   body:not(.editing) #menuProjectSettings,
+  body:not(.editing) #menuWholeClip,
   body:not(.editing) #menuExport,
   body:not(.editing) #menuTopView,
   body:not(.editing) #menuLookImport,
@@ -552,7 +554,8 @@
   #projectDialog { width: min(480px, calc(100vw - 32px)); }
   /* Effect picker sidebar - appears to the right of the main panel. */
   #effectRackPanel {
-    position: fixed; top: 38px; left: 302px; width: 260px; height: calc(100vh - 38px);
+    position: fixed; top: 38px; left: 302px; width: min(260px, calc(100vw - 32px));
+    height: calc(100vh - 38px);
     display: flex; flex-direction: column; overflow: hidden;
     border: 0; border-right: 1px solid var(--line); border-radius: 0;
     background: rgba(8, 11, 16, 0.82); backdrop-filter: blur(12px); z-index: 9;
@@ -561,6 +564,12 @@
   #effectRackPanel[hidden] { display: none; }
   body:not(.editing) #effectRackPanel { background: var(--paper-2); backdrop-filter: none; }
   body.editing #effectRackPanel { height: calc(100vh - var(--timeline-h) - var(--tlanes-h) - 38px); }
+  body.panelcollapsed #effectRackPanel { left: 16px; }
+  @media (max-width: 562px) {
+    #effectRackPanel, body.panelcollapsed #effectRackPanel {
+      left: 16px; right: 16px; width: auto; z-index: 11;
+    }
+  }
   .effect-rack-head {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     padding: 10px 0 8px; border-bottom: 1px solid var(--line); margin: 0 -14px 10px;
@@ -1190,6 +1199,7 @@
       <div class="appmenu">
         <button class="appmenu-trigger" id="outputMenuButton" type="button" aria-expanded="false" aria-controls="outputMenu">Output</button>
         <div class="appmenu-popover" id="outputMenu" role="menu" hidden>
+          <button class="menu-command" id="menuWholeClip" type="button" role="menuitem"><span>Whole clip</span><kbd>&#8997;X</kbd></button>
           <button class="menu-command" id="menuExport" type="button" role="menuitem"><span>Export</span><kbd>&#8984;E</kbd></button>
           <div class="menu-separator"></div>
           <button class="menu-command" id="menuObs" type="button" role="menuitem"><span>Output to OBS</span><kbd></kbd></button>
@@ -1356,7 +1366,7 @@
     <div id="gradeAnchor" hidden></div>
     <div class="group" id="effectRackGroup" data-panel-tab="look" hidden>
       <div class="btnrow">
-        <button id="effectRackOpen" type="button">+ add effect</button>
+        <button id="effectRackOpen" type="button" aria-expanded="false" aria-controls="effectRackPanel">+ add effect</button>
       </div>
     </div>
   </div><!-- #panelBody -->
@@ -1387,9 +1397,9 @@
   </div>
   </div><!-- #panel -->
 
-  <aside id="effectRackPanel" hidden>
+  <aside id="effectRackPanel" aria-labelledby="effectRackTitle" hidden>
     <div class="effect-rack-head">
-      <h2>Effects</h2>
+      <h2 id="effectRackTitle">Effects</h2>
       <button id="effectRackClose" type="button" aria-label="Close">&times;</button>
     </div>
     <input id="effectRackSearch" type="search" autocomplete="off" spellcheck="false" placeholder="search">

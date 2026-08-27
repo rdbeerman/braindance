@@ -62,6 +62,10 @@ zoom about the pointer, `+`/`-` about the playhead, `,`/`.` to pan, `F` to fit t
 to frame the trim. The overview underneath is always the whole clip: drag its box to pan, an
 edge to zoom, click to go there.
 
+Press `I` and `O` to set the trim at the playhead. Choose **Output > Whole clip**, or press
+Option-X, to restore `{ in: 0, out: null }`. The null end means the range continues to the end
+if the program later grows; writing the current duration would freeze it there instead.
+
 **Easing a move.** Select a key and the `key options` row shapes the segments either side of
 it: `lin`, `in`, `out`, `smooth`, `glide` and `hold`, or drag the handles in the lane for
 anything in between. `in` writes the incoming side and `out` the outgoing one, so they are two
@@ -503,11 +507,12 @@ widest that ships is the glitch's at 2,740 bytes over seven parameters, and a ma
 to disk, hashed on every read and turned into a control per parameter on every open page — so
 twelve thousand correct parameters carrying one small chunk of GLSL passes every rule above it and
 fits inside a request body), a binding has to be the *shape* of the uniform it writes — `axisDeg`
-needs a `vec2` and everything else a `float` — and may not aim at an array at all, since every
+and `centeredEdges` need a `vec2`, while `degToRad` and a plain binding need a `float` — and may
+not aim at an array at all, since every
 binding writes one cell and three.js takes its uploader off the declaration, a binding that
-declares `gates` has to be something the grade gate can read, so not `axisDeg`, whose
-two-component direction is never zero, and not a table the gate does not collect, a step may not
-be finer than `1e-6`, which is a grid neither the rounding nor a 32-bit float can resolve, and a
+declares `gates` has to be something the grade gate can read, so not either vector transform,
+whose two-component value is not a scalar amount, and not a table the gate does not collect, a
+step may not be finer than `1e-6`, which is a grid neither the rounding nor a 32-bit float can resolve, and a
 parameter may only name a panel group this build holds or one its own package declares, with a
 package group key that collides with either refused by name. A refused package leaves nothing
 behind.
@@ -712,6 +717,7 @@ The panel is generated from the registry at boot. A parameter is one entry namin
 and label, and the row, bounds, readout and keyframe control are built from that, so an
 effect cannot get a control the registry does not own. Package-effect rows are hidden until
 the effect is added with **+ add effect** or any of its values or tracks carries work.
+Rows declared `under` another parameter are hidden while that master is at its absent value.
 Removing one resets every value and deletes every track in one confirmed, undoable edit.
 The local rack preference is panel state, not project state. The generator refuses to boot
 if the rows it emitted are not the parameters that were declared.

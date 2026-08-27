@@ -23,7 +23,9 @@ import {
 } from './plan-geometry.js';
 import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
-import { EFFECT_BIND_TRANSFORMS, tableFromPackages, withEffectGroups } from './effect-manifests.js';
+import {
+  EFFECT_BIND_TRANSFORMS, effectBindUniformType, tableFromPackages, withEffectGroups,
+} from './effect-manifests.js';
 import { bloomChainSize } from './bloom-pass.js';
 import {
   depthCurr, colorPrev, colorCurr, buildTextures, bindDepth, bindColor, plantColor,
@@ -531,6 +533,10 @@ function effectApply(bind) {
       const r = THREE.MathUtils.degToRad(v);
       table()[bind.uniform].value.set(Math.sin(r), Math.cos(r));
     };
+  } else if (bind.transform === 'centeredEdges') {
+    // Subtract in JavaScript's double precision, then upload the two answers as floats. Doing
+    // this arithmetic in the shader rounds the width first and moves the lower edge by one ulp.
+    write = (v) => { table()[bind.uniform].value.set(0.5 - v, 0.5 + v); };
   } else if (bind.transform === 'degToRad') {
     write = (v) => { table()[bind.uniform].value = THREE.MathUtils.degToRad(v); };
   } else if (bind.transform) {
@@ -690,7 +696,7 @@ const buildParams = () => ({
     group: 'colour', label: 'gamma',
     apply: (v) => { uniforms.depthGamma.value = v; } },
   rim: { def: 0.55, min: 0, max: 1, step: 0.01, kind: 'scalar', tag: 'look',
-    group: 'colour', label: 'rim',
+    group: 'style', label: 'rim',
     apply: (v) => { uniforms.rimAmount.value = v; } },
   ...effectSlice('thermal.amount', 'duotone.motion'),
 
@@ -705,7 +711,7 @@ const buildParams = () => ({
   ...effectSlice('rgbsplit.amount', 'vignette.amount'),
   // The toe under the grade's Reinhard curve, and the one term that does not gate the pass.
   crush: { def: 0.018, min: 0, max: 0.2, step: 0.001, kind: 'scalar', tag: 'look',
-    group: 'colour', label: 'crush',
+    group: 'post', label: 'crush',
     apply: (v) => { grade.uniforms.crush.value = v; } },
 
   denoise: { def: true, kind: 'step', tag: 'look',
@@ -872,7 +878,10 @@ function specOf(name) {
 const params = {
   spec(name) {
     const spec = specOf(name);
-    return { default: spec.def, min: spec.min, max: spec.max, step: spec.step, kind: spec.kind, tag: spec.tag };
+    return {
+      default: spec.def, min: spec.min, max: spec.max, step: spec.step,
+      kind: spec.kind, tag: spec.tag, under: spec.under ?? null,
+    };
   },
   names(tag) {
     return Object.keys(PARAMS).filter((n) => !tag || PARAMS[n].tag === tag);
@@ -1237,14 +1246,16 @@ let refusedEffectSignature = null;
 
 /** A uniform cell for every binding the registry holds, minted where the tables have none. */
 const uniformCellFits = (cell, bind) => Boolean(cell)
-  && (cell.value instanceof THREE.Vector2) === (bind.transform === 'axisDeg');
+  && (cell.value instanceof THREE.Vector2) === (effectBindUniformType(bind.transform) === 'vec2');
 
 function seedUniformCells() {
   for (const name of Object.keys(EFFECT_PARAMS)) {
     const bind = EFFECT_PARAMS[name];
     const table = bind.on === 'grade' ? grade.uniforms : uniforms;
     if (uniformCellFits(table[bind.uniform], bind)) continue;
-    table[bind.uniform] = { value: bind.transform === 'axisDeg' ? new THREE.Vector2() : 0 };
+    table[bind.uniform] = {
+      value: effectBindUniformType(bind.transform) === 'vec2' ? new THREE.Vector2() : 0,
+    };
   }
 }
 
@@ -1268,7 +1279,9 @@ function restoreDepartedUniforms(was, now) {
     const cell = table[bind.uniform];
     if (!cell) continue;
     const pristine = PRISTINE_UNIFORMS[bind.on]?.get(bind.uniform);
-    if (pristine === undefined) cell.value = bind.transform === 'axisDeg' ? new THREE.Vector2() : 0;
+    if (pristine === undefined) {
+      cell.value = effectBindUniformType(bind.transform) === 'vec2' ? new THREE.Vector2() : 0;
+    }
     else cell.value = pristine instanceof THREE.Vector2 ? pristine.clone() : pristine;
   }
 }
@@ -1828,6 +1841,7 @@ function addEffectToRack(id) {
   }
   refreshPanel();
   paintEffectRackDialog();
+  document.getElementById('effectRackSearch')?.focus();
   return true;
 }
 
@@ -1848,6 +1862,7 @@ function removeEffectFromRack(id) {
   requestRepaint();
   history.commit();
   paintEffectRackDialog();
+  document.getElementById('effectRackSearch')?.focus();
   return true;
 }
 
@@ -1891,7 +1906,11 @@ function paintEffectRackDialog() {
     } else if (effectRackConfirming === id) {
       const cancel = panelNode('button', 'dialog-secondary', 'cancel');
       cancel.type = 'button';
-      cancel.addEventListener('click', () => { effectRackConfirming = null; paintEffectRackDialog(); });
+      cancel.addEventListener('click', () => {
+        effectRackConfirming = null;
+        paintEffectRackDialog();
+        document.querySelector(`[data-effect-remove="${CSS.escape(id)}"]`)?.focus();
+      });
       const remove = panelNode('button', 'dialog-secondary', 'reset & remove');
       remove.type = 'button';
       remove.dataset.effectConfirmRemove = id;
@@ -1908,6 +1927,7 @@ function paintEffectRackDialog() {
         if (now.moved.length || now.keys) {
           effectRackConfirming = id;
           paintEffectRackDialog();
+          document.querySelector(`[data-effect-confirm-remove="${CSS.escape(id)}"]`)?.focus();
         } else {
           removeEffectFromRack(id);
         }
@@ -4325,9 +4345,6 @@ function paintTimeline(t) {
   ui.source.textContent = timecode(retime.sourceSecAt(program));
   if (!ui.exportName.placeholder) ui.exportName.placeholder = t.source.id;
   paintStripPositions();
-  if (ui.inOut) ui.inOut.textContent = timecode(clipIn);
-  if (ui.outOut) ui.outOut.textContent = clipOut === null ? 'end' : timecode(clipOut);
-  if (ui.clipLen) ui.clipLen.textContent = `${Math.max(0, (clipOut ?? view.duration) - clipIn).toFixed(2)}s`;
   paintDeliverable();
   paintLanes();
   drawChrome();
@@ -4726,19 +4743,18 @@ function setClipRangeFromPlayhead(which) {
   history.commit();
 }
 
-ui.setIn?.addEventListener('click', () => setClipRangeFromPlayhead('in'));
-ui.setOut?.addEventListener('click', () => setClipRangeFromPlayhead('out'));
-ui.clearRange?.addEventListener('click', () => {
+function clearClipRange() {
   // `null` rather than the duration, so the range still means to the end if the program grows.
   setClipInOut({ in: 0, out: null });
   history.commit();
-});
+}
 
 const TYPING_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 const isTyping = (el) => el instanceof HTMLElement && (TYPING_TAGS.has(el.tagName) || el.isContentEditable);
 
 const SHORTCUTS = 'space play/pause · arrows step a frame, with shift a second · '
-  + 'home/end · i/o set in/out, with shift jump to them · del removes the selected key · '
+  + 'home/end · i/o set in/out, with shift jump to them · option-x uses the whole clip · '
+  + 'del removes the selected key · '
   + 'm marks, [/] jump to the previous and next mark · '
   + '+/- zoom the ruler, ,/. pan it, f fits the clip, z frames in..out · '
   + 'cmd-z undoes · h hides the panel';
@@ -4774,6 +4790,11 @@ addEventListener('keydown', (e) => {
   }
   // Everything below is about a clip, and the recorder has none.
   if (!EDITING || !timeline) return;
+  if (e.code === 'KeyX' && e.altKey && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    clearClipRange();
+    return;
+  }
   // Any modifier but shift belongs to the browser or the OS. Shift is a frame against a second.
   const composed = e.key.length === 1 && e.getModifierState('AltGraph');
   if ((e.metaKey || e.ctrlKey || e.altKey) && !composed) return;
@@ -7777,6 +7798,7 @@ const shell = shellElements({
   surfaceName: 'surfaceName',
   saveProject: 'menuSaveProject',
   projectSettings: 'menuProjectSettings',
+  wholeClip: 'menuWholeClip',
   export: 'menuExport',
   obs: 'menuObs',
   cameraReset: 'menuCameraReset',
@@ -7819,7 +7841,8 @@ shell.menus = [...document.querySelectorAll('.appmenu')];
 
 shell.surfaceName.textContent = EDITING ? 'Editor' : 'Record';
 for (const control of [
-  shell.saveProject, shell.projectSettings, shell.export, shell.lookImport, shell.lookExport,
+  shell.saveProject, shell.projectSettings, shell.wholeClip, shell.export,
+  shell.lookImport, shell.lookExport,
 ]) {
   control.disabled = !EDITING;
 }
@@ -7869,26 +7892,34 @@ function openDialog(dialog) {
 }
 
 shell.projectSettings.addEventListener('click', () => openDialog(shell.projectDialog));
-shell.effectRackOpen.addEventListener('click', () => {
-  const panel = shell.effectRackPanel;
-  if (!panel.hidden) {
-    panel.hidden = true;
-    effectRackConfirming = null;
-  } else {
-    effectRackConfirming = null;
-    shell.effectRackSearch.value = '';
-    paintEffectRackDialog();
-    panel.hidden = false;
-    shell.effectRackSearch.focus();
-  }
-});
-shell.effectRackClose.addEventListener('click', () => {
+function closeEffectRack({ restore = false } = {}) {
   shell.effectRackPanel.hidden = true;
+  shell.effectRackOpen.setAttribute('aria-expanded', 'false');
   effectRackConfirming = null;
+  if (restore) shell.effectRackOpen.focus();
+}
+
+function openEffectRack() {
+  effectRackConfirming = null;
+  shell.effectRackSearch.value = '';
+  paintEffectRackDialog();
+  shell.effectRackPanel.hidden = false;
+  shell.effectRackOpen.setAttribute('aria-expanded', 'true');
+  shell.effectRackSearch.focus();
+}
+
+shell.effectRackOpen.addEventListener('click', () => {
+  if (shell.effectRackPanel.hidden) openEffectRack();
+  else closeEffectRack({ restore: true });
 });
+shell.effectRackClose.addEventListener('click', () => closeEffectRack({ restore: true }));
 shell.effectRackSearch.addEventListener('input', () => {
   effectRackConfirming = null;
   paintEffectRackDialog();
+});
+shell.wholeClip.addEventListener('click', () => {
+  closeApplicationMenus();
+  clearClipRange();
 });
 shell.export.addEventListener('click', () => openDialog(ui.exportDialog));
 shell.saveProject.addEventListener('click', () => {
@@ -8078,6 +8109,11 @@ addEventListener('keydown', (event) => {
   // Asked first, Escape included: a key another control consumed is not this handler's.
   if (event.defaultPrevented) return;
   if (event.key === 'Escape') {
+    if (!shell.effectRackPanel.hidden) {
+      event.preventDefault();
+      closeEffectRack({ restore: true });
+      return;
+    }
     closeApplicationMenus({ restore: true });
     return;
   }

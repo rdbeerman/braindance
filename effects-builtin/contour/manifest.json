@@ -52,7 +52,8 @@
       },
       "bind": {
         "on": "points",
-        "uniform": "contourWidth"
+        "uniform": "contourEdges",
+        "transform": "centeredEdges"
       },
       "under": "amount"
     }

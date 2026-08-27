@@ -49,7 +49,9 @@ const MUTATIONS = {
   'install-skips-the-uniform-cells': {
     file: 'web/main.js',
     edits: [[
-      "    table[bind.uniform] = { value: bind.transform === 'axisDeg' ? new THREE.Vector2() : 0 };",
+      "    table[bind.uniform] = {\n"
+        + "      value: effectBindUniformType(bind.transform) === 'vec2' ? new THREE.Vector2() : 0,\n"
+        + '    };',
       '    if (Object.hasOwn(table, bind.uniform)) table[bind.uniform] = { value: 0 };',
     ]],
   },
