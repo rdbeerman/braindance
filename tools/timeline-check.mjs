@@ -479,19 +479,19 @@ const RGB_LOOK = JSON.parse(
 ).values;
 const BLACKWALL = { look: BLACKWALL_LOOK };
 
-const NETRUN_PATH = new URL('../presets-builtin/netrun.json', import.meta.url);
-const NETRUN_SHIPPED = existsSync(NETRUN_PATH)
-  ? JSON.parse(readFileSync(NETRUN_PATH, 'utf8')).values
-  : {
-    ...BLACKWALL_LOOK,
-    'datamosh.amount': 1,
-    'datamosh.reach': 14,
-    'datamosh.decay': 0.88,
-    'datamosh.splay': 1,
-    'datamosh.line': 0.55,
-    'datamosh.grain': 3,
-    'datamosh.refresh': 1.2,
-  };
+// Blackwall with the datamosh raised, stated here rather than read off a document: MOSH_SHORT_BY
+// and the band beside it were measured against these exact values, so a document swapped in
+// underneath would move the numbers this section asserts without touching the assertion.
+const MOSH_LOOK = {
+  ...BLACKWALL_LOOK,
+  'datamosh.amount': 1,
+  'datamosh.reach': 14,
+  'datamosh.decay': 0.88,
+  'datamosh.splay': 1,
+  'datamosh.line': 0.55,
+  'datamosh.grain': 3,
+  'datamosh.refresh': 1.2,
+};
 
 const CASCADE_PATH = new URL('../presets-builtin/cascade.json', import.meta.url);
 const CASCADE_SHIPPED = existsSync(CASCADE_PATH)
@@ -1333,7 +1333,7 @@ console.log('\n== 7. the mosh pass decodes from its own last refresh ==');
   // to converge in.
   const MOSH_SHORT_BY = 35;
   const NETRUN_LOOK = {
-    ...NETRUN_SHIPPED,
+    ...MOSH_LOOK,
     fade: 0,
     wake: 0,
     trails: 0,
@@ -1346,7 +1346,7 @@ console.log('\n== 7. the mosh pass decodes from its own last refresh ==');
   const control = await arm({ ...config, kind: 'seek', frames: 0, label: 'moshControl' });
 
   const plan = seeked.seek.plan;
-  console.log(`  method: ${existsSync(NETRUN_PATH) ? 'netrun.json' : 'Blackwall with the datamosh raised'}`
+  console.log('  method: Blackwall with the datamosh raised'
     + `, refresh ${MOSH_REFRESH}s, rate 1.00x, 30 fps out, target ${TARGET_SEC}s. Pre-roll `
     + `${plan.frames} frames (surface ${plan.surface}, trails ${plan.trails}, mosh ${plan.mosh}). `
     + `Playback rendered ${played.delta.renders}, the seek ${seeked.delta.renders}, the control `

@@ -1,6 +1,6 @@
 // Proves that the same program time produces the same image. Every input is pinned - a fixed
-// run of real capture frames, a fixed camera pose, colour off - with both feedback paths left
-// switched on, since they are the only things that could carry state between two runs. The
+// run of real capture frames, a fixed camera pose, colour off - with all three feedback paths
+// left switched on, since they are the only things that could carry state between two runs. The
 // frames are sampled every fourth frame, because a static scene makes the afterimage converge
 // to its own input and return the same hash whether the accumulator ran or not.
 //
@@ -34,23 +34,11 @@ const STRIDE = Number(flag('--stride', '4'));
 // from display frames.
 const SUBSTEPS = Number(flag('--substeps', '4'));
 
-// The shipped Blackwall document, read rather than restated: a copy of these values typed in
-// here would be a second source of truth for a look.
-const NETRUN_MOSH = {
-  'datamosh.amount': 1,
-  'datamosh.reach': 16,
-  'datamosh.decay': 0.92,
-  'datamosh.splay': 1,
-  'datamosh.line': 0.55,
-  'datamosh.grain': 3,
-  'datamosh.refresh': 1.2,
-};
-const BLACKWALL_LOOK = JSON.parse(
-  readFileSync(new URL('../presets-builtin/blackwall.json', import.meta.url), 'utf8'),
+// The shipped `rift` document, read rather than restated: a copy of these values typed in
+// here would be a second source of truth for a look. It is the look every section here runs.
+const RIFT_LOOK = JSON.parse(
+  readFileSync(new URL('../presets-builtin/rift.json', import.meta.url), 'utf8'),
 ).values;
-
-// Blackwall with the smear over it, which is the look every section here runs.
-const NETRUN_LOOK = { ...BLACKWALL_LOOK, ...NETRUN_MOSH };
 
 // Playwright is a tool the proofs reach for rather than a dependency, so it is resolved
 // wherever it sits.
@@ -290,12 +278,11 @@ async function openPage() {
   }
   if (!gpu.colorBufferFloat) throw new Error('no EXT_color_buffer_float: the surface memory is not running at float');
 
-  // Blackwall, read out of the document that ships it rather than typed in here, with the
-  // datamosh raised over it. Blackwall was chosen because it is the one preset that switches on
-  // both of the accumulators it knew about; the mosh pass is a third, and a third accumulator no
-  // named look enables is the object every observation here would skip. The terms are spelled
-  // out rather than read off a preset because no shipped document carries them yet.
-  await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(NETRUN_LOOK)})`);
+  // `rift`, read out of the document that ships it rather than typed in here. It was chosen
+  // because it switches on all three of the passes that carry state from one render to the
+  // next - the afterimage, the surface memory and the mosh - and an accumulator no named look
+  // enables is the object every observation here would skip.
+  await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(RIFT_LOOK)})`);
 
   await page.evaluate(async () => {
     const buffer = await (await fetch('/__pinned.bin')).arrayBuffer();

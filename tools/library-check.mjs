@@ -881,7 +881,7 @@ const pageMutation = mutation && mutation.file.startsWith('web/') ? mutation : n
 const PAGE_URLS = { 'library.html': '/gallery', 'menu.html': '/' };
 const urlForPageFile = (file) => PAGE_URLS[file] ?? `/${file}`;
 const serverMutation = mutation && mutation.file.startsWith('server/') ? mutation : null;
-// A mutation of one of the nine documents the picker offers, which is the third kind of file
+// A mutation of one of the twelve documents the picker offers, which is the third kind of file
 // this tree stages and the only one that is data rather than code.
 const documentMutation = mutation && mutation.file.startsWith('presets-builtin/') ? mutation : null;
 

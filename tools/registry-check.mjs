@@ -4127,7 +4127,7 @@ console.log('\n[registry] the two masters are exactly absent at zero, and so is 
     'while raised, those same three keys do move the picture', 'the keys reach nothing at all');
 
   pair('flatFine', 'flatCoarse',
-    'at a lattice of 0 the cell size reaches no pixel, so the eight shipped looks that never '
+    'at a lattice of 0 the cell size reaches no pixel, so the ten shipped looks that never '
     + 'snap are untouched by the energy compensation', 'the compensation is not exactly one');
   moves('snappedFine', 'snappedCoarse',
     'while with the lattice raised the same two cell sizes do move it',
