@@ -126,9 +126,11 @@ none of them names the thing it is referencing.
 
 **`updraft.json` and `rift.json` are `ember`'s grade with the datamosh raised over it, and
 `datamosh.splay` is the whole of what separates them.** `updraft` sits at 0, where every column
-drags the same way and the whole picture streams upward — measured rather than assumed, because
-the name went out backwards once: over `captures/fixture-long.knct` at 1.100s the light the pass
-adds sits 33.2 rows above the centroid of the frame it was added to. `rift` sits at 1, where the
+drags the same way and the whole picture streams upward — upward is the only direction the pass
+has rather than a setting, since it fills a fragment from below it, and the name went out
+backwards once before anybody checked. Measured over `captures/fixture-long.knct`: the light the
+pass adds aligns with the frame it was added to at a displacement of 32 rows of 360 toward the
+top, and every downward displacement correlates worse. `rift` sits at 1, where the
 picture is pulled away from `datamosh.line` and comes apart from the middle outward. They are
 built on `ember` rather than on a reading because the smear is nearly invisible over a light
 grade, and each carries the reach, decay and grain its own reading wanted: 14 pixels at 0.92 over

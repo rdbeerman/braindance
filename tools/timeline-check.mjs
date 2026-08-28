@@ -1332,7 +1332,7 @@ console.log('\n== 7. the mosh pass decodes from its own last refresh ==');
   // contended machine; at 35 it is comfortable and every other accumulator still has 25 frames
   // to converge in.
   const MOSH_SHORT_BY = 35;
-  const NETRUN_LOOK = {
+  const MOSH_ARM_LOOK = {
     ...MOSH_LOOK,
     fade: 0,
     wake: 0,
@@ -1340,7 +1340,7 @@ console.log('\n== 7. the mosh pass decodes from its own last refresh ==');
     'datamosh.decay': MOSH_DECAY,
     'datamosh.refresh': MOSH_REFRESH,
   };
-  const config = { look: NETRUN_LOOK, rate: 1, fps: 30, targetSec: TARGET_SEC, frames: null };
+  const config = { look: MOSH_ARM_LOOK, rate: 1, fps: 30, targetSec: TARGET_SEC, frames: null };
   const played = await arm({ ...config, kind: 'playback', label: 'moshPlayed' });
   const seeked = await arm({ ...config, kind: 'seek', label: 'moshSeeked' });
   const control = await arm({ ...config, kind: 'seek', frames: 0, label: 'moshControl' });
