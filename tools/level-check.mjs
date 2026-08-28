@@ -35,7 +35,7 @@ const MUTATIONS = {
   // control for section 1 rather than for any comparison, because every comparison below is
   // satisfied by a build that draws the same picture twice.
   'tilt-ignored': { file: 'web/main.js', edits: [[
-    '  level.quaternion.copy(worldTilt);',
+    '  tiltQuaternion(levelAngles.tilt, levelAngles.roll, level.quaternion);',
     '  level.quaternion.identity();',
   ]] },
   // The crop moves to the far side of the levelling, so the six faces stop being a place in the
@@ -50,7 +50,7 @@ const MUTATIONS = {
   // room's - what the top-down's old rectangle did for as long as levelling existed, with
   // no control at all.
   'plan-box-ignores-tilt': { file: 'web/main.js', edits: [[
-    '    ).applyQuaternion(worldTilt);',
+    '    ).applyQuaternion(level.quaternion);',
     '    );',
   ]] },
   // The switch reaches the shader and stops there, so the top-down goes on culling the cloud the
@@ -63,7 +63,7 @@ const MUTATIONS = {
   // The picture levels and the box in the corner does not, which is the state this feature was
   // built to end. Nothing outside section 3 can see it.
   'plan-ignores-tilt': { file: 'web/main.js', edits: [[
-    '      planVec.applyQuaternion(worldTilt);',
+    '      planVec.applyQuaternion(level.quaternion);',
     '      planVec.setX(planVec.x);',
   ]] },
   // The plan culls on x alone, which is what it did while a top-down had no y to care about;
@@ -80,8 +80,8 @@ const MUTATIONS = {
   // meaning "exactly what the sensor shot" shows a rolled picture. `sensor-view-check`'s fov rows
   // cannot see this.
   'sensor-view-ignores-tilt': { file: 'web/main.js', edits: [[
-    '  setNavigationUp(new THREE.Vector3(0, 1, 0).applyQuaternion(worldTilt));\n'
-    + '  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).applyQuaternion(worldTilt);',
+    '  setNavigationUp(new THREE.Vector3(0, 1, 0).applyQuaternion(level.quaternion));\n'
+    + '  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).applyQuaternion(level.quaternion);',
     '  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE);',
   ]] },
   // The button takes tilt back to neutral and leaves roll behind. Reading both parameters and both

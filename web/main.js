@@ -6,7 +6,7 @@ import {
 import { pollRecordState } from './record-poll.js';
 // The renderer, imported first: its body appends the canvas, so import order is boot order.
 import {
-  renderer, scene, freeCamera, programCamera, viewCamera, controls, worldTilt, WORLD_UP,
+  renderer, scene, freeCamera, programCamera, viewCamera, controls, WORLD_UP,
   DEFAULT_POSE, onNav, setNavigationUp, useViewCamera,
 } from './scene.js';
 import {
@@ -41,8 +41,8 @@ import {
   setMoshProgram,
 } from './post-chain.js';
 import {
-  geometry, uniforms, material, cloud, level, transform, setAdditive, setCloudProgram,
-  CLIP_NEAR_DEFAULT, CLIP_FAR_DEFAULT, CROP_LIMIT, cropReach, croppedOut,
+  geometry, uniforms, material, cloud, level, levelAngles, transform, setAdditive,
+  setCloudProgram, CLIP_NEAR_DEFAULT, CLIP_FAR_DEFAULT, CROP_LIMIT, cropReach, croppedOut,
 } from './point-cloud.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createCloudInstance, disposeCloudInstance, selectCloud } from './cloud-instance.js';
@@ -266,14 +266,13 @@ function forEachLook(write) {
   for (const clip of clips) withClip(clip, () => write(clip.look));
 }
 
-// Which way is up in the room, in degrees. Nothing measures the angle it was bolted at.
-const worldTiltAngles = { tilt: 0, roll: 0 };
-
+// Composes the selected clip's two levelling angles into the rotation its cloud draws through.
+//
+// Both angles off that clip's own pair, because each of the two sliders writes one member and
+// then recomposes both: read off a pair shared by the program, a clip's tilt would compose with
+// whichever clip last wrote a roll.
 function applyWorldTilt() {
-  tiltQuaternion(worldTiltAngles.tilt, worldTiltAngles.roll, worldTilt);
-  // The selected clip's levelling group, because levelling is a clip-scope value and reaches
-  // every clip the way every other one does - through the write below run once per clip.
-  level.quaternion.copy(worldTilt);
+  tiltQuaternion(levelAngles.tilt, levelAngles.roll, level.quaternion);
   // Levelling says this frame is the room's, so it takes the pole off the sensor view.
   setNavigationUp(WORLD_UP);
 }
@@ -740,10 +739,10 @@ const buildParams = () => ({
   // The mount's cant, in degrees. Document state, because the angle belongs to the take.
   tilt: { def: 0, min: -90, max: 90, step: 0.5, kind: 'scalar', tag: 'look', scope: 'clip',
     group: 'framing', label: 'tilt',
-    apply: (v) => { worldTiltAngles.tilt = v; applyWorldTilt(); } },
+    apply: (v) => { levelAngles.tilt = v; applyWorldTilt(); } },
   roll: { def: 0, min: -180, max: 180, step: 0.5, kind: 'scalar', tag: 'look', scope: 'clip',
     group: 'framing', label: 'roll',
-    apply: (v) => { worldTiltAngles.roll = v; applyWorldTilt(); } },
+    apply: (v) => { levelAngles.roll = v; applyWorldTilt(); } },
   near: { def: CLIP_NEAR_DEFAULT, min: 0.05, max: 9.5, step: 0.05, kind: 'scalar', tag: 'look', scope: 'clip',
     group: 'framing', label: 'near',
     apply: (v) => { uniforms.nearClip.value = v; } },
@@ -6304,7 +6303,9 @@ function beginRateGesture({ fromKey = false } = {}) {
     gen,
     // Disarmed for a gesture that begins inside the band at something other than 1.00x.
     detentArmed: retime.rate === 1 || !insideDetent(sliderFromRate(retime.rate)),
-    source: retime.sourceSecAt(timeline.programSec),
+    // Through the clip's own zero: the curve's domain is clip-local, so feeding it the
+    // project second would anchor on the wrong source frame of a clip that starts after 0.
+    source: sourceSecOfProgram(timeline.programSec),
     wasPlaying: timeline.playing,
     // The parameterisation the gesture started in. Every time is rescaled from these.
     rate: retime.rate,
@@ -6346,9 +6347,9 @@ function applyRate(rate) {
   return program;
 }
 
-/** Where the anchored frame sits now that the slope has changed. */
+/** Where the anchored frame sits now that the slope has changed, in project seconds. */
 function programHoldingAnchor() {
-  return Math.max(0, Math.min(retime.programSecAt(rateGesture.source), timeline.duration));
+  return Math.max(0, Math.min(programSecOfSource(rateGesture.source), timeline.duration));
 }
 
 ui.rate.addEventListener('pointerdown', () => beginRateGesture());
@@ -8621,7 +8622,7 @@ function drawPlanCloud(rect) {
       // All four lateral faces, so the plan does not draw points the renderer discards.
       if (croppedOut(planVec.x, planVec.y, z)) continue;
       // A canted room drawn about the sensor's axes is a slanted section labelled TOP-DOWN.
-      planVec.applyQuaternion(worldTilt);
+      planVec.applyQuaternion(level.quaternion);
       const px = rect.x + rect.w / 2 + (planVec.x - TOP_CENTRE.x) * s;
       const py = rect.y + rect.h / 2 + (planVec.z - TOP_CENTRE.z) * s;
       if (px < rect.x || px > rect.x + rect.w || py < rect.y || py > rect.y + rect.h) continue;
@@ -8687,7 +8688,7 @@ function cropBoxCorners() {
       (i & 1) ? hi[0] : lo[0],
       (i & 2) ? hi[1] : lo[1],
       (i & 4) ? hi[2] : lo[2],
-    ).applyQuaternion(worldTilt);
+    ).applyQuaternion(level.quaternion);
   }
   return cropCorners;
 }
@@ -8697,7 +8698,7 @@ function cropFaceNormal(face, out) {
   return out
     .set(face.axis === 0 ? 1 : 0, face.axis === 1 ? 1 : 0, face.axis === 2 ? 1 : 0)
     .multiplyScalar(face.side === 1 ? 1 : -1)
-    .applyQuaternion(worldTilt);
+    .applyQuaternion(level.quaternion);
 }
 
 /** How a room-space point lands in the view, in stage pixels. One signature for both views. */
@@ -9273,7 +9274,7 @@ addEventListener('pointerdown', (e) => {
     depth: depthCurr.image.data,
     focal: uniforms.focal.value,
     center: uniforms.center.value,
-    tilt: worldTilt,
+    tilt: level.quaternion,
     camera: freeCamera,
     stage: { x: 0, y: 0, ...stageSize() },
     x: view.x,
@@ -9380,8 +9381,8 @@ function sensorView() {
   freeCamera.updateProjectionMatrix();
   params.set('spin', false);
   // Posed in the sensor's frame, not the levelled one: the button means what the sensor shot.
-  setNavigationUp(new THREE.Vector3(0, 1, 0).applyQuaternion(worldTilt));
-  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).applyQuaternion(worldTilt);
+  setNavigationUp(new THREE.Vector3(0, 1, 0).applyQuaternion(level.quaternion));
+  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).applyQuaternion(level.quaternion);
   controls.update();
   requestRepaint();
   return {
@@ -10816,6 +10817,10 @@ globalThis.__kinect = {
           position: clip.transform.position.toArray(),
           quaternion: clip.transform.quaternion.toArray(),
         },
+        // The levelling rotation this clip actually draws through, for every clip rather than
+        // for the selected one. `__kinect.worldTilt` answers for the selection alone, so a leak
+        // from one clip's angles into another's group is invisible to it.
+        level: clip.cloud.points.level.quaternion.toArray(),
         renderOrder: clip.points.renderOrder,
         additive: !clip.points.material.depthWrite,
         warmFrames: clip.warmFrames(outputFps(), warmCeiling()),

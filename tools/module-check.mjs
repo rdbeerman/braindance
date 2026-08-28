@@ -771,11 +771,6 @@ const EXEMPTIONS = [
   },
   {
     module: 'web/scene.js',
-    binding: 'worldTilt',
-    why: 'A three.js Quaternion carrying the levelling rotation. Four surfaces read it and the plane fit writes it, and three.js maths objects are written in place by design - `setFromEuler` returns the same object.',
-  },
-  {
-    module: 'web/scene.js',
     binding: 'WORLD_UP',
     why: 'A three.js Vector3 naming the room vertical. Read-only in practice and a constant by intent, but a Vector3 cannot be frozen without breaking every three.js call that takes one as scratch.',
   },
@@ -857,11 +852,16 @@ const EXEMPTIONS = [
     why: 'The one combined grade pass. Eighteen look parameters write their term into `uniforms` and seven of them gate `enabled` on whether any term is up - which seven read off the packages\' `gates` bindings rather than listed - and that is the reason the pass is one rather than four.',
   },
   // A uniform is a cell the GPU reads and `.value =` is the only mechanism three.js offers, so a
-  // setter per term would be the registry spelled twice. The other three exports need no entry.
+  // setter per term would be the registry spelled twice. The other four exports need no entry.
   {
     module: 'web/point-cloud.js',
     binding: 'uniforms',
     why: "The cloud's uniform table. A uniform is a cell the GPU reads and writing `.value` on one is the whole of the interface three.js publishes for driving a shader, so the registry's look parameters land here directly; the alternative is a setter per parameter, which is the registry declared a second time in the module it drives.",
+  },
+  {
+    module: 'web/point-cloud.js',
+    binding: 'levelAngles',
+    why: "The selected clip's two levelling angles, in degrees. The `tilt` and `roll` parameters write one member each and then recompose both into the clip's levelling group, so the pair is a two-cell table this module owns and `web/main.js` drives, exactly as it drives the uniform table above; a setter per angle would be those two parameters declared a second time. It is here rather than derived from the group because a quaternion does not say which of the two angles produced it.",
   },
 ];
 

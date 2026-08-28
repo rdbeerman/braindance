@@ -18,16 +18,20 @@ import { scene } from './scene.js';
 export const CLIP_NEAR_DEFAULT = 0.05;
 export const CLIP_FAR_DEFAULT = 6;
 
-// The selected cloud as six live bindings, read from `web/main.js` for the rest of the
-// program's life and repointed by the select below. Only the table has an entry in
-// `tools/module-check.mjs`: a uniform cell is the interface three.js publishes, and the other
-// five are reached through their own methods rather than written into.
+// The selected cloud as seven live bindings, read from `web/main.js` for the rest of the
+// program's life and repointed by the select below. Two have an entry in
+// `tools/module-check.mjs` - the uniform table and the levelling pair, both of them written
+// into from outside - and the other five are reached through their own methods.
 export let geometry = null;
 export let uniforms = null;
 export let material = null;
 export let cloud = null;
 // The group the levelling rotation rides, which is the selected clip's rather than the program's.
 export let level = null;
+// The two angles that rotation is composed from, in degrees, and this clip's own pair. Held
+// rather than read back off the group: a quaternion does not say which of the two angles made
+// it, and each of the two sliders writes one of them and then recomposes both.
+export let levelAngles = null;
 // The group the clip's placement rides, above levelling. Where the clip sits in the room.
 export let transform = null;
 
@@ -242,16 +246,18 @@ export function createPointCloud(sourceCells, stateTexture, program) {
   level.add(cloud);
   transform.add(level);
   scene.add(transform);
-  return { geometry, uniforms, material, cloud, level, transform };
+  return { geometry, uniforms, material, cloud, level, levelAngles: { tilt: 0, roll: 0 }, transform };
 }
 
 /**
- * Points the six bindings above, and everything below that reads them, at one cloud.
+ * Points the seven bindings above, and everything below that reads them, at one cloud.
  *
- * The levelling rotation is in that list now: it rides a group of its own per clip, so the
- * readers that ask what "up" is are asking about the selected clip rather than about the program.
- * The placement above it is there for the same reason - the registry's `transform` writes it, and
- * a write reaches whichever clip the selection or a `withClip` walk has the core pointed at.
+ * The levelling rotation is in that list, and so are the two angles it is composed from: they
+ * ride a group and a pair of their own per clip, so the readers that ask what "up" is are asking
+ * about the selected clip rather than about the program. One shared pair is what let a clip's
+ * tilt compose with another clip's roll. The placement above it is there for the same reason -
+ * the registry's `transform` writes it, and a write reaches whichever clip the selection or a
+ * `withClip` walk has the core pointed at.
  */
 export function selectPointCloud(points) {
   geometry = points.geometry;
@@ -259,6 +265,7 @@ export function selectPointCloud(points) {
   material = points.material;
   cloud = points.cloud;
   level = points.level;
+  levelAngles = points.levelAngles;
   transform = points.transform;
 }
 

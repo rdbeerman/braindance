@@ -8,10 +8,11 @@
 // which is a heavy way to ask a question that is four multiplications wide. Here a node
 // test states the order in longhand and compares, with nothing running.
 //
-// It deliberately does not reach `scene.js` for `worldTilt`, which is where the rotation
-// actually lands. That module builds a `WebGLRenderer` in its body and appends a canvas,
-// so importing it would put a browser between this arithmetic and every test of it. The
-// destination arrives as an argument instead, and the caller is the one holding a scene.
+// It deliberately does not reach for the levelling group the rotation lands on, which is a
+// clip's and lives behind `web/point-cloud.js` and so behind `web/scene.js`. That module builds
+// a `WebGLRenderer` in its body and appends a canvas, so importing it would put a browser
+// between this arithmetic and every test of it. The destination arrives as an argument instead,
+// and the caller is the one holding a scene.
 
 import * as THREE from 'three';
 
@@ -41,8 +42,8 @@ const tiltEuler = new THREE.Euler(0, 0, 0, 'XYZ');
  * returned, so the caller decides what object carries it.
  *
  * The destination is a parameter rather than something this module imports, and that is
- * the load-bearing part of the signature rather than a style choice. The rotation lives
- * on `scene.js`'s `worldTilt`, and importing that binding to write it would drag a
+ * the load-bearing part of the signature rather than a style choice. The rotation lives on
+ * each clip's own levelling group, and importing that binding to write it would drag a
  * renderer into every caller - including a test, which is the reason this file exists.
  */
 function tiltQuaternion(tilt, roll, out) {

@@ -41,6 +41,20 @@ function revBeforeMarker(marker) {
   return `${introduced}^`;
 }
 const MUTATIONS = {
+  // The levelling pair goes back to being one pair the program shares rather than one per clip,
+  // by pinning the binding to whichever cloud was selected first. Every clip's `tilt` and `roll`
+  // then write the same two numbers, so a clip's tilt composes with another clip's roll - which
+  // is what shipped. Only the two-clip section can see it.
+  'levelling-shares-one-pair': {
+    file: 'web/point-cloud.js',
+    edits: [[
+      '  levelAngles = points.levelAngles;',
+      '  levelAngles = levelAngles ?? points.levelAngles;',
+    ]],
+    fails: 'the drawn-rotation row for the clip written last, and nothing else - the clip '
+      + 'written first is never rewritten so it cannot pick anything up, and both clips go on '
+      + 'serialising the right two angles, which is the whole shape of the bug',
+  },
   'rgb-contributes-no-alpha': {
     file: 'web/cloud-shader.js',
     edits: [[
@@ -2713,6 +2727,81 @@ console.log('\n[registry] the streak goes where the angle points');
       + `${up > 0 ? 'rising' : 'falling'} rows and screen-right at `
       + `${rightward > 0 ? 'rising' : 'falling'} columns`);
   }
+}
+
+console.log('\n[registry] a clip-scope write lands on the clip it was made on and on no other');
+{
+  // Levelling, because it is the one clip-scope value composed out of two parameters: `tilt` and
+  // `roll` each write one member of a pair and then compose both, so a pair the program shares
+  // rather than a pair per clip makes one clip's tilt compose with another clip's roll. Every
+  // other clip value writes one uniform cell and cannot be caught this way.
+  const TILT = 30;
+  const ROLL = 45;
+  const staged = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    const one = doc.clips[0];
+    // Two clips of the one take this page holds, which is an edit the document can spell. Both
+    // levelled at nothing in the document rather than wherever the sections above left them, so
+    // the two angles each clip ends up holding are the two written below and nothing else.
+    const flat = { ...one.params, tilt: 0, roll: 0 };
+    doc.clips = [
+      { ...one, id: 'c1', start: 0, params: flat },
+      { ...one, id: 'c2', start: 0, params: flat },
+    ];
+    k.library.restoreProject(doc);
+    await k.timeline.settled();
+    // The order that separates a pair per clip from a pair per program: one clip is given a
+    // roll, and then the other is given only a tilt. A shared pair still holds the roll.
+    k.timeline.select('c2');
+    k.params.set('roll', ${ROLL});
+    k.timeline.select('c1');
+    k.params.set('tilt', ${TILT});
+    // Off every clip's own group rather than through the selection: the worldTilt handle answers
+    // for the selected clip alone, so a leak into an unselected clip is invisible to it, and
+    // selecting each clip in turn to read it would pass a build that reloaded on selection.
+    const drawn = Object.fromEntries(k.timeline.clips()
+      .map((c) => [c.id, c.level.map((v) => Number(v.toFixed(9)))]));
+    const body = k.library.serialiseProjectBody();
+    const held = Object.fromEntries(body.clips
+      .map((c) => [c.id, { tilt: c.params.tilt, roll: c.params.roll }]));
+    return { drawn, held, ids: body.clips.map((c) => c.id) };
+  })()`);
+
+  const wantC1 = levellingQuaternion(TILT, 0);
+  const wantC2 = levellingQuaternion(0, ROLL);
+  console.log(`  c1 holds tilt ${staged.held.c1?.tilt} roll ${staged.held.c1?.roll} and draws `
+    + `${show(staged.drawn.c1)}; c2 holds tilt ${staged.held.c2?.tilt} roll ${staged.held.c2?.roll} `
+    + `and draws ${show(staged.drawn.c2)}`);
+
+  check(eq(staged.ids, ['c1', 'c2']),
+    'the edit holds two clips, which is the only fixture where the rows below can be false',
+    show(staged.ids));
+  check(!eq(wantC1, wantC2),
+    'and the two rotations they should be drawing are different, so the two rows below are not '
+    + 'one row asked twice',
+    `${show(wantC1)} against ${show(wantC2)}`);
+  check(eq(staged.held.c1, { tilt: TILT, roll: 0 }) && eq(staged.held.c2, { tilt: 0, roll: ROLL }),
+    'each clip serialises the two angles it was written with and not the other clip\'s',
+    `c1 ${show(staged.held.c1)}, c2 ${show(staged.held.c2)}`);
+  check(eq(staged.drawn.c1, wantC1),
+    'and the clip written last draws the rotation its own two angles compose to, so a write made '
+    + 'on it did not pick up the roll standing on another clip',
+    `${show(staged.drawn.c1)} against ${show(wantC1)}`);
+  check(eq(staged.drawn.c2, wantC2),
+    'and the clip written first still draws its own, so the later write on another clip did not '
+    + 'reach back into it',
+    `${show(staged.drawn.c2)} against ${show(wantC2)}`);
+
+  // Back to one clip, because every section after this one is written against a single-clip
+  // edit and a second clip left standing would draw into all of them.
+  await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips = [{ ...doc.clips[0], id: 'c1', start: 0 }];
+    k.library.restoreProject(doc);
+    await k.timeline.settled();
+  })()`);
 }
 
 console.log('\n[registry] the ripple opens the region by itself');

@@ -46,6 +46,22 @@ const halfStep = (spec) => spec.step / 2 + 1e-9;
 // A mutation whose text is not found exactly once is refused: a replacement matching nothing would
 // run the unmutated page and be recorded as a miss.
 const MUTATIONS = {
+  // The two below plant the speed gesture's anchor as it shipped, when an edit was one clip
+  // starting at zero and clip time and project time were the same number. Section 6h is the only
+  // thing in the suite that can see either, because every other arm here parks a clip at zero.
+  //
+  // The gesture anchors on the source second at the playhead, read out of a clip-local curve
+  // with a project second: on a clip starting at 10s it anchors ten seconds of source too late.
+  'rate-anchor-skips-clip-start': { file: 'web/main.js', edits: [[
+    '    source: sourceSecOfProgram(timeline.programSec),',
+    '    source: retime.sourceSecAt(timeline.programSec),',
+  ]] },
+  // And the landing runs back the same way, so the playhead is put at a clip second read as a
+  // project one and leaves the clip being edited.
+  'rate-landing-skips-clip-start': { file: 'web/main.js', edits: [[
+    '  return Math.max(0, Math.min(programSecOfSource(rateGesture.source), timeline.duration));',
+    '  return Math.max(0, Math.min(retime.programSecAt(rateGesture.source), timeline.duration));',
+  ]] },
   // Ease handles stop bending the timing, so every scalar segment is a straight lerp.
   'ease-ignored': { file: 'web/curve.js', edits: [[
     `function easeAt(a, b, x) {
@@ -2873,6 +2889,91 @@ console.log('\n== 6g. a keyed look travels with the clip that holds it ==');
     doc.clips[0].start = 0;
     delete doc.clips[0].tracks.exposure;
     delete doc.look.tracks.bloom;
+    k.library.restoreProject(doc);
+    k.keyframes.undo.commit();
+    await k.timeline.settled();
+  })()`);
+}
+
+
+console.log('\n== 6h. a speed change holds the playhead on the frame it was parked on ==');
+{
+  // Staged away from the head of the edit for the reason 6f gives, and it is the whole of what
+  // this section is: at a start of zero, a project second and the clip's own second are the same
+  // number, so the two conversions the gesture makes cannot be told apart and no arm above can
+  // see either of them being wrong.
+  const START = 10;
+  const PARKED = 12;
+  const TO = 2;
+
+  // Nothing is keyed and no export range is set here on purpose. A rate change rescales the
+  // in/out pair, and `frameAt` clamps every seek into it, so a range would move under the
+  // gesture and clamp the landing - which would redden the row below on a build whose anchor
+  // arithmetic is right. What this section is about is the anchor and nothing else.
+  const arm = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips[0].start = ${START};
+    doc.clips[0].length = null;
+    doc.clips[0].retime = { rate: 1, keys: [] };
+    k.library.restoreProject(doc);
+    await k.timeline.settled();
+    k.timeline.transport().pause();
+    k.editor.setClipRange(0, null);
+    await k.timeline.transport().seek(${PARKED});
+    await k.timeline.settled();
+    const shot = () => ({
+      programSec: k.timeline.transport().programSec,
+      rate: k.timeline.retime.rate,
+      range: k.editor.clipRange(),
+      start: k.timeline.clips()[0].start,
+      end: k.timeline.clips()[0].end,
+    });
+    const before = shot();
+    // The slider driven through its own events rather than through the setRetime handle,
+    // because the fault is in the gesture: setRetime writes the curve and anchors nothing.
+    const el = document.getElementById('tRate');
+    el.value = String(k.editor.rateSlider.toValue(${TO}));
+    el.dispatchEvent(new Event('input'));
+    el.dispatchEvent(new Event('change'));
+    await k.timeline.settled();
+    return { before, after: shot() };
+  })()`);
+
+  const { before, after } = arm;
+  // The parked project second is `PARKED`, which is `PARKED - START` of the clip's own time and
+  // so that many source seconds at 1x. At `TO` the clip reaches the same source second in half
+  // the time, so the frame that was under the playhead is now at `START + local / TO`.
+  const want = START + (PARKED - START) / TO;
+  console.log(`  a clip at ${START}s parked at ${PARKED}s, ${before.rate}x -> ${after.rate}x: `
+    + `playhead ${before.programSec.toFixed(3)}s -> ${after.programSec.toFixed(3)}s, `
+    + `clip ${before.start}..${before.end.toFixed(2)}s -> ${after.start}..${after.end.toFixed(2)}s`);
+
+  check(before.start === START && Math.abs(before.programSec - PARKED) < 1e-6,
+    'the clip under this section starts away from the head of the edit and the playhead is '
+    + 'parked inside it, which is what lets the rows below be false',
+    `start ${before.start}s, playhead ${before.programSec}s`);
+  check(Math.abs(after.rate - TO) < 1e-6 && after.rate !== before.rate,
+    'and the slider really moved the slope, or none of the rows below are about a speed change',
+    `${before.rate}x -> ${after.rate}x`);
+  check(after.range.out === null,
+    'and no export range is standing that could clamp the landing, so the row below reads the '
+    + 'anchor rather than a cut',
+    `${after.range.in}..${after.range.out}`);
+
+  check(Math.abs(after.programSec - want) < 1e-3,
+    'the playhead lands on the project second holding the source frame it was parked on, which '
+    + 'is the clip\'s own zero plus its rescaled local time',
+    `${after.programSec.toFixed(4)}s against ${want.toFixed(4)}s`);
+  check(after.programSec >= after.start - 1e-6,
+    '  and so it is still inside the clip being edited rather than before its head',
+    `${after.programSec.toFixed(4)}s against a start of ${after.start}s`);
+
+  await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips[0].start = 0;
+    doc.clips[0].retime = { rate: 1, keys: [] };
     k.library.restoreProject(doc);
     k.keyframes.undo.commit();
     await k.timeline.settled();

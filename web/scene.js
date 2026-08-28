@@ -54,11 +54,6 @@ let viewCamera = freeCamera;
 // pole the footage does not have.
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
-// The rotation the levelling parameters put on the cloud, kept as a value because
-// four separate things have to ask what it is: the sensor view, the top-down, the
-// plane fit that writes it, and the proof tool that reads it back.
-const worldTilt = new THREE.Quaternion();
-
 // Not a constant, and that is the one surprising thing about navigation here.
 // OrbitControls resolves its orbit axis from `object.up` **in the constructor** and
 // never looks again - `_quat` in `three/examples/jsm/controls/OrbitControls.js`,
@@ -179,7 +174,6 @@ export {
   programCamera,
   viewCamera,
   controls,
-  worldTilt,
   WORLD_UP,
   DEFAULT_POSE,
   onNav,

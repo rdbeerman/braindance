@@ -54,6 +54,13 @@ node tools/index-check.mjs --mutate frame-offsets-truncated-to-32-bits # ... the
                                                           #     2502006469. The two below it stay green and are the
                                                           #     positive twin, because `x % 2**31 === x` under the line
 node tools/registry-check.mjs --url http://localhost:8080 # step 3: one registry, sliders as views
+node tools/registry-check.mjs --mutate levelling-shares-one-pair   # ... the two levelling angles held as one pair the
+                                                          #     program shares rather than one pair per clip, so a
+                                                          #     clip's tilt composes with another clip's roll. Reddens
+                                                          #     exactly 1: the drawn-rotation row for the clip written
+                                                          #     last. Both clips go on serialising the right two angles
+                                                          #     and the clip written first is never rewritten, which is
+                                                          #     why the other two rows of that section stay green
 node tools/registry-check.mjs --mutate mix-ignores-normalisation  # ... and must FAIL mutated
 node tools/registry-check.mjs --mutate rgb-contributes-no-alpha   # ... and must FAIL mutated
 node tools/registry-check.mjs --mutate contour-edges-round-in-float # ... contour.width's two edges computed after float rounding
@@ -210,6 +217,16 @@ node tools/keyframe-check.mjs --mutate every-key-on-the-clip-clock # ... the sam
                                                           #     tracks are written at a hard zero rather than through
                                                           #     `trackEpoch`, so the panel's own write is the only arm in
                                                           #     the suite that can see it
+node tools/keyframe-check.mjs --mutate rate-anchor-skips-clip-start # ... the speed gesture anchoring on the source second
+                                                          #     read out of a clip-local curve with a project second.
+                                                          #     Reddens 1 in 6h: on a clip starting at 10s the anchor
+                                                          #     is ten seconds of source too late, so the playhead
+                                                          #     lands at 16s where it should land at 11s
+node tools/keyframe-check.mjs --mutate rate-landing-skips-clip-start # ... and the same conversion run back the other way,
+                                                          #     so the landing is a clip second read as a project one.
+                                                          #     Reddens 2 in 6h, and the second is the shape of the
+                                                          #     bug: the playhead ends up at 1s, before the head of
+                                                          #     the clip being edited
 node tools/keyframe-check.mjs --mutate pose-ignores-ease  # ... the camera's handles, which shape when it arrives and never
                                                           #     where it goes. Separable from `pose-linear` on purpose and the
                                                           #     counts are how you tell: 4 rows here against that one's 6, and

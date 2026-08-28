@@ -1031,7 +1031,7 @@ const MUTATIONS = {
   'rate-holds-program': {
     file: 'web/main.js',
     edits: [[
-      'return Math.max(0, Math.min(retime.programSecAt(rateGesture.source), timeline.duration));',
+      'return Math.max(0, Math.min(programSecOfSource(rateGesture.source), timeline.duration));',
       'return Math.max(0, Math.min(timeline.programSec, timeline.duration));',
     ]],
   },
