@@ -111,7 +111,7 @@ const MUTATIONS = {
 
   'doc-line-ends-in-whitespace': {
     file: 'docs/proof-tools.md',
-    edits: [['#     "and on no other clip"', '#     "and on no other clip" ']],
+    edits: [['Counted rather than recalled:', 'Counted rather than recalled: ']],
     fails: 'and a prose line ending in a space, which is invisible on the page and invisible to '
       + 'a clean `git diff --check`',
   },
