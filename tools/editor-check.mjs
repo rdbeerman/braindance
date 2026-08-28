@@ -7853,7 +7853,22 @@ try {
     await settle();
     const unarmed = [];
     const byTab = new Map();
-    const resetOrder = [...scalars].sort((a, b) => Number(Boolean(b.under)) - Number(Boolean(a.under)));
+    // How far down an `under` chain a row sits, so the order below runs bottom-up rather than one
+    // level deep. `datamosh.refresh` is under `cycleRefresh`, which is itself under `amount`:
+    // pressing the middle row's reset puts it back to its default and hides the bottom row, so a
+    // sort that only separates "has a parent" from "has none" drives the bottom row while it is
+    // off screen and files a working reset under "never offered".
+    const underOf = new Map(rest.params.map((p) => [p.name, p.under]));
+    const underDepth = (name) => {
+      let depth = 0;
+      for (let at = underOf.get(name); at; at = underOf.get(at)) {
+        depth += 1;
+        // A chain naming itself would spin here, and a check that hangs reads as a busy machine.
+        if (depth > underOf.size) throw new Error(`the under chain from ${name} does not terminate`);
+      }
+      return depth;
+    };
+    const resetOrder = [...scalars].sort((a, b) => underDepth(b.name) - underDepth(a.name));
     for (const p of resetOrder) {
       if (!p.tab) {
         unarmed.push(`${p.name} (no panel tab)`);
@@ -7870,7 +7885,8 @@ try {
     check(unarmed.length === 0 && scalars.length > 0,
       `every reset the panel renders was pressed here, each offered by its own drag first (${scalars.length})`,
       unarmed.length ? `${unarmed.length} never offered after the drag, so they were never pressed: ${unarmed.join(', ')}`
-        : `${scalars.length} of ${scalars.length} across ${[...byTab.keys()].join(', ')}`);
+        : `${scalars.length} of ${scalars.length} across ${[...byTab.keys()].join(', ')}, `
+          + `deepest under chain ${Math.max(...scalars.map((p) => underDepth(p.name)))}`);
 
     const afterPresses = carried(await resetState());
     // Three observables on a slider row and two on a checkbox row, because a checkrow has no

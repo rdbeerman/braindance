@@ -3985,6 +3985,20 @@ and both of its ways out are pressed — and then to run `plant-unswept-control`
 `tPlantedControl`, which is the row doing its job; a widening that swallowed the planted
 control would have read green at 488 assertions.
 
+## A loop ordered by whether a parent exists collapses every level below the first
+
+`editor-check` section 17e presses all 104 resets, and a tuning row declared `under` a master is
+hidden while that master reads zero, so the section drives tuning rows before their masters. It
+ordered them on `Boolean(p.under)`, which sorts a hierarchy into two buckets and leaves every
+level below the first sharing one: `datamosh.refresh` is under `cycleRefresh`, which is itself
+under `amount`, so pressing the middle row's reset put it back to `false` and hid the bottom row
+before its own drag reached it. **An ordering rule over a hierarchy is denominated in the depth of
+the data, not in a boolean about whether a parent exists** — the sort runs on the length of the
+`under` chain now, so a chain three deep is ordered by existing rather than by somebody
+remembering. The press waits on `!disabled && checkVisibility`, so the row nothing reached times
+out and is reported as never offered, and the two rows after it name a real parameter holding 1.25
+against a default of 1.2: three reds about the panel, for a fault that was the drive order.
+
 ## A hook renamed under a tool that deliberately boots two builds
 
 `registry-check` renders this tree against a `web/main.js` pulled out of history with `git
