@@ -643,20 +643,28 @@ async function main() {
       // not a number. Both are refused on sight for a name the registry knows.
       const VALUE = 'a value with no spec to hold it to';
       const KEYS = [{ t: 'not a time', value: VALUE }];
-      const staged = (name, id) => {
+      // The control carries the value alone. Its track half would be refused a step earlier, by
+      // the key restorer over a time that is not a number, and a control caught by the row before
+      // the one under test is a control that proved nothing about it.
+      const staged = (name, id, track) => {
         const doc = k.library.serialiseProjectBody();
         doc.clips[0].params[name] = VALUE;
-        doc.clips[0].tracks[name.replace(/\\..*/, '.wobble')] = KEYS;
+        if (track) doc.clips[0].tracks[track] = KEYS;
         if (id) doc.requires = [...(doc.requires ?? []), { id, version: '1.0.0' }];
         return doc;
       };
-      // Off the registry rather than named here: every dotted name it answers for belongs to an
-      // effect that is installed, which is what makes it the control.
-      const installed = k.params.names().find((n) => k.effectOf(n) !== null);
+      // A core clip value, off the registry rather than named here. It has to be one the document
+      // already carries: an effect parameter added to a block that names none of its siblings is
+      // refused by the completeness check two loops earlier, which would catch the control
+      // before the line under test ever ran.
+      const installed = k.params.names().find((n) => k.effectOf(n) === null
+        && k.params.spec(n).scope === 'clip' && k.params.spec(n).tag === 'look');
       let refusedInstalled = null;
-      try { k.library.restoreProject(staged(installed, null)); } catch (e) { refusedInstalled = e.message; }
+      try { k.library.restoreProject(staged(installed, null, null)); } catch (e) { refusedInstalled = e.message; }
       let refusedParked = null;
-      try { k.library.restoreProject(staged('nosuch.amount', 'nosuch')); } catch (e) { refusedParked = e.message; }
+      try {
+        k.library.restoreProject(staged('nosuch.amount', 'nosuch', 'nosuch.wobble'));
+      } catch (e) { refusedParked = e.message; }
       const pool = k.library.parkedLook();
       const back = k.library.serialiseProjectBody();
       return {
@@ -673,8 +681,8 @@ async function main() {
       };
     })()`);
 
-    check(parked.refusedInstalled !== null && new RegExp(parked.installed.replace('.', '\\\\.')).test(parked.refusedInstalled),
-      `the same value under ${parked.installed}, which this build does have an effect for, is refused by name`,
+    check(parked.refusedInstalled !== null && parked.refusedInstalled.startsWith(parked.installed),
+      `the same value under ${parked.installed}, which the registry does answer for, is refused by name`,
       parked.refusedInstalled === null ? 'it was ACCEPTED' : parked.refusedInstalled.slice(0, 120));
     check(parked.refusedParked === null,
       'and under an effect this build has not got the document is taken, because the spec that '

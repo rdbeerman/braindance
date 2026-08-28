@@ -672,6 +672,15 @@ node tools/boot-check.mjs --mutate document-door-takes-a-clip-with-no-take # ...
                                                           #     `paintOpenTake` on `clip.take.id`. The recorder's own row stays
                                                           #     green: its save writes `take: null` and the refusal is the
                                                           #     editor's rather than the format's
+node tools/boot-check.mjs --mutate the-door-normalises-a-parked-value # ... the door's normalise hoisted above the parked
+                                                          #     `continue`, so a value belonging to an effect this build has not
+                                                          #     got is held to a spec that does not exist here. Reddens **three**
+                                                          #     rows, measured, and the refusal it produces is
+                                                          #     `unknown parameter "nosuch.amount"` - `specOf` throws rather than
+                                                          #     answering nothing, so the document is refused outright and the
+                                                          #     two rows about what the pool came back holding redden with it.
+                                                          #     The control row above them stays green: a name the registry does
+                                                          #     answer for is refused either way
 node tools/boot-check.mjs --mutate a-refused-take-stays-cached # ... `openSource` as it shipped, caching the take and stamping it
                                                           #     with its hello before either refusal reads one. Reddens exactly
                                                           #     one row, measured: the format refusal still fires, and the take
@@ -2650,6 +2659,16 @@ carrying the hello that was rejected, so the next synchronous restore found it a
 adopted what the fetching door had refused. Each has a `--mutate` control above, and each
 control reddens only its own rows.
 
+**The parked half of that door is proved by the same section, in the other direction.** A
+parameter belonging to an effect this build has not got is stored raw and never normalised,
+because the spec that would hold it to anything is the manifest this build is missing — so the
+section feeds one value the registry would refuse on sight under two names, one the registry
+answers for and one it does not, and asks for the first to be refused and the second to survive
+into the parked pool and back out through the save byte for byte. The control has to be a *core*
+clip value rather than an effect parameter: an effect value added to a block naming none of its
+siblings is refused by the completeness check two loops earlier, which caught the control before
+the line under test ever ran and read as a passing row twice while this was written.
+
 **The refusal for a clip naming no take is the editor's rather than the format's**, which is
 the one place this section could have been made wrong in the other direction. The recorder
 draws the live stream, its own `serialiseProjectBody` writes `take: null`, and the panel
@@ -2658,7 +2677,7 @@ refuse the document the page had just written. The refusal is behind `EDITING`, 
 saying the recorder still takes its own document back is the over-refusal guard beside it.
 
 `--mutate reset-before-the-panel-generator` is the control and it is the shipped fault itself,
-restored by moving the boot write above the generator. **It reddens exactly one row of 34**
+restored by moving the boot write above the generator. **It reddens exactly one row of 38**
 and leaves the write-sweep row beside it green, which is the split that matters: the sweep
 writes a value through the registry after boot and asks the control to have followed, and by
 then `panelControls` is filled either way, so the two rows are different questions rather than
