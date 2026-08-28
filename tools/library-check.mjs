@@ -3135,7 +3135,7 @@ async function runChecks() {
       // refused is footage this machine has not got, and it is named.
       const otherHash = (await getJson(`${macUrl}/library/takes`)).takes.find((t) => t.id === 'truncated-take').hash;
       const cutOnto = async (name, take) => takePage.evaluate(`(async () => {
-        const body = globalThis.__kinect.library.serialiseProject();
+        const body = globalThis.__kinect.library.serialiseProjectBody();
         body.clips[0].take = ${JSON.stringify(take)};
         await fetch('/projects/${name}', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         try { await globalThis.__kinect.library.loadProject('${name}'); return 'ACCEPTED'; }
@@ -3160,7 +3160,7 @@ async function runChecks() {
       // And the whole path end to end, seek included, onto the take it was built on.
       const own = await takePage.evaluate(`(async () => {
         const k = globalThis.__kinect;
-        const body = k.library.serialiseProject();
+        const body = k.library.serialiseProjectBody();
         await fetch('/projects/own-footage', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         try { await k.library.loadProject('own-footage'); return 'ACCEPTED'; } catch (e) { return e.message; }
       })()`);
@@ -3212,7 +3212,7 @@ async function runChecks() {
     // Through an actual file: the page saves it, the server writes it, the page reads it back.
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
-      const body = k.library.serialiseProject();
+      const body = k.library.serialiseProjectBody();
       const res = await fetch('/projects/round-trip', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
@@ -3274,7 +3274,7 @@ async function runChecks() {
     };
     const parked = await page.evaluate(`(async (f) => {
       const k = globalThis.__kinect;
-      const clean = k.library.serialiseProject();
+      const clean = k.library.serialiseProjectBody();
       const doc = JSON.parse(JSON.stringify(clean));
       Object.assign(doc.clips[0].params, f.clipValues);
       Object.assign(doc.clips[0].tracks, f.clipTracks);
@@ -3287,7 +3287,7 @@ async function runChecks() {
         out.loaded = true;
         out.missing = k.library.missingEffects();
       } catch (e) { out.loaded = false; out.loadError = String(e.message ?? e); return out; }
-      const body = k.library.serialiseProject();
+      const body = k.library.serialiseProjectBody();
       out.put = (await fetch('/projects/parked-round-trip', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })).status;
@@ -3372,7 +3372,7 @@ async function runChecks() {
   // silently be a case about null.
     const refuse = async (label, source) => page.evaluate(`(() => {
       const k = globalThis.__kinect;
-      const p = k.library.serialiseProject();
+      const p = k.library.serialiseProjectBody();
       ${source}
       try { k.library.restoreProject(p); return 'ACCEPTED'; } catch (e) { return e.message; }
     })()`).then((message) => ({ label, message }));
@@ -3441,8 +3441,8 @@ async function runChecks() {
     // The control the two truncation rows need, and it is not the row above.
     const wholeEffect = await page.evaluate(`(() => {
       const k = globalThis.__kinect;
-      const clean = k.library.serialiseProject();
-      const p = k.library.serialiseProject();
+      const clean = k.library.serialiseProjectBody();
+      const p = k.library.serialiseProjectBody();
       const names = k.params.names('look').filter((n) => n.startsWith('glyph.'));
       // Read off the live registry rather than off \`spec\`, which answers with a projection
       // carrying \`default\` and not \`def\` - a probe pointed at a field that has never existed
@@ -3474,7 +3474,7 @@ async function runChecks() {
         notices: [...document.querySelectorAll('#tMissing .missingfx[data-skew]')]
           .map((e) => e.querySelector('b').textContent),
       });
-      const clean = k.library.serialiseProject();
+      const clean = k.library.serialiseProjectBody();
       k.params.set('glyph.amount', 0.5);
       const matched = k.library.serialiseProjectBody();
       const authored = (matched.requires ?? []).find((e) => e.id === 'glyph')?.version ?? null;
@@ -3508,7 +3508,7 @@ async function runChecks() {
     // The other half of the `suppressed` rule, and it is the half with no throw in it.
     const adopted = await page.evaluate(`(() => {
       const k = globalThis.__kinect;
-      const p = k.library.serialiseProject();
+      const p = k.library.serialiseProjectBody();
       p.suppressed = [{ id: 'sparkle', version: '1.0.0' }];
       try { k.library.restoreProject(p); } catch (e) { return { threw: String(e.message ?? e) }; }
       return {
@@ -3620,7 +3620,7 @@ async function runChecks() {
       `${applied.stamp?.rev?.slice(7, 19)} against ${diskRev.slice(7, 19)}`);
 
     // On the clip, because a preset is a look and a look is the clip's.
-    const inProject = await page.evaluate('globalThis.__kinect.library.serialiseProject().clips[0].appliedPreset');
+    const inProject = await page.evaluate('globalThis.__kinect.library.serialiseProjectBody().clips[0].appliedPreset');
     check(eq(inProject, applied.stamp), 'and it travels in the project, so drift across a set of clips is visible');
 
     // The copy is what keeps a project self-contained.

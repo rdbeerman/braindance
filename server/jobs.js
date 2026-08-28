@@ -99,7 +99,7 @@ export class JobStore {
     if (project.version === undefined) {
       throw new Error(
         'a job\'s project has no version, so it is the store envelope rather than the document body: '
-        + 'pass what serialiseProject() returns, not { name, rev, body }',
+        + 'pass what serialiseProjectBody() returns, not { name, rev, body }',
       );
     }
     if (!Array.isArray(captures) || captures.length === 0

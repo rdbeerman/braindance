@@ -2562,14 +2562,6 @@ function serialiseProjectBody({ suppressed = null } = {}) {
   };
 }
 
-function serialiseProject() {
-  return {
-    ...serialiseProjectBody(),
-    // Saved with the project so undo survives a reload. Never inside a snapshot or a job.
-    history: { stack: [...history.stack], baseline: history.baseline },
-  };
-}
-
 /** A key as it arrives from outside, checked into a key this editor can hold. */
 function restoreKey(owner, k, kind) {
   if (!Number.isFinite(k?.t)) {
@@ -2928,15 +2920,6 @@ function checkProject(project) {
     }
   }
 
-  if (project.history !== undefined) {
-    if (!project.history || typeof project.history !== 'object' || !Array.isArray(project.history.stack)) {
-      throw new Error('a project history is an object with a stack array');
-    }
-    if (project.history.baseline !== null && typeof project.history.baseline !== 'string') {
-      throw new Error('a project history baseline is a string or null');
-    }
-  }
-
   return {
     project,
     clips: plannedClips,
@@ -2975,6 +2958,8 @@ function fitClipCount(want) {
 
 function applyProject(plan, sources = null) {
   const project = plan.project;
+  // Read before the refit, because the refit is what can take the selected clip away.
+  const wasSelected = clipRow?.id ?? null;
   // Before the look is written, because a look reaches every clip and a clip made after it would
   // come up on the registry's defaults instead.
   fitClipCount(plan.clips.length);
@@ -3037,21 +3022,23 @@ function applyProject(plan, sources = null) {
   }
   releaseUnusedFrames();
   orderClips();
-  // An undo rebuilds every clip in place, so a selection usually survives one. A document that
-  // dropped the clip it was on leaves the strip holding a clip this edit no longer has, which
-  // `deleteSelectedClip` would then splice by an index of -1 - so it is dropped rather than
-  // moved. Dropped and not re-chosen: choosing is what the two doors above do.
-  if (!clips.includes(clipRow)) clipRow = null;
+  // An undo rebuilds every clip in place, so a selection usually survives one, and it is re-found
+  // by the id it named rather than by the object holding it: `fitClipCount` grows and shrinks at
+  // the tail only, so restoring a document that had a middle clip appends an object and re-labels
+  // every one past the deletion point. An identity test survives that rewrite and the selection
+  // silently becomes the clip that inherited the slot. A document that dropped the clip the strip
+  // was on leaves it holding a clip this edit no longer has, which `deleteSelectedClip` would
+  // then splice by an index of -1 - so that one is dropped rather than moved. Dropped and not
+  // re-chosen: choosing is what the two doors above do.
+  clipRow = wasSelected === null ? null : (clips.find((clip) => clip.id === wasSelected) ?? null);
+  // The render core moves with the strip or the panel greys one clip and reads another's values:
+  // a clip-scope write goes to `selectedClip`, and `selectClipRow` is the only other writer that
+  // keeps the two pointing at the same clip.
+  if (clipRow) selectClip(clipRow);
   paintClipPanel();
   paintGizmo();
 
   timingChanged();
-
-  if (project.history) {
-    history.stack = [...project.history.stack];
-    // A null baseline is accepted above: it is what the recorder holds before `begin` runs.
-    history.baseline = project.history.baseline ?? history.snapshot();
-  }
 }
 
 /**
@@ -3133,7 +3120,7 @@ const history = {
       paintMissingEffects();
     }
     // Auto-save after every change. Fire-and-forget, so a failed save blocks nothing.
-    const workingBody = serialiseProject();
+    const workingBody = serialiseProjectBody();
     writeWorking(workingBody).then(async (res) => {
       if (!res.ok) {
         const text = await res.text().catch(() => '');
@@ -7823,9 +7810,7 @@ function offerWorkingDocument(projects) {
   const open = footageOf(serialiseProjectBody());
   if (!open.every(Boolean)) return;
   if (String(footageOf(working.body)) !== String(open)) return;
-  const body = { ...working.body };
-  delete body.history;
-  if (JSON.stringify(body) === history.baseline) return;
+  if (JSON.stringify(working.body) === history.baseline) return;
   if (!ui.resume) return;
   offeredWorkingBody = JSON.parse(JSON.stringify(working.body));
   if (ui.resumeWhen) ui.resumeWhen.textContent = `autosaved ${new Date(working.savedAt).toLocaleString()}`;
@@ -9683,7 +9668,7 @@ async function saveProjectAs() {
   if (!name) return;
   try {
     // The take is named by content hash, which makes a project a self-contained render job.
-    const body = serialiseProject();
+    const body = serialiseProjectBody();
     const res = await fetch(`/projects/${encodeURIComponent(name)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -10155,13 +10140,10 @@ async function loadProjectNamed(name, offered = null) {
   // with it: the ruler's ticks belong to the take rather than to the project drawn over it.
   else if (sources.size) await paintOpenTake();
   const listed = first ? await listLibrary() : null;
-  // Restored from the file where it was saved, and otherwise restarted from the document.
-  if (doc.body.history) {
-    history.stack = [...doc.body.history.stack];
-    history.baseline = doc.body.history.baseline;
-  } else {
-    history.begin();
-  }
+  // Started from the document, always. The stack holds whole documents and the synchronous door
+  // will only take one whose footage is already open, which a live session guarantees and a load
+  // cannot: it opens what the body names while a stack reaches below it.
+  history.begin();
   // A loaded project gets a default deliverable unless one is selected, so export has a target.
   ensureActiveDeliverable();
   applyDeliverable(activeDeliverable);
@@ -10679,7 +10661,7 @@ globalThis.__kinect = {
     names() { return [...tracks.keys()]; },
     toggle: toggleKey,
     lanes: () => laneRows().map((r) => ({ owner: r.owner, kind: r.kind, keys: keysOf(r.owner).length })),
-    project: serialiseProject,
+    project: serialiseProjectBody,
     undo: {
       depth: () => history.depth,
       commit: () => history.commit(),
@@ -10906,7 +10888,6 @@ globalThis.__kinect = {
     PROJECT_VERSION,
     CLIP_CEILING,
     restoreProject,
-    serialiseProject,
     serialiseProjectBody,
     loadProject: loadProjectNamed,
     applyStoredPreset,

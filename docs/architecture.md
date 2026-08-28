@@ -481,6 +481,26 @@ slot the page no longer has. Footage that is *open* is not a fetch, so that slot
 from the take rather than refused - and a take a clip stops using loses its decoded frames and
 keeps its index, which is what makes it still open to be re-pointed from.
 
+**The stack does not outlive the page, and that is what makes the paragraph above true rather
+than usually true.** The argument rests on a precondition: every take any entry in the stack
+names is currently open. A session holds that by construction, because every entry was a
+snapshot of a document the page was holding at the time, and `openTakes` only ever grows. A
+saved stack discards it - a load opens the footage the *body* names while the stack reaches
+below the body, so an entry can name a take the reloaded page never fetched. That shipped:
+add a clip on a second take, delete it, save, reload, and undo walks down into a snapshot the
+synchronous door then refuses, permanently, because the poison is in the file and every fresh
+load re-arms it. So undo is session state and the document is the file's: nothing writes a
+stack out and nothing reads one in, a load always starts a fresh one, and the door's refusal
+becomes an invariant nothing should ever be able to trip rather than a case a document can
+reach. A file written before this still parses - `checkProject` reads the fields it names and
+ignores the rest - and its stack is simply not read.
+
+**The selection is re-found by the id it named, not by the object holding it.** `fitClipCount`
+only grows and shrinks at the tail, so restoring a document that had a middle clip appends an
+object and re-labels every clip past the deletion point; an identity test survives that rewrite,
+and the selection silently becomes whichever clip inherited the slot while the highlight never
+moves.
+
 **The parked pool is per clip too**, because a value belongs to the block it arrived in and two
 clips are allowed to park different values for one missing effect. `requires` stays project-level:
 it names which effects a document was authored against, which is a fact about the document.

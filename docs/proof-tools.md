@@ -641,7 +641,9 @@ node tools/editor-check.mjs --mutate commit-ignores-null-baseline --no-render # 
                                                                        #     two rows in section 13 - the press being recorded,
                                                                        #     and what it destroyed - so read the rows
 node tools/boot-check.mjs                                 # the post-boot state diff: every control shows the value the registry holds for the
-                                                          #     selected clip; and the document door, which adopts a whole document or none
+                                                          #     selected clip; the document door, which adopts a whole document or none;
+                                                          #     undo, which is the session's and is written into no file; and the selection,
+                                                          #     which survives the undo of a delete without becoming another clip
 node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the shipped fault put back - the boot write landing
                                                           #     before the panel generator has filled its Maps, which reaches
                                                           #     no control, throws nothing, and leaves a page whose sliders
@@ -687,6 +689,30 @@ node tools/boot-check.mjs --mutate a-refused-take-stays-cached # ... `openSource
                                                           #     it refused is still there for the synchronous restore to adopt.
                                                           #     The two rows above it stay green and have to - they are the
                                                           #     control saying the refusal happened at all
+node tools/boot-check.mjs --mutate the-save-writes-the-undo-stack # ... the undo stack written back into the project file, which
+                                                          #     is the half of the shipped fault that puts the poison there.
+                                                          #     Reddens exactly one row, measured: the one that reads the
+                                                          #     stored bytes back off the server. The two poisoned sections
+                                                          #     stay green - they load documents this tool staged by hand,
+                                                          #     and what the page saves does not change those files
+node tools/boot-check.mjs --mutate the-load-arms-the-saved-stack-in-the-loader # ... `loadProjectNamed` reading the saved stack
+                                                          #     back. Reddens **four** rows, measured: the depth row and the
+                                                          #     press row of each poisoned document
+node tools/boot-check.mjs --mutate the-load-arms-the-saved-stack-in-apply # ... the same read from `applyProject`'s tail, which is
+                                                          #     where the second copy of it lived. Reddens exactly **one**
+                                                          #     row, measured, and only the one driving the synchronous door -
+                                                          #     through the loader this reader is invisible, because the
+                                                          #     loader starts a stack of its own after `applyProject` returns
+                                                          #     and overwrites whatever this armed. Aimed at the loader alone
+                                                          #     it was NOT CAUGHT, which is what the `restoreProject` probe
+                                                          #     beside those two navigations exists to close
+node tools/boot-check.mjs --mutate the-selection-guard-tests-the-object # ... the selection guard back to testing that the clip
+                                                          #     object is still in the array. Reddens **two** rows, measured:
+                                                          #     which clip the selection answers to after the undo, and which
+                                                          #     clip's block a write then lands in. The three fixture rows
+                                                          #     above stay green, and that is the shape of the bug - the undo
+                                                          #     works, the highlight does not move, and only the label under
+                                                          #     it changes
 node tools/effect-check.mjs                               # installing an effect: revisions, the door, the hotload, park and restore
 node tools/effect-check.mjs --mutate temporaries-are-visible # ... the id filter the store lists directories through, widened, so
                                                           #     a crashed install's `<id>.<seq>.tmp` becomes a package `/effects`
@@ -2612,9 +2638,11 @@ in the table while the code stays put reddens it.
 **`boot-check`** is the post-boot state diff the other three documents deferred to, and it
 needs a GPU browser and a free port and nothing else — no capture, no sensor, no server
 already running. It spawns its own on 8391 against a temporary captures directory and exits 2
-naming the port when something already holds it. The one capture in that directory is
-synthesised by the run itself, out of `make-sample` at twelve frames, which costs under a
-second: the take door cannot be asked to refuse footage without footage to refuse. Its
+naming the port when something already holds it. The two captures in that directory are
+synthesised by the run itself, out of `make-sample` at twelve and sixteen frames, which costs
+under two seconds: the take door cannot be asked to refuse footage without footage to refuse,
+and the undo sections need a second take that no page opens, cut to a different length so it
+hashes differently. Its
 projects directory is temporary for the same reason as its captures one and a sharper one —
 the checkout's `projects/` holds the editor's autosave and every other tool's staged
 documents, so a run writing its fixture there hands the next tool a document it did not
@@ -2669,6 +2697,27 @@ clip value rather than an effect parameter: an effect value added to a block nam
 siblings is refused by the completeness check two loops earlier, which caught the control before
 the line under test ever ran and read as a passing row twice while this was written.
 
+**The third claim is that undo is the session's and the document is the file's**, and it needs
+a second capture — one no page here ever opens — because the only thing that separates a stack
+which outlives the page from one that does not is a saved entry naming footage a reload never
+fetches. The section stages two poisoned documents, with the unreachable entry on top of the
+stack and one below it, and asks the same question of both: the page comes up with no stack,
+and pressing undo raises nothing. It asks it a third time of `restoreProject`, and that probe is
+not a third spelling of the other two. The saved stack used to be read back in *two* places,
+`applyProject`'s tail and `loadProjectNamed` a line later, and the loader starts a stack of its
+own after `applyProject` returns — so a mutation reinstating the `applyProject` reader alone was
+**NOT CAUGHT** by either navigation, and only the synchronous door can see it. Reading the code
+would have said the two sites were equals; the measurement said one of them had been dead for as
+long as the other was there.
+
+**Every row in that section is an absence, so the falsification control comes first and is a
+presence:** undo is made to move a value and put it back, read off the value rather than off the
+stack's depth. Without it, a build where undo simply did not work would satisfy every row below.
+The same discipline puts a floor under the stored-bytes row — the save is provoked by a real
+commit, and the bytes are read back off the server rather than out of the page, because
+`JSON.stringify` drops an `undefined` value and a build writing `history: undefined` would read
+identically to one that writes nothing.
+
 **The refusal for a clip naming no take is the editor's rather than the format's**, which is
 the one place this section could have been made wrong in the other direction. The recorder
 draws the live stream, its own `serialiseProjectBody` writes `take: null`, and the panel
@@ -2677,7 +2726,7 @@ refuse the document the page had just written. The refusal is behind `EDITING`, 
 saying the recorder still takes its own document back is the over-refusal guard beside it.
 
 `--mutate reset-before-the-panel-generator` is the control and it is the shipped fault itself,
-restored by moving the boot write above the generator. **It reddens exactly one row of 38**
+restored by moving the boot write above the generator. **It reddens exactly one row of 57**
 and leaves the write-sweep row beside it green, which is the split that matters: the sweep
 writes a value through the registry after boot and asks the control to have followed, and by
 then `panelControls` is filled either way, so the two rows are different questions rather than

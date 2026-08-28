@@ -678,8 +678,10 @@ const MUTATIONS = {
       ['  await fitCropToTake(id, params.get(\'near\'), params.get(\'far\'))\n'
         + '    .catch((err) => { say(`the crop box could not be fitted to this take: ${err.message}`); });\n',
       ''],
-      ['\n  history.begin();\n',
-      '\n  history.begin();\n'
+      // Anchored through the comment above it rather than on the call alone: a load starts its
+      // own stack now, so `history.begin()` appears twice and the bare line names both.
+      ['  // somewhere to land.\n  history.begin();\n',
+      '  // somewhere to land.\n  history.begin();\n'
         + '  await fitCropToTake(id, params.get(\'near\'), params.get(\'far\'))\n'
         + '    .catch((err) => { say(`the crop box could not be fitted to this take: ${err.message}`); });\n'
         + '  history.commit();\n'],
@@ -9329,7 +9331,7 @@ try {
       const res = await fetch('/projects/${PROBE}', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(k.library.serialiseProject()),
+        body: JSON.stringify(k.library.serialiseProjectBody()),
       });
       if (!res.ok) throw new Error('the probe project could not be saved: ' + res.status);
       await k.library.loadProject('${PROBE}');

@@ -8,12 +8,17 @@
 // against declared defaults compares defaults to defaults and reports nothing. Homed on the
 // recorder, which boots the full panel with no grabber and no sensor.
 //
-// The second claim, off the same server: a document is adopted whole or not at all. Both doors a
-// document comes through - the synchronous `restoreProject` and the fetching `loadProjectNamed` -
-// are asked to refuse a bad one with the editor still holding what it had, and the take door is
-// asked to refuse footage without leaving it cached as opened. That needs `/edit` and one
-// capture, so this tool synthesises its own into the temporary directory it boots the server on.
-// Needs a GPU browser and a free port.
+// Three more claims, off the same server. That a document is adopted whole or not at all: both
+// doors one comes through - the synchronous `restoreProject` and the fetching `loadProjectNamed`
+// - are asked to refuse a bad one with the editor still holding what it had, and the take door is
+// asked to refuse footage without leaving it cached as opened. That undo is the session's and the
+// document is the file's: nothing writes a stack out, nothing reads one in, and a file carrying
+// one arms nothing. And that undoing the delete of a middle clip leaves the selection on the clip
+// it was on rather than on whichever inherited its slot.
+//
+// Those need `/edit` and two captures - the second one so a saved stack can name footage a reload
+// never fetches - so this tool synthesises both into the temporary directory it boots the server
+// on. Needs a GPU browser and a free port.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createConnection } from 'node:net';
@@ -41,6 +46,17 @@ const RECORDER_PATH = '/record';
 /** The take this run synthesises for itself, and the project it writes naming it. */
 const PROBE_TAKE = 'bootprobe';
 const NULL_TAKE_PROJECT = 'bootprobenulltake';
+
+/**
+ * A second take, which no page here ever opens. It exists so a saved undo stack can name footage
+ * a reload does not fetch, which is the one thing that separates a stack that outlives the page
+ * from one that does not. Cut to a different length so it hashes differently.
+ */
+const OTHER_TAKE = 'bootother';
+
+/** The two poisoned documents: the unreachable snapshot on top of the stack, and one below it. */
+const POISON_TOP = 'bootpoisontop';
+const POISON_UNDER = 'bootpoisonunder';
 
 // `reset-before-the-panel-generator` is the shipped fault itself, put back by lifting
 // `buildPanel()` from above the value walk to below it. It has to boot: a mutation that throws
@@ -112,6 +128,62 @@ const MUTATIONS = {
     edits: [[
       '      if (EDITING) {\n        throw new Error(\n',
       '      if (false) {\n        throw new Error(\n',
+    ]],
+  },
+  // Undo history written back into the file, which is the half of the shipped fault that puts the
+  // poison there. Must redden exactly one row, measured - the one that reads the stored bytes.
+  // The two sections below it stay green: they load documents this tool staged by hand, and what
+  // the page saves does not change what those files already carry.
+  //
+  // Anchored on the autosave rather than on a serialiser of its own: the block used to be added
+  // by a `serialiseProject` that wrapped `serialiseProjectBody` and did nothing else, and that
+  // wrapper is gone. This is the write the row reads back off the server, so the fault is planted
+  // where the claim is measured.
+  'the-save-writes-the-undo-stack': {
+    file: 'web/main.js',
+    edits: [[
+      '    const workingBody = serialiseProjectBody();\n',
+      '    const workingBody = { ...serialiseProjectBody(),\n'
+        + '      history: { stack: [...history.stack], baseline: history.baseline } };\n',
+    ]],
+  },
+  // The other half, and there were two restore sites rather than one: `applyProject`'s tail read
+  // `project.history` and `loadProjectNamed` read `doc.body.history` again straight afterwards.
+  // A mutation each, because measuring is the only way to learn they were not equals - and the
+  // measurement says they are not. This one reddens exactly one row, and only the row driving the
+  // synchronous door: through the loader it is invisible, because the loader starts a stack of
+  // its own after `applyProject` returns and overwrites whatever this armed. That is why the
+  // section carries a `restoreProject` probe beside its two navigations.
+  'the-load-arms-the-saved-stack-in-apply': {
+    file: 'web/main.js',
+    edits: [[
+      '\n  timingChanged();\n}\n',
+      '\n  timingChanged();\n\n  if (project.history) {\n'
+        + '    history.stack = [...project.history.stack];\n'
+        + '    history.baseline = project.history.baseline ?? history.snapshot();\n  }\n}\n',
+    ]],
+  },
+  // The site that was actually load-bearing. Must redden four rows, measured: the depth row and
+  // the press row of each poisoned document. The synchronous-door row beside them stays green,
+  // because this reader is in the loader and that probe never goes through it.
+  'the-load-arms-the-saved-stack-in-the-loader': {
+    file: 'web/main.js',
+    edits: [[
+      '  history.begin();\n  // A loaded project gets a default deliverable',
+      '  if (doc.body.history) {\n    history.stack = [...doc.body.history.stack];\n'
+        + '    history.baseline = doc.body.history.baseline;\n  } else {\n    history.begin();\n  }\n'
+        + '  // A loaded project gets a default deliverable',
+    ]],
+  },
+  // The selection guard as it shipped, testing that the object is still in the array. Must redden
+  // the two rows about where the selection landed and leave the three fixture rows above them
+  // green - the undo itself still works, and that is the point: nothing about the edit looks
+  // wrong, only the row label under an unmoved highlight.
+  'the-selection-guard-tests-the-object': {
+    file: 'web/main.js',
+    edits: [[
+      '  clipRow = wasSelected === null ? null : (clips.find((clip) => clip.id === wasSelected) ?? null);\n',
+      '  if (!clips.includes(clipRow)) clipRow = null;\n',
     ]],
   },
   // The take door as it shipped: the take was cached and stamped with its hello before either
@@ -244,11 +316,13 @@ async function main() {
   // capture in it is synthesised here, because the take door cannot be asked to refuse footage
   // without footage to refuse.
   work = mkdtempSync(join(tmpdir(), 'boot-check-'));
-  const made = spawnSync(process.execPath, [
-    join(ROOT, 'tools/make-sample.mjs'), join(work, `${PROBE_TAKE}.knct`), '--frames', '12',
-  ], { cwd: ROOT, encoding: 'utf8' });
-  if (made.status !== 0) {
-    throw new Error(`make-sample could not stage ${PROBE_TAKE}: ${(made.stderr || made.stdout || '').trim()}`);
+  for (const [id, frames] of [[PROBE_TAKE, '12'], [OTHER_TAKE, '16']]) {
+    const made = spawnSync(process.execPath, [
+      join(ROOT, 'tools/make-sample.mjs'), join(work, `${id}.knct`), '--frames', frames,
+    ], { cwd: ROOT, encoding: 'utf8' });
+    if (made.status !== 0) {
+      throw new Error(`make-sample could not stage ${id}: ${(made.stderr || made.stdout || '').trim()}`);
+    }
   }
   // The projects directory too, and for a sharper reason than tidiness: the checkout's
   // `projects/` is where the editor's own autosave lives and where every other tool on this
@@ -311,8 +385,12 @@ async function main() {
   const openPage = async (where, hello = null) => {
     const it = await context.newPage();
     const errors = [];
+    const asked = [];
     it.on('pageerror', (err) => errors.push(String(err)));
     it.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+    // Every path this page asked the server for. Read by the undo sections, where a take the
+    // document does not name must never be fetched.
+    it.on('request', (req) => asked.push(new URL(req.url()).pathname));
     if (mutation) {
       const path = `/${mutation.file.slice('web/'.length)}`;
       await it.route((url) => url.pathname === path, (route) => {
@@ -334,7 +412,7 @@ async function main() {
     }
     await it.goto(`http://127.0.0.1:${PORT}${where}`, { waitUntil: 'domcontentloaded' });
     await it.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
-    return { page: it, errors };
+    return { page: it, errors, asked };
   };
 
   const { page, errors } = await openPage(RECORDER_PATH);
@@ -848,6 +926,238 @@ async function main() {
         : door.adopted.slice(0, 140));
     await refused.page.close();
   }
+  console.log('\n[boot] undo works inside the session and is written into no file');
+  {
+    // The falsification control first, and it has to come first: every row below this section is
+    // an absence, and a build where undo simply did not work would satisfy all of them. So undo
+    // is made to do its job here, read off the value it put back rather than off the stack's
+    // depth - a depth is blind once a session has ever reached the ceiling, and it says nothing
+    // about whether the press moved the picture.
+    const session = await opened.page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const was = k.params.get('pointSize');
+      k.params.set('pointSize', 41.5);
+      k.keyframes.undo.commit();
+      const moved = k.params.get('pointSize');
+      const popped = k.keyframes.undo.pop();
+      const back = k.params.get('pointSize');
+      // The autosave is what the shipped save path writes, so it is asked rather than a
+      // serialiser this file picked: the working document is written by 'commit' above, and read
+      // back off the server so the bytes under test are the stored ones. 'JSON.stringify' drops
+      // an undefined value, so a build writing 'history: undefined' would look identical to one
+      // that writes nothing at all if this were read out of the page.
+      let stored = null;
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const res = await fetch('/projects/__working__');
+        if (res.ok) {
+          const doc = await res.json();
+          if (doc.body) { stored = doc.body; break; }
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return {
+        was, moved, popped, back,
+        depth: k.keyframes.undo.depth(),
+        stored: stored === null ? null : Object.keys(stored),
+        hasHistory: stored === null ? null : Object.hasOwn(stored, 'history'),
+      };
+    })()`);
+
+    check(session.moved === 41.5 && session.was !== 41.5,
+      'a write moves the value, so the undo below has something to take back',
+      `${session.was} to ${session.moved}`);
+    check(session.popped === true && session.back === session.was,
+      'and undo puts it back inside the session, read off the value rather than off the depth',
+      `pop returned ${session.popped}, the value reads ${session.back} against ${session.was}`);
+    check(session.stored !== null && session.stored.length > 5,
+      'the autosave the commit fired reached the server, so the row below is about a document '
+      + 'that exists',
+      session.stored === null ? 'the working document never appeared' : `${session.stored.length} keys stored`);
+    check(session.hasHistory === false,
+      'and the stored bytes carry no undo history: the stack is the session\'s and the file is '
+      + 'the document\'s',
+      `stored keys ${JSON.stringify(session.stored)}`);
+  }
+
+  console.log('\n[boot] a file that carries an undo stack does not arm one');
+  {
+    // The stack that is saved holds whole documents, and a document it holds can name footage the
+    // reload never opens - the body names what the edit ended on and the stack reaches below it.
+    // The synchronous door then refuses, correctly, and the edit below that point is unreachable
+    // for the life of the file. Both positions are staged because they fail differently: on top,
+    // the first press is the one that dies; one below, the first press works and the second dies,
+    // which is the shape somebody reports as "undo stopped halfway".
+    const staged = await opened.page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const { takes } = await (await fetch('/library/takes')).json();
+      const other = takes.find((t) => t.id === '${OTHER_TAKE}');
+      // One clip, named rather than inherited: this page is shared with the sections above, and
+      // a document built out of whatever they left standing makes this section's fixture theirs.
+      const held = k.library.serialiseProjectBody();
+      const body = { ...held, clips: [held.clips[0]] };
+      const one = JSON.stringify(body);
+      // A snapshot naming footage this page holds open and the reload will not: the body names
+      // one take, so the loader opens one take, and this entry names two.
+      const second = JSON.parse(JSON.stringify(body.clips[0]));
+      second.id = 'poisoned';
+      second.take = { id: '${OTHER_TAKE}', hash: other.hash };
+      second.start = 0;
+      const two = JSON.stringify({ ...body, clips: [body.clips[0], second] });
+      const put = async (name, stack) => {
+        const res = await fetch('/projects/' + name, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, history: { stack, baseline: one } }),
+        });
+        return res.ok;
+      };
+      return {
+        hash: other.hash,
+        top: await put('${POISON_TOP}', [two]),
+        under: await put('${POISON_UNDER}', [one, two, one]),
+      };
+    })()`);
+    check(staged.top && staged.under && typeof staged.hash === 'string',
+      `both poisoned documents were stored, each carrying a snapshot cut on ${OTHER_TAKE}`,
+      `${OTHER_TAKE} hashes ${staged.hash.slice(0, 22)}…`);
+
+    for (const [name, presses, where] of [[POISON_TOP, 1, 'on top of the stack'],
+      [POISON_UNDER, 2, 'one entry below the top']]) {
+      const on = await openPage(`/edit?project=${name}`);
+      await on.page.waitForFunction('globalThis.__kinect.library.opened() === true', null, { timeout: 30000 })
+        .catch(() => { /* the rows below say so */ });
+      // Through the same function the key handler calls. Driven here rather than through Ctrl+z
+      // because the keydown guard treats every input element as typing, so a press with a slider
+      // focused is swallowed and reads as an undo that did nothing.
+      const walked = await on.page.evaluate(`(() => {
+        const k = globalThis.__kinect;
+        const before = k.timeline.clips().map((c) => c.id + ':' + (c.take ? c.take.id : 'none'));
+        const depth = k.keyframes.undo.depth();
+        // Caught here rather than let out: a refusal escaping the evaluate ends the run as a
+        // crash, and a crash with no failed assertion behind it is not a finding in either
+        // direction. The press is the probe, so its outcome has to come back as a value.
+        const popped = [];
+        for (let i = 0; i < ${presses}; i++) {
+          try { popped.push(k.keyframes.undo.pop()); } catch (e) { popped.push(e.message); }
+        }
+        return {
+          depth,
+          popped,
+          refused: popped.filter((p) => typeof p === 'string'),
+          before,
+          after: k.timeline.clips().map((c) => c.id + ':' + (c.take ? c.take.id : 'none')),
+        };
+      })()`);
+      const other = on.asked.filter((p) => p.includes(`/${OTHER_TAKE}`));
+      check(walked.depth === 0,
+        `${name}: the file carries a stack and the page comes up with none, ${where}`,
+        `depth ${walked.depth} after load`);
+      check(walked.refused.length === 0 && on.errors.length === 0,
+        `${name}: and ${presses} press${presses === 1 ? '' : 'es'} of undo raise nothing, where the `
+        + 'saved stack would have reached a document naming footage this page never opened',
+        walked.refused.length ? walked.refused[0].slice(0, 150)
+          : on.errors.length ? on.errors[0].split('\n')[0].slice(0, 150)
+            : `popped ${JSON.stringify(walked.popped)}, and the page asked for ${OTHER_TAKE} `
+              + `${other.length} time(s)`);
+      check(JSON.stringify(walked.before) === JSON.stringify(walked.after),
+        `${name}: and the edit is the one the document named, before the presses and after them`,
+        `${JSON.stringify(walked.before)} against ${JSON.stringify(walked.after)}`);
+      await on.page.close();
+    }
+
+    // The synchronous door as well, and it is not a third spelling of the two above: those go
+    // through the loader, which starts a stack of its own after the document is applied, so a
+    // reader of `project.history` inside `applyProject` is overwritten a line later and invisible
+    // there. This is the probe placed where the two answers differ - `restoreProject` applies and
+    // returns, with nothing behind it to overwrite what a reader would have armed.
+    const sync = await opened.page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const held = k.library.serialiseProjectBody();
+      const body = { ...held, clips: [held.clips[0]] };
+      const one = JSON.stringify(body);
+      const before = k.keyframes.undo.depth();
+      // Five entries, so an armed stack cannot be mistaken for the session's own depth.
+      k.library.restoreProject({ ...body, history: { stack: [one, one, one, one, one], baseline: one } });
+      const after = k.keyframes.undo.depth();
+      let refusal = null;
+      try { k.keyframes.undo.pop(); } catch (e) { refusal = e.message; }
+      return { before, after, refusal };
+    })()`);
+    check(sync.after === sync.before,
+      'and a document handed straight to the synchronous door arms no stack either, where the '
+      + 'loader would have overwritten one a line later and hidden the reader that did',
+      `depth ${sync.before} before the restore and ${sync.after} after it, against the 5 entries `
+      + 'the document carried');
+    check(sync.refusal === null,
+      'and the press after it raises nothing',
+      sync.refusal === null ? 'clean' : sync.refusal.slice(0, 140));
+  }
+
+  console.log('\n[boot] undoing the delete of a middle clip leaves the selection where it was');
+  {
+    // `fitClipCount` grows and shrinks at the tail only, so undoing the delete of a middle clip
+    // appends an object and re-labels every one from the deletion point on. The guard that drops
+    // a selection the document no longer holds tests object identity, which an id rewrite does
+    // not disturb - so the selected object keeps its slot and is handed the id of the clip that
+    // used to sit before it. The panel highlight never moves, which is why the probe is the id
+    // the selection answers to and then where a write actually lands.
+    const strip = await opened.page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const doc = k.library.serialiseProjectBody();
+      const of = (id) => ({ ...JSON.parse(JSON.stringify(doc.clips[0])), id, start: 0 });
+      k.library.restoreProject({ ...doc, clips: [of('m1'), of('m2'), of('m3')] });
+      // Committed, or the delete below pushes whatever baseline the sections above left standing
+      // and the undo lands on a document three clips older than the one under test. That is a
+      // fixture that reddens the rows for a reason nobody wrote them for.
+      const based = k.keyframes.undo.commit();
+      k.editor.selectClipRow('m2');
+      return {
+        built: k.timeline.clips().map((c) => c.id), based, selected: k.editor.clipSelection(),
+      };
+    })()`);
+    check(strip.based === true, 'the three-clip edit is the baseline, so the undo below lands on it',
+      `commit returned ${strip.based}`);
+    check(JSON.stringify(strip.built) === JSON.stringify(['m1', 'm2', 'm3']) && strip.selected === 'm2',
+      'three clips, with the middle one selected: the fixture the rows below need, and the only '
+      + 'shape where a tail-only refit relabels anything',
+      `${JSON.stringify(strip.built)}, selection ${strip.selected}`);
+
+    // Through the button rather than the handle: the delete is a gesture, and the selection it
+    // leaves behind is part of what the gesture does.
+    await opened.page.click('#tDeleteClip');
+    const after = await opened.page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      return { clips: k.timeline.clips().map((c) => c.id), selected: k.editor.clipSelection() };
+    })()`);
+    check(JSON.stringify(after.clips) === JSON.stringify(['m1', 'm3']) && after.selected === 'm3',
+      'deleting it leaves two clips and moves the selection onto the one that took its place',
+      `${JSON.stringify(after.clips)}, selection ${after.selected}`);
+
+    const undone = await opened.page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const popped = k.keyframes.undo.pop();
+      const selected = k.editor.clipSelection();
+      // Ground truth, and the reason the row above it is not a cosmetic one: a clip-scope write
+      // goes to whichever clip the selection resolved to, so which block it lands in is the
+      // selection, stated by the document rather than by the highlight.
+      k.params.set('pointSize', 33.5);
+      const held = Object.fromEntries(k.library.serialiseProjectBody().clips
+        .map((c) => [c.id, c.params.pointSize]));
+      return { popped, selected, clips: k.timeline.clips().map((c) => c.id), held };
+    })()`);
+    check(undone.popped === true && JSON.stringify(undone.clips) === JSON.stringify(['m1', 'm2', 'm3']),
+      'and undo puts the middle clip back, so the rows below are about a restored edit',
+      `${JSON.stringify(undone.clips)}`);
+    check(undone.selected === 'm3',
+      'the selection is still the clip it was on, rather than the one that inherited its slot '
+      + 'when the refit relabelled every clip past the deletion point',
+      `selection reads ${undone.selected}, and the clip selected before the undo was m3`);
+    check(undone.held.m3 === 33.5 && undone.held.m2 !== 33.5,
+      'and a clip-scope write after the undo lands on that clip and on no other',
+      `pointSize by clip: ${JSON.stringify(undone.held)}`);
+  }
+
   await opened.page.close();
 }
 

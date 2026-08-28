@@ -164,7 +164,7 @@ exit code (rule 3).
 | `export-check.mjs` | resolution, export, the file | `--url`, ffmpeg and ffprobe |
 | `editor-check.mjs` | the editor's controls exist, and pressing them changes something | `--url`, a take of ≥32s |
 | `library-check.mjs` | the library, the recorder, the routes | a free port span |
-| `boot-check.mjs` | after boot, every control shows the value the registry holds for the selected clip; and the document door adopts a whole document or none | port 8391 free |
+| `boot-check.mjs` | after boot, every control shows the value the registry holds for the selected clip; the document door adopts a whole document or none; the undo stack is the session's and the file is the document's | port 8391 free |
 | `monitor-check.mjs` | the monitor's decimation, the take it must not touch, the picture | port 8341 free |
 | `sensor-view-check.mjs` | the intrinsics a take was shot with, against a build assuming them | `--url`, plus port 8131 |
 | `level-check.mjs` | levelling: the room turns and every surface keeps its meaning | port 8377 free |
