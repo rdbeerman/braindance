@@ -48,14 +48,29 @@ const RAIN_CONTROL_MIN_PCT = 0.8;
 const RAIN_CONTROL_MIN_MEAN = 0.08;
 
 const MUTATIONS = {
+  // Every clip warms on the selected clip's persistence rather than on its own, so a take's
+  // demand stops depending on what each clip cut on it actually asks for. Must redden section
+  // 8b's rows and leave section 8's alone, where every clip carries the same look.
+  'warm-reads-the-selection': { file: 'web/main.js', edits: [[
+    `    const surfaceSec = (valueAtProgram('fade', this.start, this)
+      + valueAtProgram('wake', this.start, this)) / 1000;`,
+    `    const surfaceSec = (valueAtProgram('fade', this.start)
+      + valueAtProgram('wake', this.start)) / 1000;`,
+  ]] },
+  // The cache goes back to one constant however many clips share a take, which is what capped a
+  // four-clip pre-roll at a quarter of what it computed. Must redden section 8's first two rows.
+  'cache-is-a-constant': { file: 'web/main.js', edits: [[
+    'const MAX_SPAN_FRAMES = CACHE_CEILING_FRAMES - CACHE_HEADROOM;',
+    'const MAX_SPAN_FRAMES = CACHE_FRAMES - 16;',
+  ]] },
   // The pre-roll stops being a function of anything.
   'preroll-constant': { file: 'web/main.js', edits: [[
-    'const frames = Math.max(back.frames, trails, back3.frames);',
+    'const frames = Math.max(surface, trails, back3.frames);',
     'const frames = 8;',
   ]] },
   // Nothing is rendered ahead of the target.
   'preroll-none': { file: 'web/main.js', edits: [[
-    'let start = Math.max(0, target - length);',
+    'let start = Math.max(0, target - asked);',
     'let start = target;',
   ]] },
   // Program time stops being scaled into source time.
@@ -80,13 +95,13 @@ const MUTATIONS = {
     '    /* mutation: the bypass is skipped */',
   ]] },
   'draft-always-resets': { file: 'web/main.js', edits: [[
-    'if (target !== this.frame || this.source.applied !== i + 1) {',
-    'if (true) {',
+    'const standing = target === this.frame && this.standingAt(t);',
+    'const standing = false;',
   ]] },
   // The accumulators are not cleared before a pre-roll.
   'no-reset': { file: 'web/main.js', edits: [[
     '  clearFeedback(\n'
-    + '    [statePrev, stateNext, afterimage._textureComp, afterimage._textureOld, ...mosh.history],\n'
+    + '    [...clipStateTargets(), afterimage._textureComp, afterimage._textureOld, ...mosh.history],\n'
     + "    'afterimage internals moved: the accumulator reset is no longer complete',\n"
     + '  );',
     '  /* mutation: accumulator reset skipped */',
@@ -129,8 +144,55 @@ const MUTATIONS = {
     '    if (!PARAMS[name].reading) paramWritten(name, spec.tag);',
   ]] },
   'rain-accumulates': { file: 'web/main.js', edits: [[
-    '    uniforms.rainPhase.value = t;',
-    '    uniforms.rainPhase.value += 1 / 30;',
+    '      uniforms.rainPhase.value = local;',
+    '      uniforms.rainPhase.value += 1 / 30;',
+  ]] },
+  // A clip is shown the instant it starts, with whatever its ping-pong pair last drew still in
+  // it. Section 7's entry rows are the only ones that can see it: with one clip there is no cut.
+  'warm-skipped': { file: 'web/main.js', edits: [[
+    "  return t >= clip.start - warmSec - CLIP_EDGE ? 'warming' : 'off';",
+    "  return 'off';",
+  ]] },
+  // A clip warms and is shown without ever being put back to nothing, so it builds on whatever
+  // its ping-pong pair last held. Both clears go, because on every path this build can reach the
+  // reset clears the pair a moment before the entry does and either one alone still leaves it
+  // empty - `docs/instruments.md` carries the measurement that says so.
+  'warm-without-reset': { file: 'web/main.js', edits: [
+    [
+      '  clearFeedback(\n'
+      + '    [statePrev, stateNext],\n'
+      + "    'the surface memory moved: a clip can no longer be cleared on the frame it enters',\n"
+      + '  );',
+      '  /* mutation: the clip keeps whatever it last drew */',
+    ],
+    [
+      '    [...clipStateTargets(), afterimage._textureComp, afterimage._textureOld, ...mosh.history],',
+      '    [afterimage._textureComp, afterimage._textureOld, ...mosh.history],',
+    ],
+  ] },
+  // Every clip is written the first clip's look, which is the union `checkProject` used to build
+  // and the silent wrong render that made a clip's look its own.
+  'look-broadcast': { file: 'web/main.js', edits: [[
+    '      params.apply(planned.look.applied);',
+    '      params.apply(plan.clips[0].look.applied);',
+  ]] },
+  // A clip value at a program position is read off the selected clip rather than off the clip
+  // being asked about, so one clip's persistence decides every clip's pre-roll.
+  'clip-look-reads-selection': { file: 'web/main.js', edits: [[
+    "  const on = spec.scope === 'clip' ? (clip ?? clipOfLook()) : null;\n  const look = on ? on.look : homeOf(spec);",
+    '  const on = null;\n  const look = homeOf(spec);',
+  ]] },
+  // Draw order comes off the array rather than off the clip ids, so one document composites
+  // differently depending on the order its clips happen to be listed in.
+  'draw-order-by-array': { file: 'web/main.js', edits: [[
+    '  for (const [at, clip] of order.entries()) clip.points.renderOrder = at;',
+    '  for (const [at, clip] of clips.entries()) clip.points.renderOrder = at;',
+  ]] },
+  // Every clip opens its own copy of its take, so two clips of one take carry two indexes, two
+  // caches and two decodes of every frame they both want.
+  'take-not-shared': { file: 'web/main.js', edits: [[
+    '  const take = openTakes.get(id) ?? await IndexedTake.open(id);',
+    '  const take = await IndexedTake.open(id);',
   ]] },
   'rain-phase-unread': { file: 'effects-builtin/rain/cell.vert.glsl', edits: [[
     '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
@@ -392,7 +454,11 @@ const errors = [];
 page.on('pageerror', (err) => errors.push(String(err)));
 page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
 page.on('response', (res) => { if (!res.ok()) errors.push(`${res.status()} ${res.url()}`); });
-await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
+// The rejection is caught rather than left floating. A `fulfill` that loses its race - the page
+// gone, the request already answered - rejects with nobody holding it, node takes an unhandled
+// rejection as fatal, and the run dies mid-evaluate reporting `Resulting promise was garbage
+// collected` with zero failed assertions on a non-zero exit. `docs/instruments.md` has the case.
+await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }).catch(() => {}));
 
 let mutantServed = 0;
 let mutantPath = null;
@@ -401,7 +467,7 @@ if (MUTATE) {
   mutantPath = servedAt(file);
   await page.route((url) => url.pathname === mutantPath, (route) => {
     mutantServed++;
-    route.fulfill({ contentType: contentTypeFor(file), body });
+    route.fulfill({ contentType: contentTypeFor(file), body }).catch(() => {});
   });
   console.log(`[timeline] MUTATED BUILD: ${MUTATE} in ${file} at ${mutantPath} - this run is expected to FAIL`);
 }
@@ -416,7 +482,14 @@ if (MUTATE && mutantServed === 0) {
 }
 await page.evaluate('globalThis.__kinect.setOutputSize?.("640x360")');
 await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
-{
+// The lane stack is built when the open finishes, not when the transport appears, and a strip
+// measured before it has its rows grows under the viewport that was just sized to it. The loop
+// below cannot recover from that on its own: it breaks out the moment the buffer matches, and a
+// pre-lane measurement can match. So the open is waited for first, and the loop is left in place
+// for the resize itself.
+await page.waitForFunction(() => globalThis.__kinect.takeOpened(), null, { timeout: 60000 });
+for (let attempt = 0; attempt < 3; attempt++) {
+  await page.evaluate('globalThis.__kinect.timeline.settled()').catch(() => {});
   const furniture = await page.evaluate(`(() => {
     const strip = document.getElementById('timeline');
     const appBar = document.getElementById('appBar');
@@ -433,10 +506,11 @@ await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), nul
   // a throw inside `waitForFunction` is not caught by it: the twenty seconds a wait is
   // given are never spent, and the failure arrives instantly wearing the shape of a
   // finding. `docs/instruments.md` records that costing a round on its own.
-  await page.waitForFunction((want) => {
+  const landed = await page.waitForFunction((want) => {
     const gl = globalThis.__kinect?.renderer?.getContext?.();
     return !!gl && gl.drawingBufferWidth === want.w && gl.drawingBufferHeight === want.h;
-  }, { w: STAGE.width, h: STAGE.height }, { timeout: 15000 }).catch(() => {});
+  }, { w: STAGE.width, h: STAGE.height }, { timeout: 15000 }).then(() => true).catch(() => false);
+  if (landed) break;
 }
 await page.evaluate(INSTALL);
 
@@ -503,6 +577,11 @@ const CASCADE_LOOK = {
   trails: BLACKWALL_LOOK.trails,
   cell: (CASCADE_SHIPPED.cell ?? 0.055) * 3,
 };
+
+// What a take's cache is sized against, read off the page rather than restated here: the
+// ceiling is derived from a memory budget and a copy of the number it comes to would drift.
+const CACHE = await page.evaluate(() => globalThis.__kinect.timeline.cache());
+const CLIP_CEILING = await page.evaluate(() => globalThis.__kinect.library.CLIP_CEILING);
 
 const arm = (opts) => page.evaluate(`(${ARM})(${JSON.stringify(opts)})`);
 const diff = (a, b) => page.evaluate(`globalThis.__tl.diff(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
@@ -625,7 +704,7 @@ console.log('\n== 1c. the image at a program position is the frame the index nam
     const k = globalThis.__kinect;
     const t = k.timeline.transport();
     await t.seek(${programSec});
-    return { applied: t.source.applied, hash: await globalThis.__tl.sha(globalThis.__tl.grab('reached')) };
+    return { applied: t.clip.source.applied, hash: await globalThis.__tl.sha(globalThis.__tl.grab('reached')) };
   })()`);
   await page.evaluate(`(${golden})(${CURRENT})`);
   await page.evaluate(`(${golden})(${CURRENT - 1})`);
@@ -790,7 +869,13 @@ console.log('\n== 2d. a pre-roll wider than the frame cache ==');
     JSON.stringify({ capped: seeked.seek.capped, shortfall: seeked.seek.shortfall }));
   check(seeked.seek.shortfall > 0 && seeked.seek.frames < seeked.seek.plan.frames,
     'and it really did render fewer frames than it computed');
-  check(state.cached <= 192, 'the cache stayed inside its ceiling', `${state.cached} frames`);
+  check(state.cached <= state.capacity,
+    'the cache stayed inside the capacity its demand bought',
+    `${state.cached} frames against a capacity of ${state.capacity}`);
+  check(state.capacity <= CACHE.ceiling,
+    'and that capacity is inside the ceiling the memory budget buys, which is what bounds one '
+    + 'take however much of it a plan asks for',
+    `${state.capacity} against ${CACHE.ceiling}`);
   check(seeked.delta.renders === seeked.seek.frames + 1,
     'the seek completed rather than throwing', `${seeked.delta.renders} renders`);
 }
@@ -869,23 +954,23 @@ console.log('\n== 3. draft scrub against accurate seek ==');
     const out = { fetch: [], render: [], reset: [] };
     for (let i = 0; i < positions.length; i++) {
       const at = positions[i];
-      const pair = t.sourceFrameAt(at);
+      const pair = t.clip.sourceFrameAt(at);
       // Cold on purpose: the two bracketing frames are dropped so the fetch and
       // the JPEG decode are both paid, which is what a drag onto a position it
       // has not been to costs.
       for (const k2 of [pair, pair + 1]) {
-        t.source.cache.get(k2)?.bitmap?.close();
-        t.source.cache.delete(k2);
+        t.clip.source.cache.get(k2)?.bitmap?.close();
+        t.clip.source.cache.delete(k2);
       }
       let t0 = performance.now();
-      await t.source.ensure(pair, pair + 1);
+      await t.clip.source.ensure(pair, pair + 1);
       const fetchMs = performance.now() - t0;
 
       t0 = performance.now();
       k.resetAccumulators();
       const resetMs = performance.now() - t0;
 
-      t.source.seekTo(pair);
+      t.clip.source.seekTo(pair);
       t0 = performance.now();
       k.renderProgramFrame(at);
       k.drive.readPixels();          // forces the GPU to have finished
@@ -1000,7 +1085,7 @@ console.log('\n== 3c. a draft that did not move the playhead rebuilds nothing ==
     const moved = tl.since(away);
     tl.grab('draft-arrived');
 
-    return { still, moved, applied: t.source.applied };
+    return { still, moved, applied: t.clip.source.applied };
   })()`);
 
   console.log(`  a draft where the playhead already was: ${result.still.drafts} draft, `
@@ -1035,7 +1120,7 @@ for (const rate of [0.5, 1.0, 2.0]) {
       await t.runTo(t.frameAt(sec));
       out.push({
         programSec: t.programSec,
-        applied: t.source.applied,
+        applied: t.clip.source.applied,
         mixT: k.uniforms.mixT.value,
         sinceFrameSec: k.uniforms.sinceFrameSec.value,
       });
@@ -1079,7 +1164,7 @@ console.log('\n== 4b. 60 fps out of a capture whose median gap is 64ms ==');
       await t.runTo(t.frame + 1);
       const label = 'w' + i;
       out.push({
-        applied: t.source.applied,
+        applied: t.clip.source.applied,
         mixT: k.uniforms.mixT.value,
         programSec: t.programSec,
         hash: await tl.sha(tl.grab(label)),
@@ -1433,6 +1518,625 @@ console.log('\n== 7. the mosh pass decodes from its own last refresh ==');
     'and a seek with no pre-roll at all is further still', show(apart));
 }
 
+
+
+// The clips of the multi-clip fixture, in the order the document lists them - which is
+// deliberately not the order of their ids, so a build assigning draw order by array position
+// draws a different composite from one assigning it by id.
+const FIXTURE_CLIPS = [
+  // Two seconds of half speed at the head, then 1x. Its in-point is 20s into the take, so its
+  // head affords far more than any look asks for. It is also the clip the page comes up selected
+  // on, and its persistence is deliberately the shortest here: a build that read the look off
+  // the selection rather than off each clip would compute this clip's pre-roll for all of them.
+  { id: 'c2', start: 3, length: 6, keys: [[0, 20], [2, 21], [6, 25]], second: false,
+    look: { fade: 100, wake: 100 } },
+  // In-point at source zero, so there is nothing before it to warm with. It enters cold, and a
+  // seek to the same instant enters cold too, which is why the invariant holds here. Its
+  // brightness is plainly not the others', which is what a broadcast look would flatten.
+  { id: 'c4', start: 6, length: 4, keys: [[0, 0], [4, 4]], second: true,
+    look: { exposure: 2.4 } },
+  // A head shorter than the look asks for: 0.6s of source against a full second of persistence.
+  { id: 'c1', start: 0, length: 8, keys: [[0, 0.6], [8, 8.6]], second: false, look: {} },
+  // The same take as c1, placed elsewhere and offset so it stands on the same source frame at
+  // every program position it shares with it. Two clips wanting one frame of one take is the
+  // case the per-take half of the pipeline split is about.
+  { id: 'c5', start: 2, length: 2.5, keys: [[0, 2.6], [2.5, 5.1]], second: false, look: {} },
+  // Enters mid-hold. Source time does not move before its in-point, so the walk back reaches no
+  // footage at all and this clip enters cold as well - by a different route from c4's. It is the
+  // only additive clip here, which is what puts a clip on each side of the draw order's split.
+  { id: 'c3', start: 5, length: 4, keys: [[0, 40], [0.8, 40], [4, 43.2]], second: false,
+    look: { additive: true } },
+];
+
+// Persistence short enough that four clips of one take fit its cache with room, and long enough
+// that a clip entering without a warm is a visibly different picture. Depth-writing, because
+// additive blending is commutative and an order the composite is genuinely sensitive to is the
+// only one the byte-identity row below is a claim about.
+const MULTI_LOOK = { ...BLACKWALL_LOOK, fade: 300, wake: 700, trails: 0, additive: false };
+
+const { takes: LIBRARY_TAKES = [] } = await (await fetch(`${URL_BASE}/library/takes`)).json();
+const SECOND_TAKE = LIBRARY_TAKES.find((t) => t.id !== TAKE && t.openable) ?? null;
+
+const MULTI = `(() => {
+  const k = globalThis.__kinect;
+  const tl = globalThis.__tl;
+  globalThis.__mc = {
+    /** One serialised retime, built through the shipped door so its handles are the real ones. */
+    retimeFor(keys) {
+      k.keyframes.setRetime({ rate: 1, keys: keys.map(([t, value]) => ({ t, value })) });
+      return JSON.parse(JSON.stringify(k.library.serialiseProjectBody().clips[0].retime));
+    },
+
+    /**
+     * The fixture loaded, with the clips listed in the order given.
+     *
+     * Built by serialising what the page already holds and editing the clip array, because a
+     * clip block written by hand is refused: a document carries all five reading weights and
+     * every parameter of every effect it names.
+     */
+    async load(spec, second, look) {
+      const base = k.library.serialiseProjectBody();
+      const one = base.clips[0];
+      // Split by the registry's own answer rather than by a list here: a clip block carrying a
+      // project value is refused by the scope door, and a hand-written split would drift.
+      const scoped = (want, scope) => Object.fromEntries(
+        Object.entries(want).filter(([n]) => k.params.spec(n).scope === scope),
+      );
+      const built = spec.map((c) => ({
+        ...one,
+        id: c.id,
+        start: c.start,
+        length: c.length,
+        take: c.second && second ? { ...second } : one.take,
+        retime: this.retimeFor(c.keys),
+        // This clip's own look, written into the document rather than applied afterwards - the
+        // loader is the door a per-clip look actually comes through.
+        params: { ...one.params, ...scoped(look, 'clip'), ...scoped(c.look ?? {}, 'clip') },
+      }));
+      await k.library.loadProject('multi-clip fixture', {
+        ...base,
+        look: { ...base.look, params: { ...base.look.params, ...scoped(look, 'project') } },
+        clips: built,
+      });
+      await k.timeline.settled();
+      tl.pinCamera();
+      await k.timeline.settled();
+      tl.pinCamera();
+      return k.timeline.clips();
+    },
+
+    /** A program position reached by seeking, or by playing to it from a position before it. */
+    async arm(kind, targetSec, fromSec, label, frames) {
+      const t = k.timeline.transport();
+      const before = tl.counters();
+      let seek = null;
+      if (kind === 'playback') {
+        await t.seek(fromSec);
+        await t.runTo(t.frameAt(targetSec));
+      } else {
+        // A seek answers null when it stood down for a repaint rather than landing. Asked again
+        // rather than read as a result: null is "come back", and reading it as one is how a
+        // stand-down would arrive here wearing the shape of a finding.
+        for (let attempt = 0; attempt < 4 && seek === null; attempt++) {
+          seek = await t.seek(targetSec, frames === null ? {} : { frames });
+        }
+        if (seek === null) throw new Error('the seek to ' + targetSec + 's stood down four times');
+      }
+      const pixels = tl.grab(label);
+      return {
+        hash: await tl.sha(pixels),
+        delta: tl.since(before),
+        camera: tl.camera(),
+        seek,
+        clips: k.timeline.clips(),
+        showing: k.timeline.showingAt(t.programSec),
+        takes: k.timeline.takes(),
+        frame: t.frame,
+      };
+    },
+  };
+  return true;
+})()`;
+
+console.log('\n== 7. more than one clip: the composite, the cut, and what a clip enters holding ==');
+{
+  await page.evaluate(MULTI);
+  const order = FIXTURE_CLIPS.map((c) => c.id);
+  const built = await page.evaluate(
+    `globalThis.__mc.load(${JSON.stringify(FIXTURE_CLIPS)}, ${JSON.stringify(SECOND_TAKE
+      ? { id: SECOND_TAKE.id, hash: SECOND_TAKE.hash } : null)}, ${JSON.stringify(MULTI_LOOK)})`,
+  );
+  console.log(`  ${built.length} clips, listed as ${order.join(', ')}, on `
+    + `${SECOND_TAKE ? `${TAKE} and ${SECOND_TAKE.id}` : `${TAKE} alone (no second take in the library)`}`);
+  for (const c of built) {
+    console.log(`    ${c.id.padEnd(3)} ${String(c.start).padStart(5)}s +${String(c.length).padStart(4)}s  `
+      + `draw ${c.renderOrder}  warm ${String(c.warmFrames).padStart(3)} frames  take ${c.take?.id ?? 'none'}`);
+  }
+
+  check(built.length === FIXTURE_CLIPS.length,
+    `the build composites all ${FIXTURE_CLIPS.length} clips rather than refusing the document`,
+    `${built.length} clips`);
+  check(built.map((c) => c.id).join() === order.join(),
+    'and holds them in the order the document listed them, which is not the order of their ids',
+    built.map((c) => c.id).join(', '));
+
+  // 7a. each clip's look is its own.
+  const blocks = await page.evaluate(`(() => {
+    const body = globalThis.__kinect.library.serialiseProjectBody();
+    return body.clips.map((c) => ({ id: c.id, additive: c.params.additive,
+      exposure: c.params.exposure, fade: c.params.fade, wake: c.params.wake }));
+  })()`);
+  console.log("  each clip's own look, off the document it would be saved as:");
+  for (const b of blocks) {
+    console.log(`    ${b.id.padEnd(3)} ${b.additive ? 'additive' : 'depth   '} `
+      + `exposure ${String(b.exposure).padStart(5)}  fade ${String(b.fade).padStart(4)}  `
+      + `wake ${String(b.wake).padStart(4)}`);
+  }
+  const looks = new Set(blocks.map((b) => `${b.additive}/${b.exposure}/${b.fade}/${b.wake}`));
+  check(looks.size >= 3,
+    'the clips carry looks of their own, and three of them are different looks rather than one '
+    + 'look written five times', `${looks.size} distinct blocks across ${blocks.length} clips`);
+  check(built.every((c) => c.additive === blocks.find((b) => b.id === c.id).additive),
+    'and what each clip is actually blending with is what its own block says, so the values '
+    + 'reached the clouds rather than only the tables',
+    built.map((c) => `${c.id}:${c.additive ? 'a' : 'd'}`).join(' '));
+
+  // 7b. draw order, now that a clip can be on either side of the split.
+  const depth = built.filter((c) => !c.additive);
+  const glow = built.filter((c) => c.additive);
+  check(new Set(built.map((c) => c.renderOrder)).size === built.length,
+    'every clip draws at a render order of its own rather than sharing one with another',
+    built.map((c) => `${c.id}:${c.renderOrder}`).join(' '));
+  check(depth.length >= 2 && glow.length >= 1,
+    'the fixture puts clips on both sides of the additive split, which is what makes the row '
+    + 'below a claim rather than a description of one group',
+    `${depth.length} writing depth, ${glow.length} additive`);
+  check(Math.max(...depth.map((c) => c.renderOrder)) < Math.min(...glow.map((c) => c.renderOrder)),
+    'every clip that writes depth draws before every additive one, because an additive layer '
+    + 'composited under one that writes depth is a different picture',
+    built.map((c) => `${c.id}:${c.renderOrder}${c.additive ? 'a' : 'd'}`).join(' '));
+  const inIdOrder = (half) => [...half].sort((a, b) => (a.id < b.id ? -1 : 1))
+    .every((c, at, all) => at === 0 || all[at - 1].renderOrder < c.renderOrder);
+  check(inIdOrder(depth) && inIdOrder(glow),
+    'and inside each half the tie breaks on the clip id rather than on the array order, so two '
+    + 'runs of one document write the same bytes however the array came to be built',
+    built.map((c) => `${c.id}:${c.renderOrder}`).join(' '));
+
+  const flipped = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const before = k.timeline.clips().map((c) => ({ id: c.id, ro: c.renderOrder, add: c.additive }));
+    const held = before.find((c) => c.selected) ?? before[0];
+    k.timeline.select('c1');
+    k.params.apply({ additive: true });
+    const after = k.timeline.clips().map((c) => ({ id: c.id, ro: c.renderOrder, add: c.additive }));
+    k.params.apply({ additive: false });
+    k.timeline.select(held.id);
+    return { before, after };
+  })()`);
+  const movedOne = flipped.after.filter((c, at) => c.add !== flipped.before[at].add);
+  check(movedOne.length === 1 && movedOne[0].id === 'c1',
+    'turning one clip additive turns that clip additive and no other, because the switch is '
+    + "that clip's look rather than the project's",
+    movedOne.length ? movedOne.map((c) => c.id).join(', ') : 'none moved');
+  check(flipped.after.find((c) => c.id === 'c1').ro
+    > Math.max(...flipped.after.filter((c) => !c.add).map((c) => c.ro)),
+  'and it crosses the draw order to sit with the additive half',
+  flipped.after.map((c) => `${c.id}:${c.ro}${c.add ? 'a' : 'd'}`).join(' '));
+
+  const FOUR_SEC = 6.5;
+  const reversed = await page.evaluate(
+    `globalThis.__mc.load(${JSON.stringify([...FIXTURE_CLIPS].reverse())}, ${JSON.stringify(SECOND_TAKE
+      ? { id: SECOND_TAKE.id, hash: SECOND_TAKE.hash } : null)}, ${JSON.stringify(MULTI_LOOK)})`,
+  );
+  const reversedShot = await page.evaluate(
+    `globalThis.__mc.arm('seek', ${FOUR_SEC}, 0, 'multiReversed', null)`,
+  );
+  await page.evaluate(
+    `globalThis.__mc.load(${JSON.stringify(FIXTURE_CLIPS)}, ${JSON.stringify(SECOND_TAKE
+      ? { id: SECOND_TAKE.id, hash: SECOND_TAKE.hash } : null)}, ${JSON.stringify(MULTI_LOOK)})`,
+  );
+  const forwardShot = await page.evaluate(
+    `globalThis.__mc.arm('seek', ${FOUR_SEC}, 0, 'multiForward', null)`,
+  );
+  const orderSame = await diff('multiForward', 'multiReversed');
+  console.log(`  the same four clips listed forwards and backwards: ${show(orderSame)}`);
+  check(reversed.map((c) => c.id).reverse().join() === built.map((c) => c.id).join(),
+    'the two loads really did list the clips in opposite orders',
+    `${built.map((c) => c.id).join(',')} against ${reversed.map((c) => c.id).join(',')}`);
+  check(orderSame.max === 0,
+    'and the composite is byte-identical, so the array order reaches no pixel', show(orderSame));
+
+  // 7b. four clips overlap here, and the idle ones cost nothing.
+  const live = forwardShot.showing.filter((s) => s.showing === 'live');
+  console.log(`  at ${FOUR_SEC}s: ${forwardShot.showing.map((s) => `${s.id} ${s.showing}`).join(', ')}`);
+  check(live.length === 4, `four clips overlap at ${FOUR_SEC}s, which is the budget this step is `
+    + 'measured against', `${live.length} live`);
+  check(forwardShot.clips.every((c) => c.visible === (
+    forwardShot.showing.find((s) => s.id === c.id).showing === 'live')),
+  'and a clip is in the scene exactly while it is drawn, so an idle one costs no draw at all',
+  forwardShot.clips.map((c) => `${c.id}:${c.visible ? 'on' : 'off'}`).join(' '));
+
+  const ONE_SEC = 1.0;
+  const alone = await page.evaluate(`globalThis.__mc.arm('seek', ${ONE_SEC}, 0, 'multiAlone', null)`);
+  const aloneLive = alone.showing.filter((s) => s.showing === 'live');
+  const versusAlone = await diff('multiForward', 'multiAlone');
+  check(aloneLive.length === 1,
+    `one clip alone at ${ONE_SEC}s, which is what makes the comparison below a control`,
+    aloneLive.map((s) => s.id).join(', '));
+  check(versusAlone.max >= CONTROL_MIN && versusAlone.pct >= CONTROL_MIN_PCT,
+    'and the four-clip composite is a different picture from the one-clip one, so the clips '
+    + 'whose order the rows above are about are contributing pixels', show(versusAlone));
+
+  // 7c. the pipeline splits per take and per clip.
+  const sameTake = forwardShot.clips.filter((c) => c.take?.id === TAKE);
+  const cursors = sameTake.map((c) => c.applied);
+  const slots = forwardShot.clips.map((c) => `${c.id}:${c.takeSlot}`);
+  console.log(`  ${forwardShot.takes} take(s) open for ${forwardShot.clips.length} clips; `
+    + `the ${sameTake.length} cut on ${TAKE} stand at source frames ${cursors.join(', ')}`);
+  console.log(`  each clip's walk is over take slot ${slots.join(' ')}`);
+  check(forwardShot.takes === (SECOND_TAKE ? 2 : 1),
+    `the ${sameTake.length} clips cut on ${TAKE} share one open take, so its bytes, its index `
+    + 'and its fetch cache are one of each rather than one per clip',
+    `${forwardShot.takes} open`);
+  check(new Set(sameTake.map((c) => c.takeSlot)).size === 1,
+    'and they read it through one take object rather than one each, which is the identity the '
+    + 'count above cannot see', slots.join(' '));
+  check(new Set(cursors).size >= 2,
+    'while standing on source frames of their own, so sharing the take did not put one '
+    + "clip's frame in front of another's shader", cursors.join(', '));
+
+  // At 4s, and not over the four-clip overlap: `c3` enters mid-hold, and a hold is a span the
+  // pre-roll can never cover, so any position it is live at plans the whole edit and thrashes
+  // the cache. Two clips of one take is what this row is about, and 4s has exactly that.
+  const DECODE_SEC = 4;
+  const decoded = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const t = k.timeline.transport();
+    await t.seek(0);
+    const before = { ...k.timeline.counters };
+    await t.seek(${DECODE_SEC});
+    const moved = { ...k.timeline.counters };
+    await t.seek(${DECODE_SEC});
+    const again = { ...k.timeline.counters };
+    return {
+      live: k.timeline.showingAt(t.programSec).filter((s) => s.showing === 'live').map((s) => s.id),
+      together: k.timeline.clips().filter((c) => c.id === 'c1' || c.id === 'c5').map((c) => c.applied),
+      decodes: moved.bitmapDecodes - before.bitmapDecodes,
+      repeat: again.bitmapDecodes - moved.bitmapDecodes,
+      fetched: moved.framesFetched - before.framesFetched,
+    };
+  })()`);
+  console.log(`  a seek to ${DECODE_SEC}s (${decoded.live.join(', ')} live) decoded ${decoded.decodes} `
+    + `JPEGs (${decoded.fetched} frames fetched); seeking there again decoded ${decoded.repeat}`);
+  check(decoded.live.length >= 2,
+    `two clips of ${TAKE} are live at ${DECODE_SEC}s, which is what the two rows below are about`,
+    decoded.live.join(', '));
+  check(decoded.together.length === 2 && decoded.together[0] === decoded.together[1],
+    'and two of them want the same source frame there, which is the case a per-clip cache would '
+    + 'fetch and decode twice', `c1 and c5 at ${decoded.together.join(' and ')}`);
+  check(decoded.repeat === 0,
+    'a second seek to the same position decodes nothing, so the decode is cached rather than '
+    + 'repeated per clip per frame', `${decoded.repeat} decodes`);
+  check(decoded.decodes === decoded.fetched,
+    'and a fetched frame is decoded once, not once per clip cut on the take it came from',
+    `${decoded.decodes} decodes against ${decoded.fetched} frames`);
+
+  // 7d. the claim: a clip entered under playback is the clip seeked to.
+  console.log('\n  a clip entered under playback against the same clip seeked to');
+  const ENTRIES = [
+    { id: 'c2', targetSec: 3.3, fromSec: 0.5, why: 'a two-second half-speed head' },
+    { id: 'c3', targetSec: 5.3, fromSec: 3.4, why: 'entering mid-hold' },
+    // From before c3's in-point, so the playback arm's own seek is not the one c3's hold makes
+    // reach the head of the edit - which is what keeps the two arms doing different amounts of
+    // work now that the frame cache no longer truncates a pre-roll.
+    { id: 'c4', targetSec: 6.3, fromSec: 4.9, why: 'no footage before its in-point' },
+  ];
+  for (const entry of ENTRIES) {
+    await page.evaluate(
+      `globalThis.__mc.load(${JSON.stringify(FIXTURE_CLIPS)}, ${JSON.stringify(SECOND_TAKE
+        ? { id: SECOND_TAKE.id, hash: SECOND_TAKE.hash } : null)}, ${JSON.stringify(MULTI_LOOK)})`,
+    );
+    const played = await page.evaluate(
+      `globalThis.__mc.arm('playback', ${entry.targetSec}, ${entry.fromSec}, 'entryPlayed', null)`,
+    );
+    const seeked = await page.evaluate(
+      `globalThis.__mc.arm('seek', ${entry.targetSec}, ${entry.fromSec}, 'entrySeeked', null)`,
+    );
+    const control = await page.evaluate(
+      `globalThis.__mc.arm('seek', ${entry.targetSec}, ${entry.fromSec}, 'entryControl', 0)`,
+    );
+    const same = await diff('entryPlayed', 'entrySeeked');
+    const apart = await diff('entryPlayed', 'entryControl');
+    const entered = played.clips.find((c) => c.id === entry.id);
+    const liveHere = played.showing.filter((s) => s.showing === 'live').map((s) => s.id);
+
+    console.log(`\n  ${entry.id} at ${entry.targetSec}s (${entry.why}): warm ${entered.warmFrames} `
+      + `frames, ${liveHere.length} clips live (${liveHere.join(', ')}), playback rendered `
+      + `${played.delta.renders} and entered ${played.delta.clipEntries} clips, the seek `
+      + `${seeked.delta.renders} over a ${seeked.seek.plan.frames}-frame pre-roll`);
+    console.log(`    played vs seeked   ${show(same)}${same.max === 0 ? '  (byte-identical)' : ''}`);
+    console.log(`    played vs no pre-roll ${show(apart)}`);
+
+    check(liveHere.includes(entry.id),
+      `${entry.id}: the clip under test is actually drawn at this position`, liveHere.join(', '));
+    // Different, not one-sided: a seek beside a retime hold pre-rolls to the head of the edit,
+    // because walking back inside a hold never covers the persistence and the walk runs to the
+    // ceiling. That used to be truncated by the frame cache, and the direction this row used to
+    // assert was a fact about that truncation rather than about the two paths.
+    check(played.delta.renders !== seeked.delta.renders,
+      `${entry.id}: the two arms did different amounts of work`,
+      `${played.delta.renders} renders against ${seeked.delta.renders}`);
+    check(played.delta.clipEntries > 0,
+      `${entry.id}: the playback arm crossed a cut rather than starting inside the clip`,
+      `${played.delta.clipEntries} clips entered`);
+    check(same.max <= SAME_MAX,
+      `${entry.id}: a clip entered under playback is the clip a seek lands on`, show(same));
+    check(apart.max >= CONTROL_MIN && apart.pct >= CONTROL_MIN_PCT,
+      `${entry.id}: and a build with no pre-roll at all lands somewhere else, so the equality `
+      + 'above is about something', show(apart));
+    check(apart.max > same.max * 8 + 8,
+      `${entry.id}: the two verdicts are separated rather than adjacent`,
+      `control max ${apart.max} against ${same.max}`);
+  }
+
+  // 7e. the warm itself: which clips have one, and what bounds it.
+  await page.evaluate(
+    `globalThis.__mc.load(${JSON.stringify(FIXTURE_CLIPS)}, ${JSON.stringify(SECOND_TAKE
+      ? { id: SECOND_TAKE.id, hash: SECOND_TAKE.hash } : null)}, ${JSON.stringify(MULTI_LOOK)})`,
+  );
+  const warmed = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const t = k.timeline.transport();
+    await t.seek(0.5);
+    const before = { ...k.timeline.counters };
+    await t.runTo(t.frameAt(3.4));
+    return {
+      clips: k.timeline.clips(),
+      warmedFrames: k.timeline.counters.clipsWarmed - before.clipsWarmed,
+      showingBefore: k.timeline.showingAt(2.9),
+    };
+  })()`);
+  const warmTable = Object.fromEntries(warmed.clips.map((c) => [c.id, c.warmFrames]));
+  console.log(`\n  warm windows: ${Object.entries(warmTable).map(([id, n]) => `${id} ${n}`).join(', ')}`);
+  check(warmTable.c2 > 0,
+    'a clip whose head is real footage is warmed before its in-point', `c2 warms ${warmTable.c2} frames`);
+  check(warmTable.c4 === 0,
+    'a clip whose footage starts at source zero has nothing to warm with, so it enters cold - '
+    + 'and so does a seek to that instant, which is why the rows above hold rather than break',
+    `c4 warms ${warmTable.c4} frames`);
+  check(warmTable.c3 === 0,
+    'and so does one entering mid-hold, by the other route: walking back inside a hold reaches '
+    + 'the frame already bound however far it walks', `c3 warms ${warmTable.c3} frames`);
+  check(warmTable.c5 > warmTable.c1,
+    'and one of the same take with a longer head is warmed further, so the bound is the head '
+    + 'rather than a constant', `c5 warms ${warmTable.c5} against c1's ${warmTable.c1}`);
+  check(warmTable.c1 > 0 && warmTable.c1 < 30,
+    'a clip whose head is shorter than the look asks for is warmed with what the head affords '
+    + 'rather than off the front of the take', `c1 warms ${warmTable.c1} frames of 30 asked for`);
+  check(warmed.warmedFrames > 0,
+    'and playing up to a cut really does step a clip nobody can see yet',
+    `${warmed.warmedFrames} warmed clip-frames`);
+  check(warmed.showingBefore.some((s) => s.showing === 'warming'),
+    'which is what the composite says it is doing just before the cut',
+    warmed.showingBefore.map((s) => `${s.id} ${s.showing}`).join(', '));
+
+  // What the warm actually buys, read off the surface memory rather than off the counters: a
+  // build that skipped it renders a self-consistent picture - the seek and the playback both
+  // enter cold and agree with each other - so the rows above cannot see it and this one can.
+  //
+  // c1 and c5 are the arms because they stand on the same source frame at every program position
+  // they share. Same take, same frame, same look: the only thing that differs at 2.1s is that c1
+  // has been playing since the head of the edit and c5 entered a tenth of a second ago.
+  const shedding = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const t = k.timeline.transport();
+    await t.seek(2.1);
+    const at = (id) => {
+      k.timeline.select(id);
+      return { stats: k.stateStats(), applied: k.timeline.clips().find((c) => c.id === id).applied };
+    };
+    const settled = at('c1');
+    const entered = at('c5');
+    k.timeline.select('c1');
+    return { settled, entered };
+  })()`);
+  const shed = (a) => a.stats.ghostsDrawn;
+  console.log(`\n  at 2.1s, both on source frame ${shedding.settled.applied}: c1 has been playing `
+    + `since the head of the edit and sheds ${shed(shedding.settled)}% of the frame; c5 entered `
+    + `0.1s ago with a ${warmTable.c5}-frame warm behind it and sheds ${shed(shedding.entered)}%`);
+  // Within one frame rather than exactly equal: the cursor is where each clip's walk has got to,
+  // and a clip that entered a tenth of a second ago has consumed one fewer pair than one that
+  // has been walking since the head of the edit. One pair apart on a 9.3fps take is the same
+  // footage, which is what this row is about.
+  check(Math.abs(shedding.settled.applied - shedding.entered.applied) <= 1,
+    'the two clips really are standing on the same footage, which is what makes this an A/B on '
+    + 'the history rather than on the pictures',
+    `${shedding.settled.applied} and ${shedding.entered.applied}`);
+  check(shed(shedding.settled) > 1,
+    'the reading is about something: the settled clip is shedding a real fraction of the frame',
+    `${shed(shedding.settled)}%`);
+  check(Math.abs(shed(shedding.entered) - shed(shedding.settled)) <= shed(shedding.settled) * 0.25,
+    'and a clip a tenth of a second past its cut is shedding what the clip beside it has taken '
+    + 'the whole edit to build, which is what the warm before its in-point buys',
+    `${shed(shedding.entered)}% against ${shed(shedding.settled)}%`);
+
+  const entries = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const t = k.timeline.transport();
+    const before = { ...k.timeline.counters };
+    await t.seek(0);
+    await t.runTo(t.frameAt(9.5));
+    return {
+      entered: k.timeline.counters.clipEntries - before.clipEntries,
+      reEntered: k.timeline.counters.clipReEntries - before.clipReEntries,
+    };
+  })()`);
+  console.log(`  a walk over the whole edit entered ${entries.entered} clips, `
+    + `${entries.reEntered} of them holding something they had already drawn`);
+  check(entries.entered >= FIXTURE_CLIPS.length,
+    'a walk over the whole edit enters every clip in it', `${entries.entered} entries`);
+  check(entries.reEntered === 0,
+    'and none of them was re-entered holding an earlier pass, because a clip goes off, warming, '
+    + 'live, off in that order and every move that breaks the order resets first',
+    `${entries.reEntered} re-entries`);
+}
+
+
+// The persistence a cache is sized against here: two seconds of it, which is an ordinary look
+// and 60 output frames of pre-roll at 30fps. `MULTI_LOOK` is deliberately shorter than this.
+const STACK_LOOK = { ...BLACKWALL_LOOK, fade: 500, wake: 1500, trails: 0, additive: false };
+// Where the stacked clips are seeked to, and how far apart their in-points are cut into the take.
+const STACK_TARGET_SEC = 3;
+const STACK_GAP_SEC = 1;
+const STACK_LENGTH_SEC = 6;
+const STACK_ARMS = [1, 2, 4, CLIP_CEILING];
+
+/** N clips of one take, all live at the target, each cut a second further into the footage. */
+const stackOf = (n) => Array.from({ length: n }, (_, i) => ({
+  id: `s${i}`,
+  start: 0,
+  length: STACK_LENGTH_SEC,
+  keys: [[0, i * STACK_GAP_SEC], [STACK_LENGTH_SEC, i * STACK_GAP_SEC + STACK_LENGTH_SEC]],
+  second: false,
+  look: {},
+}));
+
+console.log('\n== 8. the frame cache is sized by the clips asking for it ==');
+{
+  console.log(`  ${STACK_ARMS.join(', ')} clips of ${TAKE} at fade ${STACK_LOOK.fade}ms plus wake `
+    + `${STACK_LOOK.wake}ms, every one of them live at ${STACK_TARGET_SEC}s and cut `
+    + `${STACK_GAP_SEC}s further into the take than the one before it.`);
+  console.log(`  the cache: a floor of ${CACHE.floor} frames, a budget of `
+    + `${(CACHE.budgetBytes / (1024 * 1024)).toFixed(0)} MB at ${CACHE.frameBytes} bytes a frame, `
+    + `so a ceiling of ${CACHE.ceiling} and a span of ${CACHE.span}.`);
+
+  // Loaded once before the measured arms, so every arm is built from a stack document rather
+  // than the first one from whatever the section above it left on the page.
+  await page.evaluate(
+    `globalThis.__mc.load(${JSON.stringify(stackOf(1))}, null, ${JSON.stringify(STACK_LOOK)})`,
+  );
+
+  const stacked = [];
+  for (const n of STACK_ARMS) {
+    await page.evaluate(
+      `globalThis.__mc.load(${JSON.stringify(stackOf(n))}, null, ${JSON.stringify(STACK_LOOK)})`,
+    );
+    const shot = await page.evaluate(
+      `globalThis.__mc.arm('seek', ${STACK_TARGET_SEC}, 0, 'stack${n}', null)`,
+    );
+    stacked.push({ n, shot });
+    const s = shot.seek;
+    console.log(`  ${String(n).padStart(2)} clip(s): pre-roll ${s.plan.frames} asked `
+      + `(surface ${s.plan.surface}, trails ${s.plan.trails}), ${s.frames} `
+      + `rendered${s.capped ? ` - CAPPED ${s.shortfall} short` : ''}; the take is asked for `
+      + `${s.bound.frames} frames by ${s.bound.clips} clip(s), holds ${shot.clips[0].capacity}, `
+      + `and has ${shot.clips[0].cached} decoded`);
+  }
+
+  const one = stacked.find((a) => a.n === 1);
+  const most = stacked[stacked.length - 1];
+
+  check(stacked.every(({ shot }) => shot.seek.frames === shot.seek.plan.frames),
+    'every arm rendered the whole pre-roll it computed, however many clips of one take asked '
+    + 'that one cache for a window of their own',
+    stacked.map(({ n, shot }) => `${n}:${shot.seek.frames}/${shot.seek.plan.frames}`).join(' '));
+  check(stacked.every(({ shot }) => shot.seek.capped === false),
+    'and none of them reports itself capped', stacked.map(({ n, shot }) => `${n}:${shot.seek.capped}`).join(' '));
+  check(stacked.every(({ shot }) => shot.seek.plan.frames === one.shot.seek.plan.frames),
+    'the arms all computed the same pre-roll, so what differs between them is how many clips '
+    + 'are asking for it and not how long it is',
+    stacked.map(({ n, shot }) => `${n}:${shot.seek.plan.frames}`).join(' '));
+  check(most.shot.seek.bound.clips === CLIP_CEILING
+    && most.shot.seek.bound.frames >= one.shot.seek.bound.frames * CLIP_CEILING * 0.9,
+  `the widest arm really does put all ${CLIP_CEILING} clips on one take and ask it for about `
+    + `${CLIP_CEILING} times the window one clip asks for, which is what makes the row above a `
+    + 'claim about sharing rather than about a window that always fitted',
+  `${most.shot.seek.bound.clips} clips asking ${most.shot.seek.bound.frames} frames against `
+    + `${one.shot.seek.bound.frames} for one`);
+  check(most.shot.seek.bound.frames > CACHE.floor,
+    'and it asks for more of one take than the floor a single clip is sized at, so the arm is '
+    + 'outside what a constant cache could have held',
+    `${most.shot.seek.bound.frames} frames against a floor of ${CACHE.floor}`);
+  check(one.shot.clips[0].capacity === CACHE.floor,
+    'a one-clip project caches exactly what it always did, because the floor is what a take '
+    + 'holds when one clip is asking',
+    `${one.shot.clips[0].capacity} frames`);
+  check(most.shot.clips[0].capacity > CACHE.floor
+    && most.shot.clips[0].capacity >= most.shot.clips[0].demand,
+  'and the widest arm bought a cache above that floor, big enough for what it asked for',
+  `${most.shot.clips[0].capacity} frames for a demand of ${most.shot.clips[0].demand}`);
+  check(most.shot.clips[0].cached > CACHE.floor,
+    'which the take is actually holding: more frames are decoded than a constant cache would '
+    + 'have kept, read off the cache rather than off the number that sizes it',
+    `${most.shot.clips[0].cached} decoded against a floor of ${CACHE.floor}`);
+  check(stacked.every(({ shot }) => shot.clips[0].capacity <= CACHE.ceiling),
+    'and no arm went past the ceiling the memory budget buys',
+    stacked.map(({ n, shot }) => `${n}:${shot.clips[0].capacity}`).join(' '));
+  check(CACHE.span >= CLIP_CEILING * (one.shot.seek.bound.frames),
+    `the ceiling is generous by the measure it was chosen against: it covers all ${CLIP_CEILING} `
+    + `clips this build composites at ${(STACK_LOOK.fade + STACK_LOOK.wake) / 1000}s of `
+    + 'persistence each',
+    `a span of ${CACHE.span} against ${CLIP_CEILING} x ${one.shot.seek.bound.frames}`);
+  check(Math.floor(CACHE.budgetBytes / CACHE.frameBytes) === CACHE.ceiling,
+    'and it is a memory budget with the frame count derived from it, rather than a frame count '
+    + 'with a memory figure written beside it',
+    `${(CACHE.budgetBytes / (1024 * 1024)).toFixed(0)} MB / ${CACHE.frameBytes} B = ${CACHE.ceiling}`);
+}
+
+
+
+// Three clips of one take whose only difference is the persistence in their own look blocks. The
+// long one is warming at the target and the short one is idle there, so what each clip asks its
+// take for depends on that clip's own values and on nothing shared.
+const MIXED_TARGET_SEC = 3;
+const MIXED_CLIPS = [
+  { id: 'live', start: 0, length: 12, keys: [[0, 0], [12, 12]], second: false, look: {} },
+  { id: 'warmLong', start: 3.5, length: 4, keys: [[0, 20], [4, 24]], second: false,
+    look: { fade: 1500, wake: 4000 } },
+  { id: 'warmShort', start: 3.5, length: 4, keys: [[0, 40], [4, 44]], second: false,
+    look: { fade: 100, wake: 0 } },
+];
+
+console.log('\n== 8b. the demand is each clip\'s own, not one persistence for the project ==');
+{
+  await page.evaluate(
+    `globalThis.__mc.load(${JSON.stringify(MIXED_CLIPS)}, null, ${JSON.stringify(STACK_LOOK)})`,
+  );
+  const shot = await page.evaluate(
+    `globalThis.__mc.arm('seek', ${MIXED_TARGET_SEC}, 0, 'mixed', null)`,
+  );
+  const blocks = await page.evaluate(`(() => globalThis.__kinect.library.serialiseProjectBody()
+    .clips.map((c) => ({ id: c.id, fade: c.params.fade, wake: c.params.wake })))()`);
+  const warm = Object.fromEntries(shot.clips.map((c) => [c.id, c.warmFrames]));
+  const showing = Object.fromEntries(shot.showing.map((s) => [s.id, s.showing]));
+
+  for (const b of blocks) {
+    console.log(`    ${b.id.padEnd(10)} fade ${String(b.fade).padStart(4)} wake `
+      + `${String(b.wake).padStart(4)} -> warms ${String(warm[b.id]).padStart(3)} frames, `
+      + `${showing[b.id]} at ${MIXED_TARGET_SEC}s`);
+  }
+  console.log(`  the take is asked for ${shot.seek.bound.frames} frames by `
+    + `${shot.seek.bound.clips} of the ${blocks.length} clips cut on it`);
+
+  check(new Set(blocks.map((b) => `${b.fade}/${b.wake}`)).size === 3,
+    'the three clips really do carry three different persistences in their own blocks, which is '
+    + 'what makes the rows below a claim rather than a description of one look',
+    blocks.map((b) => `${b.id} ${b.fade}/${b.wake}`).join(', '));
+  check(warm.warmLong > warm.warmShort * 10,
+    'and each one warms for a window worked out from its own values',
+    `${warm.warmLong} frames against ${warm.warmShort}`);
+  check(showing.live === 'live' && showing.warmLong === 'warming' && showing.warmShort === 'off',
+    'so two clips placed at the same instant differ in whether they are warming there at all',
+    Object.entries(showing).map(([id, s]) => `${id}:${s}`).join(' '));
+  check(shot.seek.bound.clips === 2,
+    'and the take is asked for a window by the two clips that are touching it and not by the '
+    + 'third, so the demand a cache is sized against is read per clip rather than from one '
+    + 'persistence held for the project',
+    `${shot.seek.bound.clips} of ${blocks.length} clips`);
+  check(shot.seek.frames === shot.seek.plan.frames && shot.seek.capped === false,
+    'and the seek still renders the whole pre-roll it computed',
+    `${shot.seek.frames}/${shot.seek.plan.frames}, capped ${shot.seek.capped}`);
+}
 
 if (SHOTS) {
   await page.evaluate(`(async () => {

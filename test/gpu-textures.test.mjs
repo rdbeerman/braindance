@@ -7,10 +7,13 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { DEPTH_H, DEPTH_W } from '../web/format.js';
 import {
-  buildTextures, bindDepth, bindColor, plantColor, depthCurr, colorPrev, colorCurr,
+  createTextures, selectTextures, bindDepth, bindColor, plantColor, depthCurr, colorPrev, colorCurr,
 } from '../web/gpu-textures.js';
 
-const cells = buildTextures();
+// One instance, selected, which is what the boot does and what the exported views below name.
+const textures = createTextures();
+selectTextures(textures);
+const { cells } = textures;
 
 /** A block at divisor `k`, every sample carrying the index it was measured at. */
 const block = (k) => {
@@ -45,6 +48,9 @@ test('a full-rate block lands one sample per texel, and the pair swaps under it'
   assert.equal(cells.depthCurr.value, willBeCurrent);
   assert.deepEqual(cells.depthCurr.value.image.data, data);
   assert.ok(cells.depthCurr.value.version > version, 'the bind asks for an upload');
+  // Identity rather than `assert.equal`, because the message for two different textures is a
+  // diff of two 217,088-sample arrays and node takes minutes over it rather than failing.
+  assert.ok(depthCurr === cells.depthCurr.value, 'the exported view moved with the swap');
 });
 
 test('a decimated block puts every sample on the ray it was measured on', () => {

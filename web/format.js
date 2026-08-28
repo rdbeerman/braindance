@@ -4,10 +4,11 @@
  *
  * A document from any other version is refused, naming the version it found, rather than
  * opened on a best guess: this build ships no conversion and no reader of a second shape.
- * Version 6 names a look parameter by the effect it belongs to - `glyph.tone` rather than
- * `glyphTone` - and carries a `requires` list naming the effects its values are built from.
+ * Version 7 carries a `clips` array - each clip its own take, placement, retime curve and the
+ * look values that write the cloud - beside the `look` block holding the ones that write the
+ * post chain. Version 6 carried one take at the top and one undivided look under it.
  */
-export const PROJECT_VERSION = 6;
+export const PROJECT_VERSION = 7;
 
 /**
  * The sentence a document from the wrong version gets, in one place because two doors saying

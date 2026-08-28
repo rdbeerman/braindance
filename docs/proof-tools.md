@@ -18,7 +18,41 @@ still enforces that every tool in `tools/` is named there.
 ```
 node tools/determinism-check.mjs                    # step 1: same program time, same image
 node tools/determinism-check.mjs --clock --before HEAD~1
-node tools/index-check.mjs --url http://localhost:8123   # step 2: index, hash, frame API
+node tools/index-check.mjs --url http://localhost:8123   # step 2: index, hash, frame API.
+                                                          #   **It refuses to run without a fixture past 2 GiB**,
+                                                          #   naming the path or the byte count: its whole subject is a
+                                                          #   frame at an offset a whole-file read cannot reach, and on
+                                                          #   a smaller set every row passes while that one tests
+                                                          #   nothing. That absence used to arrive as an ENOENT or as
+                                                          #   `walk.frames[-1]`, both with zero failed assertions and a
+                                                          #   non-zero exit
+node tools/index-check.mjs --stage                        # ... the same run against a server this tool spawns from a
+                                                          #   staged tree on 8251, rather than the one at --url. It is
+                                                          #   the innocent-conditions control for the two mutations
+                                                          #   below: they can only be read against a baseline taken in
+                                                          #   the conditions their failure happened in
+node tools/index-check.mjs --mutate frame-read-is-a-whole-file-read # ... `Capture.readAt` reading the file whole and
+                                                          #     slicing, which is the hazard `server/capture.js` opens by
+                                                          #     naming. Implies --stage, and only the *server's* copy is
+                                                          #     edited - this tool's own imports stay unmutated, so the
+                                                          #     oracle every row compares against cannot move with the
+                                                          #     thing under test. Reddens **four** rows, measured: every
+                                                          #     frame at every offset, because a whole-file read of a
+                                                          #     2.5 GB take fails wherever you aim it. Then the run ends
+                                                          #     early in the victim section, where the same read meets a
+                                                          #     deleted file - `caught, and the count is a floor`, which
+                                                          #     is a different animal from a control that fires nothing
+                                                          #     before it dies
+node tools/index-check.mjs --mutate frame-offsets-truncated-to-32-bits # ... the same hazard as a regression rather than
+                                                          #     a rewrite: a positioned read whose offset wrapped at 32
+                                                          #     bits. This is the sharp one. It serves the frame at
+                                                          #     `offset % 2**31` **with a 200**, so the row can only
+                                                          #     redden through its own byte comparison rather than
+                                                          #     through a status - a mutation that 500s would prove only
+                                                          #     that the check reads status codes. Reddens **two** rows,
+                                                          #     measured: the two picks past the mark, at 2147533537 and
+                                                          #     2502006469. The two below it stay green and are the
+                                                          #     positive twin, because `x % 2**31 === x` under the line
 node tools/registry-check.mjs --url http://localhost:8080 # step 3: one registry, sliders as views
 node tools/registry-check.mjs --mutate mix-ignores-normalisation  # ... and must FAIL mutated
 node tools/registry-check.mjs --mutate rgb-contributes-no-alpha   # ... and must FAIL mutated
@@ -115,13 +149,67 @@ node tools/timeline-check.mjs --take fixture-1g --mutate rain-accumulates   # ..
                                                           #     where playback never would. Its section applies a
                                                           #     rain-raised look of its own, because every other arm
                                                           #     in that file renders the term completely inert
+node tools/timeline-check.mjs --take fixture-1g --mutate warm-skipped       # ... a clip shown the instant it starts, with whatever
+                                                          #     its pair last drew still in it. Both arms lose it
+                                                          #     together, so the entry equality stays green: what
+                                                          #     reddens is the surface-memory reading and the counters
+node tools/timeline-check.mjs --take fixture-1g --mutate warm-without-reset # ... a clip warmed and shown without ever being put
+                                                          #     back to nothing. Removes both clears, because either
+                                                          #     one alone still leaves the pair empty on every path
+                                                          #     this build can reach
+node tools/timeline-check.mjs --take fixture-1g --mutate draw-order-by-array # ... draw order off the array rather than the clip ids,
+                                                          #     so one document composites differently depending on
+                                                          #     the order its clips happen to be listed in
+node tools/timeline-check.mjs --take fixture-1g --mutate look-broadcast     # ... every clip written the first clip's look, which is the
+                                                          #     union `checkProject` used to build and the silent wrong
+                                                          #     render that made a clip's look its own
+node tools/timeline-check.mjs --take fixture-1g --mutate clip-look-reads-selection # ... a clip value read off the selected clip rather
+                                                          #     than the clip being asked about, so one clip's
+                                                          #     persistence decides every clip's pre-roll
+node tools/timeline-check.mjs --take fixture-1g --mutate take-not-shared    # ... every clip opening its own copy of its take, so
+                                                          #     two clips of one take carry two indexes, two caches
+                                                          #     and two decodes of every frame they both want
 node tools/timeline-check.mjs --take fixture-1g --mutate rain-phase-unread  # ... and the same clock written correctly and read by
                                                           #     nothing, which both arms agree about perfectly. It is
                                                           #     the control for the guard rather than for the claim:
                                                           #     what reddens is the row that moves the clock alone
                                                           #     under a still frame
+node tools/timeline-check.mjs --take fixture-1g --mutate warm-reads-the-selection # ... every clip warming on the selected clip's
+                                                          #     persistence rather than on its own, so two clips at
+                                                          #     one instant stop differing in whether they touch the
+                                                          #     take there. Section 8b is the catch
+node tools/timeline-check.mjs --take fixture-1g --mutate cache-is-a-constant # ... a take's cache back to one constant however many
+                                                          #     clips share it, which caps a four-clip pre-roll at 41
+                                                          #     of the 60 frames it computed and an eight-clip one at
+                                                          #     20. Section 8's first two rows are the catch, and it
+                                                          #     fires seven in all
 node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, retime curve, undo
 node tools/keyframe-check.mjs --mutate pose-linear        # ... and must FAIL mutated
+node tools/keyframe-check.mjs --mutate placement-rotation-lerped # ... the rotation between two keys lerped and normalised
+                                                          #     rather than slerped. Reddens three rows measured: the
+                                                          #     two camera-pose arms and 6f's quarter-turn, which reads
+                                                          #     27.7958 against the 30 a slerp gives - a placement and a
+                                                          #     camera pose share `poseAt`, which is what that row says
+node tools/keyframe-check.mjs --mutate clip-keys-on-the-program-clock # ... everything a clip owns read and written at
+                                                          #     program time rather than on the clip's own clock, which
+                                                          #     is the whole of what clip-local comes to. Reddens 9: two
+                                                          #     rows of 6f and seven of 6g - the placement, the keyed
+                                                          #     look either side of a real drag, the lane its diamonds
+                                                          #     draw in, and the key a hand plants from the panel. The
+                                                          #     lane row reads 10.63% off, which is where the edit's
+                                                          #     clock puts those two keys exactly. 6e stays green
+                                                          #     because the clip it keys sits at the head of the edit,
+                                                          #     where an in-point of zero makes the two clocks the same
+                                                          #     number. The equality rows cannot catch it - both arms
+                                                          #     read past the last key and agree - which is why the rows
+                                                          #     that discriminate are written out separately
+node tools/keyframe-check.mjs --mutate every-key-on-the-clip-clock # ... the same boundary from the other side: every
+                                                          #     track on its clip's clock, scope unasked. Reddens exactly
+                                                          #     1, in 6g: the project key stamped at the selected clip's
+                                                          #     in-point. Evaluation is untouched, because the project's
+                                                          #     tracks are written at a hard zero rather than through
+                                                          #     `trackEpoch`, so the panel's own write is the only arm in
+                                                          #     the suite that can see it
 node tools/keyframe-check.mjs --mutate pose-ignores-ease  # ... the camera's handles, which shape when it arrives and never
                                                           #     where it goes. Separable from `pose-linear` on purpose and the
                                                           #     counts are how you tell: 4 rows here against that one's 6, and
@@ -243,8 +331,9 @@ node tools/library-check.mjs --mutate open-ignores-format          # ... the cap
 node tools/library-check.mjs --mutate save-forgets-the-parked-pool # ... a document opened on a machine without one of its
                                                                    #     effects and saved back with that effect's values gone,
                                                                    #     which is the destructive shape parking exists to
-                                                                   #     prevent. Reddens 5: the reopen row, the two value rows,
-                                                                   #     the row asking what else is under the prefix, and the
+                                                                   #     prevent. Reddens 6: the reopen row, the two value rows,
+                                                                   #     the row about which block each key came back in, the
+                                                                   #     row asking what else is under the prefix, and the
                                                                    #     second-trip row. The requires row stays green - this
                                                                    #     mutation keeps the entry - and so do the two load rows,
                                                                    #     because the load half is untouched - read the rows
@@ -260,6 +349,12 @@ node tools/library-check.mjs --mutate completeness-reads-the-values-only # ... t
                                                                    #     on save. Reddens the track-only refusal alone; the
                                                                    #     values-truncation row beside it stays green, because
                                                                    #     that document reaches the loop either way
+node tools/library-check.mjs --mutate park-forgets-its-block        # ... which block each parked key arrived in, which is the
+                                                                   #     one thing a build without the effect cannot work out
+                                                                   #     for itself: the pool's two blocks become one object, so
+                                                                   #     every parked key is saved into both. Reddens the
+                                                                   #     which-block row alone - the value rows read across both
+                                                                   #     blocks and still find everything
 node tools/library-check.mjs --mutate save-forgets-the-parked-requires # ... and the same merge's other half, keeping the values
                                                                    #     and dropping the claim. Reddens the entry row, the
                                                                    #     reopen row, and the second-trip row that stands on it
@@ -288,6 +383,41 @@ node tools/editor-check.mjs --mutate suppress-toggle-is-a-latch --no-render # ..
                                                                        #     way, so a decision about one render becomes a
                                                                        #     decision about the session. Reddens the
                                                                        #     press-it-again row alone
+node tools/editor-check.mjs --mutate head-trim-slides-the-footage      # ... a head trim that moves the clip and lets the footage
+                                                                      #     travel with it, which is a slip and not a trim
+node tools/editor-check.mjs --mutate head-trim-ignores-the-curve       # ... the head edge taking a keyed clip anyway and
+                                                                      #     silently, which is the shape the refusal exists
+                                                                      #     to avoid
+node tools/editor-check.mjs --mutate add-clip-ignores-the-playhead     # ... a clip landing at the head of the edit rather than
+                                                                      #     under the playhead. Two rows: the placement, and
+                                                                      #     the row that says the mark arm has a placement to
+                                                                      #     be about at all
+node tools/editor-check.mjs --mutate marks-ignore-the-placement        # ... a mark drawn through its clip's curve and not
+                                                                      #     through where that clip sits, so two clips of one
+                                                                      #     take draw their marks on top of each other
+node tools/editor-check.mjs --mutate select-row-does-not-select-the-clip # ... a row selection the page never follows, which
+                                                                      #     leaves the panel and the marks on whatever clip
+                                                                      #     the editor opened with
+node tools/editor-check.mjs --mutate project-load-keeps-the-selection  # ... the project loader keeping whichever clip the page
+                                                                      #     happened to be on, which is a guess wearing the
+                                                                      #     shape of an answer. Reddens 22b's "loading a
+                                                                      #     project selects no clip"; the take half is a
+                                                                      #     different door and is untouched by it
+node tools/editor-check.mjs --mutate delete-leaves-nothing-selected    # ... the delete leaving the strip on no clip at all,
+                                                                      #     which greys the panel's clip half over an edit
+                                                                      #     that still has clips to edit. Reddens section
+                                                                      #     22's "puts the strip on whatever took its place"
+node tools/editor-check.mjs --mutate gizmo-renders-from-the-pointer    # ... the clip handles writing and rebuilding the lane
+                                                                      #     stack from the pointer event rather than arming a
+                                                                      #     redraw the animation loop pumps. Reddens the two
+                                                                      #     rebuild rows of 22b: 30 rebuilds for 30 moves,
+                                                                      #     against the 34-for-one this program has shipped
+node tools/editor-check.mjs --mutate preset-writes-every-clip          # ... a preset's cloud half written to every clip rather
+                                                                      #     than to the selected one, which is the whole of
+                                                                      #     what makes a look a clip's own. Reddens 22b's
+                                                                      #     "and on no other clip" 
+node tools/editor-check.mjs --mutate restore-refuses-a-regrown-slot    # ... the synchronous restore refusing a clip slot that
+                                                                      #     grew back, which is what the undo of a delete is
 node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
 node tools/editor-check.mjs --mutate plant-unswept-control --no-render # ... and must FAIL
 node tools/editor-check.mjs --mutate ends-reaches-the-selection --no-render # ... `ends` shaping the selected key instead of the
@@ -423,7 +553,14 @@ node tools/editor-check.mjs --mutate pick-answers-on-nothing --no-render # ... a
 node tools/editor-check.mjs --mutate pick-accepts-a-singleton --no-render # ... and one isolated sensor return treated as a surface
 node tools/editor-check.mjs --mutate pick-rehomes-modified-pan --no-render # ... and a modified left press re-homing the pivot before its pan
 node tools/editor-check.mjs --mutate fit-lands-after-history-begins --no-render # ... the box a take opens with, which is the clip rather than the first thing you can undo
-node tools/editor-check.mjs --mutate fit-outlives-a-restored-project --no-render # ... and a document's own box, which only the ordering still protects
+node tools/editor-check.mjs --mutate fit-outlives-a-restored-project --no-render # ... and a document's own box, which the entry point
+                                                                       #     protects by structure: the fit belongs to opening a
+                                                                       #     bare take and a named project never runs it. The
+                                                                       #     mutation puts one back into the boot chain, and
+                                                                       #     reddens 4 - the planted-box row plus the three reset
+                                                                       #     rows on a page the late fit lands on. The box row
+                                                                       #     reads its planes twice, because a fit is a fetch and
+                                                                       #     one landing after a single read passes on nothing
 node tools/editor-check.mjs --mutate play-button-skips-pausetransport --no-render # ... the one pause on this surface that did
                                                                        #     not take the transport. **NOT caught by this suite**,
                                                                        #     and that is recorded rather than left to be
@@ -486,7 +623,7 @@ node tools/editor-check.mjs --mutate commit-ignores-null-baseline --no-render # 
                                                                        #     interactive with a null baseline. Reddens exactly
                                                                        #     two rows in section 13 - the press being recorded,
                                                                        #     and what it destroyed - so read the rows
-node tools/boot-check.mjs                                 # the post-boot state diff: every control shows the value the registry holds
+node tools/boot-check.mjs                                 # the post-boot state diff: every control shows the value the registry holds for the selected clip
 node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the shipped fault put back - the boot write landing
                                                           #     before the panel generator has filled its Maps, which reaches
                                                           #     no control, throws nothing, and leaves a page whose sliders
@@ -495,6 +632,11 @@ node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the sh
                                                           #     live path and the fault is in the boot write - read the rows
 node tools/boot-check.mjs --mutate effect-rack-shows-every-effect # ... every installed package row shown on a fresh recorder.
                                                           #     Reddens exactly the package-row visibility assertion
+node tools/boot-check.mjs --mutate panel-does-not-follow-the-selection # ... the pre-fix build: the panel written by value writes
+                                                          #     alone, so selecting a clip leaves every clip-scope control
+                                                          #     showing the clip selected before it. Reddens the two
+                                                          #     selection rows and leaves the boot diff green, because that
+                                                          #     one is over a single clip and cannot see this - read the rows
 node tools/effect-check.mjs                               # installing an effect: revisions, the door, the hotload, park and restore
 node tools/effect-check.mjs --mutate temporaries-are-visible # ... the id filter the store lists directories through, widened, so
                                                           #     a crashed install's `<id>.<seq>.tmp` becomes a package `/effects`
@@ -856,7 +998,12 @@ node tools/jobs-check.mjs                                 # step 8: the queue, t
                                                           #   **It wants 8232 as well as 8231**: three arms put a
                                                           #   forwarding proxy between a worker and the server, one
                                                           #   policy at a time on `--proxy-port`, which defaults to
-                                                          #   the port above plus one
+                                                          #   the port above plus one.
+                                                          #   **It stages two takes**: `--source` symlinked in, and a
+                                                          #   60-frame one it synthesises with `make-sample` at start.
+                                                          #   A job carries one hash per clip, and a check with one
+                                                          #   take in its library cannot tell a list from a single
+                                                          #   entry however many rows it writes
 node tools/jobs-check.mjs --mutate claim-ignores-renderer # ... and must FAIL mutated
 node tools/jobs-check.mjs --mutate envelope-takes-the-callers-requires # ... the effects a job needs, taken from a field beside
                                                           #     the document instead of derived from it - a job that can lie
@@ -886,6 +1033,52 @@ node tools/jobs-check.mjs --mutate queue-takes-any-requires-shape # ... the entr
                                                           #     `--no-render`. Reddens **seven** rows - one per shape,
                                                           #     measured - and leaves the twin beside them green, because a
                                                           #     well-formed entry is taken on both builds
+node tools/jobs-check.mjs --mutate enqueue-accepts-any-capture # ... the caller's own capture list never held to the
+                                                          #     content-hash rule, so a take id reaches the queue. Queue
+                                                          #     semantics, so `--no-render`. Reddens **one** row, measured:
+                                                          #     the take-id one. The needle is the *sentence* and not the
+                                                          #     three digits, because the derivation beside it refuses the
+                                                          #     same document for a neighbouring reason - a row asking only
+                                                          #     "was it a 400" passes this mutation
+node tools/jobs-check.mjs --mutate envelope-takes-the-callers-captures # ... the footage a job renders, taken from the
+                                                          #     caller's list instead of derived from the clips - a job that
+                                                          #     can lie about what it is cut on, which is what `job.capture`
+                                                          #     was before it became a list. Queue semantics, so
+                                                          #     `--no-render`. Reddens **two** rows, measured: the two
+                                                          #     disagreement rows, which come back 200. The three positive
+                                                          #     rows stay green, because a caller whose list agrees with its
+                                                          #     document is taken on both builds - the two are not one control
+node tools/jobs-check.mjs --mutate worker-preflights-only-the-first-capture # ... the worker asking its library about the
+                                                          #     first hash a job names rather than every one of them. It needs
+                                                          #     the render block. Reddens **three** rows, measured, across two
+                                                          #     arms. Both builds fail both jobs, so every one of the three is
+                                                          #     about *what was said* and what it cost to say it. The job
+                                                          #     whose second clip is on footage this machine has not got now
+                                                          #     fails from inside the page - `clip c2 was cut on ... and no
+                                                          #     take on this **machine** hashes it` where the worker's own
+                                                          #     sentence says **worker**, one condition wearing two sentences.
+                                                          #     The partial arm loses more: `sourcesFor` throws on the *first*
+                                                          #     clip it cannot open, so a job naming three takes with two of
+                                                          #     them absent comes back naming one, with no count of how much
+                                                          #     of its footage is here - and a browser was launched to say it.
+                                                          #     The read-failure row beside them stays green, because it is
+                                                          #     still not a read that failed
+node tools/jobs-check.mjs --mutate attestation-passes-on-a-mismatch # ... the worker's comparison of what the page opened
+                                                          #     against what the job named. It needs the render block, and its
+                                                          #     fixture is a job the front door cannot make: the queue derives
+                                                          #     the list off the clips, so a record whose list disagrees with
+                                                          #     its own document is planted by hand. Reddens **two** rows,
+                                                          #     measured, and the second is the one that matters - the job
+                                                          #     comes back `done` with a *file written* under it, which is a
+                                                          #     video of footage nobody asked for and nothing in it saying so
+node tools/jobs-check.mjs --mutate worker-reads-any-job-version # ... the worker's gate on the job envelope's own version.
+                                                          #     It needs the render block, and its fixture is a planted
+                                                          #     version 1 record - one capture as a string where this build
+                                                          #     reads a list. Reddens **one** row, measured: the *reason*.
+                                                          #     The state is `failed` on both builds, because a mutated
+                                                          #     worker reaches the missing field a step later and dies on it -
+                                                          #     which is the whole argument for the gate, since that sentence
+                                                          #     is about a field rather than about a job
 node tools/jobs-check.mjs --mutate worker-door-waved-open # ... the worker's door on an effect it has not got. It needs a
                                                           #     render, like `heartbeat-stops-on-first-error`, and it
                                                           #     reddens **one** row: the *reason*. The state row beside it
@@ -905,8 +1098,12 @@ node tools/jobs-check.mjs --mutate preflight-snapshot-is-taken-once # ... the wo
                                                           #     measured: the *second* job's version. The first job's is the
                                                           #     control and stays green, because a worker that read the store
                                                           #     once is right about the first job by construction
-node tools/jobs-check.mjs --mutate preflight-asks-once    # ... the retry budget on that read cut to one attempt, which is
-                                                          #     how it shipped. The read runs after the claim and before the
+node tools/jobs-check.mjs --mutate preflight-asks-once    # ... the retry budget cut to one attempt, which is how it
+                                                          #     shipped. One budget covers both of the worker's store
+                                                          #     readings - the installed effects and the library's takes -
+                                                          #     since a server that cannot be reached is one condition
+                                                          #     however many routes a job needs from it.
+                                                          #     The read runs after the claim and before the
                                                           #     first heartbeat, so one connection reset there failed a
                                                           #     claimed job through `/finish` into a terminal state - and a
                                                           #     worker and its server are two processes with a restart, a
@@ -1440,7 +1637,7 @@ planted sections in — 120 before the review round added the two-surface occlus
 the descent row, the ripple arms and the solo-key guards, taken against a server on the default port with the tool's own planted
 fixtures on its 640x360 canvas. Three times after the rebase rather than once, because a single
 green run of a tool with a known
-intermittent in the suite beside it is not a baseline. Paired with `timeline-check` at 75/0, and
+intermittent in the suite beside it is not a baseline. Paired with `timeline-check` at 128/0, and
 with all 22 mutation runs re-run across the rebase reddening **the same named rows before and
 after** — the names being the claim, since a total can move without a name moving. The load on
 the machine during each of those runs is not recorded, and on this machine another agent's run
@@ -1493,8 +1690,30 @@ across the two `main` revisions this branch was rebased over and it reports 0 of
 looks unmoved by `main` itself, which is context for reading the 120 rather than a second
 control, since a null result cannot demonstrate sensitivity.
 
-**`timeline-check` runs 75 assertions, 0 failed, and its two newest mutations share a section
-brought in for them.** `rain-accumulates` integrates the rain frame to frame instead of computing it from program
+**`timeline-check` runs 128 assertions, 0 failed.** Section 7 is 53 of them and covers more than
+one clip: the composite, the cut, and what a clip enters holding. Its fixture is five clips over
+two takes, listed in an order that is deliberately not the order of their ids, and every clip in
+it is uncomfortable on purpose - a two-second half-speed head, a head shorter than the look asks
+for, one entering mid-hold, one whose footage starts at source 0, and one placed to stand on the
+same source frame as another clip of the same take. Four of them overlap at 6.5s, which is the
+budget `tools/layering-ab.mjs` measures against.
+
+Six mutations belong to it and each fires: `warm-skipped` **3 rows**, `warm-without-reset` **8**,
+`draw-order-by-array` **3**, `take-not-shared` **2**, `look-broadcast` **6** and
+`clip-look-reads-selection` **8**. Three things about that set are written up in
+`docs/instruments.md` and are worth knowing before reading a green run: the entry-equality rows
+cannot see `warm-skipped` at all, because both arms lose the warm together and agree while both
+being wrong, so what catches it is a surface-memory reading taken across two clips standing on one
+source frame; `warm-without-reset` had to be widened from one call site to two before it was a
+mutation of anything; and the additive half of the draw order had no image arm at all until a
+clip's look became its own.
+
+**And it has an unresolved intermittent that ends a run with zero failed assertions** - about one
+run in three dies with `Resulting promise was garbage collected`. Its entry in
+`docs/instruments.md` carries the measurement and the dead end. A run that ends that way did not
+run: re-run it rather than reading its count.
+
+**Its two rain mutations share a section brought in for them.** `rain-accumulates` integrates the rain frame to frame instead of computing it from program
 time, so a seek arrives carrying whatever the scrub built rather than the frame playback would
 have drawn — which is this tool's whole subject. It could not be hung on any existing arm,
 because the rain defaults to 0 and nothing else in the file raises it, so every other section
@@ -1545,6 +1764,17 @@ fixes — a tool with no crash handler still exits non-zero on a throw with noth
 **Measured after both fixes: 75 assertions, 0 failed, twice**, against a server on 8505 with the
 sample capture, `stage 640x360` on both runs.
 
+**Section 7 moved every one of those totals and none of the names.** With it the tool runs 124
+assertions, and the mutations that were counted against 75 redden more because there are now more
+rows about the same thing to redden: `preroll-constant` goes from 8 to **20** and `preroll-none`
+from 13 to **21**, each one run against `fixture-1g` - the earlier figures are from a tree without
+section 7 in it, so the pairs are not two measurements of one thing. The new four are
+`warm-skipped` **4**, `warm-without-reset` **9**, `draw-order-by-array` **3** and `take-not-shared`
+**2**. One census pass recorded `draw-order-by-array` at zero and the same invocation then
+reproduced 3 three times running, with the tail of the zero run not captured - which is the shape
+the first intermittent above wears exactly, so it is written down as one rather than as a mutation
+that is sometimes missed.
+
 **`keyframe-check`** runs its cheapest claim first, on a 60-second budget, and stops the run if
 it fails. That is not ordering by cost: an evaluator that announces its writes schedules a seek
 per frame, each of which renders a pre-roll which evaluates, so the page never answers and
@@ -1562,6 +1792,14 @@ turns those clicks into thirty-second timeouts - which arrive as a crash with **
 assertions**, the shape this repo has twice recorded being written down as a bug found. If you
 touch either end, run `keyframe-check`; `editor-check` section 13c is the row that grades the
 mechanism itself.
+
+**Section 6g presses two diamonds and asks first whether it can.** It keys `exposure` and `bloom`
+at one playhead over a clip that does not start at zero, which is the pair that says the boundary
+is scope: one lands at the playhead less the clip's in-point and the other at the playhead. Both
+clicks stand on the same group-reveal the paragraph above is about, so rather than inherit that
+silence it queries each control for existing, being enabled and having an `offsetParent`, and
+files its four rows red naming which one was unreachable. A thirty-second timeout carrying no
+failed assertion becomes a row, which is the difference this file keeps recording.
 
 **It was three rows red on this rig, in section 6b, and it is 139/0 now — the cause was the
 stage and not the drag.** The readings were `dx 0.000 against 1.068, dz 0.000 against -0.712`,

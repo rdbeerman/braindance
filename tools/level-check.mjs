@@ -35,8 +35,8 @@ const MUTATIONS = {
   // control for section 1 rather than for any comparison, because every comparison below is
   // satisfied by a build that draws the same picture twice.
   'tilt-ignored': { file: 'web/main.js', edits: [[
-    '  cloud.quaternion.copy(worldTilt);',
-    '  cloud.quaternion.identity();',
+    '  level.quaternion.copy(worldTilt);',
+    '  level.quaternion.identity();',
   ]] },
   // The crop moves to the far side of the levelling, so the six faces stop being a place in the
   // room. Section 2's identity sees it: the surviving set changes, and no camera move can put a

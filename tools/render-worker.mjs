@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { JOB_VERSION } from '../server/jobs.js';
 
 const argv = process.argv.slice(2);
 const flag = (name, dflt = null) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : dflt);
@@ -88,6 +89,46 @@ try {
   const renderer = await page.evaluate(() => globalThis.__kinect.export.rendererClass());
 
   /**
+   * One of the queue server's own listings, read and held to a shape, or a sentence saying the
+   * read failed. Both readings below go through here, so a store that cannot be reached says so
+   * in one voice however many routes a job needs.
+   *
+   * A read that did not work is never an empty store: `.json()` on a 500 parses `{"error":"..."}`
+   * perfectly well and `?? []` read that as nothing installed, so the effects gate below refused
+   * the job naming a package the machine has. Status and shape are both checked, and anything
+   * short of a listing throws.
+   *
+   * Retried, because this runs inside the claim, so a transport failure here is a job going
+   * terminal as `failed`. Four attempts about ten seconds of trying, comfortably inside the queue's
+   * two-minute silence window, with a timeout per attempt for the reason the heartbeat has one.
+   *
+   * Its own sentence, and the one thing it must never be is either of the two sentences below -
+   * about a package this worker has not got, or about footage it has not got. Those three send
+   * whoever reads the queue to three different machines.
+   */
+  const STORE_READ_TRIES = 4;
+  const STORE_READ_GAP_MS = 2500;
+  const readStore = async (path, what, held) => {
+    let last = null;
+    for (let attempt = 0; attempt < STORE_READ_TRIES; attempt++) {
+      if (attempt) await new Promise((r) => { setTimeout(r, STORE_READ_GAP_MS); });
+      try {
+        const res = await fetch(`${URL_}${path}`, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) throw new Error(`it answered ${res.status}`);
+        return held(await res.json());
+      } catch (err) {
+        last = err;
+      }
+    }
+    throw new Error(
+      `this worker could not read ${URL_}${path} in ${STORE_READ_TRIES} attempts `
+      + `${STORE_READ_GAP_MS / 1000}s apart, so it does not know ${what} and will `
+      + `not guess: ${last?.message ?? 'no attempt reported why'}. This is a failure to read the queue's own server `
+      + 'rather than anything about the job, the look it names or the footage it is cut on',
+    );
+  };
+
+  /**
    * The effect packages this worker's server holds, read once per job - off `/effects`, which is
    * the route the registry itself assembles from.
    *
@@ -95,49 +136,42 @@ try {
    * a running server, and a package retuned mid-drain would have the skew line quote a build that
    * was replaced an hour ago into the log somebody reads to decide whether a file is a render of
    * what they asked for.
-   *
-   * A read that did not work is never an empty store: `.json()` on a 500 parses `{"error":"..."}`
-   * perfectly well and `?? []` read that as nothing installed, so the gate below refused the job
-   * naming a package the machine has. Status and shape are both checked, and anything short of
-   * a listing throws.
-   *
-   * Retried, because this runs inside the claim, so a transport failure here is a job going
-   * terminal as `failed`. Four attempts about ten seconds of trying, comfortably inside the queue's
-   * two-minute silence window, with a timeout per attempt for the reason the heartbeat has one.
    */
-  const EFFECT_READ_TRIES = 4;
-  const EFFECT_READ_GAP_MS = 2500;
-  const readInstalledEffects = async () => {
-    let last = null;
-    for (let attempt = 0; attempt < EFFECT_READ_TRIES; attempt++) {
-      if (attempt) await new Promise((r) => { setTimeout(r, EFFECT_READ_GAP_MS); });
-      try {
-        const res = await fetch(`${URL_}/effects`, { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) throw new Error(`it answered ${res.status}`);
-        const body = await res.json();
-        if (!body || !Array.isArray(body.effects)) {
-          throw new Error('it answered a body that is not a list of installed packages');
-        }
-        for (const e of body.effects) {
-          if (!e || typeof e.id !== 'string') throw new Error(`it listed the entry ${JSON.stringify(e)}, which names no id`);
-        }
-        return {
-          installed: new Set(body.effects.map((e) => e.id)),
-          versions: new Map(body.effects.map((e) => [e.id, e.version])),
-        };
-      } catch (err) {
-        last = err;
+  const readInstalledEffects = () => readStore(
+    '/effects', 'which effect packages this machine holds',
+    (body) => {
+      if (!body || !Array.isArray(body.effects)) {
+        throw new Error('it answered a body that is not a list of installed packages');
       }
-    }
-    // Its own sentence, and the one thing it must never be is the sentence below about a package
-    // this worker has not got: the two send whoever reads the queue to two different machines.
-    throw new Error(
-      `this worker could not read ${URL_}/effects in ${EFFECT_READ_TRIES} attempts `
-      + `${EFFECT_READ_GAP_MS / 1000}s apart, so it does not know which effect packages this machine holds and will `
-      + `not guess: ${last?.message ?? 'no attempt reported why'}. This is a failure to read the queue's own server `
-      + 'rather than anything about the job or the look it names',
-    );
-  };
+      for (const e of body.effects) {
+        if (!e || typeof e.id !== 'string') throw new Error(`it listed the entry ${JSON.stringify(e)}, which names no id`);
+      }
+      return {
+        installed: new Set(body.effects.map((e) => e.id)),
+        versions: new Map(body.effects.map((e) => [e.id, e.version])),
+      };
+    },
+  );
+
+  /** The footage this worker's server holds, as the take id behind each content hash. */
+  const readLibraryTakes = () => readStore(
+    '/library/takes', 'which footage this machine holds',
+    (body) => {
+      if (!body || !Array.isArray(body.takes)) {
+        throw new Error('it answered a body that is not a list of takes');
+      }
+      const byHash = new Map();
+      for (const t of body.takes) {
+        if (!t || typeof t.id !== 'string' || typeof t.hash !== 'string') {
+          throw new Error(`it listed the entry ${JSON.stringify(t)}, which names no id and hash`);
+        }
+        // One take's bytes under two names is one entry: either id fetches the same frames, and
+        // the first is the one the listing puts first.
+        if (!byHash.has(t.hash)) byHash.set(t.hash, t.id);
+      }
+      return byHash;
+    },
+  );
 
   /**
    * Whether this worker can render a job at all, answered off the job envelope before a page is
@@ -153,21 +187,29 @@ try {
   };
 
   /**
-   * A job names its capture by content hash and the page opens a take by id, so this is where one
-   * becomes the other. By hash and never by id: an id is a filename, two machines can hold
-   * different footage under the same one, and a lookup by id would render whatever happened to be
-   * called that and look like it worked.
+   * The take id behind each hash a job names, in the order the job names them. By hash and never
+   * by id: an id is a filename, two machines can hold different footage under the same one, and a
+   * lookup by id would render whatever happened to be called that and look like it worked.
+   *
+   * Every hash and not the first: `sourcesFor` refuses the same document from the other end, so a
+   * job whose second clip is on footage this machine lacks would otherwise fail in the page's
+   * sentence where a job whose first clip is fails in this one - two sentences for one condition.
    */
-  const takeForHash = async (hash) => {
-    const { takes = [] } = await (await fetch(`${URL_}/library/takes`)).json();
-    const match = takes.find((t) => t.hash === hash);
-    if (!match) {
+  const takesForCaptures = async (captures) => {
+    const byHash = await readLibraryTakes();
+    const missing = [...new Set(captures)].filter((hash) => !byHash.has(hash));
+    if (missing.length) {
+      // Every hash that is missing, counted against every hash the job names: a partial
+      // resolution is the ordinary case for a composite, and "some of this footage is not here"
+      // is a different errand from "none of it is".
       throw new Error(
-        `no take on this worker hashes ${hash.slice(0, 22)}…, so the footage this job was authored `
-        + `against is not here - ${takes.length} take(s) present and none of them is it`,
+        `no take on this worker hashes ${missing.map((h) => `${h.slice(0, 22)}…`).join(', ')}, so `
+        + 'the footage this job was authored against is not here - '
+        + `${byHash.size} take(s) present, and ${missing.length} of the ${new Set(captures).size} `
+        + `this job names ${missing.length === 1 ? 'is' : 'are'} missing`,
       );
     }
-    return match.id;
+    return captures.map((hash) => byHash.get(hash));
   };
   if (/swiftshader|software|llvmpipe/i.test(renderer)) {
     throw new Error(`this browser is on a software rasteriser (${renderer}), so anything it rendered would be pinned to a class nothing else can reproduce`);
@@ -201,6 +243,17 @@ try {
     try {
       // Inside the try, so a server that cannot be read is this job coming back `failed` naming the
       // read rather than the worker dying before its first claim.
+      //
+      // The envelope first, before a field is read out of it: a record from another version names
+      // its footage somewhere else, and reading it would fail in a sentence about a field that is
+      // not there rather than about a job this build cannot run.
+      if (job.version !== JOB_VERSION) {
+        throw new Error(
+          `job ${job.id} is envelope version ${JSON.stringify(job.version)} and this worker runs `
+          + `version ${JOB_VERSION}: this repo ships no conversion, so it is refused rather than `
+          + 'rendered on a guess about which field holds the footage',
+        );
+      }
       const { installed, versions } = await readInstalledEffects();
       const unresolved = cannotResolve(job, installed);
       if (unresolved.length) {
@@ -223,19 +276,42 @@ try {
       }
       // Reopened per job rather than once, because two jobs in a queue are two edits and nothing
       // says they are against the same footage.
-      const takeId = await takeForHash(job.capture);
-      await page.goto(`${URL_}/edit?take=${encodeURIComponent(takeId)}`, { waitUntil: 'load' });
-      await page.waitForFunction(() => Boolean(globalThis.__kinect?.timeline?.transport()), null, { timeout: 60000 });
+      const takeIds = await takesForCaptures(job.captures);
+      // The editor has no entry that comes up on nothing - `/edit` with neither a take nor a
+      // project redirects to the gallery - so it is brought up on the first clip's footage and the
+      // project opens the rest. `openTakes` is keyed by id, so the second open is not a second
+      // fetch of that index.
+      await page.goto(`${URL_}/edit?take=${encodeURIComponent(takeIds[0])}`, { waitUntil: 'load' });
+      // `opened()` rather than the transport: the transport exists a moment before `openTake` has
+      // finished fitting the crop box, and a fit still in flight lands on the restored document.
+      await page.waitForFunction(() => globalThis.__kinect?.library?.opened() === true, null, { timeout: 60000 });
       errors.length = 0;
 
-      // Attest the footage and renderer before rendering: the capture is named by content hash, and
-      // the renderer class is pinned on the claim.
-      const [actualHash, actualRenderer] = await page.evaluate(() => [
-        globalThis.__kinect.library.takeHash(),
+      // The project travels in the job rather than by name: a name would resolve to whatever is in
+      // the store when the worker gets round to it, which is the opposite of reproducing an edit.
+      // `loadProject` and not `restoreProject`: the second is the synchronous door and refuses a
+      // clip whose take is not already open, because opening footage is a fetch. This one resolves
+      // each clip's take by hash and opens it.
+      await page.evaluate(async (j) => {
+        await globalThis.__kinect.library.loadProject(j.id, j.project);
+      }, job);
+
+      // Attest the footage and renderer before rendering: the job names its footage by content
+      // hash, and the renderer class is pinned on the claim.
+      const [opened, actualRenderer] = await page.evaluate(() => [
+        globalThis.__kinect.library.serialiseProjectBody().clips.map((c) => c.take?.hash ?? null),
         globalThis.__kinect.export.rendererClass(),
       ]);
-      if (actualHash !== job.capture) {
-        throw new Error(`the opened take hashes ${actualHash.slice(0, 22)}… but the job expects ${job.capture.slice(0, 22)}…`);
+      // Clip by clip and in order, never as a set: two clips whose footage is swapped hold the same
+      // hashes between them and are a different edit, and a set would call that render the one
+      // that was asked for. What is read is what the page opened rather than what the document
+      // claimed - `clip.take` is written only by `adoptSource`, off the index it actually opened.
+      const short = (h) => (typeof h === 'string' ? `${h.slice(0, 22)}…` : 'no take');
+      if (opened.length !== job.captures.length || opened.some((h, at) => h !== job.captures[at])) {
+        throw new Error(
+          `the page opened ${opened.map(short).join(', ')} but the job names `
+          + `${job.captures.map(short).join(', ')}, so this render would not be the edit the job asks for`,
+        );
       }
       if (actualRenderer !== renderer) {
         throw new Error(`the rendering browser is ${actualRenderer} but the claim was made on ${renderer}`);
@@ -275,23 +351,17 @@ try {
       beat.unref?.();
       beatOnce();
 
-      // The project travels in the job rather than by name: a name would resolve to whatever is in
-      // the store when the worker gets round to it, which is the opposite of reproducing an edit.
       const result = await page.evaluate(async (j) => {
-        // `restoreProject` rather than `loadProject`: the second fetches by name from the store,
-        // and a job carries its document precisely so it does not depend on what the store holds.
-        globalThis.__kinect.library.restoreProject(j.project);
         // Through `applyDeliverable`, which is the door, rather than `setActiveDeliverable` past
         // it: the bare assignment skips the version gate and the refusal of a stored size belonging
         // to another shape. Older jobs carry explicit width/height/fps/codec, so those override
         // when no deliverable is present.
         if (j.deliverable) globalThis.__kinect.library.applyDeliverable(j.deliverable);
-        // Settled before exporting, or the restore's own repaint lands inside the export's first
-        // seek: `ExportTransport` throws on any program position reaching the sink more than once,
-        // and it showed up as `the render at 0.000000s reached the export 2 times` on some runs and
-        // not others. Then a seek, because `restoreProject` leaves the transport where it was
-        // rather than where the restored document says - awaiting `settled()` alone
-        // narrowed nothing.
+        // Settled before exporting, or the deliverable's own repaint lands inside the export's
+        // first seek: `ExportTransport` throws on any program position reaching the sink more than
+        // once, and it showed up as `the render at 0.000000s reached the export 2 times` on some
+        // runs and not others. Then a seek, because the transport is left where it was rather than
+        // where the loaded document says - awaiting `settled()` alone narrowed nothing.
         const transport = globalThis.__kinect.timeline.transport();
         await transport.seek(transport.programSec);
         await globalThis.__kinect.timeline.settled();

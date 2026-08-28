@@ -12,6 +12,7 @@ import { connect } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROJECT_VERSION } from '../web/format.js';
+import { JOB_VERSION } from '../server/jobs.js';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -39,8 +40,31 @@ const MUTATIONS = {
     '        return { job: null, blocked: [], queued: 0 };',
   ]] },
   'enqueue-accepts-any-capture': { file: 'server/jobs.js', edits: [[
-    "    if (typeof capture !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(capture)) {",
+    '    if (!Array.isArray(captures) || captures.length === 0\n'
+    + "      || !captures.every((h) => typeof h === 'string' && CONTENT_HASH.test(h))) {",
     '    if (false) {',
+  ]] },
+  'envelope-takes-the-callers-captures': { file: 'server/jobs.js', edits: [
+    [
+      '    if (captures.length !== cut.length || captures.some((hash, at) => hash !== cut[at])) {',
+      '    if (false) {',
+    ],
+    [
+      '        captures: [...cut],',
+      '        captures: [...captures],',
+    ],
+  ] },
+  'worker-reads-any-job-version': { file: 'tools/render-worker.mjs', edits: [[
+    '      if (job.version !== JOB_VERSION) {',
+    '      if (false) {',
+  ]] },
+  'worker-preflights-only-the-first-capture': { file: 'tools/render-worker.mjs', edits: [[
+    '    const missing = [...new Set(captures)].filter((hash) => !byHash.has(hash));',
+    '    const missing = [captures[0]].filter((hash) => !byHash.has(hash));',
+  ]] },
+  'attestation-passes-on-a-mismatch': { file: 'tools/render-worker.mjs', edits: [[
+    '      if (opened.length !== job.captures.length || opened.some((h, at) => h !== job.captures[at])) {',
+    '      if (false) {',
   ]] },
   'finish-accepts-any-state': { file: 'server/jobs.js', edits: [[
     "      if (isTerminal(job.state)) {\n        throw new Error(`job ${id} is already ${job.state}, so this report is from a worker that lost a race`);\n      }\n      if (job.state !== 'running') {",
@@ -131,37 +155,42 @@ const MUTATIONS = {
     ],
   ] },
   'preflight-snapshot-is-taken-once': { file: 'tools/render-worker.mjs', edits: [[
-    '  const readInstalledEffects = async () => {\n',
+    "  const readInstalledEffects = () => readStore(\n    '/effects',",
     '  let snapshotOnce = null;\n'
     + '  const readInstalledEffects = async () => {\n'
     + '    if (!snapshotOnce) snapshotOnce = await readEffectsNow();\n'
     + '    return snapshotOnce;\n'
     + '  };\n'
-    + '  const readEffectsNow = async () => {\n',
+    + "  const readEffectsNow = () => readStore(\n    '/effects',",
   ]] },
   'preflight-asks-once': { file: 'tools/render-worker.mjs', edits: [[
-    '  const EFFECT_READ_TRIES = 4;', '  const EFFECT_READ_TRIES = 1;',
+    '  const STORE_READ_TRIES = 4;', '  const STORE_READ_TRIES = 1;',
   ]] },
-  'preflight-reads-a-failure-as-an-empty-store': { file: 'tools/render-worker.mjs', edits: [[
-    '        const res = await fetch(`${URL_}/effects`, { signal: AbortSignal.timeout(5000) });\n'
-    + '        if (!res.ok) throw new Error(`it answered ${res.status}`);\n'
-    + '        const body = await res.json();\n'
-    + '        if (!body || !Array.isArray(body.effects)) {\n'
-    + "          throw new Error('it answered a body that is not a list of installed packages');\n"
-    + '        }\n'
-    + '        for (const e of body.effects) {\n'
-    + '          if (!e || typeof e.id !== \'string\') throw new Error(`it listed the entry ${JSON.stringify(e)}, which names no id`);\n'
-    + '        }\n'
-    + '        return {\n'
-    + '          installed: new Set(body.effects.map((e) => e.id)),\n'
-    + '          versions: new Map(body.effects.map((e) => [e.id, e.version])),\n'
-    + '        };',
-    '        const listing = (await (await fetch(`${URL_}/effects`)).json()).effects ?? [];\n'
-    + '        return {\n'
-    + '          installed: new Set(listing.map((e) => e.id)),\n'
-    + '          versions: new Map(listing.map((e) => [e.id, e.version])),\n'
-    + '        };',
-  ]] },
+  'preflight-reads-a-failure-as-an-empty-store': { file: 'tools/render-worker.mjs', edits: [
+    [
+      '        const res = await fetch(`${URL_}${path}`, { signal: AbortSignal.timeout(5000) });\n'
+      + '        if (!res.ok) throw new Error(`it answered ${res.status}`);\n'
+      + '        return held(await res.json());',
+      '        return held(await (await fetch(`${URL_}${path}`)).json());',
+    ],
+    [
+      '      if (!body || !Array.isArray(body.effects)) {\n'
+      + "        throw new Error('it answered a body that is not a list of installed packages');\n"
+      + '      }\n'
+      + '      for (const e of body.effects) {\n'
+      + '        if (!e || typeof e.id !== \'string\') throw new Error(`it listed the entry ${JSON.stringify(e)}, which names no id`);\n'
+      + '      }\n'
+      + '      return {\n'
+      + '        installed: new Set(body.effects.map((e) => e.id)),\n'
+      + '        versions: new Map(body.effects.map((e) => [e.id, e.version])),\n'
+      + '      };',
+      '      const listing = body.effects ?? [];\n'
+      + '      return {\n'
+      + '        installed: new Set(listing.map((e) => e.id)),\n'
+      + '        versions: new Map(listing.map((e) => [e.id, e.version])),\n'
+      + '      };',
+    ],
+  ] },
   'heartbeat-stops-on-first-error': { file: 'tools/render-worker.mjs', edits: [[
     '      const beatOnce = () => { heartbeat().catch((err) => missedBeat(err.message)); };',
     '      const beatOnce = () => { heartbeat().catch((err) => { stopBeating(); console.error(`[worker] ${job.id} heartbeat: ${err.message}`); }); };',
@@ -229,6 +258,13 @@ if (!existsSync(SAMPLE)) {
   process.exit(2);
 }
 symlinkSync(SAMPLE, join(caps, 'sample.knct'));
+// A second take, so a two-clip job has two hashes to be cut on. Synthesised rather than declared
+// as a fixture: a job carries one hash per clip, and a check with one take in its library cannot
+// tell a list from a single entry however many rows it writes. Short on purpose - the two-clip
+// render row below is about the list, and the frame count is the row above's.
+const SECOND = join(caps, 'second.knct');
+execFileSync(process.execPath, [join(REPO, 'tools/make-sample.mjs'), SECOND, '--frames', '60'],
+  { stdio: 'ignore' });
 
 const servers = [];
 const proxies = [];
@@ -267,6 +303,9 @@ const post = async (path, body, headers = {}) => {
 const get = async (path) => (await fetch(URL_ + path)).json();
 
 const HASH_A = `sha256:${'a'.repeat(64)}`;
+// A second hash nothing on disk carries, so a row about two captures is about the list rather
+// than about one entry written twice.
+const HASH_B = `sha256:${'b'.repeat(64)}`;
 // A document `restoreProject` accepts field for field, with all five readings spelled out
 // because the loader refuses a project that names fewer than five. A named package is complete,
 // including the two quiet parameters under each master, because the loader refuses half a package.
@@ -280,7 +319,14 @@ const PROJECT = {
   // The three package readings are values even at their inert defaults. The queue derives this
   // envelope from every package namespace the document names, so the baseline must claim them.
   requires: READING_REQUIRES,
-  look: {
+  // Every one of these writes the cloud, so they are the clip's block and not the project's.
+  clips: [{
+    id: 'c1',
+    take: { id: 'a-take', hash: HASH_A },
+    start: 0,
+    length: null,
+    retime: { rate: 1, keys: [] },
+    appliedPreset: null,
     params: {
       readRgb: 1,
       readDepth: 0,
@@ -295,56 +341,82 @@ const PROJECT = {
       'blackwall.scan': 0,
     },
     tracks: {},
-  },
-  composition: {
-    retime: { rate: 1, keys: [] },
-    camera: [],
-  },
+  }],
+  look: { params: {}, tracks: {} },
+  composition: { camera: [] },
   // 16:9 throughout, since `restoreProject` refuses a shape `EXPORT_SIZES` has no resolution
   // for and `exportClip` skips its own check whenever a width and height are supplied.
   outputSize: '1280x720',
-  appliedPreset: null,
 };
+
+/**
+ * One clip's block, edited. The readings and every package parameter here bind the cloud, so a
+ * document adding one adds it to the clip rather than beside it.
+ */
+const withClipLook = (project, params, tracks = {}) => ({
+  ...project,
+  clips: [{
+    ...project.clips[0],
+    params: { ...project.clips[0].params, ...params },
+    tracks: { ...project.clips[0].tracks, ...tracks },
+  }],
+});
+
+/**
+ * The same document, cut on the footage a job names: one clip per hash, in that order. The page
+ * joins a clip to a take on the hash, and the queue derives the job's list back off these, so a
+ * document and the list have to be built from one place or every row is about the fixture.
+ *
+ * A clip beyond the ones the document declares is a copy of the last, which is only reached by a
+ * caller naming more captures than its project has clips - and that is a job the queue refuses.
+ */
+const cutOn = (project, hashes) => ({
+  ...project,
+  clips: hashes.map((hash, at) => {
+    const from = project.clips[Math.min(at, project.clips.length - 1)];
+    return { ...from, id: `c${at + 1}`, take: { ...from.take, hash } };
+  }),
+});
+
+/** Two clips cut end to end, one on each take, which is the shape a one-clip job cannot fake. */
+const twoClips = (hashA, hashB) => ({
+  ...PROJECT,
+  clips: [
+    { ...PROJECT.clips[0], id: 'c1', take: { id: 'first', hash: hashA }, start: 0, length: 0.5 },
+    { ...PROJECT.clips[0], id: 'c2', take: { id: 'second', hash: hashB }, start: 0.5, length: 0.5 },
+  ],
+});
 // The same project under an effect nothing here ships, which stages a document from a machine
 // carrying something this one lacks. Loadable rather than broken, because the worker's door is
 // about a job it cannot draw whole.
-const PARKED_PROJECT = {
-  ...PROJECT,
-  requires: [...READING_REQUIRES, { id: 'sparkle', version: '1.0.0' }],
-  look: {
-    params: {
-      ...PROJECT.look.params,
-      'sparkle.amount': 0.6,
-      'sparkle.size': 3.25,
-      'sparkle.hue': 210,
-      'sparkle.jitter': 0.125,
-    },
-    tracks: {
-      'sparkle.amount': [
-        { t: 0, value: 0, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
-        { t: 2, value: 0.9, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
-      ],
-      'sparkle.hue': [{ t: 0.5, value: 10, easeOut: [[0.1, 0.2]], easeIn: [[0.3, 0.4]] }],
-    },
+const PARKED_PROJECT = withClipLook(
+  { ...PROJECT, requires: [...READING_REQUIRES, { id: 'sparkle', version: '1.0.0' }] },
+  {
+    'sparkle.amount': 0.6,
+    'sparkle.size': 3.25,
+    'sparkle.hue': 210,
+    'sparkle.jitter': 0.125,
   },
-};
+  {
+    'sparkle.amount': [
+      { t: 0, value: 0, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+      { t: 2, value: 0.9, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
+    ],
+    'sparkle.hue': [{ t: 0.5, value: 10, easeOut: [[0.1, 0.2]], easeIn: [[0.3, 0.4]] }],
+  },
+);
 
 // The same project over an effect this build does ship, at a version it does not. Every one of
 // rain's four parameters is named, because a document naming a subset is one the loader refuses.
-const SKEW_PROJECT = {
-  ...PROJECT,
-  requires: [...READING_REQUIRES, { id: 'rain', version: '9.9.9' }],
-  look: {
-    params: {
-      ...PROJECT.look.params,
-      'rain.amount': 0.4,
-      'rain.speed': 0.55,
-      'rain.span': 1.3,
-      'rain.trail': 0.45,
-    },
-    tracks: {},
+const SKEW_PROJECT = withClipLook(
+  { ...PROJECT, requires: [...READING_REQUIRES, { id: 'rain', version: '9.9.9' }] },
+  {
+    'rain.amount': 0.4,
+    'rain.speed': 0.55,
+    'rain.span': 1.3,
+    'rain.trail': 0.45,
   },
-};
+);
 
 // Version 2 and no `outputFps`: the rate moved onto the project, so a deliverable naming one is
 // a version 1 document and `applyDeliverable` refuses it.
@@ -358,9 +430,17 @@ const DELIVERABLE = {
 // Unique per call. As the constant `check` every later enqueue got a 400 for a name another
 // live job had reserved, and a refusal arriving for a neighbouring reason reads like this one.
 let outputSeq = 0;
-const enqueue = (over = {}) => post('/jobs', {
-  project: PROJECT, deliverable: DELIVERABLE, capture: HASH_A, output: `check${++outputSeq}`, width: 640, height: 360, fps: 30, ...over,
+const jobBody = (over = {}) => ({
+  project: PROJECT, deliverable: DELIVERABLE, captures: [HASH_A], output: `check${++outputSeq}`, width: 640, height: 360, fps: 30, ...over,
 });
+// The clips are cut on the footage the job names, because the worker opens this document and the
+// queue derives the job's list back off it. A row about a job disagreeing with its own document
+// builds its body from `jobBody` and posts it, since this helper's whole job is to agree.
+const enqueue = (over = {}) => {
+  const body = jobBody(over);
+  if (body.project?.clips && Array.isArray(body.captures)) body.project = cutOn(body.project, body.captures);
+  return post('/jobs', body);
+};
 const refusedBecause = (res, needle) => res.status === 400 && String(res.body.error ?? '').includes(needle);
 
 /**
@@ -442,10 +522,43 @@ try {
   check(good.status === 200 && good.body.state === 'queued', 'a job with a project body and a content-hashed capture is accepted',
     `${good.status} ${good.body.id ?? good.body.error}`);
   check(good.body.renderer === null, 'and it starts unpinned, because the first job has no class to reproduce yet');
-  const byId = await enqueue({ capture: 'sample' });
-  check(refusedBecause(byId, 'content hash'),
+  const byId = await enqueue({ captures: ['sample'] });
+  // The sentence and not the three digits: the derivation below refuses this document too, for a
+  // neighbouring reason, so a row asking only "was it a 400" would pass a queue that never held
+  // the caller's own list to the rule at all.
+  check(refusedBecause(byId, 'names its captures by content hash'),
     'a capture named by take id is refused - an id is a filename and two machines can hold different footage under one',
     `${byId.status} ${(byId.body.error ?? '').slice(0, 60)}`);
+
+  // The list is derived from the clips rather than believed, so a caller and its own document
+  // disagreeing is answered here rather than a browser and a minute of GPU later.
+  const twoTake = await enqueue({ captures: [HASH_A, HASH_B], project: twoClips(HASH_A, HASH_B) });
+  check(twoTake.status === 200
+    && JSON.stringify(twoTake.body.captures) === JSON.stringify([HASH_A, HASH_B]),
+  'a two-clip project is queued naming both captures, in project order - a job used to name exactly one and a composite could not be rendered at all',
+  `${twoTake.status} ${JSON.stringify(twoTake.body.captures ?? twoTake.body.error).slice(0, 80)}`);
+  const swapped = await enqueue({ captures: [HASH_B, HASH_A], project: twoClips(HASH_B, HASH_A) });
+  check(JSON.stringify(swapped.body.captures) === JSON.stringify([HASH_B, HASH_A]),
+    '  and the same two clips with their footage swapped is a different list rather than the same set, because it is a different edit',
+    JSON.stringify(swapped.body.captures ?? swapped.body.error).slice(0, 80));
+  const twice = await enqueue({ captures: [HASH_A, HASH_A], project: twoClips(HASH_A, HASH_A) });
+  check(JSON.stringify(twice.body.captures) === JSON.stringify([HASH_A, HASH_A]),
+    '  and two clips of one take name it twice, one entry per clip, which a set could not tell from a one-clip job',
+    JSON.stringify(twice.body.captures ?? twice.body.error).slice(0, 80));
+  const disagrees = await post('/jobs', jobBody({ captures: [HASH_B] }));
+  check(refusedBecause(disagrees, 'disagrees with its own project'),
+    'a job naming footage its own clips are not cut on is refused by name, rather than recorded and discovered inside a render',
+    `${disagrees.status} ${(disagrees.body.error ?? '').slice(0, 90)}`);
+  const tooMany = await post('/jobs', jobBody({ captures: [HASH_A, HASH_B] }));
+  check(refusedBecause(tooMany, 'disagrees with its own project'),
+    '  and so is one naming two captures for a document holding one clip, because the list is one entry per clip',
+    `${tooMany.status} ${(tooMany.body.error ?? '').slice(0, 90)}`);
+  const takeless = await post('/jobs', jobBody({
+    project: { ...PROJECT, clips: [{ ...PROJECT.clips[0], take: null }] },
+  }));
+  check(refusedBecause(takeless, 'naming no content hash'),
+    '  and a clip naming no take at all, which the page otherwise refuses only once the browser is open',
+    `${takeless.status} ${(takeless.body.error ?? '').slice(0, 90)}`);
   const envelope = await enqueue({ project: { name: 'p', rev: 'sha256:x', body: PROJECT } });
   check(refusedBecause(envelope, 'envelope'),
     'and so is the store envelope in place of the document body, rather than being unwrapped on a guess',
@@ -588,6 +701,10 @@ try {
   // Everything this block queued goes back off, because the section below asserts exactly one
   // job is queued. Unlinked rather than removed through a route, since no route deletes a job.
   for (const id of [...strays, ...misshapenIds, goodCodec.body.id, lossless.body.id,
+    twoTake.body.id, swapped.body.id, twice.body.id,
+    // Refused at baseline and admitted under the mutation that takes the caller's list, so their
+    // records are swept here rather than left to redden the precondition below as well.
+    disagrees.body.id, tooMany.body.id, takeless.body.id,
     withParked.body.id, lying.body.id, understated.body.id, overstated.body.id,
     repeated.body.id, carriedWhole.body.id, wellShaped.body.id, goodSuppress.body.id]) {
     if (typeof id === 'string') rmSync(join(jobsDir, `${id}.json`), { force: true });
@@ -684,7 +801,7 @@ try {
   // so the guard against a leaseless running record is otherwise unreachable.
   const plantedId = `job-${'ab'.repeat(8)}`;
   writeFileSync(join(jobsDir, `${plantedId}.json`), `${JSON.stringify({
-    id: plantedId, version: 1, project: PROJECT, capture: HASH_A, renderer: METAL,
+    id: plantedId, version: JOB_VERSION, project: PROJECT, captures: [HASH_A], renderer: METAL,
     output: 'planted', width: 64, height: 36, fps: 30, codec: 'h264',
     state: 'running', created: 1, claimed: 2, finished: null, worker: 'ghost',
     error: null, attempts: 1, lease: null,
@@ -717,7 +834,7 @@ try {
   // stayed out of `claim`. What expires is the silence, because a render may run for hours.
   const deadId = `job-${'cd'.repeat(8)}`;
   writeFileSync(join(jobsDir, `${deadId}.json`), `${JSON.stringify({
-    id: deadId, version: 1, project: PROJECT, capture: HASH_A, renderer: METAL,
+    id: deadId, version: JOB_VERSION, project: PROJECT, captures: [HASH_A], renderer: METAL,
     output: 'orphan', width: 64, height: 36, fps: 30, codec: 'h264',
     state: 'running', created: 1, claimed: 1, heartbeat: 1, finished: null,
     worker: 'killed-mid-render', error: null, attempts: 1, lease: 'lease-that-died-with-it',
@@ -781,9 +898,17 @@ try {
   if (!SKIP_RENDER) {
     section('and a job becomes a file, through the page\'s own export door');
     const { takes } = await get('/library/takes');
-    const take = takes[0];
-    if (!take) throw new Error('no take in the staged library to render');
-    const real = await enqueue({ capture: take.hash, output: 'jobs-check-render', width: 320, height: 180 });
+    // By name rather than `takes[0]`: this library holds two takes, and a row reading whichever
+    // one the listing happened to put first would move its own subject when that order moved.
+    const take = takes.find((t) => t.id === 'sample');
+    const second = takes.find((t) => t.id === 'second');
+    if (!take || !second) {
+      throw new Error(`the staged library holds ${takes.map((t) => t.id).join(', ') || 'nothing'} where sample and second belong`);
+    }
+    check(take.hash !== second.hash,
+      'the two staged takes are different footage under different hashes, which is what makes every two-clip row below about a list rather than one entry written twice',
+      `${take.hash.slice(0, 22)}… and ${second.hash.slice(0, 22)}…`);
+    const real = await enqueue({ captures: [take.hash], output: 'jobs-check-render', width: 320, height: 180 });
     check(real.status === 200, 'a job against real footage is queued', real.body.id ?? real.body.error);
     const worker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
       '--url', URL_, '--name', 'jobs-check', '--drain', '--max', '1'], { stdio: 'ignore' });
@@ -798,7 +923,7 @@ try {
     // The door, asserted rather than assumed: a worker adopting with a bare
     // `setActiveDeliverable` would render every job here and nothing would say a gate had gone.
     const refusedJob = await enqueue({
-      capture: take.hash,
+      captures: [take.hash],
       output: 'jobs-check-refused',
       width: 320,
       height: 180,
@@ -824,7 +949,7 @@ try {
       'sparkle is not a package this build ships, which is what makes the two rows below about a missing effect',
       `${packages.length} installed: ${packages.map((p) => p.id).join(', ')}`);
     const missingJob = await enqueue({
-      capture: take.hash, output: 'jobs-check-missing', width: 320, height: 180, project: PARKED_PROJECT,
+      captures: [take.hash], output: 'jobs-check-missing', width: 320, height: 180, project: PARKED_PROJECT,
     });
     check(missingJob.status === 200,
       'a job whose look names an effect this worker has not got is queued, because the queue is not where that is decided either',
@@ -844,7 +969,7 @@ try {
     String(missingRecord.error ?? 'no reason recorded').slice(0, 120));
 
     const allowedJob = await enqueue({
-      capture: take.hash,
+      captures: [take.hash],
       output: 'jobs-check-suppressed',
       width: 320,
       height: 180,
@@ -876,12 +1001,151 @@ try {
       'and it holds every frame the export declared, not one frame at the right size',
       `${probedFrames} in the file, ${record.frames} declared, from a ${take.frames}-frame take`);
 
+    section('a job names one capture per clip, and the worker opens the clips it names');
+    // One worker per job throughout this section, and each planted record written only once the
+    // one before it has been taken: `claim` hands out the oldest queued job, so two of them in the
+    // queue at once would make which worker got which a property of the wall clock.
+    const drainOne = async (name) => {
+      const child = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
+        '--url', URL_, '--name', name, '--drain', '--max', '1'], { stdio: ['ignore', 'pipe', 'pipe'] });
+      const log = [];
+      child.stdout.on('data', (c) => log.push(c.toString()));
+      child.stderr.on('data', (c) => log.push(c.toString()));
+      const code = await new Promise((done) => child.on('close', done));
+      return { code, log: log.join('') };
+    };
+    // Everything a claim leaves on a record, so a planted job is one the queue could have written
+    // rather than a shape the worker happens to tolerate.
+    const plantJob = (id, over) => {
+      writeFileSync(join(jobsDir, `${id}.json`), `${JSON.stringify({
+        id,
+        version: JOB_VERSION,
+        project: cutOn(PROJECT, [take.hash]),
+        deliverable: DELIVERABLE,
+        requires: READING_REQUIRES,
+        suppressEffects: [],
+        captures: [take.hash],
+        renderer: null,
+        output: id,
+        artifactPath: null,
+        width: 320,
+        height: 180,
+        fps: 30,
+        codec: 'h264',
+        state: 'queued',
+        created: Date.now(),
+        claimed: null,
+        finished: null,
+        worker: null,
+        error: null,
+        attempts: 0,
+        lease: null,
+        ...over,
+      }, null, 2)}\n`);
+      return id;
+    };
+
+    const composite = await enqueue({
+      captures: [take.hash, second.hash],
+      project: twoClips(take.hash, second.hash),
+      output: 'jobs-check-two-take',
+      width: 320,
+      height: 180,
+      // A second of programme, because this row is about the list rather than about the length.
+      deliverable: { ...DELIVERABLE, in: 0, out: 1 },
+    });
+    check(composite.status === 200
+      && JSON.stringify(composite.body.captures) === JSON.stringify([take.hash, second.hash]),
+    'a two-clip job cut on two different takes is queued naming both, in project order',
+    `${composite.status} ${JSON.stringify(composite.body.captures ?? composite.body.error).slice(0, 90)}`);
+    const compositeRun = await drainOne('jobs-check-two-take');
+    const compositeRecord = await get(`/jobs/${composite.body.id}`);
+    check(compositeRecord.state === 'done' && Number(compositeRecord.frames) > 0,
+      '  and the worker opens both takes through the project and renders it - a page entry that opens one take could not have drawn the second clip at all',
+      `exit ${compositeRun.code}, state ${compositeRecord.state}, ${compositeRecord.frames ?? 0} frames`
+      + `${compositeRecord.error ? `, ${String(compositeRecord.error).slice(0, 90)}` : ''}`);
+    let compositeProbe = '';
+    try {
+      compositeProbe = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,nb_frames',
+        '-of', 'default=nw=1', compositeRecord.artifactPath], { encoding: 'utf8' });
+    } catch (err) { compositeProbe = `ffprobe failed: ${err.message}`; }
+    check(/width=320/.test(compositeProbe)
+      && Number(compositeProbe.match(/nb_frames=(\d+)/)?.[1] ?? 0) === compositeRecord.frames,
+    '  and the file it wrote holds every frame the export declared, so the composite reached a real encoder rather than a record saying done',
+    compositeProbe.trim().replace(/\n/g, ' '));
+
+    // The second clip and not the first: a worker asking the library about one hash resolves this
+    // job's opening take, opens a page, and lets the loader refuse it in a different sentence.
+    const halfHere = await enqueue({
+      captures: [take.hash, HASH_B],
+      project: twoClips(take.hash, HASH_B),
+      output: 'jobs-check-second-missing',
+      width: 320,
+      height: 180,
+    });
+    const halfRun = await drainOne('jobs-check-second-missing');
+    const halfRecord = await get(`/jobs/${halfHere.body.id}`);
+    const halfError = String(halfRecord.error ?? '');
+    check(halfRecord.state === 'failed' && /no take on this worker hashes/.test(halfError)
+      && halfError.includes(HASH_B.slice(0, 22)),
+    'a job whose second clip is cut on footage this worker has not got fails naming that take, before a browser is opened',
+    `exit ${halfRun.code}, state ${halfRecord.state}, ${halfError.slice(0, 100)}`);
+    check(!/could not read/.test(halfError),
+      '  and not as a failure to read the library, because those two sentences send whoever is looking at the queue to two different machines',
+      halfError ? halfError.slice(0, 100) : 'no error recorded at all');
+
+    // A partial resolution, which is the ordinary way a composite fails: some of its footage is
+    // here and some is not. The plural branch of that sentence is reached by nothing above it.
+    const HASH_C = `sha256:${'c'.repeat(64)}`;
+    const partial = await enqueue({
+      captures: [take.hash, HASH_B, HASH_C],
+      output: 'jobs-check-partial',
+      width: 320,
+      height: 180,
+    });
+    const partialRun = await drainOne('jobs-check-partial');
+    const partialRecord = await get(`/jobs/${partial.body.id}`);
+    const partialError = String(partialRecord.error ?? '');
+    check(partialRecord.state === 'failed'
+      && partialError.includes(HASH_B.slice(0, 22)) && partialError.includes(HASH_C.slice(0, 22))
+      && !partialError.includes(take.hash.slice(0, 22)),
+    'a job where some of the footage is here and some is not names the takes that are missing and only those, rather than the whole list',
+    `exit ${partialRun.code}, state ${partialRecord.state}, ${partialError.slice(0, 120)}`);
+    check(/2 of the 3 this job names are missing/.test(partialError),
+      '  and it counts them against what the job asked for, because "some of this footage is not here" is a different errand from "none of it is"',
+      partialError.slice(0, 130));
+
+    // A job the front door cannot make: the queue derives the list off the clips, so a record whose
+    // list disagrees with its own document has to be written by hand. What it stages is a worker
+    // that opened footage the job did not name, which is the only thing the attestation is for.
+    const liar = plantJob(`job-${'ef'.repeat(8)}`, { captures: [second.hash] });
+    const liarRun = await drainOne('jobs-check-attested');
+    const liarRecord = await get(`/jobs/${liar}`);
+    const liarError = String(liarRecord.error ?? '');
+    check(liarRecord.state === 'failed'
+      && liarError.includes(take.hash.slice(0, 22)) && liarError.includes(second.hash.slice(0, 22)),
+    'a job whose captures disagree with the document the page loaded is refused by the worker, naming both lists rather than writing a file of the wrong footage',
+    `exit ${liarRun.code}, state ${liarRecord.state}, ${liarError.slice(0, 110)}`);
+    check(liarRecord.artifactPath === null && !Number.isFinite(liarRecord.frames),
+      '  and nothing was written for it, so the refusal came before the export rather than after it',
+      `${JSON.stringify(liarRecord.artifactPath)}, ${liarRecord.frames ?? 'no frame count'}`);
+
+    // The envelope itself, refused at the same door: this build reads a list of captures where
+    // version 1 named one string, and reading that record would fail about a missing field.
+    const oldEnvelope = plantJob(`job-${'9a'.repeat(8)}`, { version: 1, captures: undefined, capture: take.hash });
+    const oldRun = await drainOne('jobs-check-old-envelope');
+    const oldRecord = await get(`/jobs/${oldEnvelope}`);
+    const oldError = String(oldRecord.error ?? '');
+    check(oldRecord.state === 'failed' && /envelope version 1/.test(oldError),
+      'a job record from an envelope version this build does not read is refused naming the version, rather than rendered on a guess about which field holds the footage',
+      `exit ${oldRun.code}, state ${oldRecord.state}, ${oldError.slice(0, 110)}`);
+
     section('a dropped connection does not silence a claim that is still rendering');
     // The whole render goes through the proxy, because a worker has one `--url`. A row here
     // failing about the export, the page or a closed target is the proxy, not the heartbeat.
     const proxy = await startInterferingProxy(PROXY_PORT, PORT, dropsOneHeartbeat);
     proxies.push(proxy);
-    const beaten = await enqueue({ capture: take.hash, output: 'jobs-check-heartbeat', width: 320, height: 180 });
+    const beaten = await enqueue({ captures: [take.hash], output: 'jobs-check-heartbeat', width: 320, height: 180 });
     const beatWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
       '--url', proxy.url, '--name', 'jobs-check-beat', '--drain', '--max', '1', '--beat', '1000'],
     { stdio: 'ignore' });
@@ -916,7 +1180,7 @@ try {
     check(rainBefore?.version === '1.0.0' && rainBefore?.builtin === true,
       'rain ships with this build at 1.0.0 and nothing is forking it, which is what the two readings below are read against',
       `rain ${rainBefore ? `${rainBefore.version}, builtin=${rainBefore.builtin}` : 'is not installed'}`);
-    const skewA = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-skew-a' });
+    const skewA = await enqueue({ project: SKEW_PROJECT, captures: [HASH_A], output: 'jobs-check-skew-a' });
     const preflight = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
       '--url', URL_, '--name', 'jobs-check-preflight', '--max', '2', '--poll', '300'],
     { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -952,7 +1216,7 @@ try {
     check(forkRes.status === 200 && forkBody.manifest?.version === '3.1.4',
       '  and rain is forked to 3.1.4 while that worker is between claims, which is the only thing that moves between the two readings',
       `${forkRes.status} ${forkBody.error ?? `version ${forkBody.manifest?.version}`}`);
-    const skewB = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-skew-b' });
+    const skewB = await enqueue({ project: SKEW_PROJECT, captures: [HASH_A], output: 'jobs-check-skew-b' });
     // Cleared rather than left to fire, because a pending timer holds the event loop open.
     let preflightDeadline = null;
     const preflightCode = await Promise.race([
@@ -988,7 +1252,7 @@ try {
       `rain ${rainNow ? `is at ${rainNow.version}` : 'is not installed'}`);
     const blipProxy = await startInterferingProxy(PROXY_PORT, PORT, failsWorkerEffectReads({ times: 1 }));
     proxies.push(blipProxy);
-    const blipped = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-effects-blip' });
+    const blipped = await enqueue({ project: SKEW_PROJECT, captures: [HASH_A], output: 'jobs-check-effects-blip' });
     const blipWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
       '--url', blipProxy.url, '--name', 'jobs-check-effects-blip', '--drain', '--max', '1'],
     { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -1021,7 +1285,7 @@ try {
     const outageProxy = await startInterferingProxy(PROXY_PORT, PORT,
       failsWorkerEffectReads({ times: 99, answer: { error: 'this proxy could not reach the store' } }));
     proxies.push(outageProxy);
-    const outaged = await enqueue({ project: SKEW_PROJECT, capture: HASH_A, output: 'jobs-check-effects-outage' });
+    const outaged = await enqueue({ project: SKEW_PROJECT, captures: [HASH_A], output: 'jobs-check-effects-outage' });
     const outageWorker = spawn(process.execPath, [join(root, 'tools/render-worker.mjs'),
       '--url', outageProxy.url, '--name', 'jobs-check-effects-outage', '--drain', '--max', '1'],
     { stdio: ['ignore', 'pipe', 'pipe'] });

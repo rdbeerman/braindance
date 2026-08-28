@@ -157,14 +157,14 @@ exit code (rule 3).
 | tool | what it proves | what it needs |
 | --- | --- | --- |
 | `determinism-check.mjs` | same program time, same image | a capture |
-| `index-check.mjs` | the index, the hash, the frame API | `--url` against a running server |
+| `index-check.mjs` | the index, the hash, the frame API | `--url`, and a fixture past 2 GiB |
 | `registry-check.mjs` | one registry, sliders as views of it, every look term live | `--url` |
 | `timeline-check.mjs` | seek equals playback | `--url`, a take of ≥12s |
 | `keyframe-check.mjs` | tracks, the retime curve, undo | `--url`, a take of ≥24s |
 | `export-check.mjs` | resolution, export, the file | `--url`, ffmpeg and ffprobe |
 | `editor-check.mjs` | the editor's controls exist, and pressing them changes something | `--url`, a take of ≥32s |
 | `library-check.mjs` | the library, the recorder, the routes | a free port span |
-| `boot-check.mjs` | after boot, every control shows the value the registry holds | port 8391 free |
+| `boot-check.mjs` | after boot, every control shows the value the registry holds for the selected clip | port 8391 free |
 | `monitor-check.mjs` | the monitor's decimation, the take it must not touch, the picture | port 8341 free |
 | `sensor-view-check.mjs` | the intrinsics a take was shot with, against a build assuming them | `--url`, plus port 8131 |
 | `level-check.mjs` | levelling: the room turns and every surface keeps its meaning | port 8377 free |
@@ -186,9 +186,11 @@ exit code (rule 3).
 `--node-port` and `--mac-port`..`+16`, which default to 8210 and 8211..8227. The distinction is not bookkeeping: a
 tool that finds a stranger already listening on its port is answered by the stranger and asserts
 against whatever fixture *that* process staged, which is a green run proving nothing.
-`library-check`, `boot-check` and `effect-check` ask the kernel first and exit 2 naming what is
-held; everywhere else check `pgrep -f "tools/.*-check.mjs"` yourself, because another agent's run
-is the normal state on this machine. **Two tools write packages, and each keeps its user root off
+`index-check` is a ninth under `--stage` or `--mutate` only, on 8251: a mutation edits the
+server's own `server/capture.js`, so a mutated run cannot borrow the server at `--url`.
+`library-check`, `boot-check`, `effect-check` and `index-check` ask the kernel first and exit 2
+naming what is held; everywhere else check `pgrep -f "tools/.*-check.mjs"` yourself, because
+another agent's run is the normal state on this machine. **Two tools write packages, and each keeps its user root off
 the checkout by a different mechanism** — a run whose user root resolved to the checkout would
 leave its fixtures in `effects/`. `effect-check` hands its staged server both store roots by name
 rather than letting them resolve; `jobs-check` forks one shipped package to move the store between
@@ -211,7 +213,7 @@ function present in the headers and absent from the library is as green here as 
 What it closes is that `native/grabber.cpp` — the only writer of the one artifact in this program
 that cannot be shot again — had no compile gate of any kind.
 
-**The other ten tools in `tools/`**, listed because a tool nobody documented is a tool nobody
+**The other eleven tools in `tools/`**, listed because a tool nobody documented is a tool nobody
 runs. `syntax-check` enforces the list: anything in `tools/` this file does not name fails it, so
 a tool added next year is asked by existing.
 
@@ -224,6 +226,7 @@ node tools/sweep-all.mjs           # every mutation of four tools; needs a serve
 node tools/settle-probe.mjs        # does settle()'s drain scale with the take or the ceiling
 node tools/prof-summary.mjs        # reads grabber --profile output, flags contended runs
 node tools/render-worker.mjs       # renders one queued job; jobs-check drives it
+node tools/layering-ab.mjs         # what a second, third and fourth overlapping clip cost
 tools/monitor-cost-ab.mjs          # the monitor's cost on a capture node, over SSH
 tools/pi-registration-ab.sh        # the threading A/B runbook for a capture node
 ```

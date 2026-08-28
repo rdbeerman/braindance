@@ -101,13 +101,66 @@ const MUTATIONS = {
     ]],
   },
 
+  // ---- section 22, the clip a person adds, selects and deletes ----
+  // A head trim that moves the clip and lets the footage travel with it, which is a slip and not
+  // a trim. Must redden 'the footage under what is left holds still', alone.
+  'head-trim-slides-the-footage': {
+    file: 'web/main.js',
+    edits: [['  const value = held + (start - clip.start) * rate;', '  const value = held;']],
+  },
+
+  // The head edge takes a keyed curve's clip anyway, silently, which is the shape this refusal
+  // exists to avoid. Must redden the two refusal rows of 22.
+  'head-trim-ignores-the-curve': {
+    file: 'web/main.js',
+    edits: [["    if (side === 'head' && clip.retime.keys.length > 1) {",
+             '    if (false) {']],
+  },
+
+  // A clip lands at the head of the edit rather than under the playhead. Must redden 'it lands
+  // at the playhead' and, with it, the row that says the mark arm has a placement to be about -
+  // which is that row working rather than a second catch.
+  'add-clip-ignores-the-playhead': {
+    file: 'web/main.js',
+    edits: [['  clip.start = timeline ? timeline.programSec : 0;', '  clip.start = 0;']],
+  },
+
+  // A mark is drawn through its clip's curve and not through where that clip sits.
+  // Must redden both mark rows of 22 and nothing else there.
+  'marks-ignore-the-placement': {
+    file: 'web/main.js',
+    edits: [[
+      'const programSecOfSource = (sourceSec) => selectedClip.start\n'
+      + '  + selectedClip.retime.programSecAt(sourceSec);',
+      'const programSecOfSource = (sourceSec) => selectedClip.retime.programSecAt(sourceSec);',
+    ]],
+  },
+
+  // Selecting a row moves the strip's idea of the selection and not the page's.
+  // Must redden 'the panel and the retime binding follow it' and the mark rows with it.
+  'select-row-does-not-select-the-clip': {
+    file: 'web/main.js',
+    edits: [['  clipRow = clip;\n  selectClip(clip);',
+             '  clipRow = clip;']],
+  },
+
+  // The door a restore comes through refuses a slot that grew back, which is what an undo of a
+  // delete is. Must redden the two undo rows of 22.
+  'restore-refuses-a-regrown-slot': {
+    file: 'web/main.js',
+    edits: [[
+      '    const open = planned.take ? takeOpenedAs(planned.take.hash) : null;',
+      '    const open = null;',
+    ]],
+  },
+
   // ---- section 15b, the badge for an effect this build has not got ----
   // Must redden: the exact-sentence row of 15b, alone.
   'badge-counts-the-registry': {
     file: 'web/main.js',
     edits: [[
-      "  values: Object.keys(parkedLook.params).filter((n) => effectOf(n) === entry.id).length,\n"
-      + "  tracks: Object.keys(parkedLook.tracks).filter((n) => effectOf(n) === entry.id).length,",
+      "  values: Object.keys(parkedWhole('params')).filter((n) => effectOf(n) === entry.id).length,\n"
+      + "  tracks: Object.keys(parkedWhole('tracks')).filter((n) => effectOf(n) === entry.id).length,",
       '  values: effectParamNames(entry.id).length,\n'
       + '  tracks: effectParamNames(entry.id).filter((n) => tracks.has(n)).length,',
     ]],
@@ -217,7 +270,7 @@ const MUTATIONS = {
   // itself is unchanged.
   'picker-keeps-a-refused-look': {
     file: 'web/main.js',
-    edits: [["          showPickerChoice(picker, appliedPreset?.name ?? '');\n", '']],
+    edits: [["          showPickerChoice(picker, appliedPreset()?.name ?? '');\n", '']],
   },
 
   // Must redden the two per-side refusal rows - a point outside the segment, a camera handle
@@ -237,9 +290,9 @@ const MUTATIONS = {
   'restore-skips-the-fold-check': {
     file: 'web/main.js',
     edits: [
-      ['    refuseFolds(`track ${name}`, restored);\n', ''],
-      ["  refuseFolds('track camera', restoredCamera);\n", ''],
-      ["  refuseFolds('the retime curve', restoredRetime);\n", ''],
+      ['    refuseFolds(owner, ready);\n', ''],
+      ["  refuseFolds('track camera', camera);\n", ''],
+      ["    refuseFolds('the retime curve', keys);\n", ''],
     ],
   },
 
@@ -322,9 +375,9 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [[
       '          say(stamped\n'
-      + '            ? `applied ${doc.name} · ${doc.rev.slice(7, 15)}`\n'
-      + '            : `applied ${written} values from ${doc.name}, which names part of a look rather than the whole of one`);',
-      '          void stamped; void written;',
+      + '            ? `applied ${doc.name} · ${doc.rev.slice(7, 15)}${grade}`\n'
+      + '            : `applied ${written} values from ${doc.name}, which names part of a look rather than the whole of one${grade}`);',
+      '          void stamped; void written; void grade;',
     ]],
   },
 
@@ -332,8 +385,8 @@ const MUTATIONS = {
   'offer-ignores-take-hash': {
     file: 'web/main.js',
     edits: [[
-      '  if (!openTakeHash || working.body?.take?.hash !== openTakeHash) return;',
-      '  if (!openTakeId || working.body?.take?.id !== openTakeId) return;',
+      '  if (String(footageOf(working.body)) !== String(open)) return;',
+      '  if (String(footageOf(working.body).length) !== String(open.length)) return;',
     ]],
   },
 
@@ -517,7 +570,7 @@ const MUTATIONS = {
   // Must redden: one rack row, the confirmed removal's joined value/track/presence assertion.
   'effect-rack-remove-keeps-tracks': {
     file: 'web/main.js',
-    edits: [['  for (const name of names) tracks.delete(name);\n', '']],
+    edits: [['        look.tracks.delete(name);\n', '']],
   },
 
   // Must redden: one rack row, the reset-retains assertion.
@@ -614,9 +667,9 @@ const MUTATIONS = {
   'fit-outlives-a-restored-project': {
     file: 'web/main.js',
     edits: [[
-      '    .then(() => (REQUESTED_PROJECT ? loadProjectNamed(REQUESTED_PROJECT) : null))',
-      '    .then(() => (REQUESTED_PROJECT ? loadProjectNamed(REQUESTED_PROJECT) : null))\n'
-      + '    .then(() => fitCropToTake(REQUESTED_TAKE, params.get(\'near\'), params.get(\'far\')).catch(() => {}))',
+      '  (REQUESTED_PROJECT ? loadProjectNamed(REQUESTED_PROJECT) : openTake(REQUESTED_TAKE))',
+      '  (REQUESTED_PROJECT ? loadProjectNamed(REQUESTED_PROJECT) : openTake(REQUESTED_TAKE))\n'
+      + '    .then(() => fitCropToTake(openTakeId(), params.get(\'near\'), params.get(\'far\')).catch(() => {}))',
     ]],
   },
   'fit-lands-after-history-begins': {
@@ -882,11 +935,60 @@ const MUTATIONS = {
     ]],
   },
 
+  // The rule this program has already broken once: a pointer move that starts a redraw instead
+  // of arming one. Must redden the two rebuild rows of 22b and nothing else.
+  // The pre-clip-row build of the delete: the strip left holding nothing, which greys the panel's
+  // clip half over an edit that still has clips to edit. Must redden section 22's
+  // "puts the strip on whatever took its place".
+  'delete-leaves-nothing-selected': {
+    file: 'web/main.js',
+    edits: [[
+      "  clipLanesShut.delete(clip.id);\n"
+      + "  // Onto whatever took its place rather than onto nothing: the panel's clip half greys when the\n"
+      + "  // strip holds no clip, and an edit that still has clips has one under the panel.\n"
+      + '  selectClipRow(clips[Math.min(at, clips.length - 1)]);',
+      '  selection = null;\n'
+      + '  // Before the cloud goes, because the render core is pointed at whatever is selected.\n'
+      + '  if (selectedClip === clip) selectClip(clips[Math.min(at, clips.length - 1)]);',
+    ]],
+  },
+  // The project loader choosing the clip the page happened to be on, which is a guess wearing
+  // the shape of an answer. Must redden exactly 22b's "loading a project selects no clip" - the
+  // take half is a different door and is untouched by this.
+  'project-load-keeps-the-selection': {
+    file: 'web/main.js',
+    edits: [[
+      "  // A document does not record which clip was being worked on - two people's saves of one edit\n"
+      + '  // would differ over nothing - so loading one selects none, and the panel\'s clip half greys\n'
+      + '  // until somebody says which clip they mean. That is the case the split is worth showing in:\n'
+      + '  // a project is where there is a choice to make.\n'
+      + '  deselectClipRow();\n',
+      '',
+    ]],
+  },
+  'gizmo-renders-from-the-pointer': {
+    file: 'web/main.js',
+    edits: [[
+      "  gizmo.addEventListener('objectChange', () => { gizmoWriteWanted = true; });",
+      "  gizmo.addEventListener('objectChange', () => { gizmoWriteWanted = true; pumpGizmo(); lanesChanged(); });",
+    ]],
+  },
+  // A preset's cloud half written to every clip rather than to the selected one, which is the
+  // whole of what makes a look a clip's own. Must redden 22b's "and on no other clip".
+  'preset-writes-every-clip': {
+    file: 'web/main.js',
+    edits: [
+      ['    params.apply({ ...resets, ...values });', '    forEachLook(() => params.apply({ ...resets, ...values }));'],
+      ['  } else {\n    params.apply(values);\n  }\n  if (stamped) stampPreset',
+        '  } else {\n    forEachLook(() => params.apply(values));\n  }\n  if (stamped) stampPreset'],
+    ],
+  },
   'orbit-arms-into-playback': {
     file: 'web/main.js',
     edits: [[
       '  if (!timeline || timeline.playing || exporting) {\n'
-      + '    draftWanted = null;\n    orbitRedrawWanted = false;\n    orbitSettling = false;\n    return;\n  }',
+      + '    draftWanted = null;\n    orbitRedrawWanted = false;\n    orbitSettling = false;\n'
+      + '    gizmoWriteWanted = false;\n    return;\n  }',
       '  if (!timeline || timeline.playing || exporting) return;',
     ]],
   },
@@ -1129,18 +1231,8 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [
       [
-        '    const spec = params.spec(name);',
-        '    params.spec(name);',
-      ],
-      [
-        "    if (spec.tag !== 'look') {\n"
-        + '      throw new Error(\n'
-        + '        `the track on ${JSON.stringify(name)} is on a ${spec.tag} parameter: a project carries `\n'
-        + "        + 'look tracks only, which is what this build writes and the only kind it can evaluate '\n"
-        + "        + 'without resizing the drawing buffer from inside the render loop',\n"
-        + '      );\n'
-        + '    }\n',
-        '',
+        '    const spec = params.spec(name);\n    if (spec.scope !== scope) {',
+        '    const spec = params.spec(name);\n    if (spec.scope !== scope && spec.tag === \'look\') {',
       ],
     ],
   },
@@ -1265,8 +1357,8 @@ const MUTATIONS = {
   'pose-lane-draws-flat': {
     file: 'web/main.js',
     edits: [[
-      '    at: (owner, t) => poseLaneFraction(keysOf(owner), t),',
-      '    at: () => 0.5,',
+      '  at: (owner, t) => poseLaneFraction(keysOf(owner), t),',
+      '  at: () => 0.5,',
     ]],
   },
 
@@ -1299,8 +1391,8 @@ const MUTATIONS = {
   'pose-segments-never-shaped': {
     file: 'web/main.js',
     edits: [[
-      '    moved: (a, b) => poseMoved(a.value, b.value),',
-      '    moved: () => false,',
+      '  moved: (a, b) => poseMoved(a.value, b.value),',
+      '  moved: () => false,',
     ]],
   },
 
@@ -1308,8 +1400,10 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [[
       `    h[0] = foldFreeX(a.easeOut, b.easeIn, laneDrag.side, laneDrag.index, h[0],
-      Math.min(span.hi, Math.max(span.lo, (laneProgramAt(e.clientX) - a.t) / dt)));`,
-      '    h[0] = Math.min(1, Math.max(0, (laneProgramAt(e.clientX) - a.t) / dt));',
+      Math.min(span.hi, Math.max(span.lo,
+        (programToLane(row.owner, laneProgramAt(e.clientX)) - a.t) / dt)));`,
+      `    h[0] = Math.min(1, Math.max(0,
+      (programToLane(row.owner, laneProgramAt(e.clientX)) - a.t) / dt));`,
     ]],
   },
 
@@ -1401,7 +1495,7 @@ const MUTATIONS = {
 
   'export-ignores-name': {
     file: 'web/main.js',
-    edits: [['      name: options.name ?? exportBaseName(),', '      name: options.name ?? timeline.source.id,']],
+    edits: [['      name: options.name ?? exportBaseName(),', '      name: options.name ?? timeline.clip.source.id,']],
   },
 };
 
@@ -1486,6 +1580,12 @@ const DRIVER_RULES = [
     // Matched against the serialized row like every rule beside it - an element-shaped match is
     // handed a row with no `closest`, so the dialog's boxes fall through to the panel rule.
     match: (row) => inGroup(row, '#presetPick'),
+  },
+  {
+    key: 'clippick',
+    what: 'a control in the dialog a clip is cut from',
+    by: 'section 22 opens it from the clip bar, reads what it offers, and picks a take',
+    match: (row) => inGroup(row, '#clipPick'),
   },
   {
     key: 'shelldialogs',
@@ -1583,6 +1683,11 @@ function inGroup(row, ...groups) {
 }
 
 const DRIVER_IDS = {
+  tAddClip: 'section 22 - opens the picker, chooses a take, and reads the clip that landed',
+  tDeleteClip: 'section 22 - deletes the selected clip and undoes it',
+  tMoveClip: 'section 22b - arms the move handles, drags them and reads where the clip went',
+  tRotateClip: 'section 22b - arms the turn handles and reads that the mode moved with the press',
+  tKeyClip: 'section 22b - keys the placement at two playheads and scrubs between them',
   tPlay: 'section 2 - toggles playback and the state is read back',
   tRate: 'section 4 - the anchor rows and the seek-storm row',
   tCamView: 'section 1 - looks through the program camera and reads the orbit back',
@@ -1796,6 +1901,9 @@ const settle = () => page.evaluate('__kinect.timeline.settled()');
 const read = () => page.evaluate('__kinect.timeline.read()');
 const range = () => page.evaluate('__kinect.editor.clipRange()');
 const lanes = () => page.evaluate('__kinect.keyframes.lanes()');
+// The lanes that carry keys. The stack also holds the clip bar and a row per clip, which are
+// structure rather than animation and are counted by section 22 instead.
+const keyedLanes = async () => (await lanes()).filter((l) => l.kind !== 'clips' && l.kind !== 'clip');
 const keyCount = async (owner) => ((await lanes()).find((l) => l.owner === owner)?.keys ?? 0);
 const text = (sel) => page.locator(sel).textContent();
 /** Focus somewhere with no claim on the keyboard, so the window handler gets the key. */
@@ -2160,6 +2268,7 @@ try {
       groups: ['#appBar', '#panel', '#panelTabs', '#lookPresetGroup', '#cameraGroup', '#navRow',
         '#recordGroup', '#recLookGroup', '#sensorGroup', '#monitorGroup',
         '#programOutGroup', '#presetPick', '#projectDialog', '#exportDialog', '#obsDialog',
+        '#clipPick',
         '#effectRackPanel', '#panelDock', '.appmenu']
         .filter((g) => el.closest(g)),
       kf: el.classList.contains('kf'),
@@ -2181,7 +2290,7 @@ try {
       : DRIVER_RULES.map((r) => `${r.key} ${sweep.filter((row) => r.match(row)).length}`).join(', '));
 
   const unknown = sweep.filter((row) => !covered(row));
-  const DIALOG_GROUPS = ['#presetPick', '#exportDialog', '#obsDialog'];
+  const DIALOG_GROUPS = ['#presetPick', '#exportDialog', '#obsDialog', '#clipPick'];
   const inDialog = sweep.filter((r) => DIALOG_GROUPS.some((group) => r.groups.includes(group))).length;
   const inTbar = sweep.filter((r) => r.inTbar).length;
   note(`${sweep.length} interactive controls on the editor`,
@@ -3161,7 +3270,7 @@ try {
   const afterLanes = await markersPresent();
   check(afterLanes.in !== null && afterLanes.out !== null && afterLanes.out.h > 10,
     'and both markers survive a lane being built, which is when they used to disappear',
-    `${(await lanes()).length} lanes, in ${afterLanes.in ? 'present' : 'GONE'}, out ${afterLanes.out ? 'present' : 'GONE'}`);
+    `${(await keyedLanes()).length} keyed lanes, in ${afterLanes.in ? 'present' : 'GONE'}, out ${afterLanes.out ? 'present' : 'GONE'}`);
   check(near((await range()).out ?? -1, afterDrag.out ?? -1, 1e-6),
     'and the range they show is unchanged by it', JSON.stringify(await range()));
   await page.locator('#outputMenuButton').click();
@@ -3687,7 +3796,9 @@ try {
     await settle();
   };
   const clickKey = async (owner, i) => {
-    const b = await page.locator(`.tlane[data-owner=${owner}] .tkey`).nth(i).boundingBox();
+    // Quoted, because a clip's lane owner carries a colon and a slash and an unquoted attribute
+    // selector holding either is not a selector at all.
+    const b = await page.locator(`.tlane[data-owner="${owner}"] .tkey`).nth(i).boundingBox();
     await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
     await new Promise((r) => setTimeout(r, 200));
     return b;
@@ -3780,6 +3891,21 @@ try {
       outside: 3,
       read: (v) => v.position[0],
     },
+    // A clip's placement. The lane owner and the track are two different strings here and only
+    // here: a clip value's lane is qualified by the clip that holds it, and the id is read off
+    // the page rather than written down, so this fixture does not go stale on a rename.
+    placement: {
+      owner: `clip:${await page.evaluate('__kinect.editor.clipSelection()')}/transform`,
+      track: 'transform',
+      keys: [[-0.4, 0.2], [0.1, -0.1], [0.5, 0.3]].map(([x, z], i) => ({
+        t: 1 + i * 4,
+        value: { position: [x, 0, z], quaternion: [0, 0, 0, 1] },
+        ...BENT,
+      })),
+      inside: 7,
+      outside: 3,
+      read: (v) => v.position[0],
+    },
   };
   const easedKinds = await page.evaluate('__kinect.editor.easedKinds()');
   const unfixtured = easedKinds.filter((k) => !KIND_FIXTURES[k]);
@@ -3797,7 +3923,7 @@ try {
   for (const kind of easedKinds.filter((k) => KIND_FIXTURES[k])) {
     const fx = KIND_FIXTURES[kind];
     for (const name of presetNames) {
-      await plant({ [fx.owner]: fx.keys });
+      await plant({ [fx.track ?? fx.owner]: fx.keys });
       await page.evaluate(`__kinect.editor.select('${fx.owner}', 1)`);
       await settle();
       // Asked before it is pressed: Playwright's `click` waits for a control to become
@@ -3965,15 +4091,15 @@ try {
 
   for (const kind of easedKinds.filter((k) => KIND_FIXTURES[k])) {
     const fx = KIND_FIXTURES[kind];
-    await plant({ [fx.owner]: fx.keys.map(({ easeOut, easeIn, ...rest }) => rest) });
+    await plant({ [fx.track ?? fx.owner]: fx.keys.map(({ easeOut, easeIn, ...rest }) => rest) });
     await page.evaluate(`__kinect.editor.select('${fx.owner}', 1)`);
     await settle();
     // The first handle drawn on a key is its `easeOut`, which shapes the segment after it, so the
     // curve is sampled at 7s and not at 3s - a probe at 3s sits in the neighbouring segment where
     // the answer is the same either way.
-    const drawn = await page.locator(`.tlane[data-owner=${fx.owner}] .thandle`).count();
+    const drawn = await page.locator(`.tlane[data-owner="${fx.owner}"] .thandle`).count();
     const hb = drawn > 0
-      ? await page.locator(`.tlane[data-owner=${fx.owner}] .thandle`).first().boundingBox()
+      ? await page.locator(`.tlane[data-owner="${fx.owner}"] .thandle`).first().boundingBox()
       : null;
     check(hb !== null && hb.width >= 10 && hb.height >= 10, `a ${kind} ease handle is big enough to hit`,
       hb ? `${hb.width}x${hb.height}px` : `no handle drawn on the ${kind} lane at all`);
@@ -4644,7 +4770,8 @@ try {
       const k = globalThis.__kinect;
       const doc = k.keyframes.project();
       for (const n of ['left', 'right', 'bottom', 'top']) {
-        doc.look.params[n] = n === 'left' || n === 'bottom' ? -6.5 : 6.5;
+        // The crop faces write the cloud, so they are the clip's block and not the project's.
+        doc.clips[0].params[n] = n === 'left' || n === 'bottom' ? -6.5 : 6.5;
       }
       return doc;
     })()`);
@@ -4662,12 +4789,18 @@ try {
     await both.page.waitForFunction(
       `globalThis.__kinect.params.get('left') !== ${atOpen.planes[0]}`, null, { timeout: 15000 },
     ).catch(() => {});
-    const withProject = await both.page.evaluate(
+    const readPlanes = () => both.page.evaluate(
       `['left','right','bottom','top'].map((n) => globalThis.__kinect.params.get(n))`);
-    check(withProject.join() === [-6.5, 6.5, -6.5, 6.5].join(),
-      'a project named beside the take keeps its own box, because the restore lands after the fit',
-      `${withProject.join(', ')} against the project's -6.5, 6.5, -6.5, 6.5 and the fit's `
-      + `${atOpen.planes.map((v) => v.toFixed(2)).join(', ')}`);
+    const withProject = await readPlanes();
+    // Read again after a beat, because a fit is a fetch: one landing after the first read would
+    // leave this row green while doing exactly what it is the control for.
+    await both.page.waitForTimeout(2000);
+    const settledPlanes = await readPlanes();
+    check(withProject.join() === [-6.5, 6.5, -6.5, 6.5].join()
+      && settledPlanes.join() === withProject.join(),
+      'a project named beside the take keeps its own box, because the fit belongs to opening a bare take and a named project is not one',
+      `${withProject.join(', ')} then ${settledPlanes.join(', ')} against the project's `
+      + `-6.5, 6.5, -6.5, 6.5 and the fit's ${atOpen.planes.map((v) => v.toFixed(2)).join(', ')}`);
     await both.close();
     await fetch(`${URL_BASE}/projects/${encodeURIComponent(PLANTED)}`, { method: 'DELETE' }).catch(() => {});
 
@@ -5504,9 +5637,9 @@ try {
   await plantLanes();
   await settle();
   const manyLanes = await page.evaluate('__kinect.editor.strip()');
-  check(manyLanes.stacked > manyLanes.ceiling && (await lanes()).length === LANED.length,
+  check(manyLanes.stacked > manyLanes.ceiling && (await keyedLanes()).length === LANED.length,
     'enough keyed parameters and the lanes want more height than the stage can spare',
-    `${(await lanes()).length} lanes stacking ${manyLanes.stacked}px against a ${manyLanes.ceiling}px ceiling, `
+    `${(await keyedLanes()).length} keyed lanes stacking ${manyLanes.stacked}px against a ${manyLanes.ceiling}px ceiling, `
     + `strip ${manyLanes.height}px`);
 
   const gripAt = () => page.locator('#tGrip').boundingBox();
@@ -6198,10 +6331,12 @@ try {
     // asserts that it did - the offer is deliberately silent when the two agree, so a document
     // that accidentally matched would test the wrong branch.
     const shapeOf = (doc) => (doc?.aspect ?? []).join(':') || 'none';
+    // The footage a document is cut on rides inside its clips, so the stamp goes there.
     const workingBody = (stamp, differ = true) => {
       const body = JSON.parse(JSON.stringify(fresh));
       if (differ) body.aspect = shapeOf(fresh) === '4:3' ? [16, 9] : [4, 3];
-      return { ...body, take: stamp };
+      body.clips[0].take = stamp;
+      return body;
     };
     const foreignHash = `sha256:${'0'.repeat(64)}`;
 
@@ -6211,7 +6346,9 @@ try {
       'the document about to be planted differs from what a fresh open puts on screen, or there is nothing for the offer to be about',
       `${shapeOf(differing)} against ${shapeOf(fresh)}`);
     await putDoc(WORKING, differing);
-    await putDoc(OTHER, { ...JSON.parse(JSON.stringify(fresh)), take: { id: 'some-other-take', hash: foreignHash } });
+    const otherFootage = JSON.parse(JSON.stringify(fresh));
+    otherFootage.clips[0].take = { id: 'some-other-take', hash: foreignHash };
+    await putDoc(OTHER, otherFootage);
     await reopen();
 
     const offered = await offerState();
@@ -6224,7 +6361,7 @@ try {
     const listedWorking = await page.evaluate(`(async () => {
       const list = (await (await fetch('/projects')).json()).projects ?? [];
       const w = list.find((d) => d.name === '${WORKING}');
-      return { there: Boolean(w), stamped: w?.body?.take?.hash ?? null };
+      return { there: Boolean(w), stamped: w?.body?.clips?.[0]?.take?.hash ?? null };
     })()`);
     check(listedWorking.there && listedWorking.stamped === openHash,
       'and the library listed the working document carrying this take\'s hash, so the row above is about the offer rather than about a store that answered nothing',
@@ -6345,8 +6482,8 @@ try {
         return String(err);
       }
     })()`);
-    check(/different footage/.test(foreignRefusal ?? ''),
-      'the project loader still refuses a document built on different footage',
+    check(/no take on this machine hashes it/.test(foreignRefusal ?? ''),
+      'the project loader refuses a document whose clip names footage this machine has not got, naming the take',
       foreignRefusal ?? 'no refusal');
     // The presets refusal above deliberately produces the network error Chrome reports. The
     // remaining error sweep begins after it, so only failures the later gestures did not ask for
@@ -6698,9 +6835,10 @@ try {
       'a press on a live control of a take that never opened is not recorded as an edit, because there is no baseline for it to be an edit against',
       `undo depth ${await page.evaluate('__kinect.undoDepth()')}`);
     check(slotAfter.rev === slotBefore.rev
-      && slotAfter.body?.take?.hash === openHash && slotAfter.body?.take?.id === openId,
+      && slotAfter.body?.clips?.[0]?.take?.hash === openHash
+      && slotAfter.body?.clips?.[0]?.take?.id === openId,
       'and the recovery slot still holds the document of the take that was open before, rather than one naming no take at all',
-      `stamped ${JSON.stringify(slotAfter.body?.take)}, rev ${slotAfter.rev === slotBefore.rev ? 'unchanged' : 'rewritten'}`);
+      `stamped ${JSON.stringify(slotAfter.body?.clips?.[0]?.take)}, rev ${slotAfter.rev === slotBefore.rev ? 'unchanged' : 'rewritten'}`);
     // Back onto the take the rest of this run is about. `reopen` reloads whatever is in the address
     // bar, which is the take that does not exist, so this is a `goto`.
     await page.goto(`${URL_BASE}${EDITOR_PATH}?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
@@ -8629,6 +8767,635 @@ try {
       + `${modified.before.target.map((v) => v.toFixed(6)).join(', ')}`);
   }
 
+  // -------------------------------------------------------------------------------------------
+  console.log('\n[22] adding, selecting, moving and deleting a clip');
+  {
+    const library = await (await fetch(`${URL_BASE}/library/takes`)).json();
+    const other = (library.takes ?? []).find((t) => t.id !== TAKE && t.openable !== false) ?? null;
+
+    const read = () => page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      return {
+        clips: k.timeline.clips().map((c) => ({ id: c.id, take: c.take && c.take.id,
+          start: c.start, length: c.length, selected: c.selected })),
+        selection: k.editor.clipSelection(),
+        rows: k.keyframes.lanes().map((l) => l.owner),
+        boxes: [...document.querySelectorAll('.tclip')].length,
+        duration: k.timeline.read().duration,
+        undo: k.keyframes.undo.depth(),
+        addDisabled: document.getElementById('tAddClip').disabled,
+        deleteDisabled: document.getElementById('tDeleteClip').disabled,
+      };
+    })()`);
+
+    const one = await read();
+    console.log(`  the stack: ${one.rows.join(', ')}`);
+    check(one.rows[0] === 'clips' && one.rows.includes('clip:c1'),
+      'the lane stack opens with a clip bar and a row for the clip that is open',
+      one.rows.slice(0, 3).join(', '));
+    check(one.boxes === one.clips.length,
+      'and one box is drawn per clip', `${one.boxes} boxes for ${one.clips.length} clips`);
+    check(one.deleteDisabled === true,
+      'delete is refused while the edit holds one clip, because a project carries at least one',
+      `disabled ${one.deleteDisabled}`);
+    // The other half of this is enforced by everything above rather than by a row: an editor
+    // opened on a take that selected nothing would grey its clip half, and the several hundred
+    // rows before this one that drag and reset panel controls would all be pressing dead
+    // controls. This names it where the door is known - the page was opened by `?take=`.
+    check(one.selection === one.clips[0].id,
+      'an editor opened on a take has that take\'s clip selected, because a take is one clip of '
+      + 'footage somebody has just chosen and there is nothing there to choose between',
+      `${one.selection}`);
+
+    if (!other) {
+      note('[23] runs on one take', 'no second take in this library, so the add arm below cuts a '
+        + 'second clip of the same footage - which proves the same thing about placement and a '
+        + 'weaker thing about the picker');
+    }
+    const pickId = other ? other.id : TAKE;
+
+    // The add, pressed rather than called: the picker is the one entry point and this is it.
+    await page.evaluate(`(async () => {
+      await globalThis.__kinect.timeline.transport().seek(4);
+      await globalThis.__kinect.timeline.settled();
+    })()`);
+    await page.locator('#tAddClip').click();
+    await page.waitForSelector(`.cpoption[data-take="${pickId}"]`, { timeout: 15000 });
+    const offered = await page.evaluate(
+      '[...document.querySelectorAll(".cpoption")].map((o) => o.dataset.take)',
+    );
+    check(offered.includes(pickId),
+      'the picker offers the library\'s takes, which is what a clip is cut from',
+      offered.join(', '));
+    await page.locator(`.cpoption[data-take="${pickId}"]`).click();
+    await page.waitForFunction(() => globalThis.__kinect.timeline.clips().length === 2,
+      null, { timeout: 25000 });
+    await settle();
+    const two = await read();
+    const added = two.clips[1];
+    console.log(`  added ${added.id} of ${added.take} at ${added.start.toFixed(2)}s, `
+      + `${two.rows.length} lane rows, undo depth ${two.undo}`);
+
+    check(two.clips.length === 2 && added.take === pickId,
+      'the take chosen in the picker lands as a clip of that take',
+      `${added.id} on ${added.take}`);
+    check(near(added.start, 4, 1 / 30),
+      'and it lands at the playhead rather than at the head of the edit',
+      `${added.start.toFixed(3)}s against a playhead at 4s`);
+    check(two.rows.includes(`clip:${added.id}`) && two.boxes === 2,
+      'on a row of its own, with a box of its own', two.rows.join(', '));
+    check(two.selection === added.id && added.selected === true,
+      'and the strip selects what it just added - the row and the page it points at, which is '
+      + 'one fact rather than two',
+      `row ${two.selection}, page on ${two.clips.find((c) => c.selected)?.id}`);
+    check(two.undo === one.undo + 1,
+      'the add is one undo step, because a clip lives in the document the stack snapshots',
+      `${one.undo} to ${two.undo}`);
+    check(two.deleteDisabled === false,
+      'and delete is offered now that there is a clip to lose', `disabled ${two.deleteDisabled}`);
+
+    // The selection, by clicking a row.
+    const boxAt = async (i) => {
+      const box = (await page.$$('.tclip'))[i];
+      const r = await box.boundingBox();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, r };
+    };
+    const first = await boxAt(0);
+    await page.mouse.click(first.x, first.y);
+    await settle();
+    const picked = await read();
+    check(picked.selection === picked.clips[0].id,
+      'clicking a clip\'s row selects that clip', `${picked.selection}`);
+    // The move as well as the destination: a build whose row selection never reached the page
+    // would leave the page on the clip it opened with, which is this clip, and the row would
+    // pass on the defect it exists to catch.
+    check(picked.clips[0].selected === true && picked.clips[1].selected === false
+      && two.clips.find((c) => c.selected)?.id !== picked.clips.find((c) => c.selected)?.id,
+    'and the panel and the retime binding move with it, so the selection is one fact rather than two',
+    `${two.clips.find((c) => c.selected)?.id} then `
+      + picked.clips.map((c) => `${c.id}:${c.selected}`).join(' '));
+
+    // Marks, mapped through the selected clip's placement.
+    await page.mouse.click((await boxAt(1)).x, (await boxAt(1)).y);
+    await settle();
+    const MARK_SOURCE_MS = 1500;
+    await page.evaluate(
+      `globalThis.__kinect.editor.setMarks([{ id: 'placed', sourceMs: ${MARK_SOURCE_MS}, label: 'placed' }])`,
+    );
+    await page.keyboard.press('f');
+    await settle();
+    const marked = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const clip = k.timeline.clips().find((c) => c.selected);
+      return {
+        clip: clip.id,
+        start: clip.start,
+        program: k.editor.markProgramSec(${MARK_SOURCE_MS} / 1000),
+        ticks: k.library.markTicks(),
+        duration: k.timeline.read().duration,
+      };
+    })()`);
+    console.log(`  a mark at source ${MARK_SOURCE_MS / 1000}s of ${marked.clip} `
+      + `(placed at ${marked.start.toFixed(2)}s) ticks at program ${marked.program.toFixed(3)}s, `
+      + `drawn at ${marked.ticks.map((t) => t.left.toFixed(2)).join(', ')}%`);
+    check(marked.start > 0.5,
+      'the selected clip is placed away from the head of the edit, which is what makes the two '
+      + 'rows below a claim about placement rather than about a curve',
+      `${marked.start.toFixed(3)}s`);
+    check(near(marked.program, marked.start + MARK_SOURCE_MS / 1000, 0.05),
+      'a mark ticks at the selected clip\'s placement plus its curve, because a mark is a fact '
+      + 'about footage and which clip of it the ruler is drawing is the selection',
+      `${marked.program.toFixed(3)}s against ${(marked.start + MARK_SOURCE_MS / 1000).toFixed(3)}s`);
+    // Against the placement and the source second rather than against `markProgramSec`: a build
+    // that dropped the placement from that reading would move both sides of the comparison and
+    // the row would pass on the defect it exists to catch.
+    const wantLeft = ((marked.start + MARK_SOURCE_MS / 1000) / marked.duration) * 100;
+    check(marked.ticks.length === 1 && near(marked.ticks[0].left, wantLeft, 0.5),
+      'and the tick is drawn where that says, rather than where the curve alone would put it',
+      `${marked.ticks[0]?.left.toFixed(2)}% against ${wantLeft.toFixed(2)}%`);
+
+
+    // The head, which moves the clip's in-point and must not move its footage.
+    const bed = await page.locator('#tBed').boundingBox();
+    const insideBody = () => page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const c = k.timeline.clips().find((x) => x.selected);
+      const clip = k.timeline.transport().clip;
+      // A source frame sampled inside what will still be the body after the trim, so the row is
+      // about the mapping holding rather than about a position that left the clip.
+      const at = c.start + c.length - 0.5;
+      return { id: c.id, start: c.start, end: c.end, length: c.length,
+        keys: k.timeline.retime.keys.map((key) => [key.t, key.value]),
+        rateDisabled: document.getElementById('tRate').disabled,
+        at, frame: clip.sourceFrameAt(at) };
+    })()`);
+    await page.mouse.click((await boxAt(1)).x, (await boxAt(1)).y);
+    await settle();
+    const beforeHead = await insideBody();
+    {
+      const r = (await boxAt(1)).r;
+      await page.mouse.move(r.x + 3, r.y + r.height / 2);
+      await page.mouse.down();
+      for (let i = 1; i <= 6; i++) {
+        await page.mouse.move(r.x + 3 + (bed.width * 0.04 * i) / 6, r.y + r.height / 2);
+      }
+      await page.mouse.up();
+      await settle();
+    }
+    const afterHead = await insideBody();
+    console.log(`  head trim: ${beforeHead.start.toFixed(3)}s -> ${afterHead.start.toFixed(3)}s, `
+      + `out-point ${beforeHead.end.toFixed(3)} -> ${afterHead.end.toFixed(3)}, `
+      + `curve ${JSON.stringify(afterHead.keys)}, source frame at ${afterHead.at.toFixed(2)}s `
+      + `${beforeHead.frame} -> ${afterHead.frame}`);
+    check(afterHead.start > beforeHead.start + 0.2,
+      'dragging a clip\'s head edge moves its in-point later in the edit',
+      `${beforeHead.start.toFixed(3)}s to ${afterHead.start.toFixed(3)}s`);
+    check(near(afterHead.end, beforeHead.end, 1e-6),
+      'and leaves its out-point where it was, so a head trim shortens the clip rather than moving it',
+      `${beforeHead.end.toFixed(4)} against ${afterHead.end.toFixed(4)}`);
+    check(afterHead.frame === beforeHead.frame,
+      'and the footage under what is left holds still, which is what makes it a trim rather than '
+      + 'a slip: the same project second stands on the same source frame',
+      `source frame ${beforeHead.frame} against ${afterHead.frame} at ${afterHead.at.toFixed(2)}s`);
+    check(afterHead.keys.length === 1 && afterHead.keys[0][0] === 0 && afterHead.keys[0][1] > 0,
+      'the in-point is written as the curve\'s single key at the origin, because a clip states '
+      + 'where it starts in the take through its curve rather than through a field of its own',
+      JSON.stringify(afterHead.keys));
+    check(afterHead.rateDisabled === false,
+      'and the speed slider still answers, because a curve of one key is still a rate',
+      `disabled ${afterHead.rateDisabled}`);
+
+    // The same edge on a clip whose curve says more than an in-point.
+    await page.evaluate(`globalThis.__kinect.keyframes.setRetime({ rate: 1, keys: [
+      { t: 0, value: 2 }, { t: 4, value: 6 } ] })`);
+    await settle();
+    const beforeRefusal = await insideBody();
+    {
+      const r = (await boxAt(1)).r;
+      await page.mouse.move(r.x + 3, r.y + r.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(r.x + 3 + bed.width * 0.04, r.y + r.height / 2);
+      await page.mouse.up();
+      await settle();
+    }
+    const afterRefusal = await insideBody();
+    const refusal = await page.evaluate("document.getElementById('tNote').textContent");
+    console.log(`  head trim on a keyed curve: "${refusal}"`);
+    check(near(afterRefusal.start, beforeRefusal.start, 1e-9),
+      'the head edge of a clip carrying a retime curve moves nothing',
+      `${beforeRefusal.start.toFixed(4)} against ${afterRefusal.start.toFixed(4)}`);
+    check(/retime curve/.test(refusal) && /head/.test(refusal),
+      'and says why rather than being an edge that silently does nothing on some clips',
+      refusal);
+    check(afterRefusal.rateDisabled === true,
+      'and that clip\'s speed slider has gone quiet, because a curve of two keys is not a rate',
+      `disabled ${afterRefusal.rateDisabled}`);
+    await page.evaluate('globalThis.__kinect.keyframes.setRetime({ rate: 1, keys: [] })');
+    await settle();
+
+    // The delete, and the undo of it.
+    const before = await read();
+    await page.locator('#tDeleteClip').click();
+    await settle();
+    const gone = await read();
+    check(gone.clips.length === 1 && gone.clips[0].id !== added.id,
+      'delete removes the selected clip', gone.clips.map((c) => c.id).join(', '));
+    check(gone.selection !== null && gone.selection !== added.id
+      && gone.selection === gone.clips[0].id,
+    'and puts the strip on whatever took its place rather than on nothing, because the panel greys '
+    + 'its clip half when the strip holds no clip and an edit that still has clips has one to edit',
+    `${gone.selection}`);
+    await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+z`);
+    await settle();
+    const back = await read();
+    console.log(`  after undo: ${back.clips.map((c) => `${c.id} of ${c.take} at ${c.start.toFixed(2)}s`).join(', ')}`);
+    check(back.clips.length === 2,
+      'undo puts the clip back, which needs the footage it was cut on to still be open - opening '
+      + 'it again would be a fetch and the undo path cannot await one',
+      back.clips.map((c) => c.id).join(', '));
+    check(back.clips[1]?.take === before.clips[1].take
+      && near(back.clips[1]?.start ?? -1, before.clips[1].start, 1e-6),
+    'and it comes back on the take it was cut on, at the placement it had',
+    `${back.clips[1]?.take} at ${back.clips[1]?.start?.toFixed(3)}s`);
+
+
+    // The sequence the naive fix misses: delete the last clip of a take, make one more edit, and
+    // undo twice. The first undo is what runs `applyProject` over a document that no longer names
+    // the deleted take, so a build that dropped the take there refuses on the second.
+    if (other) {
+      const twoAgain = await read();
+      check(twoAgain.clips.length === 2 && twoAgain.clips[1].take === pickId,
+        `the edit is back on two clips, one of them the only clip of ${pickId}, which is what `
+        + 'makes the sequence below about a take going out of use',
+        twoAgain.clips.map((c) => `${c.id}:${c.take}`).join(' '));
+      await page.mouse.click((await boxAt(1)).x, (await boxAt(1)).y);
+      await settle();
+      await page.locator('#tDeleteClip').click();
+      await settle();
+      // One more edit on top of the delete, so the undo of it is not the top of the stack.
+      // Through the document and not through `timeline.clips()`: that handle rebuilds its array
+      // on every call, so `clips()[0].start = …` writes to an object nothing ever reads again and
+      // the commit below finds nothing to push - which leaves the two rows under it asserting
+      // against a stack one entry shorter than the sequence they describe.
+      const moved = await page.evaluate(`(() => {
+        const k = globalThis.__kinect;
+        const body = k.library.serialiseProjectBody();
+        body.clips[0].start = 0.75;
+        k.library.restoreProject(body);
+        k.keyframes.undo.commit();
+        return k.timeline.clips()[0].start;
+      })()`);
+      const afterBoth = await read();
+      const key = process.platform === 'darwin' ? 'Meta' : 'Control';
+      await page.keyboard.press(`${key}+z`);
+      await settle();
+      const undoneOnce = await read();
+      let secondUndo = null;
+      try {
+        await page.keyboard.press(`${key}+z`);
+        await settle();
+        secondUndo = await read();
+      } catch (err) {
+        secondUndo = { error: String(err.message ?? err) };
+      }
+      console.log(`  delete the only clip of ${pickId}, move ${afterBoth.clips[0].id} to `
+        + `${moved}s, then undo twice: ${undoneOnce.clips.length} clip(s) after one, `
+        + `${secondUndo.clips ? secondUndo.clips.length : 'threw'} after two`);
+      check(undoneOnce.clips.length === 1 && near(undoneOnce.clips[0].start, 0, 1e-9),
+        'the first undo takes back the edit made after the delete and leaves the delete standing',
+        `${undoneOnce.clips.length} clip(s), first at ${undoneOnce.clips[0]?.start}`);
+      check(Boolean(secondUndo.clips) && secondUndo.clips.length === 2,
+        'and the second takes back the delete itself, one step further down a stack that has '
+        + 'already run `applyProject` over a document naming no such take',
+        secondUndo.clips ? secondUndo.clips.map((c) => c.id).join(', ') : secondUndo.error);
+      check(secondUndo.clips?.[1]?.take === pickId,
+        `and the clip comes back on ${pickId} rather than on whatever the surviving slot held`,
+        `${secondUndo.clips?.[1]?.take}`);
+    } else {
+      note('[22] the two-undo sequence is not run',
+        'it needs a second take so the deleted clip is the last user of its footage, and this '
+        + 'library holds one take');
+    }
+
+    // The view window is the project's, not the first clip's.
+    const framed = await page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const clips = k.timeline.clips();
+      const last = clips[clips.length - 1];
+      const t = k.timeline.transport();
+      return { duration: t.duration, ends: clips.map((c) => c.end), longest: last.end };
+    })()`);
+    check(near(framed.duration, Math.max(...framed.ends), 1e-6),
+      'the edit is as long as its furthest clip reaches, so the window fits the film rather than '
+      + 'the first clip', `${framed.duration.toFixed(3)}s against ends ${framed.ends.map((e) => e.toFixed(2)).join(', ')}`);
+
+    console.log('\n[22b] the handles that move a clip, and the half of a preset that is shared');
+
+    // Two clips, staged rather than inherited: section 22 above finishes on whatever its undo
+    // sequence left, and both arms below are comparisons between two clips.
+    const staged = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const body = k.library.serialiseProjectBody();
+      const first = JSON.parse(JSON.stringify(body.clips[0]));
+      const second = JSON.parse(JSON.stringify(body.clips[0]));
+      second.id = 'gz2';
+      second.start = 4;
+      first.params.pointSize = 6.5;
+      second.params.pointSize = 37.5;
+      body.clips = [first, second];
+      k.library.restoreProject(body);
+      k.editor.selectClipRow('gz2');
+      return k.timeline.clips().map((c) => ({ id: c.id, start: c.start }));
+    })()`);
+    check(staged.length === 2 && staged[1].id === 'gz2',
+      'two clips are staged for this section, which is what makes both arms below a comparison',
+      staged.map((c) => `${c.id} at ${c.start}s`).join(', '));
+
+    // The handles, armed by the command they are drawn beside.
+    await page.locator('#tMoveClip').click();
+    await settle();
+    const armed = await page.evaluate('__kinect.editor.gizmo()');
+    // The commands are drawn in the bed rather than in the rail, so a press on one arrives at
+    // the same handler that clears the selection on empty space. That cost a run: the clear
+    // rebuilt the stack and re-parented the button between the press and its click, and
+    // `+ add clip` stopped opening at all.
+    check(await page.evaluate('__kinect.editor.clipSelection()') === 'gz2',
+      'pressing a command on the clip bar leaves the clip selected, because the bar is furniture '
+      + 'rather than the empty part of the stack',
+      `${await page.evaluate('__kinect.editor.clipSelection()')}`);
+    check(armed.mode === 'translate' && armed.clip === 'gz2' && armed.shown === true,
+      'pressing move arms the translate handles on the selected clip and draws them',
+      `${armed.mode} on ${armed.clip}, shown ${armed.shown}`);
+    await page.locator('#tRotateClip').click();
+    await settle();
+    const turned = await page.evaluate('__kinect.editor.gizmo()');
+    check(turned.mode === 'rotate' && turned.clip === 'gz2',
+      'and pressing turn moves the handles to rotation rather than adding a second set',
+      `${turned.mode} on ${turned.clip}`);
+    const legend22b = await page.evaluate('__kinect.editor.shortcuts()');
+    check(/g moves and turns/.test(legend22b),
+      'and the ? legend names the key that does the same thing, so the keyboard is described '
+      + 'wherever the buttons are',
+      legend22b.slice(-90));
+    await page.locator('#tMoveClip').click();
+    await settle();
+
+    // The rule this whole design is under: a pointer move arms a redraw and never starts one.
+    // Thirty moves, because the shipped failure was 34 rebuilds for a single one.
+    const MOVES = 30;
+    const dragged = await page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const before = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
+      k.editor.gizmoDrag(true);
+      const orbitDuring = k.editor.orbitEnabled();
+      for (let i = 1; i <= ${MOVES}; i++) k.editor.moveGizmo([i * 0.02, 0, 0]);
+      const midDrag = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
+      // Two animation frames, which is where the write is allowed to happen.
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const pumped = k.params.get('transform').position[0];
+      k.editor.gizmoDrag(false);
+      await k.timeline.settled();
+      const after = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
+      return {
+        rebuilds: after.rebuilds - before.rebuilds,
+        duringRebuilds: midDrag.rebuilds - before.rebuilds,
+        renders: after.renders - before.renders,
+        duringRenders: midDrag.renders - before.renders,
+        orbitDuring,
+        orbitAfter: k.editor.orbitEnabled(),
+        pumped,
+        group: k.timeline.clips().find((c) => c.id === 'gz2').placement.position[0],
+        other: k.timeline.clips().find((c) => c.id !== 'gz2').placement.position[0],
+      };
+    })()`);
+    console.log(`  ${MOVES} pointer moves through the handles: ${dragged.duringRebuilds} lane `
+      + `rebuilds and ${dragged.duringRenders} renders while the pointer was down, `
+      + `${dragged.rebuilds} and ${dragged.renders} over the whole gesture`);
+    // First, that the drag did anything at all: a gizmo wired to nothing costs nothing either.
+    check(near(dragged.pumped, MOVES * 0.02, 1e-6) && near(dragged.group, dragged.pumped, 1e-6),
+      'the drag reaches the registry and the group both, so the counts below are of a gesture '
+      + 'that did something',
+      `registry ${dragged.pumped.toFixed(3)}, group ${dragged.group.toFixed(3)}`);
+    check(dragged.other === 0,
+      'and it reaches the clip the handles are on and no other',
+      `the other clip is at ${dragged.other}`);
+    check(dragged.duringRebuilds === 0,
+      'and no pointer move rebuilt the lane stack: the drag arms a redraw and the animation loop '
+      + 'is the only thing allowed to start one',
+      `${dragged.duringRebuilds} rebuilds across ${MOVES} moves`);
+    check(dragged.rebuilds <= 2,
+      'and the whole gesture costs one rebuild rather than one per move, which is the 34-for-one '
+      + 'this program has already shipped once',
+      `${dragged.rebuilds} rebuilds for ${MOVES} moves`);
+    check(dragged.orbitDuring === false && dragged.orbitAfter === true,
+      'the orbit stands down for the drag and comes back after it, because two controls cannot '
+      + 'both have the pointer',
+      `enabled ${dragged.orbitDuring} during, ${dragged.orbitAfter} after`);
+
+    // The placement keyed from the control that exists for it, and read between the two keys.
+    // Pressed rather than called: it is the only way to plant the first key on a placement track,
+    // because a placement has no panel row and no keyframe control beside one.
+    const keyed = await page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const t = k.timeline.transport();
+      const clip = k.timeline.clips().find((c) => c.id === 'gz2');
+      const press = async (sec, position) => {
+        await t.seek(sec);
+        await k.timeline.settled();
+        if (position) k.params.set('transform', { position, quaternion: [0, 0, 0, 1] });
+        document.getElementById('tKeyClip').click();
+        await k.timeline.settled();
+        return document.getElementById('tKeyClip').dataset.kf;
+      };
+      const kfAtFirst = await press(clip.start, [0, 0, 0]);
+      const kfAtSecond = await press(clip.start + 2, [1, 0, 0]);
+      const doc = k.library.serialiseProjectBody().clips.find((c) => c.id === 'gz2');
+      // Seeked and read without pressing, which is the third state the control has to show.
+      const at = async (sec) => {
+        await t.seek(sec);
+        await k.timeline.settled();
+        return {
+          x: k.timeline.clips().find((c) => c.id === 'gz2').placement.position[0],
+          kf: document.getElementById('tKeyClip').dataset.kf,
+        };
+      };
+      const half = await at(clip.start + 1);
+      const beyond = await at(clip.start + 3);
+      return {
+        start: clip.start,
+        kfAtFirst,
+        kfAtSecond,
+        kfBetween: half.kf,
+        keys: (doc.tracks.transform ?? []).map((key) => key.t),
+        between: half.x,
+        past: beyond.x,
+        lanes: k.keyframes.lanes().map((l) => l.owner),
+      };
+    })()`);
+    console.log(`  keyed at ${keyed.keys.join('s and ')}s of the clip's own time, `
+      + `with the clip at ${keyed.start}s: the group reads ${keyed.between.toFixed(3)} halfway `
+      + `between them and ${keyed.past.toFixed(3)} past the last`);
+    check(keyed.keys.length === 2 && Math.abs(keyed.keys[0]) < 1e-9
+      && Math.abs(keyed.keys[1] - 2) < 1e-9,
+    'the key control plants a placement key on the clip\'s own clock, so the first key of a clip '
+    + 'placed away from the head of the edit is at zero rather than at where the clip sits',
+    keyed.keys.join(', '));
+    check(keyed.kfAtSecond === 'here',
+      'and it says a key is under the playhead once one has been planted there',
+      `${keyed.kfAtFirst} then ${keyed.kfAtSecond}`);
+    check(keyed.kfBetween === 'some',
+      'and says the track carries keys elsewhere when the playhead is between them',
+      `${keyed.kfBetween}`);
+    check(Math.abs(keyed.between - 0.5) < 1e-3,
+      'and the group sits halfway between the two keys at the program second halfway between them',
+      `${keyed.between.toFixed(4)} against 0.5`);
+    check(Math.abs(keyed.past - 1) < 1e-9,
+      'and holds the last key past the end of the track rather than extrapolating out of the room',
+      `${keyed.past.toFixed(4)}`);
+    check(keyed.lanes.includes('clip:gz2/transform'),
+      'and the track draws a lane nested under the clip that holds it',
+      keyed.lanes.join(', '));
+
+    // The preset's two halves, and which of them is shared.
+    const preset = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const body = {
+        version: k.library.PROJECT_VERSION,
+        values: { pointSize: 33.3, opacity: 0.44, bloom: 2.5, crush: 0.05 },
+      };
+      const before = k.library.serialiseProjectBody();
+      const report = k.library.applyStoredPreset({ name: 'scope-probe', rev: null, body });
+      const after = k.library.serialiseProjectBody();
+      const at = (doc, id) => doc.clips.find((c) => c.id === id).params;
+      return {
+        report,
+        selected: k.editor.clipSelection(),
+        mineBefore: at(before, 'gz2').pointSize,
+        mineAfter: at(after, 'gz2').pointSize,
+        theirsBefore: at(before, before.clips[0].id).pointSize,
+        theirsAfter: at(after, before.clips[0].id).pointSize,
+        bloomBefore: before.look.params.bloom,
+        bloomAfter: after.look.params.bloom,
+      };
+    })()`);
+    console.log(`  a preset of two cloud values and two post values applied to `
+      + `${preset.selected}: its point size ${preset.mineBefore} -> ${preset.mineAfter}, the `
+      + `other clip's ${preset.theirsBefore} -> ${preset.theirsAfter}, `
+      + `the project's bloom ${preset.bloomBefore} -> ${preset.bloomAfter}`);
+    check(preset.mineBefore !== preset.theirsBefore,
+      'the two clips held different point sizes going in, so the rows below can tell them apart',
+      `${preset.mineBefore} against ${preset.theirsBefore}`);
+    check(near(preset.mineAfter, 33.3, 1e-9),
+      'a preset\'s cloud values land on the selected clip', `${preset.mineAfter}`);
+    check(preset.theirsAfter === preset.theirsBefore,
+      'and on no other clip, which is what makes a look the clip\'s own',
+      `${preset.theirsBefore} -> ${preset.theirsAfter}`);
+    check(near(preset.bloomAfter, 2.5, 1e-9) && preset.bloomBefore !== preset.bloomAfter,
+      'while its post values land on the project, which every clip in the edit is seen through',
+      `${preset.bloomBefore} -> ${preset.bloomAfter}`);
+    check(preset.report.shared === 2,
+      'and the apply says how many of them were the shared half, so the operator is told rather '
+      + 'than left to find out',
+      `${preset.report.shared} of ${preset.report.written} written`);
+    const copy = await page.evaluate(
+      "[...document.querySelectorAll('#presetPick p')].map((p) => p.textContent).join(' ')",
+    );
+    check(/project/i.test(copy) && /every other clip/i.test(copy),
+      'and the dialog that saves one says the same thing in words, on the surface a person reads',
+      copy.replace(/\s+/g, ' ').slice(0, 160));
+
+    // The other door, and the ruling's other half. Through `loadProject` rather than through
+    // `restoreProject`: the restore door is what undo arrives by and it must keep the selection,
+    // so driving that one would report the opposite of what this row claims.
+    const PROBE = '__editor-check-selection__';
+    await page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const res = await fetch('/projects/${PROBE}', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(k.library.serialiseProject()),
+      });
+      if (!res.ok) throw new Error('the probe project could not be saved: ' + res.status);
+      await k.library.loadProject('${PROBE}');
+      await k.timeline.settled();
+    })()`);
+    await settle();
+    const loaded = await page.evaluate(`(() => ({
+      selection: __kinect.editor.clipSelection(),
+      clips: __kinect.timeline.clips().length,
+      greyed: __kinect.editor.scopeOff(),
+      clipControl: document.getElementById('pointSize').disabled,
+    }))()`);
+    console.log(`  a project of ${loaded.clips} clips loaded by name: `
+      + `selection ${loaded.selection}, ${loaded.greyed} greyed rows`);
+    check(loaded.clips === 2,
+      'the probe project came back with both its clips, so the row below is about a load that '
+      + 'happened rather than one that failed',
+      `${loaded.clips} clips`);
+    check(loaded.selection === null && loaded.greyed > 20 && loaded.clipControl === true,
+      'and loading a project selects no clip, because a document does not record which clip was '
+      + 'being worked on and picking one would be a guess - which is the case the clip/project '
+      + 'split is worth showing, since it is the one with a choice in it',
+      `selection ${loaded.selection}, ${loaded.greyed} greyed`);
+    // The content type goes on the DELETE: the document routes answer 415 without one, and a
+    // swallowed refusal leaves the probe in `projects/` for the next reader to wonder about.
+    await fetch(`${URL_BASE}/projects/${PROBE}`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    }).catch(() => {});
+    await page.evaluate(`__kinect.editor.selectClipRow('gz2')`);
+    await settle();
+
+    // The gesture that reaches the greyed state, and the state itself. Pressed on the empty part
+    // of a clip's own lane - the clip starts at 4s, so the head of its lane belongs to no clip.
+    const emptyLane = await page.evaluate(`(() => {
+      const lane = document.querySelector('.tlane[data-owner="clip:gz2"]');
+      const r = lane.getBoundingClientRect();
+      const box = lane.querySelector('.tclip').getBoundingClientRect();
+      return { x: r.x + Math.max(4, (box.x - r.x) / 2), y: r.y + r.height / 2, gap: box.x - r.x };
+    })()`);
+    const greyedBefore = await page.evaluate('__kinect.editor.scopeOff()');
+    await page.mouse.click(emptyLane.x, emptyLane.y);
+    await settle();
+    const off = await page.evaluate(`(() => ({
+      selection: __kinect.editor.clipSelection(),
+      greyed: __kinect.editor.scopeOff(),
+      clipControl: document.getElementById('pointSize').disabled,
+      projectControl: document.getElementById('bloom').disabled,
+      handles: __kinect.editor.gizmo().shown,
+    }))()`);
+    console.log(`  a press ${emptyLane.gap.toFixed(0)}px left of the clip's box: `
+      + `selection ${off.selection}, ${greyedBefore} greyed rows before it and ${off.greyed} after`);
+    check(off.selection === null,
+      'a press on the empty part of the stack takes the strip off every clip', `${off.selection}`);
+    check(greyedBefore === 0 && off.greyed > 20 && off.clipControl === true,
+      'and the panel greys its clip half rather than hiding it, so the split between what a clip '
+      + 'holds and what the project holds stays on screen',
+      `${off.greyed} rows greyed, pointSize disabled ${off.clipControl}`);
+    check(off.projectControl === false,
+      'while the project half stays live, because it belongs to no clip and there is nothing to '
+      + 'have deselected',
+      `bloom disabled ${off.projectControl}`);
+    check(off.handles === false,
+      'and the handles go with it, because there is no clip for them to be on',
+      `shown ${off.handles}`);
+    await page.evaluate(`__kinect.editor.selectClipRow('gz2')`);
+    await settle();
+    check(await page.evaluate('__kinect.editor.scopeOff()') === 0,
+      'and selecting a clip again brings the whole panel back',
+      `${await page.evaluate('__kinect.editor.scopeOff()')} rows still greyed`);
+
+    // Put the page back on one clip with no handles up, so the sections after this one see what
+    // they expect.
+    await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      k.editor.setGizmoMode(null);
+      const body = k.library.serialiseProjectBody();
+      body.clips = [body.clips[0]];
+      k.library.restoreProject(body);
+    })()`);
+    await settle();
+  }
+
   console.log('\n[23] pinning the drive drops what the loop was going to serve');
 
   // The third state that strands an armed position, and the only one `pumpParkedDraft` cannot
@@ -8670,6 +9437,7 @@ try {
     check(settledAfterPin,
       'a drag the pinned drive interrupts leaves nothing armed behind it either', pinWhy);
   }
+
 } catch (err) {
   crashed = err;
 } finally {

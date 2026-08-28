@@ -158,19 +158,30 @@ const MUTATIONS = {
   // The parked pool never reaches the file again, so a save drops what the clip could not load.
   'save-forgets-the-parked-pool': { file: 'web/main.js', edits: [
     [
-      '      params: { ...lookParams, ...parked.params },',
-      '      params: { ...lookParams },',
+      '      params: { ...values, ...parked.params },',
+      '      params: { ...values },',
     ],
     [
       '        ...parked.tracks,\n      },',
       '      },',
     ],
   ] },
+  // The pool stops recording which block a key arrived in, which is the one thing a build
+  // without the effect cannot work out for itself.
+  'park-forgets-its-block': { file: 'web/main.js', edits: [[
+    '  const parked = {\n'
+    + '    clip: { params: {}, tracks: {} },\n'
+    + '    project: { params: {}, tracks: {} },\n'
+    + '    requires: [],\n'
+    + '  };',
+    '  const oneBlock = { params: {}, tracks: {} };\n'
+    + '  const parked = { clip: oneBlock, project: oneBlock, requires: [] };',
+  ]] },
   // The other half of the same merge, with its own control because the row about the
   // `requires` entry stays green under the one above.
   'save-forgets-the-parked-requires': { file: 'web/main.js', edits: [[
-    '  const requires = [...requiresFor(kept), ...parked.requires];',
-    '  const requires = [...requiresFor(kept)];',
+    '    ...writableRequires(),\n  ];',
+    '  ];',
   ]] },
   // The version a document was authored against, compared with nothing.
   'skew-goes-unreported': { file: 'web/main.js', edits: [[
@@ -179,8 +190,8 @@ const MUTATIONS = {
   ]] },
   // The completeness rule reading the values and not the tracks.
   'completeness-reads-the-values-only': { file: 'web/main.js', edits: [[
-    '  const touched = effectIdsIn([...Object.keys(project.look.params), ...Object.keys(project.look.tracks)]);',
-    '  const touched = effectIdsIn(Object.keys(project.look.params));',
+    '  for (const id of effectIdsIn(names).filter((n) => effectInstalled(n))) {',
+    '  for (const id of effectIdsIn(Object.keys(block.params)).filter((n) => effectInstalled(n))) {',
   ]] },
   // The capture format's band comes off.
   'open-ignores-format': { file: 'web/format.js', edits: [[
@@ -189,7 +200,7 @@ const MUTATIONS = {
   ]] },
   // The retime guard comes off the file door.
   'load-skips-monotonic': { file: 'web/main.js', edits: [[
-    '  retime.assertMonotonic(restoredRetime);',
+    '    retime.assertMonotonic(keys);',
     '  /* mutation: the curve arrives unchecked */',
   ]] },
   // The quaternion length check comes off, which is the gap step 5 carried: four finite numbers
@@ -219,7 +230,7 @@ const MUTATIONS = {
   // Marks are drawn at their source fraction rather than through the retime curve, which is
   // identical at rate 1 with no keys and wrong everywhere else.
   'marks-ignore-retime': { file: 'web/main.js', edits: [[
-    '\n    const program = retime.programSecAt(mark.sourceMs / 1000);\n',
+    '\n    const program = programSecOfSource(mark.sourceMs / 1000);\n',
     '\n    const program = mark.sourceMs / 1000;\n',
   ]] },
   // The gallery skims a remote take at full resolution, promising a smoothness the
@@ -251,7 +262,7 @@ const MUTATIONS = {
     "  { path: '/library/writes', pattern: /^\\/library\\/writes$/, read: serveWriteCounts },",
     "  { path: '/library/writes', pattern: /^\\/library\\/writes$/, read: serveWriteCounts },\n"
     + "  { path: '/library/sweep-probe', pattern: /^\\/library\\/sweep-probe$/, read: async (req, res) => {\n"
-    + "    await PROJECTS.write('planted-then-removed', { version: PROJECT_VERSION, look: { params: {}, tracks: {} }, composition: { retime: { rate: 1, keys: [] }, camera: [] }, outputSize: '1920x1080', appliedPreset: null });\n"
+    + "    await PROJECTS.write('planted-then-removed', { version: PROJECT_VERSION, clips: [], look: { params: {}, tracks: {} }, composition: { camera: [] }, outputSize: '1920x1080' });\n"
     + "    await PROJECTS.remove('planted-then-removed');\n"
     + '    sendJson(res, { restored: true });\n'
     + '  } },',
@@ -3120,22 +3131,36 @@ async function runChecks() {
         === (await getJson(`${macUrl}/library/takes`)).takes.find((t) => t.id === 'local-clip').hash,
         'the editor names its take by the hash the manifest reports');
 
+      // The project owns the take list, so other footage is opened rather than refused. What is
+      // refused is footage this machine has not got, and it is named.
       const otherHash = (await getJson(`${macUrl}/library/takes`)).takes.find((t) => t.id === 'truncated-take').hash;
-      await takePage.evaluate(`(async () => {
-        const body = { ...globalThis.__kinect.library.serialiseProject(), take: { id: 'truncated-take', hash: ${JSON.stringify(otherHash)} } };
-        await fetch('/projects/other-footage', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      })()`);
-      const crossed = await takePage.evaluate(`(async () => {
-        try { await globalThis.__kinect.library.loadProject('other-footage'); return 'ACCEPTED'; }
+      const cutOnto = async (name, take) => takePage.evaluate(`(async () => {
+        const body = globalThis.__kinect.library.serialiseProject();
+        body.clips[0].take = ${JSON.stringify(take)};
+        await fetch('/projects/${name}', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        try { await globalThis.__kinect.library.loadProject('${name}'); return 'ACCEPTED'; }
         catch (e) { return e.message; }
       })()`);
-      check(/different footage/.test(crossed), 'a project built on other footage is refused against this take',
-        crossed.slice(0, 80));
+      const absent = await cutOnto('absent-footage', { id: 'not-on-this-machine', hash: `sha256:${'0'.repeat(64)}` });
+      check(/no take on this machine hashes it/.test(absent),
+        'a project whose clip names footage this machine has not got is refused, and the refusal names the take',
+        absent.slice(0, 120));
+      check(await takePage.evaluate('globalThis.__kinect.library.takeId()') === 'local-clip',
+        'and the refusal left the editor on the take it had, rather than half onto one it could not open',
+        String(await takePage.evaluate('globalThis.__kinect.library.takeId()')));
+      const crossed = await cutOnto('other-footage', { id: 'truncated-take', hash: otherHash });
+      check(crossed === 'ACCEPTED'
+        && await takePage.evaluate('globalThis.__kinect.library.takeHash()') === otherHash,
+        'a project cut on other footage opens that footage, because the clips are what name the take',
+        `${String(crossed).slice(0, 80)}, now on ${String(await takePage.evaluate('globalThis.__kinect.library.takeId()'))}`);
+      // Back onto the take the rows below are about.
+      await takePage.goto(editorPage(macUrl, 'local-clip'), { waitUntil: 'load' });
+      await takePage.waitForFunction('globalThis.__kinect?.library?.opened() === true', null, { timeout: 40000 });
 
       // And the whole path end to end, seek included, onto the take it was built on.
       const own = await takePage.evaluate(`(async () => {
         const k = globalThis.__kinect;
-        const body = { ...k.library.serialiseProject(), take: { id: k.library.takeId(), hash: k.library.takeHash() } };
+        const body = k.library.serialiseProject();
         await fetch('/projects/own-footage', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         try { await k.library.loadProject('own-footage'); return 'ACCEPTED'; } catch (e) { return e.message; }
       })()`);
@@ -3212,7 +3237,7 @@ async function runChecks() {
     // The saved file is a file on disk with a version on it.
     const saved = JSON.parse(readFileSync(join(WORK, 'projects/round-trip.json'), 'utf8'));
     check(saved.version === PROJECT_VERSION, 'the file carries the format version', `version ${saved.version}`);
-    check(JSON.parse(readFileSync(join(WORK, 'projects/own-footage.json'), 'utf8')).take?.hash?.startsWith('sha256:'),
+    check(JSON.parse(readFileSync(join(WORK, 'projects/own-footage.json'), 'utf8')).clips?.[0]?.take?.hash?.startsWith('sha256:'),
       'and a project saved from the editor names its footage by content hash rather than by path');
 
     // The round trip that has to be lossless is the one this build cannot read.
@@ -3222,26 +3247,39 @@ async function runChecks() {
       'sparkle is not an effect this build has, which is what makes the rows below about a missing one',
       `${installedIds.length} installed: ${installedIds.join(', ')}`);
 
-    const PARKED_VALUES = {
-      'sparkle.amount': 0.6,
-      'sparkle.size': 3.25,
-      'sparkle.hue': 210,
-      'sparkle.jitter': 0.125,
-    };
-    const PARKED_TRACKS = {
+    // Split across the two blocks on purpose. A build without the effect cannot know where its
+    // values belong - the manifest declaring it is the thing this build has not got - so the
+    // document's own placement is the only statement of it, and each half has to come back where
+    // it went or a load and save on this machine would move a grade effect into a clip.
+    const CLIP_VALUES = { 'sparkle.amount': 0.6, 'sparkle.size': 3.25 };
+    const LOOK_VALUES = { 'sparkle.hue': 210, 'sparkle.jitter': 0.125 };
+    const PARKED_VALUES = { ...CLIP_VALUES, ...LOOK_VALUES };
+    const CLIP_TRACKS = {
       'sparkle.amount': [
         { t: 0, value: 0, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
         { t: 2, value: 0.9, easeOut: [[0.42, 0]], easeIn: [[0.58, 1]] },
       ],
+    };
+    const LOOK_TRACKS = {
       'sparkle.hue': [{ t: 0.5, value: 10, easeOut: [[0.1, 0.2]], easeIn: [[0.3, 0.4]] }],
     };
-    const parkedFixture = { values: PARKED_VALUES, tracks: PARKED_TRACKS, id: 'sparkle', version: '1.0.0' };
+    const PARKED_TRACKS = { ...CLIP_TRACKS, ...LOOK_TRACKS };
+    const parkedFixture = {
+      clipValues: CLIP_VALUES,
+      lookValues: LOOK_VALUES,
+      clipTracks: CLIP_TRACKS,
+      lookTracks: LOOK_TRACKS,
+      id: 'sparkle',
+      version: '1.0.0',
+    };
     const parked = await page.evaluate(`(async (f) => {
       const k = globalThis.__kinect;
       const clean = k.library.serialiseProject();
       const doc = JSON.parse(JSON.stringify(clean));
-      Object.assign(doc.look.params, f.values);
-      Object.assign(doc.look.tracks, f.tracks);
+      Object.assign(doc.clips[0].params, f.clipValues);
+      Object.assign(doc.clips[0].tracks, f.clipTracks);
+      Object.assign(doc.look.params, f.lookValues);
+      Object.assign(doc.look.tracks, f.lookTracks);
       doc.requires = [...(doc.requires ?? []), { id: f.id, version: f.version }];
       const out = { clean };
       try {
@@ -3280,25 +3318,46 @@ async function runChecks() {
     const pick = (from, keys) => JSON.stringify(Object.fromEntries(keys.map((k) => [k, from?.[k]])));
     const valueKeys = Object.keys(PARKED_VALUES);
     const trackKeys = Object.keys(PARKED_TRACKS);
-    check(pick(parkedFile.look?.params, valueKeys) === pick(PARKED_VALUES, valueKeys),
+    // Read across both blocks, because what the rows below are about is the values surviving; the
+    // row after them is the one about which block each landed in.
+    const bothOf = (doc, kind) => Object.assign({}, doc?.look?.[kind], ...(doc?.clips ?? []).map((c) => c[kind]));
+    check(pick(bothOf(parkedFile, 'params'), valueKeys) === pick(PARKED_VALUES, valueKeys),
       'every parked value comes back out of the saved file holding exactly what went in, key for key',
-      pick(parkedFile.look?.params, valueKeys));
-    check(pick(parkedFile.look?.tracks, trackKeys) === pick(PARKED_TRACKS, trackKeys),
+      pick(bothOf(parkedFile, 'params'), valueKeys));
+    check(pick(bothOf(parkedFile, 'tracks'), trackKeys) === pick(PARKED_TRACKS, trackKeys),
       'and so does every parked track, key times, values and ease handles alike',
-      pick(parkedFile.look?.tracks, trackKeys).slice(0, 120));
+      pick(bothOf(parkedFile, 'tracks'), trackKeys).slice(0, 120));
+    // And in the block it arrived in. A build without the effect cannot ask where its values
+    // belong, so a pool that merged the two would save a grade effect into a clip, and the build
+    // that does have it would then refuse the document on its own scope rule.
+    const keysIn = (o) => Object.keys(o ?? {}).filter((k) => k.startsWith('sparkle.')).sort();
+    const landed = {
+      clipParams: keysIn(parkedFile.clips?.[0]?.params),
+      clipTracks: keysIn(parkedFile.clips?.[0]?.tracks),
+      lookParams: keysIn(parkedFile.look?.params),
+      lookTracks: keysIn(parkedFile.look?.tracks),
+    };
+    const wanted = {
+      clipParams: Object.keys(CLIP_VALUES).sort(),
+      clipTracks: Object.keys(CLIP_TRACKS).sort(),
+      lookParams: Object.keys(LOOK_VALUES).sort(),
+      lookTracks: Object.keys(LOOK_TRACKS).sort(),
+    };
+    check(JSON.stringify(landed) === JSON.stringify(wanted),
+      'and each one comes back in the block it was written in, so a pool that lost which block a key came from would move it',
+      `${JSON.stringify(landed)} against ${JSON.stringify(wanted)}`);
     // And nothing under the pool's prefixes was invented on the way through.
-    const parkedIn = (o) => Object.keys(o ?? {}).filter((k) => k.startsWith('sparkle.')).sort();
-    check(JSON.stringify(parkedIn(parkedFile.look?.params)) === JSON.stringify(valueKeys.slice().sort())
-      && JSON.stringify(parkedIn(parkedFile.look?.tracks)) === JSON.stringify(trackKeys.slice().sort()),
+    check(JSON.stringify(keysIn(bothOf(parkedFile, 'params'))) === JSON.stringify(valueKeys.slice().sort())
+      && JSON.stringify(keysIn(bothOf(parkedFile, 'tracks'))) === JSON.stringify(trackKeys.slice().sort()),
     'and the file carries those keys and no others under that prefix, so nothing was added beside them either',
-    `${JSON.stringify(parkedIn(parkedFile.look?.params))} / ${JSON.stringify(parkedIn(parkedFile.look?.tracks))}`);
+    `${JSON.stringify(keysIn(bothOf(parkedFile, 'params')))} / ${JSON.stringify(keysIn(bothOf(parkedFile, 'tracks')))}`);
     check(JSON.stringify((parkedFile.requires ?? []).find((e) => e.id === 'sparkle')) === '{"id":"sparkle","version":"1.0.0"}',
       'and the requires entry stays with them, at the version the document was authored against',
       JSON.stringify(parkedFile.requires ?? null));
-    check(pick(parked.second?.look?.params, valueKeys) === pick(PARKED_VALUES, valueKeys)
-      && pick(parked.second?.look?.tracks, trackKeys) === pick(PARKED_TRACKS, trackKeys),
+    check(pick(bothOf(parked.second, 'params'), valueKeys) === pick(PARKED_VALUES, valueKeys)
+      && pick(bothOf(parked.second, 'tracks'), trackKeys) === pick(PARKED_TRACKS, trackKeys),
     'and a second trip through the loader moves them no further than the first did',
-    pick(parked.second?.look?.params, valueKeys));
+    pick(bothOf(parked.second, 'params'), valueKeys));
 
     // And the page goes back to a document with nothing parked in it.
     const cleaned = await page.evaluate(`(async (clean) => {
@@ -3324,9 +3383,9 @@ async function runChecks() {
       // Derived from the version this build writes rather than written down.
       ['a project from a newer version', `p.version = ${PROJECT_VERSION + 1};`],
       ['a version that is not a number', 'p.version = "1";'],
-      ['a retime curve that falls', 'p.composition.retime.keys = [{t:0,value:0},{t:1,value:2},{t:2,value:0.5}];'],
+      ['a retime curve that falls', 'p.clips[0].retime.keys = [{t:0,value:0},{t:1,value:2},{t:2,value:0.5}];'],
       ['a retime handle outside the unit box',
-        'p.composition.retime.keys = [{t:0,value:0,easeOut: [[0.4, 1.9]],easeIn: [[0.6, 0]]},{t:2,value:1,easeOut: [[0.4, 0]],easeIn: [[0.6, 0]]}];'],
+        'p.clips[0].retime.keys = [{t:0,value:0,easeOut: [[0.4, 1.9]],easeIn: [[0.6, 0]]},{t:2,value:1,easeOut: [[0.4, 0]],easeIn: [[0.6, 0]]}];'],
       ['a camera key whose quaternion is not unit length',
         'p.composition.camera = [{t:0,value:{position:[0,0,3],quaternion:[0,0,0,1.4],fov:55}},{t:1,value:{position:[1,0,3],quaternion:[0,0,0,1],fov:55}}];'],
       ['a camera key whose quaternion is all zeros',
@@ -3350,19 +3409,24 @@ async function runChecks() {
       ['a parameter named constructor in the values', 'p.look.params.constructor = 1;'],
       ['a parameter named __proto__ in the values',
         "Object.defineProperty(p.look.params, '__proto__', { value: 1, enumerable: true, configurable: true, writable: true });"],
-      ['a reading that is not a number', 'p.look.params["blackwall.amount"] = "1";'],
-      ['a retime rate of zero or less', 'p.composition.retime.rate = 0;'],
-      ['a preset stamp that is not a name and a rev', 'p.appliedPreset = { name: 42 };'],
+      ['a reading that is not a number', 'p.clips[0].params["blackwall.amount"] = "1";'],
+      // The scope split, from each side. A value in the wrong block would be applied at the wrong
+      // scope on restore and written back to the wrong one on save.
+      ['a project value in a clip block', 'p.clips[0].params.bloom = 0;'],
+      ['a clip value in the project block', 'p.look.params.pointSize = 9;'],
+      ['a view parameter in a clip block', 'p.clips[0].params.renderScale = 100;'],
+      ['a retime rate of zero or less', 'p.clips[0].retime.rate = 0;'],
+      ['a preset stamp that is not a name and a rev', 'p.clips[0].appliedPreset = { name: 42 };'],
       // The record a deliverable's embedded document carries.
       ['a suppressed list that is not a list', 'p.suppressed = "sparkle";'],
       ['a suppressed entry with no version', 'p.suppressed = [{ id: "sparkle" }];'],
       ['a suppressed entry whose id could not be an effect id', 'p.suppressed = [{ id: "Sparkle!", version: "1.0.0" }];'],
       // The completeness rule asked of the half of the document it used to skip.
       ['a project naming part of an effect in its values',
-        "p.look.params['glyph.amount'] = 0.5; p.look.params['glyph.tone'] = 0.2; p.look.params['glyph.hash'] = 1;"
+        "p.clips[0].params['glyph.amount'] = 0.5; p.clips[0].params['glyph.tone'] = 0.2; p.clips[0].params['glyph.hash'] = 1;"
         + " p.requires = [...(p.requires ?? []).filter((e) => e.id !== 'glyph'), { id: 'glyph', version: '1.0.0' }];"],
       ['a project whose only use of an effect is a track',
-        "p.look.tracks['glyph.tone'] = [{ t: 0, value: 0.2 }, { t: 1, value: 0.6 }];"
+        "p.clips[0].tracks['glyph.tone'] = [{ t: 0, value: 0.2 }, { t: 1, value: 0.6 }];"
         + " p.requires = [...(p.requires ?? []).filter((e) => e.id !== 'glyph'), { id: 'glyph', version: '1.0.0' }];"],
     ];
     const results = [];
@@ -3385,8 +3449,10 @@ async function runChecks() {
       // reads \`undefined\` on a correct build, which is the shape docs/instruments.md files
       // under a reading that is not a finding. \`get\` cannot answer with anything the
       // parameter could not hold.
-      for (const n of names) p.look.params[n] = k.params.get(n);
-      p.look.tracks['glyph.tone'] = [{ t: 0, value: 0.2 }, { t: 1, value: 0.6 }];
+      // Into the clip's block, because glyph binds the cloud - the two refused cases above
+      // are one key short of this document and have to be short of it in the same block.
+      for (const n of names) p.clips[0].params[n] = k.params.get(n);
+      p.clips[0].tracks['glyph.tone'] = [{ t: 0, value: 0.2 }, { t: 1, value: 0.6 }];
       // Replaced rather than appended, for the reason the two cases above carry: a mutation
       // of this rule leaves an earlier case's document on the page, and an appended entry
       // would then be a duplicate refused by a different rule entirely.
@@ -3553,7 +3619,8 @@ async function runChecks() {
       'the provenance stamp is the hash of the preset\'s bytes on disk',
       `${applied.stamp?.rev?.slice(7, 19)} against ${diskRev.slice(7, 19)}`);
 
-    const inProject = await page.evaluate('globalThis.__kinect.library.serialiseProject().appliedPreset');
+    // On the clip, because a preset is a look and a look is the clip's.
+    const inProject = await page.evaluate('globalThis.__kinect.library.serialiseProject().clips[0].appliedPreset');
     check(eq(inProject, applied.stamp), 'and it travels in the project, so drift across a set of clips is visible');
 
     // The copy is what keeps a project self-contained.

@@ -193,6 +193,11 @@
      A triangle built from borders cannot be recoloured with a single `border-color`: the
      two transparent edges are what give it its shape, and setting all four would fill it
      into a square. So each state names the one edge that is visible. */
+  /* The clip half of the panel with no clip under it: shown rather than hidden, so the split
+     between what a clip holds and what the project holds stays on screen. */
+  .row[data-scope-off=yes], .checkrow[data-scope-off=yes] { opacity: 0.4; }
+  .row[data-scope-off=yes] input, .checkrow[data-scope-off=yes] input { cursor: not-allowed; }
+
   .grouptoggle {
     order: -1;
     flex: 0 0 10px; width: 10px; height: 16px; display: grid; place-items: center;
@@ -231,6 +236,10 @@
   .row[hidden], .checkrow[hidden] { display: none; }
   .row span { flex: 0 0 74px; color: var(--dim); }
   .row output { flex: 0 0 42px; text-align: right; font-variant-numeric: tabular-nums; }
+  /* The lens readout carries a sentence at either end of its band, and 42px wraps that onto
+     three lines and grows the row. Sized to its content instead, so the slider gives up width
+     only while it is parked at an end it cannot reach anyway. */
+  #cameraGroup .row output { flex: 0 0 auto; white-space: nowrap; }
   #panel .row select,
   #panel .row input[type=text] {
     flex: 1;
@@ -986,6 +995,26 @@
     letter-spacing: 0.14em; text-transform: uppercase; }
   .tcol.rail .trow b { color: var(--ink); font-weight: 500; font-size: 11px;
     font-variant-numeric: tabular-nums; flex: none; }
+  /* A clip's own lanes, indented under the row they fold into. */
+  .tcol.rail .trow.nested { padding-left: 20px; }
+  .tcol.rail .trow.nested span { color: var(--faint); }
+  /* The same border triangle as the panel's group toggle, for the same gesture. */
+  .lanefold {
+    order: -1;
+    flex: 0 0 10px; width: 10px; height: 14px; display: grid; place-items: center;
+    border: 0; background: transparent; padding: 0; cursor: pointer;
+  }
+  .lanefold i {
+    width: 0; height: 0;
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-top: 5px solid var(--dim); border-bottom: 0;
+  }
+  .lanefold:hover i { border-top-color: var(--ink); }
+  .lanefold[aria-expanded=false] i {
+    border-left: 5px solid var(--dim); border-right: 0;
+    border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  }
+  .lanefold[aria-expanded=false]:hover i { border-left-color: var(--ink); }
 
   /* ── the overview strip ────────────────────────────────────────────────────
      Fixed at 22px and outside `.tlanes`, so it is part of `--timeline-h` and the
@@ -1147,6 +1176,56 @@
      The one cost is that a diamond now paints over a marker's line where they cross,
      which is the right way round: the line has the shading either side of it to say
      where the range ends, and a key has only itself. */
+  /* A clip, drawn as the thing that is there. The trim chrome on the ruler is the negative of
+     this - two shades of the excluded region - and `.tminirange` is the precedent this follows:
+     a positive box for a positive fact. */
+  .tclip {
+    position: absolute; top: 3px; bottom: 3px; z-index: 4; min-width: 3px;
+    background: var(--accent-low); border: 1px solid var(--line-3); border-radius: 3px;
+    cursor: grab; touch-action: none; overflow: hidden;
+  }
+  .tclip span { position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
+    color: var(--dim); font-size: 10px; white-space: nowrap; pointer-events: none; }
+  .tclip:hover { border-color: var(--line-3); background: var(--accent-low); }
+  .tclip.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-low); }
+  .tclip.sel span { color: var(--ink); }
+  /* The two ends. Wide enough to hit on the Pi's touchscreen, where there is no hover to
+     find them with. */
+  .tclipedge { position: absolute; top: 0; bottom: 0; width: 10px;
+    cursor: ew-resize; touch-action: none; }
+  .tclipedge.head { left: 0; }
+  .tclipedge.tail { right: 0; }
+  .tclipedge::after { content: ""; position: absolute; top: 0; bottom: 0;
+    width: 2px; background: var(--line-3); }
+  .tclipedge.head::after { left: 3px; }
+  .tclipedge.tail::after { right: 3px; }
+  .tclip.sel .tclipedge::after { background: var(--accent); }
+  /* The head of the stack: the two commands that add and remove a clip. */
+  .tlane.tclipbar { display: flex; align-items: center; gap: 6px; padding-left: 4px; }
+  .tclipcmd {
+    font: inherit; font-size: 10px; color: var(--dim); background: none;
+    border: 1px solid var(--line-2); border-radius: 3px; padding: 2px 6px; cursor: pointer;
+  }
+  .tclipcmd:hover:not(:disabled) { color: var(--ink); border-color: var(--accent); }
+  .tclipcmd:disabled { opacity: 0.4; cursor: default; }
+  /* A command that is a mode rather than an action says which mode is armed. Without this the
+     only thing on screen saying so is the shape of the handles in the viewport. */
+  .tclipcmd[aria-pressed=true] { color: var(--bg); background: var(--accent);
+    border-color: var(--accent); }
+  /* The placement's keyframe control, painted by the same three states as a panel row's. */
+  .tclipcmd[data-kf=some] { color: var(--accent); border-color: var(--accent); }
+  .tclipcmd[data-kf=here] { color: var(--bg); background: var(--accent);
+    border-color: var(--accent); }
+  /* The take list inside the add-clip dialog. */
+  .cplist { display: flex; flex-direction: column; gap: 2px; max-height: 280px;
+    overflow-y: auto; min-width: 0; }
+  .cpoption {
+    display: flex; gap: 8px; align-items: baseline; text-align: left; font: inherit;
+    background: none; border: 1px solid transparent; border-radius: 3px; padding: 4px 6px;
+    color: var(--ink); cursor: pointer;
+  }
+  .cpoption:hover, .cpoption:focus-visible { background: var(--accent-low); border-color: var(--accent); }
+  .cpoption small { color: var(--dim); font-size: 11px; }
   .tkey {
     position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px;
     background: var(--dim); transform: rotate(45deg); cursor: grab; z-index: 5;
@@ -1323,6 +1402,7 @@
       <div class="btnrow">
         <button id="camView" type="button" aria-pressed="false">set viewport to camera</button>
       </div>
+      <div class="row"><span>lens</span><input id="camLens" type="range" min="8" max="300" step="0.1" value="22.7"><output id="camLensOut">22.7mm</output></div>
     </div>
 
     <!-- Everything between the camera group and here is generated from the registry at
@@ -1754,12 +1834,35 @@
     <p>A preset carries the values you tick and nothing else, so a clip it is applied to
       keeps everything left out. The five reading weights tick and untick together,
       because a look naming some of them renders as a blend nobody authored.</p>
+    <p>Applying one is not all on one clip. The cloud values land on the selected clip;
+      the post chain - bloom, trails, crush and the rest of the grade - is the project's,
+      so those land once and every other clip in the edit is seen through them.</p>
     <input id="ppName" type="text" autocomplete="off" spellcheck="false" aria-label="Preset name" />
     <div id="ppGroups"></div>
     <div class="ppacts">
       <span id="ppCount"></span>
       <button type="button" id="ppCancel">cancel</button>
       <button type="button" class="go" id="ppGo">save</button>
+    </div>
+  </dialog>
+
+  <!-- Which take a new clip is cut from. The gallery is the surface that browses footage and
+       this is not a second one: it lists what `/library/takes` says is here, which is the same
+       route the project loader resolves a document's footage through, and choosing an entry is
+       the whole interaction. -->
+  <dialog id="clipPick" aria-labelledby="cpTitle">
+    <div class="dialog-head">
+      <h2 id="cpTitle">Add a clip</h2>
+      <button class="dialog-close" id="cpClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="dialog-field">
+      <span class="dialog-label">Take</span>
+      <div class="cplist" id="cpList" role="listbox" aria-label="Takes"></div>
+    </div>
+    <p class="note" id="cpNote">The clip lands at the playhead, on a row of its own.</p>
+    <div class="dialog-actions">
+      <span class="dialog-spacer"></span>
+      <button class="dialog-action" id="cpCancel" type="button">cancel</button>
     </div>
   </dialog>
 

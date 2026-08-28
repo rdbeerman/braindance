@@ -99,8 +99,8 @@ const MUTATIONS = {
     'const whole = (v, max) => (typeof v === \'number\' ? v : null);',
   ]] },
   'bind-ignores-grid': { file: 'web/gpu-textures.js', edits: [[
-    '  expandDepth(data, depthCurr.image.data);',
-    '  depthCurr.image.data.set(data);',
+    '  expandDepth(data, selected.depthCurr.image.data);',
+    '  selected.depthCurr.image.data.set(data);',
   ]] },
   'expand-shifts-by-a-block': { file: 'web/gpu-textures.js', edits: [[
     'for (let col = 0; col < DEPTH_W; col++) dst[to + col] = src[from + ((col / grid.k) | 0)];',

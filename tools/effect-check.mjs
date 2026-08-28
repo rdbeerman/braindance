@@ -719,6 +719,12 @@ const gradeProbePackage = () => ({
  * A pinned run with no capture and no sensor: the wire's own frame payload, which `drive.pin`
  * parses. Colour is left at zero bytes because a JPEG decode is asynchronous. The surface leans so
  * the picture has depth in it, and the frames differ so three track positions have three images.
+ *
+ * The stamps are 250ms apart rather than 33 so the run spans `POSITIONS` rather than ending
+ * inside it. It used to end at 0.165s with two of the three positions past it, and the two images
+ * were different only because the clock reached the shader - the frames behind them were the same
+ * held pair. Past a clip's out-point the composite is now empty, so those two were the same black
+ * frame and the control below said so.
  */
 const DEPTH_W = 512;
 const DEPTH_H = 424;
@@ -730,7 +736,7 @@ const pinnedBuffer = () => {
     const at = f * (16 + depthBytes);
     out.writeUInt32LE(depthBytes, at);
     out.writeUInt32LE(0, at + 4);
-    out.writeBigUInt64LE(BigInt(f * 33), at + 8);
+    out.writeBigUInt64LE(BigInt(f * 250), at + 8);
     for (let y = 0; y < DEPTH_H; y++) {
       for (let x = 0; x < DEPTH_W; x++) {
         // Drifting 40mm per frame, so successive frames are genuinely different geometry.
@@ -1162,7 +1168,12 @@ try {
     return {
       knows: k.params.names().includes('probe.amount'),
       groups: document.querySelectorAll('[data-group="probe"]').length,
-      pool: k.library.parkedLook(),
+      // The pool is kept per clip and per project; these rows count what is parked, whichever
+      // block it is in, so they take the union across every clip and the project block.
+      pool: (({ clips, project }) => ({
+        params: Object.assign({}, ...clips.map((c) => c.params), project.params),
+        tracks: Object.assign({}, ...clips.map((c) => c.tracks), project.tracks),
+      }))(k.library.parkedLook()),
       missing: k.library.missingEffects(),
       badgeHidden: badge?.hidden ?? null,
       badgeText: badge?.textContent ?? '',
@@ -1207,7 +1218,12 @@ try {
     const badge = document.getElementById('tMissing');
     return {
       hashes,
-      pool: k.library.parkedLook(),
+      // The pool is kept per clip and per project; these rows count what is parked, whichever
+      // block it is in, so they take the union across every clip and the project block.
+      pool: (({ clips, project }) => ({
+        params: Object.assign({}, ...clips.map((c) => c.params), project.params),
+        tracks: Object.assign({}, ...clips.map((c) => c.tracks), project.tracks),
+      }))(k.library.parkedLook()),
       hue: k.params.get('probe.hue'),
       track: k.keyframes.valueAt('probe.amount', 0.7),
       badgeHidden: badge?.hidden ?? null,
@@ -1264,7 +1280,12 @@ try {
       hashes,
       names: k.params.names(),
       signature: k.effects.signature(),
-      pool: k.library.parkedLook(),
+      // The pool is kept per clip and per project; these rows count what is parked, whichever
+      // block it is in, so they take the union across every clip and the project block.
+      pool: (({ clips, project }) => ({
+        params: Object.assign({}, ...clips.map((c) => c.params), project.params),
+        tracks: Object.assign({}, ...clips.map((c) => c.tracks), project.tracks),
+      }))(k.library.parkedLook()),
       body: k.library.serialiseProjectBody(),
       badgeHidden: badge?.hidden ?? null,
       badgeText: badge?.textContent ?? '',
@@ -1273,11 +1294,18 @@ try {
   };
 
   /** Everything a document says about the parked effect, as one comparable string. */
-  const parkedKeysOf = (body) => JSON.stringify({
-    params: Object.fromEntries(Object.entries(body.look.params).filter(([n]) => n.startsWith('probe.'))),
-    tracks: Object.fromEntries(Object.entries(body.look.tracks).filter(([n]) => n.startsWith('probe.'))),
-    requires: (body.requires ?? []).filter((e) => e.id === 'probe'),
-  });
+  const parkedKeysOf = (body) => {
+    // Both blocks, because a parked key comes back in the one the document wrote it in.
+    const blocks = [body.look, ...body.clips];
+    const under = (kind) => Object.fromEntries(
+      blocks.flatMap((b) => Object.entries(b[kind]).filter(([n]) => n.startsWith('probe.'))),
+    );
+    return JSON.stringify({
+      params: under('params'),
+      tracks: under('tracks'),
+      requires: (body.requires ?? []).filter((e) => e.id === 'probe'),
+    });
+  };
 
   await del('probe');
   const reParked = await page.evaluate(async () => {
@@ -2072,7 +2100,7 @@ try {
     k.params.set('probeshape.amount', 0.4);
     k.params.set('probeshape.angle', 90);
     k.params.set('probeshape.tone', 0.25);
-    return { threw: null, held: k.library.serialiseProjectBody().look.params['probeshape.angle'] ?? null };
+    return { threw: null, held: k.library.serialiseProjectBody().clips[0].params['probeshape.angle'] ?? null };
   });
   const shapesBefore = await cellShapes();
   ok('a package binding one cell of each shape installs and is adopted, with the document holding its values',
@@ -2115,7 +2143,10 @@ try {
     return {
       threw,
       knows: k.params.names().some((n) => n.startsWith('probeshape.')),
-      parked: Object.keys(k.library.parkedLook()?.params ?? {}).filter((n) => n.startsWith('probeshape.')).length,
+      parked: Object.keys((({ clips, project }) => Object.assign(
+        {}, ...clips.map((c) => c.params), project.params,
+      ))(k.library.parkedLook()))
+        .filter((n) => n.startsWith('probeshape.')).length,
     };
   });
   ok('and taking it back off leaves the page rebuilding cleanly with nothing of it parked',

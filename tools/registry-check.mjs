@@ -1010,6 +1010,9 @@ const LANDING = {
   tilt: 'k.worldTilt().map((v) => Number(v.toFixed(9)))',
   roll: 'k.worldTilt().map((v) => Number(v.toFixed(9)))',
   camera: '[...k.programCamera.position.toArray(), ...k.programCamera.quaternion.toArray(), k.programCamera.fov]',
+  // The selected clip's own placement group, which is the node the registry's write moves.
+  transform: '((c) => [...c.placement.position, ...c.placement.quaternion])'
+    + '(k.timeline.clips().find((clip) => clip.selected))',
 };
 
 /**
@@ -1151,6 +1154,7 @@ const EXPECT = {
   tilt: (v, all) => levellingQuaternion(v, all.roll),
   roll: (v, all) => levellingQuaternion(all.tilt, v),
   camera: (v) => [...v.position, ...v.quaternion, v.fov],
+  transform: (v) => [...v.position, ...v.quaternion],
 };
 
 // A scrambled but valid set: every value off its default and on its own step grid,
@@ -1263,6 +1267,9 @@ const SCRAMBLE = {
   renderScale: 85,
   // A unit quaternion, 30 degrees about Y, so the read-back is exact.
   camera: { position: [0.4, 0.9, 1.1], quaternion: [0, 0.25881904510252074, 0, 0.9659258262890683], fov: 42 },
+  // Small on purpose: a placement that carried the cloud out of frame would make every other
+  // row here a comparison of two black pictures. 10 degrees about Y, so the read-back is exact.
+  transform: { position: [0.06, -0.03, 0.04], quaternion: [0, 0.08715574274765817, 0, 0.9961946980917455] },
 };
 
 // The closed list of parameters allowed to leave the image untouched when they are dropped
@@ -1612,6 +1619,8 @@ const GOLDEN_ABSENT = new Set([
   'tPresetFile',
   'datamosh.amount', 'datamosh.reach', 'datamosh.decay', 'datamosh.splay',
   'datamosh.line', 'datamosh.grain', 'datamosh.refresh',
+  'camLens',
+  'transform',
 ]);
 const absentBefore = (name, before) => GOLDEN_ABSENT.has(name) && before === undefined;
 
@@ -1947,7 +1956,9 @@ console.log('\n[registry] the declaration');
     `every declared parameter has a landing site here (${names.length})`,
     show(names.filter((n) => !(n in LANDING))));
 
-  const kinds = { scalar: [], step: [], pose: [] };
+  // Every kind this build interpolates, and an unknown one is a failure by existing: a kind the
+  // evaluators have no branch for would be read down the scalar path and stored as NaN.
+  const kinds = { scalar: [], step: [], pose: [], placement: [] };
   const tags = { look: [], composition: [], view: [] };
   let bad = [];
   for (const [name, spec] of Object.entries(declared)) {
@@ -1965,9 +1976,21 @@ console.log('\n[registry] the declaration');
     }
   }
   check(bad.length === 0, 'every parameter carries a usable kind, tag and range', bad.join('; '));
-  check(kinds.scalar.length > 0 && kinds.step.length > 0 && kinds.pose.length > 0,
-    'all three interpolation kinds are in use',
-    `scalar ${kinds.scalar.length}, step ${kinds.step.length} (${kinds.step.join(',')}), pose ${kinds.pose.join(',')}`);
+  check(Object.values(kinds).every((names) => names.length > 0),
+    'all four interpolation kinds are in use',
+    `scalar ${kinds.scalar.length}, step ${kinds.step.length} (${kinds.step.join(',')}), `
+      + `pose ${kinds.pose.join(',')}, placement ${kinds.placement.join(',')}`);
+  // A placement is a pose without a lens, and the pair of them is what the panel draws no row
+  // for. Read off the registry rather than named here, so a third one added later is asked.
+  const world = [...kinds.pose, ...kinds.placement];
+  check(world.every((n) => declared[n].tag === 'composition'),
+    'and every position-and-rotation value is composition rather than look, so no preset carries one',
+    world.map((n) => `${n} ${declared[n].tag}`).join(', '));
+  // The scope is what says which block of the document a value comes back out of, and a
+  // placement without one would be stored nowhere and reload at the origin.
+  check(kinds.placement.every((n) => declared[n].scope === 'clip'),
+    'and a placement is scoped to the clip it places',
+    kinds.placement.map((n) => `${n} scope=${declared[n].scope ?? 'none'}`).join(', '));
   console.log(`        look ${tags.look.length}: ${tags.look.join(' ')}`);
   console.log(`        composition ${tags.composition.length}: ${tags.composition.join(' ')}`);
   console.log(`        view ${tags.view.length}: ${tags.view.join(' ')}`);
@@ -2690,7 +2713,7 @@ console.log('\n[registry] the ripple opens the region by itself');
       : `${still.filter((h, i) => h !== moving[i]).length} of ${still.length} frames differ`);
 }
 
-console.log('\n[registry] the cloud carries a rotation and nothing else');
+console.log('\n[registry] the cloud carries a rotation and a placement and nothing else');
 {
   const m = await page.evaluate(`(() => {
     const k = globalThis.__kinect;
@@ -2709,9 +2732,18 @@ console.log('\n[registry] the cloud carries a rotation and nothing else');
     };
   })()`);
   check(m.found, 'the point cloud is reachable from the scene, so the row below is about it');
-  check(m.found && eq(m.position, [0, 0, 0]) && eq(m.scale, [1, 1, 1]),
-    'and its world matrix is a pure rotation, so the lattice\'s transpose is its inverse',
-    m.found ? `position ${JSON.stringify(m.position)} scale ${JSON.stringify(m.scale)}` : '');
+  // The scale term alone is what the shaders rest on: `mat3(modelMatrix)` drops the fourth
+  // column, so a translation cannot break the transpose and a scale or a shear can. The origin
+  // used to be asserted with it and no longer can be - a clip carries a placement now - so the
+  // translation is asked against what the registry holds for it rather than dropped.
+  check(m.found && eq(m.scale, [1, 1, 1]),
+    'and its world matrix carries no scale, so the lattice\'s transpose is its inverse',
+    m.found ? `scale ${JSON.stringify(m.scale)}` : '');
+  const placed = await page.evaluate(
+    "globalThis.__kinect.params.get('transform').position.map((v) => Number(v.toFixed(9)))");
+  check(m.found && eq(m.position, placed),
+    'and the translation in it is the placement the registry holds for this clip and nothing else',
+    `group ${JSON.stringify(m.position)} against registry ${JSON.stringify(placed)}`);
 }
 
 console.log('\n[registry] the ripple advances in steps, not smoothly');

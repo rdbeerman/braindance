@@ -232,8 +232,8 @@ const MUTATIONS = {
   ]] },
   // The take renders on the boot intrinsics again. The fetch stays, so only the write is gone.
   'intrinsics-defaults': { file: 'web/main.js', edits: [[
-    `  uniforms.focal.value.set(hello.fx, hello.fy);
-  uniforms.center.value.set(hello.cx, hello.cy);`,
+    `  uniforms.focal.value.set(opened.hello.fx, opened.hello.fy);
+  uniforms.center.value.set(opened.hello.cx, opened.hello.cy);`,
     '  /* mutation: the hello is fetched and thrown away */',
   ]] },
   // A wall clock reaches the export's playhead. Sub-frame, because the point is
@@ -283,8 +283,8 @@ const MUTATIONS = {
   // every term follows it.
   'scale-by-width': { file: 'web/main.js', edits: [
     [
-      '  uniforms.bufferHeight.value = buf.y;',
-      '  uniforms.bufferHeight.value = buf.x * (1080 / 1728);',
+      '  forEachLook(() => { uniforms.bufferHeight.value = buf.y; });',
+      '  forEachLook(() => { uniforms.bufferHeight.value = buf.x * (1080 / 1728); });',
     ],
     [
       `      float k = resolution.y / 1080.0;
@@ -882,7 +882,12 @@ async function onFreshPage(what, work, attempts = 3) {
  * goes with the viewport, because the editor is letterboxed to the export aspect.
  */
 async function setStage(page, size) {
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    // Settled before the strip is measured, and the buffer read again after it lands: the lane
+    // stack is built after the transport exists, so a strip measured before it has its rows grows
+    // under the viewport that was just sized to it. That left the editor reading pixels at one
+    // size while the export rendered at another, and every frame of section 4 mismatched.
+    await page.evaluate('globalThis.__kinect.timeline.settled()').catch(() => {});
     const furniture = await page.evaluate(`(() => {
       const strip = document.getElementById('timeline');
       const appBar = document.getElementById('appBar');
@@ -904,9 +909,17 @@ async function setStage(page, size) {
         })()`,
         null, { timeout: attempt === 1 ? 5000 : 10000 },
       );
-      return;
+      await page.evaluate('globalThis.__kinect.timeline.settled()').catch(() => {});
+      const held = await page.evaluate(`(() => {
+        const gl = globalThis.__kinect.renderer.getContext();
+        return [gl.drawingBufferWidth, gl.drawingBufferHeight];
+      })()`);
+      if (held[0] === size.width && held[1] === size.height) return;
+      if (attempt === 4) {
+        throw new Error(`the stage settled at ${held.join('x')} rather than ${size.width}x${size.height}`);
+      }
     } catch (err) {
-      if (attempt === 2) throw err;
+      if (attempt === 4) throw err;
     }
   }
 }

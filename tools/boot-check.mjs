@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // The post-boot state diff: for every parameter the registry declares, the control the panel
-// drew shows the value the registry holds. The comparison has to be registry-versus-control -
+// drew shows the value the registry holds for the selected clip. The clip is in the claim
+// because a clip value now has one per clip, and a panel showing the wrong clip's number is a
+// build where the registry is right and the operator is grading blind. The comparison has to be
+// registry-versus-control -
 // in the fault the registry holds correct values and only the controls are wrong, so a diff
 // against declared defaults compares defaults to defaults and reports nothing. Homed on the
 // recorder, which boots the full panel with no grabber, no sensor and no capture; nothing here
@@ -39,10 +42,20 @@ const MUTATIONS = {
     edits: [
       ['\n  buildPanel();\n', '\n'],
       [
-        '    params.set(name, Object.hasOwn(held, name) ? held[name] : PARAMS[name].def);\n  }\n',
-        '    params.set(name, Object.hasOwn(held, name) ? held[name] : PARAMS[name].def);\n  }\n  buildPanel();\n',
+        '      params.set(name, Object.hasOwn(was, name) ? was[name] : PARAMS[name].def);\n    }\n  });\n',
+        '      params.set(name, Object.hasOwn(was, name) ? was[name] : PARAMS[name].def);\n    }\n  });\n  buildPanel();\n',
       ],
     ],
+  },
+  // The pre-fix build exactly: the panel was written by value writes alone, so selecting a clip
+  // left every clip-scope control showing the clip that had been selected before it. Must redden
+  // only the selection rows below - the boot diff is against one clip and passes either way.
+  'panel-does-not-follow-the-selection': {
+    file: 'web/main.js',
+    edits: [[
+      '  paintClipPanel();\n  paintGizmo();\n  // The retime binding',
+      '  paintGizmo();\n  // The retime binding',
+    ]],
   },
   // Package rows exist because the registry owns them, but none belongs in a fresh sidebar. Must
   // redden exactly the package-row visibility assertion below.
@@ -256,8 +269,10 @@ async function main() {
   // The other direction, so a build that stopped declaring poses does not quietly satisfy the row
   // above by having nothing left to exclude.
   const posedControls = poses.filter((r) => r.control !== null);
-  check(posedControls.length === 0, 'and a pose is the only thing the panel does not draw a control for',
-    `${poses.length} poses: ${poses.map((r) => r.name).join(', ') || 'none'}`);
+  check(posedControls.length === 0,
+    'and a position-and-rotation value is the only thing the panel does not draw a control for, '
+    + 'because those are dragged in the world',
+    `${poses.length} of them: ${poses.map((r) => `${r.name} (${r.kind})`).join(', ') || 'none'}`);
 
   const packageRows = scalars.filter((r) => r.effect !== null);
   const coreRows = scalars.filter((r) => r.effect === null && r.tag === 'look');
@@ -272,7 +287,7 @@ async function main() {
 
   // The claim, and the one row the shipped fault reddens.
   const disagree = scalars.filter((r) => String(r.registry) !== String(r.shown));
-  check(disagree.length === 0, 'every control shows the value the registry holds for it',
+  check(disagree.length === 0, 'every control shows the value the registry holds for the selected clip',
     disagree.length
       ? `${disagree.length} of ${scalars.length} diverge: `
         + disagree.slice(0, 6).map((r) => `${r.name} registry ${r.registry} vs control ${r.shown}`).join('; ')
@@ -314,6 +329,67 @@ async function main() {
       ? `${drive.moved.length} did not follow: `
         + drive.moved.slice(0, 6).map((r) => `${r.name} registry ${r.held} vs control ${r.shown}`).join('; ')
       : `${drive.swept} followed`);
+
+  // The other half of the claim: the boot diff above is over one clip, so it cannot tell a panel
+  // that follows the selection from one that shows whichever clip was written to last. Two clips
+  // holding different numbers is what separates them. The recorder has no picker and does not
+  // need one - a clip naming no take is a clip, and the restore door takes one.
+  const followed = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    const first = JSON.parse(JSON.stringify(doc.clips[0]));
+    const second = JSON.parse(JSON.stringify(doc.clips[0]));
+    second.id = 'bootc2';
+    // Eight of them and not one, so the sweep row below has a population to catch rather than a
+    // single value; a checkbox in the list because a control's state is read two different ways.
+    // Both ends of each travel, so neither number is what an unwritten control reads.
+    const apart = {
+      pointSize: [3.5, 41.5], opacity: [0.2, 0.9], exposure: [0.5, 4], additive: [false, true],
+      rgbSaturation: [0.3, 1.7], edgeTol: [60, 900], denoise: [true, false], snapDelta: [40, 900],
+    };
+    for (const [name, [lo, hi]] of Object.entries(apart)) {
+      first.params[name] = lo;
+      second.params[name] = hi;
+    }
+    doc.clips = [first, second];
+    k.library.restoreProject(doc);
+    const read = (id) => {
+      k.editor.selectClipRow(id);
+      const swept = k.params.names().filter((n) => k.params.spec(n).scope === 'clip'
+        && document.getElementById(n));
+      const diverge = swept.filter((n) => {
+        const el = document.getElementById(n);
+        const shown = el.type === 'checkbox' ? el.checked : el.value;
+        return String(k.params.get(n)) !== String(shown);
+      });
+      return {
+        id: k.editor.clipSelection(),
+        shown: document.getElementById('pointSize').value,
+        registry: k.params.get('pointSize'),
+        swept: swept.length,
+        diverge,
+      };
+    };
+    // Back to the first, because a panel painted once on the way in would pass a one-way walk.
+    return { a: read(first.id), b: read(second.id), back: read(first.id) };
+  })()`);
+
+  const { a, b, back } = followed;
+  check(a.registry !== b.registry && a.id !== b.id,
+    'the two clips under this section hold different values, so the rows below are a comparison',
+    `${a.id} holds ${a.registry}, ${b.id} holds ${b.registry}`);
+  check(String(a.registry) === a.shown && String(b.registry) === b.shown && a.shown !== b.shown,
+    'and selecting a clip shows that clip\'s value in the control rather than the last one written',
+    `${a.id} shows ${a.shown}, ${b.id} shows ${b.shown}`);
+  check(String(back.registry) === back.shown && back.shown === a.shown,
+    'and selecting back shows the first clip again, so the panel follows the selection rather than '
+    + 'being painted once on the way in',
+    `back on ${back.id} showing ${back.shown} against ${a.shown}`);
+  const missed = [...new Set([...a.diverge, ...b.diverge, ...back.diverge])];
+  check(a.swept > 20 && missed.length === 0,
+    'and every clip-scope control repaints, not only the one this section set',
+    missed.length ? `${missed.length} of ${a.swept} did not follow: ${missed.slice(0, 6).join(', ')}`
+      : `${a.swept} controls agreed with the selection at all three selections`);
 
   // Kept last so a refusal raised by anything above is in the slice.
   check(errors.length === 0, 'and the page reported no errors while it booted',
