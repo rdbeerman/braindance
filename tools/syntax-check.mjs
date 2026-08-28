@@ -87,7 +87,7 @@ const MUTATIONS = {
   // the bullet form, which the first two cannot see.
   'doc-invokes-an-undeclared-mutation': {
     file: 'docs/proof-tools.md',
-    edits: [['--mutate crop-still-draws-characters', '--mutate crop-still-draws-nothing']],
+    edits: [['--mutate leaks-at-zero', '--mutate leaks-at-nothing']],
     fails: 'and a `--mutate` this prose offers that no tool\'s table declares, which is a run '
       + 'nobody can make listed as one anybody can',
   },
@@ -95,8 +95,8 @@ const MUTATIONS = {
   'doc-lists-a-mutation-under-the-wrong-tool': {
     file: 'docs/proof-tools.md',
     edits: [[
-      'node tools/registry-check.mjs --mutate crop-still-draws-characters',
-      'node tools/editor-check.mjs --mutate crop-still-draws-characters',
+      'node tools/effect-conformance-check.mjs --mutate leaks-at-zero',
+      'node tools/registry-check.mjs --mutate leaks-at-zero',
     ]],
     fails: 'and one listed under a tool that does not declare it, which the row above cannot see '
       + 'because the name resolves somewhere',

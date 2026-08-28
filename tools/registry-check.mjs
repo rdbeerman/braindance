@@ -52,10 +52,10 @@ const MUTATIONS = {
       '  levelAngles = levelAngles ?? points.levelAngles;',
     ]],
     fails: 'the two levelling angles held as one pair the program shares rather than one pair '
-      + 'per clip, so a clip\'s tilt composes with another clip\'s roll. '
-      + 'The drawn-rotation row for the clip written last, and nothing else - the clip '
-      + 'written first is never rewritten so it cannot pick anything up, and both clips go on '
-      + 'serialising the right two angles, which is the whole shape of the bug',
+      + 'per clip, so a clip\'s tilt composes with another clip\'s roll. Reddens exactly 1: the '
+      + 'drawn-rotation row for the clip written last. Both clips go on serialising the right two '
+      + 'angles and the clip written first is never rewritten, which is why the other two rows of '
+      + 'that section stay green',
   },
   'rgb-contributes-no-alpha': {
     file: 'web/cloud-shader.js',

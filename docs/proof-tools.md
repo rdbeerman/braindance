@@ -1,8 +1,10 @@
 # The proof-tool suite in detail
 
-This is the whole of the suite: how to run each tool, every `--mutate` control it must FAIL
-under, what it needs before it will run, what its exit codes mean, and the per-tool facts that
-are only worth having when you are about to run or edit that tool. `CLAUDE.md` carries the index
+This is the whole of the suite: how to run each tool, what it needs before it will run, what its
+exit codes mean, and the per-tool facts that are only worth having when you are about to run or
+edit that tool. It is not a census of the `--mutate` controls and does not list them — each
+tool's own table is that list, and a tool handed a name it does not know prints the complete set
+it declares. `CLAUDE.md` carries the index
 — one line per tool, what it proves and what it needs — and sends you here for the rest.
 
 For the method behind the suite, see `docs/instruments.md`.
@@ -38,70 +40,6 @@ node tools/index-check.mjs --stage                        # ... the same run aga
                                                           #   below: they can only be read against a baseline taken in
                                                           #   the conditions their failure happened in
 node tools/registry-check.mjs --url http://localhost:8080 # step 3: one registry, sliders as views
-node tools/registry-check.mjs --mutate levelling-shares-one-pair   # ... the two levelling angles held as one pair the
-                                                          #     program shares rather than one pair per clip, so a
-                                                          #     clip's tilt composes with another clip's roll. Reddens
-                                                          #     exactly 1: the drawn-rotation row for the clip written
-                                                          #     last. Both clips go on serialising the right two angles
-                                                          #     and the clip written first is never rewritten, which is
-                                                          #     why the other two rows of that section stay green
-node tools/registry-check.mjs --mutate glyph-ignored              # ... the mark the room is drawn out of, switched off at both
-                                                                  #     of the stages it gates - one anchor leaves the characters
-                                                                  #     still being drawn at the old sprite size
-node tools/registry-check.mjs --mutate glyph-hash-per-point       # ... a character keyed on the point rather than on the cell it
-                                                                  #     fell in, which draws characters either way and is the
-                                                                  #     difference between a room made of code and a fog of it
-node tools/registry-check.mjs --mutate glyph-hash-on-the-displaced-point # ... and read after the turbulence moved the point, which
-                                                                  #     is the defect the probe this came out of shipped and which
-                                                                  #     is bit-identical to the fix wherever nothing is displacing
-node tools/registry-check.mjs --mutate glyph-hash-after-the-region # ... and read after the other two displacements, which run
-                                                                  #     before the turbulence and sat at zero in every arm - so
-                                                                  #     the one above cannot see it. Both are inlined together,
-                                                                  #     because the pair share a radial direction and a build
-                                                                  #     hashing after them hashes the drawn position exactly
-node tools/registry-check.mjs --mutate crossfade-reads-the-reference # ... the legibility band counted in reference pixels alone,
-                                                                  #     which is the unit every other glyph arm agrees with and
-                                                                  #     so the one none of them can refuse
-node tools/registry-check.mjs --mutate crop-still-draws-characters # ... the same reading with the crop taken out of it, so a
-                                                                  #     cut-away point keeps a sprite above the legibility band
-                                                                  #     and draws a smaller character where dust is promised
-node tools/registry-check.mjs --mutate crossfade-ignores-the-buffer-scale # ... and the same band counted in the buffer's pixels
-                                                                  #     alone, which no arm below 1080 can refuse and which lets
-                                                                  #     a view parameter move the graded look
-node tools/registry-check.mjs --mutate rain-key-counts-whole-drops # ... the drop counter handed to the index raw, which is inert
-                                                                  #     at exactly the weight the key should be loudest at
-node tools/registry-check.mjs --mutate glyph-index-averages       # ... the three keys mixed rather than summed, caught on scale
-                                                                  #     rather than on the character - the document's own
-                                                                  #     discriminator is the same number under both compositions
-node tools/registry-check.mjs --mutate glyph-tone-ignored         # ... the tonal key, and the ink ordering under it that no
-                                                                  #     comparison of two pictures can see
-node tools/registry-check.mjs --mutate rain-trail-below-the-head  # ... and which side of the head its afterglow sits on, without
-                                                                  #     which the wave reads as rising
-node tools/registry-check.mjs --mutate rain-climbs                # ... and which way the whole pattern travels, which is a
-                                                                  #     different claim from that one and which no single frame
-                                                                  #     holds - the trail is still above a head going the wrong way
-node tools/registry-check.mjs --mutate rain-span-in-frames        # ... its head gap in metres of room rather than in frames of
-                                                                  #     whatever the link is doing, which only two link speeds see
-node tools/registry-check.mjs --mutate normalisation-floor-restored # ... the pile-up fix, planted because no shipped look reaches
-                                                                  #     the band - a sprite grown to a cell moves the floor from
-                                                                  #     19cm out to where a person stands
-node tools/registry-check.mjs --mutate glyph-leaks-at-zero        # ... and the master exactly absent at 0, which is what eleven of
-                                                                  #     the twelve shipped looks rest on - cascade is the exception
-                                                                  #     and the only one that draws a character at all. The ten-of-
-                                                                  #     twelve population next door is a different set: that one is
-                                                                  #     the lattice-zero looks the compensation has to leave alone
-node tools/registry-check.mjs --mutate compensation-leaks-at-lattice-zero # ... and the energy correction, which rides no master at
-                                                                  #     all and so is excused by neither
-node tools/registry-check.mjs --mutate glyph-margins-occlude      # ... a fragment at exactly zero alpha writing depth, which is
-                                                                  #     invisible geometry per point on the hard-edged path. Its
-                                                                  #     two sections are the only ones here standing two surfaces
-                                                                  #     up: every other plants one wall coincident with itself,
-                                                                  #     where nothing is behind anything to be hidden
-node tools/registry-check.mjs --mutate margins-confined-to-glyphs # ... the same discard narrowed back to characters, which is
-                                                                  #     the state one commit of this history was in and the
-                                                                  #     wrong fix the character section cannot refuse
-node tools/registry-check.mjs --mutate margins-miss-the-newborn   # ... and narrowed the other way, to the disc's rim and not
-                                                                  #     the point that has not faded in yet
 node tools/timeline-check.mjs --url http://localhost:8080 --take fixture-1g # step 4: seek equals playback
 node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, retime curve, undo
 node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, export, the file
