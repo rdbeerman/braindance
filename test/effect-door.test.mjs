@@ -10,14 +10,17 @@ import { fileURLToPath } from 'node:url';
 import {
   MAX_EFFECT_ID, RESERVED_EFFECT_IDS, doorRefusal, forkRefusal, reservedIdRefusal,
 } from '../server/effect-door.js';
-import { HOST_DRIVEN_UNIFORMS } from '../web/effect-manifests.js';
+import {
+  HOST_DRIVEN_UNIFORMS, EFFECT_GATED_TABLES, EFFECT_BOUNDED_TABLES,
+} from '../web/effect-manifests.js';
 import { snapScalar } from '../web/format.js';
 import { cloudSpine } from '../web/cloud-shader.js';
 import { gradeSpine } from '../web/grade-shader.js';
+import { moshSpine } from '../web/mosh-shader.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILTIN = join(ROOT, 'effects-builtin');
-const SPINES = { cloud: cloudSpine, grade: gradeSpine };
+const SPINES = { cloud: cloudSpine, grade: gradeSpine, mosh: moshSpine };
 
 const load = (id) => {
   const dir = join(BUILTIN, id);
@@ -67,7 +70,7 @@ test('the door names what it refuses, one rule at a time', () => {
     ['a second master', 'rain', (c) => { Object.assign(c.manifest.params.speed, { role: 'master', def: 0, min: 0 }); }, /2 parameters with the role master/],
     ['a reading flag that is not boolean', 'ghost', (c) => { c.manifest.params.amount.reading = 'yes'; }, /declares reading as "yes"/],
     ['a reading that is not the inert master', 'ghost', (c) => { c.manifest.params.rim.reading = true; }, /declares itself a reading/],
-    ['a dependent row naming no master', 'ghost', (c) => { c.manifest.params.rim.under = 'missing'; }, /not another master in ghost/],
+    ['a dependent row naming no valid parent', 'ghost', (c) => { c.manifest.params.rim.under = 'missing'; }, /not a valid parent in ghost/],
     ['a binding no program declares', 'thermal', (c) => { c.manifest.params.amount.bind.uniform = 'thermalll'; }, /declares no such uniform/],
     ['a uniform no parameter writes', 'rain', (c) => { c.chunks['decl.frag.glsl'] += 'uniform float rainStray;\n'; }, /"rainStray" and binds no parameter/],
     ['a chunk file naming a path', 'thermal', (c) => { c.manifest.chunks[0].file = '../out.glsl'; c.chunks['../out.glsl'] = ''; }, /"\.\.\/out\.glsl"/],
@@ -339,10 +342,41 @@ test('a gating binding has to be something the gate can read', () => {
   for (const pkg of shipped()) {
     for (const [short, spec] of Object.entries(pkg.manifest.params)) {
       if (!spec.bind?.gates) continue;
-      assert.equal(spec.bind.on, 'grade', `the shipped ${pkg.id}.${short} gates on ${spec.bind.on}`);
+      assert.ok(EFFECT_GATED_TABLES.includes(spec.bind.on),
+        `the shipped ${pkg.id}.${short} gates on ${spec.bind.on}, which holds no pass open`);
       assert.equal(spec.bind.transform, undefined,
         `the shipped ${pkg.id}.${short} gates through the ${spec.bind.transform} transform`);
     }
+  }
+});
+
+test('a pass that remembers is told how long for, exactly once', () => {
+  assert.match(brokenBy('datamosh', (c) => { delete c.manifest.params.refresh.bind.bounds; }),
+    /declares 0 of them as its bounds/,
+    'a mosh package with no period is a feedback pass no seek could reproduce');
+  assert.match(brokenBy('datamosh', (c) => { c.manifest.params.grain.bind.bounds = true; }),
+    /declares 2 of them as its bounds/,
+    'and two periods is two answers to where the last refresh was');
+  assert.match(brokenBy('raster', (c) => { c.manifest.params.pitch.bind.bounds = true; }),
+    /declares bounds and binds on "grade"/,
+    'a period on a pass with no memory bounds nothing');
+  assert.match(brokenBy('datamosh', (c) => {
+    c.manifest.params.refresh.kind = 'step';
+    c.manifest.params.refresh.def = false;
+    delete c.manifest.params.refresh.min;
+    delete c.manifest.params.refresh.max;
+    delete c.manifest.params.refresh.step;
+  }), /declares bounds and is a step binding/,
+  'and a period that is a switch is not a length of time');
+  assert.equal(brokenBy('datamosh', () => {}), null, 'the shipped datamosh passes the rule');
+
+  // The census, so a second package binding on a pass with memory is asked by existing.
+  for (const pkg of shipped()) {
+    const onBounded = Object.values(pkg.manifest.params)
+      .filter((spec) => EFFECT_BOUNDED_TABLES.includes(spec.bind?.on));
+    if (onBounded.length === 0) continue;
+    assert.equal(onBounded.filter((spec) => spec.bind.bounds).length, 1,
+      `the shipped ${pkg.id} binds on a pass with memory and does not name exactly one period`);
   }
 });
 

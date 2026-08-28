@@ -1,6 +1,6 @@
 // Proves that the same program time produces the same image. Every input is pinned - a fixed
-// run of real capture frames, a fixed camera pose, colour off - with both feedback paths left
-// switched on, since they are the only things that could carry state between two runs. The
+// run of real capture frames, a fixed camera pose, colour off - with all three feedback paths
+// left switched on, since they are the only things that could carry state between two runs. The
 // frames are sampled every fourth frame, because a static scene makes the afterimage converge
 // to its own input and return the same hash whether the accumulator ran or not.
 //
@@ -34,10 +34,10 @@ const STRIDE = Number(flag('--stride', '4'));
 // from display frames.
 const SUBSTEPS = Number(flag('--substeps', '4'));
 
-// The shipped Blackwall document, read rather than restated: a copy of these values typed in
-// here would be a second source of truth for a look.
-const BLACKWALL_LOOK = JSON.parse(
-  readFileSync(new URL('../presets-builtin/blackwall.json', import.meta.url), 'utf8'),
+// The shipped `rift` document, read rather than restated: a copy of these values typed in
+// here would be a second source of truth for a look. It is the look every section here runs.
+const RIFT_LOOK = JSON.parse(
+  readFileSync(new URL('../presets-builtin/rift.json', import.meta.url), 'utf8'),
 ).values;
 
 // Playwright is a tool the proofs reach for rather than a dependency, so it is resolved
@@ -148,7 +148,10 @@ const runAfter = `async ({ substeps, tailOnly }) => {
     out,
     drawRange: k.geometry.drawRange.count,
     damp: k.afterimage.uniforms.damp.value,
-    passes: { afterimage: k.afterimage.enabled, bloom: k.bloom.enabled, grade: k.grade.enabled },
+    passes: {
+      afterimage: k.afterimage.enabled, mosh: k.mosh.enabled,
+      bloom: k.bloom.enabled, grade: k.grade.enabled,
+    },
     ghosts: k.stateStats().ghostsDrawn,
   };
 }`;
@@ -275,9 +278,11 @@ async function openPage() {
   }
   if (!gpu.colorBufferFloat) throw new Error('no EXT_color_buffer_float: the surface memory is not running at float');
 
-  // Blackwall, read out of the document that ships it rather than typed in here. It is the one
-  // preset that switches on both accumulators at once, which is why this section names a look.
-  await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(BLACKWALL_LOOK)})`);
+  // `rift`, read out of the document that ships it rather than typed in here. It was chosen
+  // because it switches on all three of the passes that carry state from one render to the
+  // next - the afterimage, the surface memory and the mosh - and an accumulator no named look
+  // enables is the object every observation here would skip.
+  await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(RIFT_LOOK)})`);
 
   await page.evaluate(async () => {
     const buffer = await (await fetch('/__pinned.bin')).arrayBuffer();
@@ -338,6 +343,7 @@ console.log(`\n[determinism] ${runA.out.length} images per run, `
   + `drawRange=${runA.drawRange} (ghost half ${runA.drawRange > 512 * 424 ? 'drawn' : 'OFF'})`);
 console.log(`[determinism] surface memory ${runA.ghosts}% of pixels ghosting at the end of the run, `
   + `afterimage ${p.afterimage ? `on damp=${runA.damp}` : 'OFF'}, `
+  + `mosh ${p.mosh ? 'on' : 'OFF'}, `
   + `bloom ${p.bloom ? 'on' : 'OFF'}, grade ${p.grade ? 'on' : 'OFF'}`);
 console.log(`[determinism] distinct images within run 1: ${varied}/${runA.out.length}`
   + `${varied < runA.out.length / 2 ? '  <-- input barely moves, the run proves little' : ''}`);
@@ -378,6 +384,6 @@ if (pageErrors.length) console.log(`\n[determinism] page errors:\n  ${pageErrors
 
 const pass = ab.same && ac.same && !ad.same
   && varied > runA.out.length / 2
-  && p.afterimage && p.bloom && p.grade && runA.ghosts > 0;
+  && p.afterimage && p.mosh && p.bloom && p.grade && runA.ghosts > 0;
 console.log(`\n[determinism] ${pass ? 'PASS' : 'FAIL'}`);
 process.exit(pass ? 0 : 1);

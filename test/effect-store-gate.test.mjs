@@ -11,10 +11,11 @@ import { fileURLToPath } from 'node:url';
 import { EffectStore } from '../server/effect-store.js';
 import { cloudSpine } from '../web/cloud-shader.js';
 import { gradeSpine } from '../web/grade-shader.js';
+import { moshSpine } from '../web/mosh-shader.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILTIN = join(ROOT, 'effects-builtin');
-const SPINES = { cloud: cloudSpine, grade: gradeSpine };
+const SPINES = { cloud: cloudSpine, grade: gradeSpine, mosh: moshSpine };
 
 const builtinManifest = (id) => JSON.parse(readFileSync(join(BUILTIN, id, 'manifest.json'), 'utf8'));
 

@@ -71,7 +71,7 @@ rest.
 
 The look is not one program. Every effect is a package — a manifest and the GLSL chunks it
 splices into the shaders — and the page assembles both point-cloud programs, the grade pass, the
-parameter registry and the panel out of whatever the store holds. `server/effect-store.js` serves
+mosh pass, the parameter registry and the panel out of whatever the store holds. `server/effect-store.js` serves
 them and `web/shader-assembly.js` joins them.
 
 **Two roots, and the user's copy wins.** `effects-builtin/` is what the build ships with and
@@ -184,9 +184,9 @@ would refuse a pair this build's own install door accepts.
 
 ### Assembly: a spine with joints, and the chunks that fill them
 
-`web/cloud-shader.js` and `web/grade-shader.js` each export a **spine** — verbatim GLSL segments
-with named joints between them — and `web/shader-assembly.js` concatenates a spine with whatever
-the installed packages bring. Neither module imports anything and neither interpolates: a chunk's
+`web/cloud-shader.js`, `web/grade-shader.js` and `web/mosh-shader.js` each export a **spine** —
+verbatim GLSL segments with named joints between them — and `web/shader-assembly.js` concatenates
+a spine with whatever the installed packages bring. Neither module imports anything and neither interpolates: a chunk's
 text is spliced between two segments exactly as it arrived, because every transformation on the
 way is a byte that could move without breaking a compile or showing in a picture anybody would
 look twice at.
@@ -209,6 +209,52 @@ offering one name is a refusal rather than a chunk quietly spliced into both. A 
 joint nothing holds is refused by name, for the same reason the alternative design was rejected:
 tagging each chunk with its program's name means a tag nobody spelled right lands the chunk in no
 program at all, the page boots, and the effect is simply gone.
+
+### A pass that reads the frame it drew last time
+
+The mosh pass in `web/mosh-pass.js` is the third spine and the third bind table, and it is the
+only pass in the chain with memory: it draws into one target while reading the one it drew into
+last time, then swaps. That is what lets a chunk hold pixels back rather than only transform the
+ones in front of it, which is the whole of what a datamosh is. It sits between the trails and the
+bloom, feed-side, because a compression artifact happened to the picture on the way here rather
+than to the display.
+
+**Memory is what makes a pass unseekable, so the memory has a stated ceiling.** A frame that
+depends on every frame before it cannot be reproduced by any length of pre-roll — the failure
+`MAX_AGE` in `web/surface-memory.js` exists to prevent one surface over. So a package binding on
+this table declares exactly one parameter as its `bounds`, in seconds, and the render loop raises
+`moshIFrame` for one frame whenever that much program time has gone by. On that frame the pass
+draws exactly what it was handed and reads no history at all.
+
+That is a GOP, and seeking works the way seeking to a keyframe works: `moshFramesBack` walks back
+to the nearest frame the pass refreshed on and the seek decodes forward from there. Three kinds of
+frame end the walk — the refresh itself, the pass's first live frame (whose history is black), and
+the head of the take — and the walk is in frames rather than in seconds because that is what the
+loop renders. A walk subtracting `1 / outputFps` off a float lands a whisker under a boundary and
+reports a refresh one frame early.
+
+**The memory is bounded twice over and the pre-roll only reads one of the two.** A shipped
+datamosh also fades what it holds by a decay each frame, so at 0.88 a frame the trail is down to
+0.05% after sixty and the refresh has nothing left to bound. A decay-aware walk would stop sooner
+and make every scrub cheaper — the shape `trailsFramesBack` already has — and it is deliberately
+not built: it would need a second role marker in the manifest naming which term is the decay, for
+a saving that only shows while somebody is dragging the playhead. The refresh is the stated bound
+and the pre-roll is measured against it, so the answer is sometimes longer than it strictly needs
+to be and never shorter.
+
+**A seek with no pre-roll at all does not isolate this pass**, which cost one green mutation run
+before it was noticed. `resetAccumulators` clears the surface memory too, and its state texture
+reads differently on its first frame whatever the fade and wake say, so an arm rendered with
+nothing before it parts from a playback on a build whose mosh reads no history whatsoever.
+`timeline-check` section 7 isolates it with a *short* pre-roll instead — long enough for every
+other accumulator to converge, short of the refresh by enough that only the smear's own history
+is missing.
+
+**A camera move does not clear it, and that is the opposite of the trails.** Screen-space history
+belongs to the pose that produced it, so `renderProgramFrame` clears the afterimage when the
+camera moves; dragging stale pixels through a camera move is what this pass is *for*, so its
+history survives navigation. `timeline-check` asserts the camera path is identical across its
+playback, seek and control arms, which is where a divergence would show.
 
 ### Hotload is boot, run a second time
 

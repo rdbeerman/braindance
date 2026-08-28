@@ -336,9 +336,36 @@ frames and not a duration: at 0.9 the trail is down to 12% after twenty of them,
 0.83s of a 24fps deliverable and 0.33s of a 60fps one. `fade` and `wake` are in milliseconds
 for the reason [surface memory](architecture.md#surface-memory) gives, and this term is the
 exception to that rather than a second expression of it — so a look graded at one output rate
-does not keep its trail at another. It is the only term this applies to, because
-`AfterimagePass` in `web/post-chain.js` is the only pass in the chain that carries anything
-from one render to the next.
+does not keep its trail at another. It applies to `reach` and `decay` under Datamosh as well and
+to nothing else: those two passes are the only ones in the chain that carry anything from one
+render to the next, and both count what they carry in renders.
+
+**`datamosh.amount`** is the picture dissolving into vertical needles, and it is the one pass in
+the chain that reads the frame it drew last time. Every frame the picture is pulled a little way
+along Y and what it leaves behind does not clear, so a highlight stretches into a streak that
+grows for as long as the pass remembers. `amount` is the master and the one worth keyframing: at
+zero the pass is switched off and costs nothing, so the dissolve arrives and clears on one track.
+
+`reach px` is how far the picture is pulled each rendered frame, in pixels at the 1080p reference,
+and `decay` is what fraction of the trail survives a frame — the two together set how long a
+needle is. The blend is a per-channel maximum rather than a mix, so a highlight leaves a needle
+and the dark between the needles stays dark; a mix feeds the whole frame back into itself and
+greys it over in about a second.
+
+`splay` is which of the two readings of "vertically" you want. At 0 the whole frame drags one way,
+and that way is up rather than down — the pass fills a fragment from below it, so there is no
+setting that streams the picture downward as a sheet. At 1 it is pulled *away* from `line`, so everything above that
+height streaks upward and everything below it streaks down, and the frame comes apart from the
+middle out. `line` is where that split sits, as a fraction of frame height from the bottom.
+`grain px` is how wide a column of the picture pulling by one amount is: at 1 the frame is a field
+of separate needles, and at 16 it comes apart in ribbons. Ragged rather than a clean stretch is
+the whole difference between this and a vertical zoom.
+
+`refresh s` is the one control that is not only a look: it is how long the pass is allowed to
+remember, and every that many seconds of program time the picture snaps back to the frame it was
+handed. That snap is the pulse the look wants and it is also what makes the timeline work — a seek
+decodes forward from the last one, the way seeking to a keyframe does — so a long refresh is a
+long dissolve *and* a long pre-roll on every scrub.
 
 ## The edit, and what comes out of it
 
@@ -732,21 +759,23 @@ and the keys it names in `values` are its scope. A parameter's key is dotted by 
 belongs to — `glyph.tone`, `raster.pitch` — and a core value that belongs to no effect stays
 bare, like `pointSize` or `readDepth`. `requires` is `[{ id, version }]`, one entry per effect
 the values touch, derived from them rather than typed: a look that never raises the rain
-carries no entry for it. Ten ship read-only from `presets-builtin/` and are marked `·` in the
+carries no entry for it. Twelve ship read-only from `presets-builtin/` and are marked `·` in the
 picker. Five of them — `rgb`, `depth`,
 `ghost`, `contour` and `blackwall` — are one per reading and differ in little else, so they
 are where a grade starts, with `blackwall.json` carrying the twelve values the old mode
-wrote. The other five — `ember`, `grille`, `voxel`, `tearline` and `cascade` — are graded
-looks in their own right: the first four read Blackwall and `cascade` reads depth, and each
-spends a duotone, a raster and a toe on top of that reading, so applying one takes a finished
-grade rather than clearing the desk.
+wrote. The other seven — `ember`, `grille`, `voxel`, `tearline`, `cascade`, `updraft` and
+`rift` — are graded looks in their own right: all of them read Blackwall except `cascade`,
+which reads depth, and each spends a duotone, a raster and a toe on top of that reading, so
+applying one takes a finished grade rather than clearing the desk. `updraft` and `rift` are
+`ember`'s grade with the datamosh over it and differ only in `datamosh.splay` — 0 streams the
+whole frame upward, 1 pulls it apart from `datamosh.line` outward.
 Nothing in the format marks the difference and nothing should — they are all documents, and
 the split is editorial. A preset naming two values is equally valid, and applying it leaves
 everything else where the grade left it.
 
-**All ten name the whole look**: the 27 bare core values every look owes, plus every parameter
+**All twelve name the whole look**: the 27 bare core values every look owes, plus every parameter
 of each effect the document itself touches — so picking one gives you that look whatever was
-on screen before it. The all-or-none reading rule means all ten also name the three reading
+on screen before it. The all-or-none reading rule means all twelve also name the three reading
 packages, Ghost, Contour and Blackwall, with all nine of their parameters. A shipped whole look
 therefore names at least 36 values. `blackwall.json` claims five more effects whose fourteen
 parameters bring it to 50. Applying a whole look resets every effect the document does not
@@ -755,8 +784,8 @@ and writing it in at its defaults describe the same look. Framing — levelling,
 the crop box — is the shot rather
 than the look, so no shipped document names it and picking one never reframes what you
 framed. `none` is the one entry that does reach the framing, because it is the way back to
-the defaults rather than an eleventh look. `library-check` holds the rule against the
-registry: a new core value fails all ten until each names it, and a new parameter added to an
+the defaults rather than a thirteenth look. `library-check` holds the rule against the
+registry: a new core value fails all twelve until each names it, and a new parameter added to an
 effect fails only the documents whose `requires` already claims that effect — an effect
 nothing has reached yet fails nothing, because nothing claims it.
 

@@ -1,9 +1,14 @@
 // Which passes the picture goes through after the cloud is drawn, and in what order.
 //
-// The order is the whole of this file's opinion: trails accumulate the raw cloud, bloom blows
-// out the hot edges of what the trails left, and the grade tears the finished image. Reordering
-// any two is a different look - a grade before the bloom would have the glow blooming the
-// tearing rather than the picture. No opinion about the passes themselves lives here.
+// The order is the whole of this file's opinion: trails accumulate the raw cloud, the mosh drags
+// what it holds of that along Y, bloom blows out the hot edges of what is left, and the grade
+// tears the finished image. Reordering any two is a different look - a grade before the bloom
+// would have the glow blooming the tearing rather than the picture, and a mosh after the grade
+// would smear the grain and the scanlines down the frame instead of drawing them over the
+// damage.
+// The mosh sits feed-side for the reason the glitch package's own tear does: a compression
+// artifact happened to the picture on its way here, before anything displayed it. No opinion
+// about the passes themselves lives here.
 //
 // Nothing is allocated and no GL is touched while this module evaluates. `new
 // EffectComposer(renderer)` is the sharpest case: it reads the renderer's pixel ratio and
@@ -12,6 +17,7 @@
 import * as THREE from 'three';
 import { renderer, scene, viewCamera } from './scene.js';
 import { BloomPass } from './bloom-pass.js';
+import { MoshPass } from './mosh-pass.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
@@ -24,8 +30,33 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 export let composer = null;
 export let renderPass = null;
 export let afterimage = null;
+export let mosh = null;
 export let bloom = null;
 export let grade = null;
+
+// Every cell the mosh's shader reads before a look lands. `tNew` and `tOld` are written by the
+// pass itself once a frame; `moshIFrame` is the render loop's, and it is 1 rather than 0 at rest
+// so that a pass switched on before anything has decided otherwise draws the frame it was handed
+// rather than reading history nobody has written.
+const MOSH_UNIFORMS = {
+  tNew: { value: null },
+  tOld: { value: null },
+  time: { value: 0 },
+  moshIFrame: { value: 1 },
+  resolution: { value: new THREE.Vector2(1, 1) },
+  // The datamosh package's ten, defaulting to what its manifest declares, so a page whose
+  // registry has not landed yet holds the same look the first slider read will.
+  mosh: { value: 0 },
+  moshReach: { value: 14 },
+  moshDecay: { value: 0.88 },
+  moshSplay: { value: 1 },
+  moshLine: { value: 0.55 },
+  moshGrain: { value: 3 },
+  moshDrift: { value: 0 },
+  moshSpeed: { value: 1 },
+  moshCycleRefresh: { value: 0 },
+  moshRefresh: { value: 1.2 },
+};
 
 // Every cell the grade's shader reads, with the value it holds before a look lands. The text
 // that reads them is assembled elsewhere, so this is the whole of what stayed: a default a
@@ -92,7 +123,7 @@ const GRADE_UNIFORMS = {
  * module builds a pass without ever knowing there is a server, which is what lets the gate run
  * the same assembler under bare node.
  */
-export function buildPostChain(gradeProgram) {
+export function buildPostChain(gradeProgram, moshProgram) {
   composer = new EffectComposer(renderer);
   renderPass = new RenderPass(scene, viewCamera);
   composer.addPass(renderPass);
@@ -100,6 +131,14 @@ export function buildPostChain(gradeProgram) {
   afterimage = new AfterimagePass(0.0);
   afterimage.enabled = false;
   composer.addPass(afterimage);
+
+  mosh = new MoshPass({
+    uniforms: MOSH_UNIFORMS,
+    vertexShader: moshProgram.vertexShader,
+    fragmentShader: moshProgram.fragmentShader,
+  });
+  mosh.enabled = false;
+  composer.addPass(mosh);
 
   bloom = new BloomPass(0.0, 0.7, 0.2);
   bloom.enabled = false;
@@ -136,4 +175,14 @@ export function setGradeProgram(gradeProgram) {
   grade.material.vertexShader = gradeProgram.vertexShader;
   grade.material.fragmentShader = gradeProgram.fragmentShader;
   grade.material.needsUpdate = true;
+}
+
+/** The mosh's program, replaced without replacing the pass. `setGradeProgram` carries the why. */
+export function setMoshProgram(moshProgram) {
+  if (mosh.material.vertexShader === moshProgram.vertexShader
+    && mosh.material.fragmentShader === moshProgram.fragmentShader) return;
+  mosh.material.dispose();
+  mosh.material.vertexShader = moshProgram.vertexShader;
+  mosh.material.fragmentShader = moshProgram.fragmentShader;
+  mosh.material.needsUpdate = true;
 }

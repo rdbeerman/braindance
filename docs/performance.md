@@ -523,6 +523,24 @@ crop-box measurement above had to move to the editor to escape. That half is
 `grabber --profile` on the sensor with `prof-summary` reading the contention, and it is
 deferred. Until both are run the honest statement is the one at the top of this subsection.
 
+## The mosh pass: what it allocates, and the number that is not here
+
+The feedback pass in `web/mosh-pass.js` costs, per rendered frame it is enabled for, **two
+full-screen draws** — the mosh program into one target and a copy out of it — against the grade's
+one and the bloom's thirteen. That is its shape rather than its price, and the price is not in
+this file: the paired A/B that every number in [What each effect costs](#what-each-effect-costs)
+comes from was attempted and thrown away, because the harness written for it read a wall clock
+around a render loop and `gl.finish()` does not fence on this machine. `docs/measurement.md`
+carries what that measured instead. The number wants the animation-loop pacing the older table
+used, and nobody has re-run it that way.
+
+**What is measured is the memory, because it is arithmetic rather than a timing.** Two
+`HalfFloatType` RGBA targets at the drawing buffer's size, so eight bytes a pixel each: **33.2 MB
+at 1920x1080 and 132.7 MB at 3840x2160**. Both are allocated whenever the chain exists rather
+than when the pass is switched on — three's own `AfterimagePass` behaves the same way and this
+pass follows it rather than inventing a second policy — so a build nobody has raised the smear on
+still holds them.
+
 ## The effect extraction cost nothing in pixels, and that is a measurement
 
 Moving every effect's GLSL out of two shader files and into sixteen packages is a refactor

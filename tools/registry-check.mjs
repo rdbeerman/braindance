@@ -332,8 +332,8 @@ const MUTATIONS = {
   'crush-gates-the-grade': {
     file: 'web/main.js',
     edits: [[
-      '  return GRADE_GATES.some(',
-      '  return grade.uniforms.crush.value > 0 || GRADE_GATES.some(',
+      '  return PASS_GATES[table].some(',
+      '  return (table === \'grade\' && grade.uniforms.crush.value > 0) || PASS_GATES[table].some(',
     ]],
     fails: 'seven rows: the pass-gate row for crush, all five reading rows of 1b (each at 6 of '
       + '6 frames and about three quarters of every frame), and the boot comparison, whose '
@@ -997,6 +997,13 @@ const LANDING = {
   'stock.latitude': 'k.grade.uniforms.stockLatitude.value',
   'vignette.amount': '[k.grade.uniforms.vignette.value, k.grade.enabled]',
   crush: 'k.grade.uniforms.crush.value',
+  'datamosh.amount': '[k.mosh.uniforms.mosh.value, k.mosh.enabled]',
+  'datamosh.reach': 'k.mosh.uniforms.moshReach.value',
+  'datamosh.decay': 'k.mosh.uniforms.moshDecay.value',
+  'datamosh.splay': 'k.mosh.uniforms.moshSplay.value',
+  'datamosh.line': 'k.mosh.uniforms.moshLine.value',
+  'datamosh.grain': 'k.mosh.uniforms.moshGrain.value',
+  'datamosh.refresh': 'k.mosh.uniforms.moshRefresh.value',
   denoise: 'k.uniforms.denoise.value',
   edgeTol: 'k.uniforms.edgeTol.value',
   renderScale: 'k.renderer.getContext().drawingBufferWidth',
@@ -1127,6 +1134,15 @@ const EXPECT = {
     || all['grain.amount'] > 0 || v > 0 || all['streak.amount'] > 0
     || all['halation.amount'] > 0 || all['stock.amount'] > 0],
   crush: (v) => v,
+  // The master is the only term on the mosh table that gates, so the pass is open exactly when
+  // it is up - no `||` run like the grade's, where seven terms share one pass.
+  'datamosh.amount': (v) => [v, v > 0],
+  'datamosh.reach': (v) => v,
+  'datamosh.decay': (v) => v,
+  'datamosh.splay': (v) => v,
+  'datamosh.line': (v) => v,
+  'datamosh.grain': (v) => v,
+  'datamosh.refresh': (v) => v,
   denoise: (v) => (v ? 1 : 0),
   edgeTol: (v) => v,
   // three floors width * pixelRatio, and the context runs at deviceScaleFactor 1.
@@ -1235,6 +1251,13 @@ const SCRAMBLE = {
   'stock.latitude': 0.14,
   'vignette.amount': 0.73,
   crush: 0.062,
+  'datamosh.amount': 0.83,
+  'datamosh.reach': 23.5,
+  'datamosh.decay': 0.71,
+  'datamosh.splay': 0.34,
+  'datamosh.line': 0.38,
+  'datamosh.grain': 7,
+  'datamosh.refresh': 1.85,
   denoise: false,
   edgeTol: 340,
   renderScale: 85,
@@ -1252,6 +1275,11 @@ const NO_PIXEL_EFFECT = {
     + 'and a pinned run has replaced the loop',
   camera: 'nothing draws the program camera on the pinned run - the viewport is the '
     + 'free camera - so a pose reaches the camera object and no pixel',
+  'datamosh.refresh': 'it is a period in seconds and this run is 0.622s long, so no refresh '
+    + 'falls inside it at 1.2 or at 1.85 and the two values render the same frames. Measured '
+    + 'rather than assumed - the run prints its own span two sections up. It reaches pixels in '
+    + 'timeline-check section 7, where the arm is twelve seconds in and `--mutate '
+    + 'mosh-never-refreshes` reddens two rows',
 };
 
 const PAGE_HELPERS = `
@@ -1582,6 +1610,8 @@ const GOLDEN_ABSENT = new Set([
   'stock.amount', 'stock.balance', 'stock.split', 'stock.latitude',
   'progSize',
   'tPresetFile',
+  'datamosh.amount', 'datamosh.reach', 'datamosh.decay', 'datamosh.splay',
+  'datamosh.line', 'datamosh.grain', 'datamosh.refresh',
 ]);
 const absentBefore = (name, before) => GOLDEN_ABSENT.has(name) && before === undefined;
 
@@ -4097,7 +4127,7 @@ console.log('\n[registry] the two masters are exactly absent at zero, and so is 
     'while raised, those same three keys do move the picture', 'the keys reach nothing at all');
 
   pair('flatFine', 'flatCoarse',
-    'at a lattice of 0 the cell size reaches no pixel, so the eight shipped looks that never '
+    'at a lattice of 0 the cell size reaches no pixel, so the ten shipped looks that never '
     + 'snap are untouched by the energy compensation', 'the compensation is not exactly one');
   moves('snappedFine', 'snappedCoarse',
     'while with the lattice raised the same two cell sizes do move it',

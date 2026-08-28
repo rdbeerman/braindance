@@ -1,0 +1,115 @@
+{
+  "version": 6,
+  "requires": [
+    {
+      "id": "ghost",
+      "version": "1.0.0"
+    },
+    {
+      "id": "contour",
+      "version": "1.0.0"
+    },
+    {
+      "id": "blackwall",
+      "version": "1.0.0"
+    },
+    {
+      "id": "glitch",
+      "version": "1.0.0"
+    },
+    {
+      "id": "duotone",
+      "version": "1.0.0"
+    },
+    {
+      "id": "rgbsplit",
+      "version": "1.0.0"
+    },
+    {
+      "id": "raster",
+      "version": "1.0.0"
+    },
+    {
+      "id": "grain",
+      "version": "1.0.0"
+    },
+    {
+      "id": "streak",
+      "version": "1.0.0"
+    },
+    {
+      "id": "vignette",
+      "version": "1.0.0"
+    },
+    {
+      "id": "datamosh",
+      "version": "1.0.0"
+    }
+  ],
+  "values": {
+    "pointSize": 8.1,
+    "opacity": 1,
+    "exposure": 1.15,
+    "additive": true,
+    "interpolate": true,
+    "snapDelta": 250,
+    "fade": 120,
+    "wake": 550,
+    "cell": 0.05,
+    "regionX": 0,
+    "regionY": 0,
+    "regionZ": -2,
+    "regionW": 0,
+    "regionH": 0,
+    "regionD": 0,
+    "regionRound": 0.5,
+    "regionSoft": 0.2,
+    "readRgb": 0,
+    "readDepth": 0,
+    "rgbSaturation": 1,
+    "depthGamma": 1,
+    "rim": 0.5,
+    "bloom": 0.8,
+    "trails": 0.45,
+    "crush": 0.06,
+    "denoise": true,
+    "edgeTol": 120,
+    "ghost.amount": 0,
+    "ghost.rim": 0.7,
+    "ghost.fill": 0.35,
+    "contour.amount": 0,
+    "contour.bands": 12,
+    "contour.width": 0.08,
+    "blackwall.amount": 1,
+    "blackwall.sweep": 0.28,
+    "blackwall.scan": 0.35,
+    "glitch.amount": 0.1,
+    "glitch.density": 0.45,
+    "glitch.shove": 0.45,
+    "glitch.tint": 1.8,
+    "glitch.bands": 12,
+    "glitch.axis": 0,
+    "glitch.rate": 7,
+    "duotone.amount": 0.92,
+    "duotone.hue": 28,
+    "duotone.split": 0.48,
+    "duotone.span": 5.95,
+    "duotone.motion": 0.35,
+    "rgbsplit.amount": 1.2,
+    "raster.amount": 0.34,
+    "raster.angle": 0,
+    "raster.pitch": 0.4,
+    "raster.hard": 0.85,
+    "grain.amount": 0.2,
+    "streak.amount": 0.2,
+    "streak.angle": 0,
+    "vignette.amount": 0.62,
+    "datamosh.amount": 1,
+    "datamosh.reach": 20,
+    "datamosh.decay": 0.9,
+    "datamosh.splay": 1,
+    "datamosh.line": 0.55,
+    "datamosh.grain": 2,
+    "datamosh.refresh": 1.2
+  }
+}

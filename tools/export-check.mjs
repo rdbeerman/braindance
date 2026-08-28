@@ -113,9 +113,25 @@ const MUTATIONS = {
   // Grain and scanlines go back to being sized in framebuffer pixels.
   'grade-absolute': { file: 'web/grade-shader.js', edits: [[
     `      float k = resolution.y / 1080.0;
-      vec2 ref = resolution / k;`,
+      vec2 ref = resolution / k;
+      vec2 texel = 1.0 / ref;
+      vec3 col;`,
     `      float k = 1.0;
-      vec2 ref = resolution;`,
+      vec2 ref = resolution;
+      vec2 texel = 1.0 / ref;
+      vec3 col;`,
+  ]] },
+  // The smear's reach and its column width go back to framebuffer pixels, so a needle covers
+  // half as much of the frame every time the buffer doubles.
+  'mosh-buffer-sized': { file: 'web/mosh-shader.js', edits: [[
+    `      float k = resolution.y / 1080.0;
+      vec2 ref = resolution / k;
+      vec2 texel = 1.0 / ref;
+      vec3 fresh = texture2D(tNew, vUv).rgb;`,
+    `      float k = 1.0;
+      vec2 ref = resolution;
+      vec2 texel = 1.0 / ref;
+      vec3 fresh = texture2D(tNew, vUv).rgb;`,
   ]] },
   // The bloom chain sized against the drawing buffer again, where its halo halves in width every
   // time the buffer doubles.
@@ -271,8 +287,14 @@ const MUTATIONS = {
       '  uniforms.bufferHeight.value = buf.x * (1080 / 1728);',
     ],
     [
-      '      float k = resolution.y / 1080.0;',
-      '      float k = resolution.x / 1728.0;',
+      `      float k = resolution.y / 1080.0;
+      vec2 ref = resolution / k;
+      vec2 texel = 1.0 / ref;
+      vec3 col;`,
+      `      float k = resolution.x / 1728.0;
+      vec2 ref = resolution / k;
+      vec2 texel = 1.0 / ref;
+      vec3 col;`,
       'web/grade-shader.js',
     ],
   ] },
@@ -689,7 +711,16 @@ const RES_ARM = `async ({ label, look, at, resLook, camera }) => {
   // a worst tile of 48.7/255, which reads as the rebase having broken and was a mask
   // still fading the cloud. Zero is the default for all four, so this changes nothing
   // for any row that was here before.
-  const REGION_BASE = { 'noise.amount': 0, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0 };
+  //
+  // **The smear is here for the same reason and it is the sharper case**, because the rows that
+  // inherit it are the rebase ones, whose whole job is to keep Blackwall's own values rather than
+  // spreading an OFF. The row that raises the smear runs last in each size's pass, so without
+  // this line every arm after it rendered through a MoshPass nobody asked for: measured the first
+  // time as eighteen rows red at a luminance ratio of 1.87, and nine more after putting it in the
+  // pipeline looks alone, where the rebase arms never see it.
+  const REGION_BASE = {
+    'noise.amount': 0, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0, 'datamosh.amount': 0,
+  };
   const merged = { ...REGION_BASE, ...resLook, ...look };
   const dropped = Object.keys(merged).filter((n) => !known.has(n));
   k.params.apply(Object.fromEntries(Object.entries(merged).filter(([n]) => known.has(n))));
@@ -977,6 +1008,18 @@ const PIPELINES = [
   ['regionpush', { look: { ...OFF, ...REGION_AT_SUBJECT, 'push.amount': 0.35 } }],
   ['regionmask', { look: { ...OFF, ...REGION_AT_SUBJECT, 'mask.amount': 0.5 } }],
   ['crop', { look: { ...OFF, ...REGION_OFF, left: -0.8, right: 0.8, bottom: -0.8, top: 0.8 } }],
+  // The one row whose pass carries a frame of memory. `RES_ARM` reaches its position through a
+  // real seek, so the pre-roll has run and the smear it measures has history behind it; the
+  // refresh puts the last decode point a second before the arm's own position at 1.5s.
+  ['datamosh', { look: { ...OFF,
+    'datamosh.amount': 1,
+    'datamosh.reach': 18,
+    'datamosh.decay': 0.9,
+    'datamosh.splay': 1,
+    'datamosh.line': 0.55,
+    'datamosh.grain': 4,
+    'datamosh.refresh': 1.5,
+  } }],
 ];
 
 // Which measurement each row is judged on, per row because the terms live at different spatial
@@ -997,6 +1040,10 @@ const RES_TOLERANCE = {
   regionpush: { on: 'coarse', mean: 1.8, ratio: 0.005 },
   regionmask: { on: 'coarse', mean: 1.5, ratio: 0.005 },
   crop: { on: 'coarse', mean: 0.9, ratio: 0.005 },
+  // Measured on this rig: 3.088 clean against 5.791 under `--mutate mosh-buffer-sized`, so the
+  // floor sits between the two rather than above both. The mutation also moves the luminance
+  // ratio to 0.938, and either half alone catches it.
+  datamosh: { on: 'coarse', mean: 4.0, ratio: 0.03 },
 };
 
 const ARMS = [];

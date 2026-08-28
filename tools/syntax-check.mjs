@@ -511,8 +511,10 @@ const withoutStringBodies = (src) => {
   // The same anchors asked of the text the driver is handed. A file is not a program since the
   // shaders became a spine plus the packages' chunks, so each anchor must appear exactly once
   // summed over every assembled program - never per program - and the edit must move one.
-  const SPINES = { cloud: 'web/cloud-shader.js', grade: 'web/grade-shader.js' };
-  const SPINE_EXPORT = { cloud: 'cloudSpine', grade: 'gradeSpine' };
+  const SPINES = {
+    cloud: 'web/cloud-shader.js', grade: 'web/grade-shader.js', mosh: 'web/mosh-shader.js',
+  };
+  const SPINE_EXPORT = { cloud: 'cloudSpine', grade: 'gradeSpine', mosh: 'moshSpine' };
   const ASSEMBLER = 'web/shader-assembly.js';
   const isSpine = (file) => Object.values(SPINES).includes(file);
   const isChunk = (file) => /^effects-builtin\/[^/]+\/[^/]+\.glsl$/.test(file);

@@ -99,9 +99,11 @@ blackwall, ghost rim, ghost fill, bands, thickness, wall sweep, scan, rim, therm
 edges — each carry a slider and a value.](media/look.png)
 
 `blackwall`, `contour`, `depth`, `ghost` and `rgb` ship in `presets-builtin/` and cannot be
-overwritten, and beside them ship five graded looks — `ember`, `grille`, `voxel`, `tearline`
-and `cascade` — which are one reading with somebody's grade already on it rather than a place
-to start. **save** writes yours to `presets/`, and **export** and **import** move them
+overwritten, and beside them ship seven graded looks — `ember`, `grille`, `voxel`, `tearline`,
+`cascade`, `updraft` and `rift` — which are one reading with somebody's grade already on it
+rather than a place to start. The last two are `ember` under a datamosh and differ only in
+`datamosh.splay`: `updraft` streams the whole frame upward, `rift` pulls it apart from the line
+outward. **save** writes yours to `presets/`, and **export** and **import** move them
 between machines as JSON. Every scalar underneath is still yours to move, and a row you have
 changed grows a **↺** that puts just that one back.
 

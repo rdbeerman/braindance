@@ -7,6 +7,7 @@
 
 import {
   MANIFEST_FORMAT, EFFECT_PARAM_KINDS, EFFECT_BIND_TABLES, EFFECT_BIND_TRANSFORMS,
+  EFFECT_GATED_TABLES, EFFECT_BOUNDED_TABLES,
   CORE_PANEL_GROUP_KEYS, HOST_DRIVEN_UNIFORMS, effectBindUniformType,
 } from '../web/effect-manifests.js';
 import { assembleShaders } from '../web/shader-assembly.js';
@@ -187,7 +188,7 @@ const spineTextByProgram = (spines) => Object.fromEntries(
 );
 
 // Which assembled program a binding's table writes into - the one place the two vocabularies meet.
-const PROGRAM_OF_TABLE = { points: 'cloud', grade: 'grade' };
+const PROGRAM_OF_TABLE = { points: 'cloud', grade: 'grade', mosh: 'mosh' };
 
 // Read off the spines rather than decided here: a chunk names a joint and never a program, so the
 // spine holding the joint is what says where it lands.
@@ -357,6 +358,8 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       + 'would assemble no control from, and the panel group it asks for would be a heading with nothing under it';
   }
   let masters = 0;
+  let bounds = 0;
+  let onBounded = 0;
   for (const [short, spec] of Object.entries(manifest.params)) {
     const name = `${id}.${short}`;
     if (!VALID_PARAM_KEY.test(short)) {
@@ -454,17 +457,17 @@ export function doorRefusal(candidate, { beside = [], spines }) {
         + 'landing the value unconverted, so this is the same refusal one door earlier';
     }
     if (bind.gates !== undefined && typeof bind.gates !== 'boolean') {
-      return `${name} declares gates as ${JSON.stringify(bind.gates)} - it says whether this term holds the grade pass open, which is a yes or a no`;
+      return `${name} declares gates as ${JSON.stringify(bind.gates)} - it says whether this term holds its pass open, which is a yes or a no`;
     }
     // `gates` is a promise about the *uniform*: `gradeNeeded` walks the gating bindings and reads
     // the cell each names, so one on another table is collected by nothing, and one beside a
     // vector transform asks whether a direction or pair of edges is zero.
     if (bind.gates) {
-      if (bind.on !== 'grade') {
+      if (!EFFECT_GATED_TABLES.includes(bind.on)) {
         return `${name} declares gates and binds on ${JSON.stringify(bind.on)} - gates says this term holds `
-          + 'the grade pass open, and the gate reads the grade pass\'s own uniforms, so a gating binding on any '
-          + 'other table is a claim the pass never sees: the control moves, the term is collected by nothing, '
-          + 'and the pass opens and shuts on the parameters that did bind there';
+          + `its pass open, and the tables with a pass to hold are ${EFFECT_GATED_TABLES.join(' and ')}, so a `
+          + 'gating binding anywhere else is a claim no pass ever sees: the control moves, the term is '
+          + 'collected by nothing, and the passes open and shut on the parameters that did bind there';
       }
       if (effectBindUniformType(bind.transform) !== 'float') {
         return `${name} declares gates beside the ${bind.transform} transform - that transform writes a two-component value `
@@ -472,6 +475,25 @@ export function doorRefusal(candidate, { beside = [], spines }) {
           + 'it held the pass shut for the life of the page under the comparison this build used to make, and '
           + 'holds it open forever under the one it makes now, so it is refused rather than given a meaning '
           + 'that changes when the comparison does';
+      }
+    }
+    if (bind.bounds !== undefined && typeof bind.bounds !== 'boolean') {
+      return `${name} declares bounds as ${JSON.stringify(bind.bounds)} - it says whether this term is how `
+        + 'long its pass remembers, which is a yes or a no';
+    }
+    if (EFFECT_BOUNDED_TABLES.includes(bind.on)) onBounded += 1;
+    if (bind.bounds) {
+      bounds += 1;
+      if (!EFFECT_BOUNDED_TABLES.includes(bind.on)) {
+        return `${name} declares bounds and binds on ${JSON.stringify(bind.on)} - bounds says this term is the `
+          + `seconds its pass remembers for, and the passes with memory are ${EFFECT_BOUNDED_TABLES.join(' and ')}. `
+          + 'On any other table it bounds nothing: the render loop would read it for a refresh that never has to '
+          + 'happen, and the seek would compute a pre-roll for a pass that never needed one';
+      }
+      if (spec.kind !== 'scalar' || effectBindUniformType(bind.transform) !== 'float') {
+        return `${name} declares bounds and is a ${spec.kind} binding writing `
+          + `${effectBindUniformType(bind.transform)} - a memory is a length of time, which is one number of `
+          + 'seconds. A step or a two-component value has no reading the pre-roll could divide by';
       }
     }
     if (spec.role !== undefined) {
@@ -499,15 +521,30 @@ export function doorRefusal(candidate, { beside = [], spines }) {
         return `${name} declares under as ${JSON.stringify(spec.under)} - it names another parameter key in the same package`;
       }
       const parent = manifest.params[spec.under];
-      if (!parent || parent === spec || parent.role !== 'master') {
-        return `${name} declares itself under ${JSON.stringify(spec.under)}, which is not another master in ${id} - `
-          + 'the parent is the term whose non-zero value reveals this row';
+      // A step defaulting to false is absent at false, so its children hide when it is unchecked.
+      const validParent = parent && parent !== spec
+        && (parent.role === 'master' || (parent.kind === 'step' && parent.def === false));
+      if (!validParent) {
+        return `${name} declares itself under ${JSON.stringify(spec.under)}, which is not a valid parent in ${id} - `
+          + 'the parent is a master or a step defaulting to false, whose non-zero value reveals this row';
       }
     }
   }
   if (masters > 1) {
     return `effect ${id} declares ${masters} parameters with the role master - one package is absent at one term, `
       + 'and two of them is two answers to whether this effect is contributing';
+  }
+  // A pass with memory has to say how long it remembers, once. Nothing else in this program can
+  // supply that number: a seek reproduces a feedback pass by decoding from the last frame that
+  // refreshed it, so a package that binds there and names no period is a pass no seek can land
+  // in, and two periods is two answers to where the last refresh was.
+  if (onBounded > 0 && bounds !== 1) {
+    return `effect ${id} binds ${onBounded} parameter${onBounded === 1 ? '' : 's'} on a pass that carries a `
+      + `frame of memory and declares ${bounds} of them as its bounds - it declares exactly one, in seconds. `
+      + `${bounds === 0
+        ? 'With none, the memory has no ceiling and no length of pre-roll reproduces it, so every seek into '
+        + 'this look lands somewhere playback never was'
+        : 'With two, the refresh the pre-roll decodes from is whichever one the page happened to collect first'}`;
   }
 
   // ---- where the rows would land, which nothing before the swap asks

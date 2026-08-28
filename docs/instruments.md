@@ -282,6 +282,52 @@ never checked against the predicate — is admitted silently. Where the reading 
 than an extent, measure the baseline and subtract it, because a position has no tolerance to hide
 a passenger in.
 
+### A control that clears three accumulators cannot say which one it was about
+
+`timeline-check` section 7 asks whether the mosh pass really reads the frame it drew last time,
+and the obvious control is the one every section above it uses: render the target with no
+pre-roll at all and require the picture to differ. It does differ — and it differs on a build
+whose mosh reads no history whatsoever. `--mutate mosh-no-history` points the pass's fetch at
+the incoming frame instead of its own last output, and the run came back **87 passed, 0 failed**.
+
+The reason is that a pre-roll is not one accumulator's. `resetAccumulators` clears the surface
+memory's state texture too, and that texture reads differently on its first frame whatever the
+fade and wake say, so the arm parts from a playback for a reason that has nothing to do with the
+pass under test. Putting fade, wake and trails to zero was not enough: the state texture is
+written on every arriving frame regardless of what the look does with it.
+
+What isolates the pass is a **short** pre-roll rather than no pre-roll — long enough for every
+other accumulator to have converged, short of the refresh by enough that the only thing missing
+is the smear's own history. Measured: 35 frames short of a 60-frame pre-roll parts from the
+playback by 20/255 across 57.9% of the frame with the pass intact, and by **exactly zero** under
+the same mutation. The separation is total, so the floor only has to sit between them.
+
+Beside it, the same section had a second arm that could not fail. `--mutate mosh-never-refreshes`
+removes the periodic I-frame, which should leave a playback carrying unbounded history against a
+seek that starts from a reset — and it reddened nothing, because the look under the section used
+the shipped decay of 0.88 a frame. 0.88^60 is 0.05%: the decay had already bounded the memory the
+refresh was supposed to bound, so removing the refresh changed no pixel. The section now names
+0.99, where the refresh is what binds.
+
+**Both are the same shape: a probe placed where its answer is the same either way.** Ask what the
+arm would read on a build with the defect, not what it reads on the build in front of you.
+
+### A search across two named programs cannot find a third program's text
+
+`effect-conformance-check` hollows each installed package in turn, checks that its GLSL has left
+the assembled shaders, puts it back and checks that it returns. The search was written as
+
+```js
+`${p.cloud.vertexShader}${p.cloud.fragmentShader}${p.grade.vertexShader}${p.grade.fragmentShader}`
+```
+
+which is every program this build had when the tool was written. A pass with its own spine
+arrived, and the row for the package that fills it read `while hollow: gone; after: missing` —
+the text was never in the string being searched, so its absence proved nothing and its return
+could not be seen. The fix is `Object.values(programs)`: the page already answers with every
+program it compiled, and reading them all means a fourth spine is asked by existing rather than
+by somebody remembering to add it here.
+
 ## Mutation-test the instrument, don't just reason about it
 
 Deliberately break the thing under test, run the check, and confirm it fails on the assertions it

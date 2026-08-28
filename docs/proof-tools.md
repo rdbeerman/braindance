@@ -89,11 +89,11 @@ node tools/registry-check.mjs --mutate rain-span-in-frames        # ... its head
 node tools/registry-check.mjs --mutate normalisation-floor-restored # ... the pile-up fix, planted because no shipped look reaches
                                                                   #     the band - a sprite grown to a cell moves the floor from
                                                                   #     19cm out to where a person stands
-node tools/registry-check.mjs --mutate glyph-leaks-at-zero        # ... and the master exactly absent at 0, which is what nine of
-                                                                  #     the ten shipped looks rest on - cascade is the tenth and
-                                                                  #     the only one that draws a character at all. The eight-of-ten
-                                                                  #     population next door is a different set: that one is the
-                                                                  #     lattice-zero looks the compensation has to leave alone
+node tools/registry-check.mjs --mutate glyph-leaks-at-zero        # ... and the master exactly absent at 0, which is what eleven of
+                                                                  #     the twelve shipped looks rest on - cascade is the exception
+                                                                  #     and the only one that draws a character at all. The ten-of-
+                                                                  #     twelve population next door is a different set: that one is
+                                                                  #     the lattice-zero looks the compensation has to leave alone
 node tools/registry-check.mjs --mutate rain-leaks-at-zero         # ... the other master, on the same terms
 node tools/registry-check.mjs --mutate compensation-leaks-at-lattice-zero # ... and the energy correction, which rides no master at
                                                                   #     all and so is excused by neither

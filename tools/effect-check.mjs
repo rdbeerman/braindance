@@ -98,7 +98,7 @@ const MUTATIONS = {
 
   'gates-are-frozen-at-boot': {
     file: 'web/main.js',
-    edits: [['  GRADE_GATES = gradeGatesOf(packages);\n', '  GRADE_GATES ??= gradeGatesOf(packages);\n']],
+    edits: [['  PASS_GATES = passGatesOf(packages);\n', '  PASS_GATES ??= passGatesOf(packages);\n']],
   },
 
   'every-reload-warms': {
@@ -143,8 +143,8 @@ const MUTATIONS = {
   'door-takes-a-gates-nothing-reads': {
     file: 'server/effect-door.js',
     edits: [[
-      '    if (bind.gates) {\n      if (bind.on',
-      '    if (false) {\n      if (bind.on',
+      '    if (bind.gates) {\n      if (!EFFECT_GATED_TABLES',
+      '    if (false) {\n      if (!EFFECT_GATED_TABLES',
     ]],
   },
 

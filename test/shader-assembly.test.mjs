@@ -11,12 +11,13 @@ import { dirname, join } from 'node:path';
 
 import { cloudSpine } from '../web/cloud-shader.js';
 import { gradeSpine } from '../web/grade-shader.js';
+import { moshSpine } from '../web/mosh-shader.js';
 import { assembleShaders } from '../web/shader-assembly.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILTIN = join(ROOT, 'effects-builtin');
 
-const SPINES = { cloud: cloudSpine, grade: gradeSpine };
+const SPINES = { cloud: cloudSpine, grade: gradeSpine, mosh: moshSpine };
 
 // A claim rather than a convention: the flip control below requires the program a chunk's
 // name promises to be the only one that moves.
@@ -24,6 +25,7 @@ const NAMES = {
   '.vert.glsl': ['cloud', 'vertexShader'],
   '.frag.glsl': ['cloud', 'fragmentShader'],
   '.grade.glsl': ['grade', 'fragmentShader'],
+  '.mosh.glsl': ['mosh', 'fragmentShader'],
 };
 
 const shippedPackages = () => readdirSync(BUILTIN, { withFileTypes: true })

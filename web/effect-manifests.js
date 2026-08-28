@@ -21,7 +21,23 @@ export const MANIFEST_FORMAT = 1;
  * one. Frozen, because a closed set anybody could push onto is not a closed set.
  */
 export const EFFECT_PARAM_KINDS = Object.freeze(['scalar', 'step']);
-export const EFFECT_BIND_TABLES = Object.freeze(['points', 'grade']);
+export const EFFECT_BIND_TABLES = Object.freeze(['points', 'grade', 'mosh']);
+
+/**
+ * The tables whose pass is switched off while every term on it is zero, so a term there may
+ * declare `gates`. The cloud is drawn whatever the look says and has nothing to hold open.
+ */
+export const EFFECT_GATED_TABLES = Object.freeze(['grade', 'mosh']);
+
+/**
+ * The tables whose pass carries a frame of memory, so a term there has to say how long that
+ * memory can last. A feedback pass with no ceiling on its own history cannot be seeked into: no
+ * length of pre-roll reproduces a frame that depends on every frame before it, which is the
+ * failure `MAX_AGE` in `web/surface-memory.js` exists to prevent one table over. A package
+ * binding here declares exactly one parameter with `bounds`, in seconds, and the render loop
+ * refreshes the pass whenever that many seconds have gone by.
+ */
+export const EFFECT_BOUNDED_TABLES = Object.freeze(['mosh']);
 const EFFECT_BIND_TRANSFORM_TYPES = Object.freeze({
   axisDeg: 'vec2',
   centeredEdges: 'vec2',
@@ -117,6 +133,7 @@ export const tableFromPackages = (packages, order) => {
     };
     if (p.bind.transform !== undefined) entry.transform = p.bind.transform;
     if (p.bind.gates !== undefined) entry.gates = p.bind.gates;
+    if (p.bind.bounds !== undefined) entry.bounds = p.bind.bounds;
     if (p.reading !== undefined) entry.reading = p.reading;
     if (p.under !== undefined) entry.under = `${name.slice(0, name.indexOf('.'))}.${p.under}`;
     table[name] = Object.freeze(entry);

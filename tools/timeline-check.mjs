@@ -34,6 +34,14 @@ const SAME_MAX = 2;
 const CONTROL_MIN = 16;
 const CONTROL_MIN_PCT = 1.0;
 
+// The isolating arm in section 7, which is a smaller signal than the no-pre-roll controls above
+// because what it removes is the older half of one pass's history rather than every accumulator
+// at once. Measured on this rig: 20/255 across 57.9% of the frame with the pass intact, and
+// exactly 0 under `--mutate mosh-no-history`, so the separation is total and the floor only has
+// to sit between them.
+const MOSH_CUT_MIN = 12;
+const MOSH_CUT_MIN_PCT = 10.0;
+
 const RAIN_SAME_MAX = 2;
 const RAIN_CONTROL_MIN = 64;
 const RAIN_CONTROL_MIN_PCT = 0.8;
@@ -42,7 +50,7 @@ const RAIN_CONTROL_MIN_MEAN = 0.08;
 const MUTATIONS = {
   // The pre-roll stops being a function of anything.
   'preroll-constant': { file: 'web/main.js', edits: [[
-    'const frames = Math.max(back.frames, trails);',
+    'const frames = Math.max(back.frames, trails, back3.frames);',
     'const frames = 8;',
   ]] },
   // Nothing is rendered ahead of the target.
@@ -78,10 +86,31 @@ const MUTATIONS = {
   // The accumulators are not cleared before a pre-roll.
   'no-reset': { file: 'web/main.js', edits: [[
     '  clearFeedback(\n'
-    + '    [statePrev, stateNext, afterimage._textureComp, afterimage._textureOld],\n'
+    + '    [statePrev, stateNext, afterimage._textureComp, afterimage._textureOld, ...mosh.history],\n'
     + "    'afterimage internals moved: the accumulator reset is no longer complete',\n"
     + '  );',
     '  /* mutation: accumulator reset skipped */',
+  ]] },
+  // The mosh pass stops reading the frame it drew last time, so it displaces the picture in
+  // front of it instead of holding one back. A seek still equals a playback - there is nothing
+  // to reproduce - and the control arm that renders with no pre-roll at all stops being able to
+  // tell itself apart from the playback, which is the row that says the feedback is real.
+  'mosh-no-history': { file: 'effects-builtin/datamosh/mosh.mosh.glsl', edits: [[
+    'vec3 held = texture2D(tOld, vUv - vec2(0.0, reach * texel.y)).rgb * moshDecay;',
+    'vec3 held = texture2D(tNew, vUv - vec2(0.0, reach * texel.y)).rgb * moshDecay;',
+  ]] },
+  // The refresh never fires on its period, so the memory has no ceiling: the pre-roll decodes
+  // from a frame that was never a keyframe and lands somewhere playback never was.
+  'mosh-never-refreshes': { file: 'web/main.js', edits: [[
+    `    mosh.uniforms.moshIFrame.value = (moshFresh || !moshWasLive
+      || (moshCycles && moshRefreshes(lastProgramTime, lastMoshPeriod, t, moshPeriod))) ? 1 : 0;`,
+    '    mosh.uniforms.moshIFrame.value = (moshFresh || !moshWasLive) ? 1 : 0;',
+  ]] },
+  // The mosh contributes nothing to the pre-roll, so the seek starts wherever the surface memory
+  // and the trails happen to want, and the smear arrives with the wrong history behind it.
+  'mosh-preroll-zero': { file: 'web/main.js', edits: [[
+    '    const back3 = this.moshFramesBack(programSec);',
+    '    const back3 = { frames: 0, covered: true };',
   ]] },
   'age-clamp-low': { file: 'web/surface-memory.js', edits: [
     ['const MAX_AGE = 6.0;', 'const MAX_AGE = 4.0;'],
@@ -449,6 +478,20 @@ const RGB_LOOK = JSON.parse(
   readFileSync(new URL('../presets-builtin/rgb.json', import.meta.url), 'utf8'),
 ).values;
 const BLACKWALL = { look: BLACKWALL_LOOK };
+
+// Blackwall with the datamosh raised, stated here rather than read off a document: MOSH_SHORT_BY
+// and the band beside it were measured against these exact values, so a document swapped in
+// underneath would move the numbers this section asserts without touching the assertion.
+const MOSH_LOOK = {
+  ...BLACKWALL_LOOK,
+  'datamosh.amount': 1,
+  'datamosh.reach': 14,
+  'datamosh.decay': 0.88,
+  'datamosh.splay': 1,
+  'datamosh.line': 0.55,
+  'datamosh.grain': 3,
+  'datamosh.refresh': 1.2,
+};
 
 const CASCADE_PATH = new URL('../presets-builtin/cascade.json', import.meta.url);
 const CASCADE_SHIPPED = existsSync(CASCADE_PATH)
@@ -1263,6 +1306,131 @@ console.log('\n== 6. the rain falls with the program clock, not with the frames 
     + 'equality above is about something', show(apart));
   check(apart.max > same.max * 8 + 8, 'the two verdicts are separated rather than adjacent',
     `control max ${apart.max} against ${same.max}`);
+}
+
+console.log('\n== 7. the mosh pass decodes from its own last refresh ==');
+{
+  // The refresh is 2.5s rather than the preset's, so the target is not on a boundary: at 12s
+  // the last refresh was at 10, and the pass therefore has 60 frames of memory behind it - more
+  // than the surface and the trails ask for between them, so the pre-roll below is the mosh's.
+  const MOSH_REFRESH = 2.5;
+  // **The surface memory and the trails are put down for this section, and that is the whole
+  // reason the control arm below means anything.** With them up, an arm rendered with no
+  // pre-roll differs from a playback whatever the mosh does - the shed points and the trail are
+  // missing too - so the row saying "the control lands somewhere else" passes on a build whose
+  // mosh reads no history at all. Measured: `--mutate mosh-no-history` reddened nothing under
+  // the preset's own fade, wake and trails. Zeroed, the mosh is the only thing in the chain
+  // that remembers, and the control is a statement about it.
+  // **The decay is put up near 1 as well, and that is the other thing this section had wrong.**
+  // The smear's memory is bounded twice over - by the refresh, and by the decay eating the trail
+  // a percent at a time - and at the shipped 0.88 the second one wins long before the first:
+  // 0.88^60 is 0.05%, so a build that never refreshed at all drew the same picture and
+  // `--mutate mosh-never-refreshes` reddened nothing. At 0.99 the refresh is what bounds it.
+  const MOSH_DECAY = 0.99;
+  // How far short of the refresh the isolating arm starts. Measured: at 20 the arm parted from
+  // the playback by 18/255, which clears the 16 this file asks for by too little to trust on a
+  // contended machine; at 35 it is comfortable and every other accumulator still has 25 frames
+  // to converge in.
+  const MOSH_SHORT_BY = 35;
+  const MOSH_ARM_LOOK = {
+    ...MOSH_LOOK,
+    fade: 0,
+    wake: 0,
+    trails: 0,
+    'datamosh.decay': MOSH_DECAY,
+    'datamosh.refresh': MOSH_REFRESH,
+  };
+  const config = { look: MOSH_ARM_LOOK, rate: 1, fps: 30, targetSec: TARGET_SEC, frames: null };
+  const played = await arm({ ...config, kind: 'playback', label: 'moshPlayed' });
+  const seeked = await arm({ ...config, kind: 'seek', label: 'moshSeeked' });
+  const control = await arm({ ...config, kind: 'seek', frames: 0, label: 'moshControl' });
+
+  const plan = seeked.seek.plan;
+  console.log('  method: Blackwall with the datamosh raised'
+    + `, refresh ${MOSH_REFRESH}s, rate 1.00x, 30 fps out, target ${TARGET_SEC}s. Pre-roll `
+    + `${plan.frames} frames (surface ${plan.surface}, trails ${plan.trails}, mosh ${plan.mosh}). `
+    + `Playback rendered ${played.delta.renders}, the seek ${seeked.delta.renders}, the control `
+    + `${control.delta.renders}.`);
+
+  const state = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    return {
+      on: k.mosh.enabled,
+      amount: k.mosh.uniforms.mosh.value,
+      refresh: k.mosh.uniforms.moshRefresh.value,
+      fade: k.uniforms.fadeTime.value,
+      wake: k.uniforms.wakeTime.value,
+      trails: k.afterimage.enabled,
+    };
+  })()`);
+  check(state.on && state.amount > 0.1,
+    'the look under this section actually has the mosh pass running',
+    `amount ${state.amount}, pass ${state.on ? 'on' : 'OFF'}`);
+  check(state.fade === 0 && state.wake === 0 && !state.trails,
+    'and it is the only thing in the chain that remembers, so the control arm below is a '
+    + 'statement about the mosh rather than about the two accumulators beside it',
+    `fade ${state.fade}, wake ${state.wake}, trails ${state.trails ? 'ON' : 'off'}`);
+
+  // The claim the whole design rests on: the memory has a ceiling, and it is the period the
+  // package declares. Without it no length of pre-roll would reproduce a frame.
+  const ceiling = Math.ceil(MOSH_REFRESH * 30);
+  check(plan.mosh > 0 && plan.mosh <= ceiling && plan.moshCovered,
+    `the mosh pre-roll is bounded by the refresh it declares, ${ceiling} frames at this period`,
+    `${plan.mosh} frames, ${plan.moshCovered ? 'covered' : 'NOT covered'}`);
+  check(plan.frames === plan.mosh && plan.mosh > plan.surface && plan.mosh > plan.trails,
+    'and it is the mosh that sets the length here, the other two being down',
+    `mosh ${plan.mosh} against surface ${plan.surface} and trails ${plan.trails}`);
+  check(plan.mosh === Math.round((TARGET_SEC - Math.floor(TARGET_SEC / MOSH_REFRESH) * MOSH_REFRESH) * 30),
+    'and the length is the distance back to the last refresh, which is where a decode starts',
+    `${plan.mosh} frames back from ${TARGET_SEC}s`);
+
+  // A target that is a refresh needs no mosh pre-roll at all, which is the same rule read from
+  // the other end: 10s is four periods of 2.5, so the pass draws the frame it was handed.
+  const onBoundary = await page.evaluate(
+    `globalThis.__kinect.timeline.transport().preroll(${Math.floor(TARGET_SEC / MOSH_REFRESH) * MOSH_REFRESH})`);
+  check(onBoundary.mosh === 0,
+    'a target that lands on a refresh asks for no mosh pre-roll, because nothing behind it is read',
+    `${onBoundary.mosh} frames at ${Math.floor(TARGET_SEC / MOSH_REFRESH) * MOSH_REFRESH}s`);
+
+  check(played.delta.renders > seeked.delta.renders * 2,
+    'the two arms did substantially different amounts of work',
+    `${played.delta.renders} renders against ${seeked.delta.renders}`);
+  check(seeked.delta.renders === plan.frames + 1,
+    'the seek rendered the pre-roll and the target and nothing else',
+    `${seeked.delta.renders} of ${plan.frames + 1}`);
+  check(played.camera === seeked.camera && played.camera === control.camera,
+    'the camera is identical across all three arms');
+
+  // **The arm that says the pass reads its own history, and it is a short pre-roll rather than
+  // no pre-roll.** The obvious control - render the target with nothing before it - is not about
+  // the mosh: the surface memory's own state texture is cleared by the same reset and reads
+  // differently on its first frame whatever the fade and wake say, so that arm parts from a
+  // playback on a build whose mosh reads no history at all. Measured: `--mutate mosh-no-history`
+  // left it at max 59/255 across 85% of the frame and the row passed. Twenty frames short of the
+  // refresh, every other accumulator has long since converged and the only thing missing is
+  // that many frames of the smear's own history.
+  const short = await arm({ ...config, kind: 'seek', frames: Math.max(1, plan.mosh - MOSH_SHORT_BY), label: 'moshShort' });
+  const same = await diff('moshPlayed', 'moshSeeked');
+  const apart = await diff('moshPlayed', 'moshControl');
+  const cut = await diff('moshPlayed', 'moshShort');
+  console.log(`\n  playback vs seek         ${show(same)}${same.max === 0 ? '  (byte-identical)' : ''}`);
+  console.log(`  playback vs ${MOSH_SHORT_BY} frames short ${show(cut)}`);
+  console.log(`  playback vs no pre-roll  ${show(apart)}`);
+
+  check(same.max <= SAME_MAX,
+    `a seek lands within ${SAME_MAX}/255 of the playback with the mosh dragging the picture`, show(same));
+  check(short.delta.renders === Math.max(1, plan.mosh - MOSH_SHORT_BY) + 1,
+    'the short arm rendered the frames it was asked for, so it is the history that is missing '
+    + 'rather than the arm', `${short.delta.renders} renders`);
+  check(cut.max >= MOSH_CUT_MIN && cut.pct >= MOSH_CUT_MIN_PCT,
+    `${MOSH_SHORT_BY} frames of pre-roll short of the refresh lands somewhere else, so the pass `
+    + 'is reading what it drew rather than displacing the frame it was handed', show(cut));
+  check(cut.max > same.max * 8 + 8, 'the two verdicts are separated rather than adjacent',
+    `short max ${cut.max} against ${same.max}`);
+  // Kept as a reading rather than as a claim about the mosh: it is every accumulator's absence
+  // at once, and the row above is the one that isolates this pass.
+  check(apart.max >= CONTROL_MIN,
+    'and a seek with no pre-roll at all is further still', show(apart));
 }
 
 
