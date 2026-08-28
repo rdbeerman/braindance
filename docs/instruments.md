@@ -478,7 +478,13 @@ file that changed between the two.** Noticing that the tree is busy only works i
 look; noticing that two measurements of one file disagree is a property of the readings. A
 mutation control makes this worse rather than better, because it writes to the tree and reverts
 it — so it must never be run against files an agent holds, and a run that was is void rather than
-interesting.
+interesting. The rule is about a reading rather than about a file: the instance that produced it
+here was a *directory listing*, counted at six entries while it held thirty-three, and bytes are
+only the commonest shape it takes. **And check that an explanation accounts for the quantity that
+was actually read** — a preserved-timestamp theory was offered for that listing and it explains
+modification times, which nobody had measured, while a count of twenty-seven missing files it
+cannot explain at all; an explanation that survives its own scrutiny because it was never asked
+the right question is more comfortable than being wrong, and therefore harder to catch.
 
 ### A source row that reads the staged tree cannot be falsified by a page mutation
 
