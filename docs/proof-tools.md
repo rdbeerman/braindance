@@ -63,6 +63,12 @@ node tools/effect-conformance-check.mjs --mutate leaks-at-zero # ... a floor und
                                                           #     declared as a function, so it has no field to hold one, and
                                                           #     reshaping it so a uniform rule can reach it is more change
                                                           #     than the rule is worth. Not an oversight
+                                                          #     **Two of syntax-check's own controls anchor on this line**
+                                                          #     - `doc-invokes-an-undeclared-mutation` on the `--mutate`
+                                                          #     name and `doc-lists-a-mutation-under-the-wrong-tool` on the
+                                                          #     whole command - because it is the only `--mutate` invocation
+                                                          #     the census deletion left standing. Move or delete it and
+                                                          #     both stop being able to run, which `anchors/` will say
 node tools/monitor-check.mjs                              # step 9: the monitor's decimation, the take it must not touch, and the picture it shows
 node tools/sensor-view-check.mjs                          # the intrinsics a take was shot with, against a build that assumes them
 node tools/level-check.mjs                                # levelling: the room turns, and the crop, the top-down and the sensor view keep their meaning

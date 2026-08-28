@@ -85,6 +85,11 @@ const MUTATIONS = {
   // One per branch of the mutate/ row, because a branch no control can reach is a branch nobody
   // proved: a name nothing declares, a name declared somewhere else than where it is listed, and
   // the bullet form, which the first two cannot see.
+  //
+  // The first two anchor on `effect-conformance-check`'s `leaks-at-zero` line, which is the only
+  // `--mutate` invocation left on the page. Their previous anchor was deleted with the entry it
+  // sat on and both controls stopped being able to run, so the reason that entry stays is written
+  // beside it in `docs/proof-tools.md` as well as here.
   'doc-invokes-an-undeclared-mutation': {
     file: 'docs/proof-tools.md',
     edits: [['--mutate leaks-at-zero', '--mutate leaks-at-nothing']],
