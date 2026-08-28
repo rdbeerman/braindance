@@ -2712,7 +2712,10 @@ function checkLookBlock(what, block, scope) {
       parked.params[name] = value;
       continue;
     }
-    applied[name] = value;
+    // Held to its spec here rather than where it is written: `params.apply` normalises too, and
+    // by the time it runs `applyProject` has already reset the look and applied every earlier
+    // clip's - so a value refused there leaves the editor holding parts of two documents.
+    applied[name] = params.normalise(name, value);
   }
   return { names, applied, tracks: restored, parked };
 }
@@ -2804,7 +2807,16 @@ function checkProject(project) {
   for (const clip of project.clips) {
     const what = `clip ${clip.id}`;
     const take = clip.take ?? null;
-    if (take !== null) {
+    if (take === null) {
+      // The editor's rule and not the format's: the recorder draws the live stream and its own
+      // save writes `take: null`, so a document refused here is one only the editor cannot hold.
+      if (EDITING) {
+        throw new Error(
+          `${what} names no take: a clip with nothing to draw is not a clip this editor can hold, `
+          + 'and the composite would reach a clip pointed at no footage rather than refuse it',
+        );
+      }
+    } else {
       const shaped = typeof take === 'object' && !Array.isArray(take)
         && typeof take.id === 'string' && VALID_ID.test(take.id)
         && typeof take.hash === 'string' && TAKE_HASH.test(take.hash);
@@ -10092,16 +10104,18 @@ addEventListener('keydown', (event) => {
  * it as a label beside the hash it is actually joined on.
  */
 async function sourcesFor(plan) {
+  // Which clips need footage fetched, and nothing more than that. A clip naming no take needs
+  // none, which is a statement about this walk rather than about the document: whether a document
+  // may hold such a clip is `checkProject`'s, and asking it twice is how it came to be asked in
+  // neither - the comparison here reads null against null and skips the clip it was refusing.
   const changing = plan.clips
     .map((planned, at) => ({ at, planned }))
-    .filter(({ at, planned }) => (planned.take?.hash ?? null) !== (clips[at]?.source?.index?.hash ?? null));
+    .filter(({ at, planned }) => planned.take !== null
+      && planned.take.hash !== (clips[at]?.source?.index?.hash ?? null));
   if (!changing.length) return new Map();
   const { takes = [] } = await (await fetch('/library/takes')).json();
   const opened = new Map();
   for (const { at, planned } of changing) {
-    if (!planned.take) {
-      throw new Error(`clip ${planned.id} names no take, and there is footage open where it goes: a clip with nothing to draw is not a clip this editor can hold`);
-    }
     const match = takes.find((t) => t.hash === planned.take.hash);
     if (!match) {
       throw new Error(
@@ -10279,7 +10293,6 @@ function takeOpenedAs(hash) {
 
 async function openSource(id) {
   const take = openTakes.get(id) ?? await IndexedTake.open(id);
-  openTakes.set(id, take);
   const res = await fetch(`/capture/${encodeURIComponent(id)}/hello`);
   if (!res.ok) {
     throw new Error(
@@ -10289,8 +10302,7 @@ async function openSource(id) {
     );
   }
   const hello = await res.json();
-  // Which generation wrote this, before anything reads a field out of it.
-  take.hello = hello;
+  // Which generation wrote this, before anything is done with the take it describes.
   const wrongFormat = captureFormatRefusal(`take ${id}`, hello.format ?? null);
   if (wrongFormat) throw new Error(wrongFormat);
   // Positive rather than finite, and inside the frame rather than merely a number.
@@ -10303,6 +10315,11 @@ async function openSource(id) {
       + `positive and the centre must lie inside the ${DEPTH_W}x${DEPTH_H} depth frame`,
     );
   }
+  // Both writes after both refusals: `takeOpenedAs` reads a take with a hello as one this page
+  // holds open, so a take cached under a hello that was rejected is one the synchronous restore
+  // adopts on the strength of a door that refused it.
+  take.hello = hello;
+  openTakes.set(id, take);
   return { id, take, hello };
 }
 

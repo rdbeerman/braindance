@@ -640,7 +640,8 @@ node tools/editor-check.mjs --mutate commit-ignores-null-baseline --no-render # 
                                                                        #     interactive with a null baseline. Reddens exactly
                                                                        #     two rows in section 13 - the press being recorded,
                                                                        #     and what it destroyed - so read the rows
-node tools/boot-check.mjs                                 # the post-boot state diff: every control shows the value the registry holds for the selected clip
+node tools/boot-check.mjs                                 # the post-boot state diff: every control shows the value the registry holds for the
+                                                          #     selected clip; and the document door, which adopts a whole document or none
 node tools/boot-check.mjs --mutate reset-before-the-panel-generator # ... the shipped fault put back - the boot write landing
                                                           #     before the panel generator has filled its Maps, which reaches
                                                           #     no control, throws nothing, and leaves a page whose sliders
@@ -654,6 +655,29 @@ node tools/boot-check.mjs --mutate panel-does-not-follow-the-selection # ... the
                                                           #     showing the clip selected before it. Reddens the two
                                                           #     selection rows and leaves the boot diff green, because that
                                                           #     one is over a single clip and cannot see this - read the rows
+node tools/boot-check.mjs --mutate document-door-takes-a-clip-parameter-raw # ... the shipped fault: `checkLookBlock` normalises a
+                                                          #     block's track keys and copies its plain values in raw, so a clip
+                                                          #     value that is not a number is caught by `params.apply` with the
+                                                          #     project's look and every earlier clip already written. Reddens
+                                                          #     exactly one row, measured - the one about what the editor is left
+                                                          #     holding. The refusal row beside it stays green, because the
+                                                          #     document is still refused, just too late to matter
+node tools/boot-check.mjs --mutate document-door-takes-a-clip-with-no-take # ... `checkProject`'s null-take refusal switched off, which
+                                                          #     is the build where that statement lived inside `sourcesFor`'s
+                                                          #     loop over the clips whose footage changed. Reddens **four** rows,
+                                                          #     measured, in the two sections that are about the two shapes: a
+                                                          #     null take landing in a slot with no source, which the loop filters
+                                                          #     out before it can refuse it, and the same document arriving as
+                                                          #     `/edit?project=`, which applies it whole and then dies in
+                                                          #     `paintOpenTake` on `clip.take.id`. The recorder's own row stays
+                                                          #     green: its save writes `take: null` and the refusal is the
+                                                          #     editor's rather than the format's
+node tools/boot-check.mjs --mutate a-refused-take-stays-cached # ... `openSource` as it shipped, caching the take and stamping it
+                                                          #     with its hello before either refusal reads one. Reddens exactly
+                                                          #     one row, measured: the format refusal still fires, and the take
+                                                          #     it refused is still there for the synchronous restore to adopt.
+                                                          #     The two rows above it stay green and have to - they are the
+                                                          #     control saying the refusal happened at all
 node tools/effect-check.mjs                               # installing an effect: revisions, the door, the hotload, park and restore
 node tools/effect-check.mjs --mutate temporaries-are-visible # ... the id filter the store lists directories through, widened, so
                                                           #     a crashed install's `<id>.<seq>.tmp` becomes a package `/effects`
@@ -2578,8 +2602,14 @@ in the table while the code stays put reddens it.
 
 **`boot-check`** is the post-boot state diff the other three documents deferred to, and it
 needs a GPU browser and a free port and nothing else — no capture, no sensor, no server
-already running. It spawns its own on 8391 against a temporary empty captures directory and
-exits 2 naming the port when something already holds it.
+already running. It spawns its own on 8391 against a temporary captures directory and exits 2
+naming the port when something already holds it. The one capture in that directory is
+synthesised by the run itself, out of `make-sample` at twelve frames, which costs under a
+second: the take door cannot be asked to refuse footage without footage to refuse. Its
+projects directory is temporary for the same reason as its captures one and a sharper one —
+the checkout's `projects/` holds the editor's autosave and every other tool's staged
+documents, so a run writing its fixture there hands the next tool a document it did not
+stage.
 
 **Its comparison is registry-versus-control, and the obvious one cannot catch the fault it
 is for.** The audit that asked for this sketched it as "read every registry value back after
@@ -2607,12 +2637,28 @@ against the 81 the registry declares, the difference being `camera`, which is a 
 no control by design. What separates them is the price of asking: `/edit` with no `?take=`
 redirects to `/gallery`, so the editor needs a capture to boot at all, while `/record` boots
 the full panel against a server with no grabber, no sensor and an empty captures directory.
-That is the state a fresh clone is in. Nothing here looks at `/edit`, so a fault reaching only
-the editor's own boot path would pass; the two surfaces share the generator and the reset, so
-there is no such path today and nothing asserting there is not.
+That is the state a fresh clone is in.
+
+**The second claim is the document door, and it is why the tool now stages a capture.** A
+document is adopted whole or not at all, and three shipped faults said otherwise: a clip value
+that is not a number was copied into the plan raw and refused by `params.apply` after the
+project's look and every earlier clip had been written; a clip naming no take was accepted by
+`checkProject`, because the refusal lived inside `sourcesFor`'s loop over the clips whose
+footage *changed* and a null take landing in a slot with no source compares null against null
+and is filtered out of it; and a take refused for its capture format stayed in `openTakes`
+carrying the hello that was rejected, so the next synchronous restore found it already open and
+adopted what the fetching door had refused. Each has a `--mutate` control above, and each
+control reddens only its own rows.
+
+**The refusal for a clip naming no take is the editor's rather than the format's**, which is
+the one place this section could have been made wrong in the other direction. The recorder
+draws the live stream, its own `serialiseProjectBody` writes `take: null`, and the panel
+section above restores exactly such a document — so a door refusing that unconditionally would
+refuse the document the page had just written. The refusal is behind `EDITING`, and the row
+saying the recorder still takes its own document back is the over-refusal guard beside it.
 
 `--mutate reset-before-the-panel-generator` is the control and it is the shipped fault itself,
-restored by moving the boot write above the generator. **It reddens exactly one row of nine**
+restored by moving the boot write above the generator. **It reddens exactly one row of 34**
 and leaves the write-sweep row beside it green, which is the split that matters: the sweep
 writes a value through the registry after boot and asks the control to have followed, and by
 then `panelControls` is filled either way, so the two rows are different questions rather than
