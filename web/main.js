@@ -473,7 +473,14 @@ let MOSH_BOUND = null;
 
 /** Whether the mosh pass is doing anything at a program position, and for how long it remembers. */
 const moshLiveAt = (programSec) => MOSH_MASTERS.some((name) => valueAtProgram(name, programSec) !== 0);
-const moshPeriodAt = (programSec) => (MOSH_BOUND ? valueAtProgram(MOSH_BOUND.name, programSec) : 0);
+// Zero when cycling is disabled: moshRefreshes treats 0 as "refresh every frame", so the preroll
+// walk finds a keyframe immediately and returns 0. The render loop guards with moshCycles, so it
+// does not actually refresh - but the preroll correctly reports no memory to replay.
+const moshPeriodAt = (programSec) => {
+  if (!MOSH_BOUND) return 0;
+  if (!valueAtProgram('datamosh.cycleRefresh', programSec)) return 0;
+  return valueAtProgram(MOSH_BOUND.name, programSec);
+};
 
 // The look terms a draft puts down for the length of its one frame. Three of them are the core's
 // own accumulators and the rest are whatever the packages brought that accumulates, because a
@@ -527,7 +534,7 @@ const EFFECT_PARAM_ORDER = [
   'stock.amount', 'stock.balance', 'stock.split', 'stock.latitude',
   'vignette.amount',
   'datamosh.amount', 'datamosh.reach', 'datamosh.decay', 'datamosh.splay',
-  'datamosh.line', 'datamosh.grain', 'datamosh.refresh',
+  'datamosh.line', 'datamosh.grain', 'datamosh.drift', 'datamosh.speed', 'datamosh.cycleRefresh', 'datamosh.refresh',
 ];
 
 // The list places the shipped set and is never a census of what is installed.
@@ -3286,8 +3293,9 @@ function renderProgramFrame(t) {
     // states the pass cannot be asked about - a cleared history, and a pass that was switched
     // off while the frames it would have remembered went by.
     const moshPeriod = MOSH_BOUND ? mosh.uniforms[MOSH_BOUND.uniform].value : 0;
+    const moshCycles = mosh.uniforms.moshCycleRefresh?.value ?? 1;
     mosh.uniforms.moshIFrame.value = (moshFresh || !moshWasLive
-      || moshRefreshes(lastProgramTime, lastMoshPeriod, t, moshPeriod)) ? 1 : 0;
+      || (moshCycles && moshRefreshes(lastProgramTime, lastMoshPeriod, t, moshPeriod))) ? 1 : 0;
     moshFresh = false;
     moshWasLive = mosh.enabled;
     lastMoshPeriod = moshPeriod;
