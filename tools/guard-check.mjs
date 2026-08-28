@@ -31,6 +31,10 @@ const MUTATIONS = {
       '      if (!r.embeddable && !sameOriginBrowser(req)) {',
       '      if (!r.embeddable && false) {',
     ]],
+    fails: 'the reads a cross-origin `<img>` can start, which `originAllowed` cannot see: an '
+      + '`<img>` sends no Origin at all, so the header that separates it from the capture '
+      + 'node is `sec-fetch-site`. Reddens the cross-origin row and leaves the same-origin, '
+      + 'absent and navigation rows green',
   },
 
   'upgrade-skips-origin': { file: 'server/index.js', edits: [[
@@ -318,6 +322,7 @@ try {
 
 console.log(`\n[guard] ${checked} assertions, ${failed} failed${unproven ? `, ${unproven} unproven` : ''}`);
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[guard] it should redden: ${MUTATIONS[MUTATE].fails}`);
   // Exit code alone cannot tell "the mutation was caught" from "the tool crashed before asserting".
   if (failed === 0) { console.log('[guard] NOT CAUGHT - the check passed a server it should have rejected'); process.exit(1); }
   console.log(`[guard] caught, as required (${failed} assertion${failed === 1 ? '' : 's'} fired)`);

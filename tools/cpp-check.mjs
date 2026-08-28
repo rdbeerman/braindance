@@ -24,6 +24,8 @@ const MUTATIONS = {
   'grabber-type-error': {
     file: 'native/grabber.cpp',
     edits: [['  HdEncoder hdEncoder(jpegQuality);', '  HdEncoder hdEncoder("high");']],
+    fails: 'a wrong argument type, which is the row that says this is a semantic pass and not a '
+      + 'tokeniser',
   },
 
   'opencl-branch-broken': {
@@ -41,6 +43,9 @@ const MUTATIONS = {
       '    pipeline = new libfreenect2::OpenGLPacketPipeline();',
       '    pipeline = new libfreenect2::OpenGLPacketPipelineThatDoesNotExist();',
     ]],
+    fails: 'a break inside the Pi\'s `#ifdef` arm, which is the control the matrix exists for: a '
+      + 'gate parsing one configuration reports this green. Reddens 2 of the 4 grabber rows, '
+      + 'not all of them - read the rows',
   },
 
   'harness-syntax-error': {
@@ -192,4 +197,5 @@ console.log('\nnative/harness/reg-runner.cpp, which branches on neither macro');
 console.log(`\n${asserted} assertions, ${failed} failed`);
 console.log('parse and typecheck only - nothing was linked and nothing ran;'
   + ' see CLAUDE.md "Proof tools" for what actually exercises the grabber');
+if (MUTATE && MUTATIONS[MUTATE]?.fails) console.log(`it should redden: ${MUTATIONS[MUTATE].fails}`);
 process.exit(failed ? 1 : 0);

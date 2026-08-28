@@ -72,6 +72,11 @@ const MUTATIONS = {
         '      params.set(name, Object.hasOwn(was, name) ? was[name] : PARAMS[name].def);\n    }\n  });\n  buildPanel();\n',
       ],
     ],
+    fails: 'the shipped fault put back - the boot write landing before the panel generator has '
+      + 'filled its Maps, which reaches no control, throws nothing, and leaves a page whose '
+      + 'sliders are lying. Reddens exactly one row of nine and leaves the write-sweep row '
+      + 'beside it green, because that one is about the live path and the fault is in the '
+      + 'boot write - read the rows',
   },
   // The pre-fix build exactly: the panel was written by value writes alone, so selecting a clip
   // left every clip-scope control showing the clip that had been selected before it. Must redden
@@ -82,6 +87,10 @@ const MUTATIONS = {
       '  paintClipPanel();\n  paintGizmo();\n  // The retime binding',
       '  paintGizmo();\n  // The retime binding',
     ]],
+    fails: 'the pre-fix build: the panel written by value writes alone, so selecting a clip '
+      + 'leaves every clip-scope control showing the clip selected before it. Reddens the two '
+      + 'selection rows and leaves the boot diff green, because that one is over a single '
+      + 'clip and cannot see this - read the rows',
   },
   // Package rows exist because the registry owns them, but none belongs in a fresh sidebar. Must
   // redden exactly the package-row visibility assertion below.
@@ -91,6 +100,8 @@ const MUTATIONS = {
       'function effectPresent(id) {\n  return rackedEffects.has(id) || effectTouched(id);\n}',
       'function effectPresent(id) {\n  return true;\n}',
     ]],
+    fails: 'every installed package row shown on a fresh recorder. Reddens exactly the '
+      + 'package-row visibility assertion',
   },
   // The pre-fix build exactly: the document door normalised a block's track keys and copied its
   // plain values in raw, so a clip value that is not a number was caught by `params.apply` with
@@ -103,6 +114,12 @@ const MUTATIONS = {
       '    applied[name] = params.normalise(name, value);\n',
       '    applied[name] = value;\n',
     ]],
+    fails: 'the shipped fault: `checkLookBlock` normalises a block\'s track keys and copies its '
+      + 'plain values in raw, so a clip value that is not a number is caught by '
+      + '`params.apply` with the project\'s look and every earlier clip already written. '
+      + 'Reddens exactly one row, measured - the one about what the editor is left holding. '
+      + 'The refusal row beside it stays green, because the document is still refused, just '
+      + 'too late to matter',
   },
   // The falsification control for the section above it: the door's normalise hoisted above the
   // parked `continue`, so a value belonging to an effect this build has not got is held to a spec
@@ -115,6 +132,13 @@ const MUTATIONS = {
       '    if (parkedNames.has(name)) {\n      parked.params[name] = value;\n      continue;\n    }\n',
       '    const held = params.normalise(name, value);\n    if (parkedNames.has(name)) {\n      parked.params[name] = held;\n      continue;\n    }\n',
     ]],
+    fails: 'the door\'s normalise hoisted above the parked `continue`, so a value belonging to '
+      + 'an effect this build has not got is held to a spec that does not exist here. Reddens '
+      + '**three** rows, measured, and the refusal it produces is `unknown parameter '
+      + '"nosuch.amount"` - `specOf` throws rather than answering nothing, so the document is '
+      + 'refused outright and the two rows about what the pool came back holding redden with '
+      + 'it. The control row above them stays green: a name the registry does answer for is '
+      + 'refused either way',
   },
   // And the pre-fix build's other half: a clip naming no take was accepted by `checkProject`,
   // and the refusal sat inside the loop over the clips whose footage changed - which a null take
@@ -129,6 +153,14 @@ const MUTATIONS = {
       '      if (EDITING) {\n        throw new Error(\n',
       '      if (false) {\n        throw new Error(\n',
     ]],
+    fails: '`checkProject`\'s null-take refusal switched off, which is the build where that '
+      + 'statement lived inside `sourcesFor`\'s loop over the clips whose footage changed. '
+      + 'Reddens **four** rows, measured, in the two sections that are about the two shapes: '
+      + 'a null take landing in a slot with no source, which the loop filters out before it '
+      + 'can refuse it, and the same document arriving as `/edit?project=`, which applies it '
+      + 'whole and then dies in `paintOpenTake` on `clip.take.id`. The recorder\'s own row '
+      + 'stays green: its save writes `take: null` and the refusal is the editor\'s rather '
+      + 'than the format\'s',
   },
   // Undo history written back into the file, which is the half of the shipped fault that puts the
   // poison there. Must redden exactly one row, measured - the one that reads the stored bytes.
@@ -146,6 +178,11 @@ const MUTATIONS = {
       '    const workingBody = { ...serialiseProjectBody(),\n'
         + '      history: { stack: [...history.stack], baseline: history.baseline } };\n',
     ]],
+    fails: 'the undo stack written back into the project file, which is the half of the shipped '
+      + 'fault that puts the poison there. Reddens exactly one row, measured: the one that '
+      + 'reads the stored bytes back off the server. The two poisoned sections stay green - '
+      + 'they load documents this tool staged by hand, and what the page saves does not '
+      + 'change those files',
   },
   // The other half, and there were two restore sites rather than one: `applyProject`'s tail read
   // `project.history` and `loadProjectNamed` read `doc.body.history` again straight afterwards.
@@ -162,6 +199,12 @@ const MUTATIONS = {
         + '    history.stack = [...project.history.stack];\n'
         + '    history.baseline = project.history.baseline ?? history.snapshot();\n  }\n}\n',
     ]],
+    fails: 'the same read from `applyProject`\'s tail, which is where the second copy of it '
+      + 'lived. Reddens exactly **one** row, measured, and only the one driving the '
+      + 'synchronous door - through the loader this reader is invisible, because the loader '
+      + 'starts a stack of its own after `applyProject` returns and overwrites whatever this '
+      + 'armed. Aimed at the loader alone it was NOT CAUGHT, which is what the '
+      + '`restoreProject` probe beside those two navigations exists to close',
   },
   // The site that was actually load-bearing. Must redden four rows, measured: the depth row and
   // the press row of each poisoned document. The synchronous-door row beside them stays green,
@@ -174,6 +217,8 @@ const MUTATIONS = {
         + '    history.baseline = doc.body.history.baseline;\n  } else {\n    history.begin();\n  }\n'
         + '  // A loaded project gets a default deliverable',
     ]],
+    fails: '`loadProjectNamed` reading the saved stack back. Reddens **four** rows, measured: '
+      + 'the depth row and the press row of each poisoned document',
   },
   // The selection guard as it shipped, testing that the object is still in the array. Must redden
   // the two rows about where the selection landed and leave the three fixture rows above them
@@ -185,6 +230,11 @@ const MUTATIONS = {
       '  clipRow = wasSelected === null ? null : (clips.find((clip) => clip.id === wasSelected) ?? null);\n',
       '  if (!clips.includes(clipRow)) clipRow = null;\n',
     ]],
+    fails: 'the selection guard back to testing that the clip object is still in the array. '
+      + 'Reddens **two** rows, measured: which clip the selection answers to after the undo, '
+      + 'and which clip\'s block a write then lands in. The three fixture rows above stay '
+      + 'green, and that is the shape of the bug - the undo works, the highlight does not '
+      + 'move, and only the label under it changes',
   },
   // The take door as it shipped: the take was cached and stamped with its hello before either
   // refusal read it, so a take refused for its capture format stayed in `openTakes` reading as
@@ -207,6 +257,11 @@ const MUTATIONS = {
         '  return { id, take, hello };\n',
       ],
     ],
+    fails: '`openSource` as it shipped, caching the take and stamping it with its hello before '
+      + 'either refusal reads one. Reddens exactly one row, measured: the format refusal '
+      + 'still fires, and the take it refused is still there for the synchronous restore to '
+      + 'adopt. The two rows above it stay green and have to - they are the control saying '
+      + 'the refusal happened at all',
   },
 };
 
@@ -1167,6 +1222,7 @@ main()
     cleanup();
     console.log(`\n[boot] ${checked} assertions, ${failed} failed`);
     if (MUTATE) {
+    if (MUTATIONS[MUTATE]?.fails) console.log(`[boot] it should redden: ${MUTATIONS[MUTATE].fails}`);
       // Exit code alone cannot tell a caught mutation from a tool that fell over before it asserted
       // anything; the verdict is the sentence and the code is 1 either way.
       if (failed === 0) {

@@ -424,6 +424,32 @@ The general shape: **whenever a suite has a standing failure, its own catch verd
 positive generator, and a baseline run is the only thing that separates the two populations.**
 Run the tool once unmutated first and note which rows are red, then read every mutation run
 against that list rather than against zero.
+### A generator reports what it meant to do, and only an oracle reports what it did
+
+Moving the invocation list's prose into the tools' `MUTATIONS` tables was three scripted passes,
+and all three reported success while changing nothing or changing the wrong thing. The first
+located an entry's end by counting `{` and `}`, which reads the braces inside an edit's source
+strings as structure — the lexer trap this file already carries four rounds of. The second
+dropped the comma after `]]` when it split an inline literal, so six tables stopped importing
+while every file still parsed and still looked plausible to a reader. The third built its
+replacement against a body cut one character short of the newline it matched on, so
+`String.replace` found nothing, returned the original, and the script counted twenty successes.
+
+**A migration is believed from the artefact and never from the run log.** What caught all three
+was re-importing every table from both trees and requiring them equal but for the added field,
+and then reading one migrated value back out of the imported table — not any count the scripts
+printed about themselves.
+
+**And the fourth instance was in the oracle**, which is the half worth keeping. The check that
+says the moved prose is the page's prose is a containment test, and its first version asked
+whether the page contained the text in front of a field that already had one. For a field nobody
+had touched that head is the empty string, `includes('')` is true of every string, and
+thirty-four fields passed a branch that could not fail. **An oracle with a branch that cannot
+fail reports nothing while looking like it reports everything** — rule 1 arriving inside the
+instrument written to make a deletion provable. Ask of an oracle what you ask of the thing under
+test: what would a broken version have to do to still pass. What found this one was counting the
+populations separately — moved, merged, untouched — rather than reading the predicate, because
+three numbers that have to sum to the total cannot all be silently empty.
 
 ### A source row that reads the staged tree cannot be falsified by a page mutation
 

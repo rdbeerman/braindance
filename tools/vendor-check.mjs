@@ -198,4 +198,5 @@ if (failed) { console.log('FAIL'); process.exit(1); }
 // "Some claims were not tested here" and "a claim failed" are different answers; 1 is the second.
 if (unproven) { console.log('PASS on the source, with the artifact untested here'); process.exit(2); }
 console.log('PASS');
+if (mutation && MUTATIONS[mutation]?.fails) console.log(`[vendor] it should redden: ${MUTATIONS[mutation].fails}`);
 process.exit(0);

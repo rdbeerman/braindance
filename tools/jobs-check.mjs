@@ -43,7 +43,13 @@ const MUTATIONS = {
     '    if (!Array.isArray(captures) || captures.length === 0\n'
     + "      || !captures.every((h) => typeof h === 'string' && CONTENT_HASH.test(h))) {",
     '    if (false) {',
-  ]] },
+  ]],
+    fails: 'the caller\'s own capture list never held to the content-hash rule, so a take id '
+      + 'reaches the queue. Queue semantics, so `--no-render`. Reddens **one** row, measured: '
+      + 'the take-id one. The needle is the *sentence* and not the three digits, because the '
+      + 'derivation beside it refuses the same document for a neighbouring reason - a row '
+      + 'asking only "was it a 400" passes this mutation',
+  },
   'envelope-takes-the-callers-captures': { file: 'server/jobs.js', edits: [
     [
       '    if (captures.length !== cut.length || captures.some((hash, at) => hash !== cut[at])) {',
@@ -53,19 +59,52 @@ const MUTATIONS = {
       '        captures: [...cut],',
       '        captures: [...captures],',
     ],
-  ] },
+  ],
+    fails: 'the footage a job renders, taken from the caller\'s list instead of derived from the '
+      + 'clips - a job that can lie about what it is cut on, which is what `job.capture` was '
+      + 'before it became a list. Queue semantics, so `--no-render`. Reddens **two** rows, '
+      + 'measured: the two disagreement rows, which come back 200. The three positive rows '
+      + 'stay green, because a caller whose list agrees with its document is taken on both '
+      + 'builds - the two are not one control',
+  },
   'worker-reads-any-job-version': { file: 'tools/render-worker.mjs', edits: [[
     '      if (job.version !== JOB_VERSION) {',
     '      if (false) {',
-  ]] },
+  ]],
+    fails: 'the worker\'s gate on the job envelope\'s own version. It needs the render block, '
+      + 'and its fixture is a planted version 1 record - one capture as a string where this '
+      + 'build reads a list. Reddens **one** row, measured: the *reason*. The state is '
+      + '`failed` on both builds, because a mutated worker reaches the missing field a step '
+      + 'later and dies on it - which is the whole argument for the gate, since that sentence '
+      + 'is about a field rather than about a job',
+  },
   'worker-preflights-only-the-first-capture': { file: 'tools/render-worker.mjs', edits: [[
     '    const missing = [...new Set(captures)].filter((hash) => !byHash.has(hash));',
     '    const missing = [captures[0]].filter((hash) => !byHash.has(hash));',
-  ]] },
+  ]],
+    fails: 'the worker asking its library about the first hash a job names rather than every one '
+      + 'of them. It needs the render block. Reddens **three** rows, measured, across two '
+      + 'arms. Both builds fail both jobs, so every one of the three is about *what was said* '
+      + 'and what it cost to say it. The job whose second clip is on footage this machine has '
+      + 'not got now fails from inside the page - `clip c2 was cut on ... and no take on this '
+      + '**machine** hashes it` where the worker\'s own sentence says **worker**, one '
+      + 'condition wearing two sentences. The partial arm loses more: `sourcesFor` throws on '
+      + 'the *first* clip it cannot open, so a job naming three takes with two of them absent '
+      + 'comes back naming one, with no count of how much of its footage is here - and a '
+      + 'browser was launched to say it. The read-failure row beside them stays green, '
+      + 'because it is still not a read that failed',
+  },
   'attestation-passes-on-a-mismatch': { file: 'tools/render-worker.mjs', edits: [[
     '      if (opened.length !== job.captures.length || opened.some((h, at) => h !== job.captures[at])) {',
     '      if (false) {',
-  ]] },
+  ]],
+    fails: 'the worker\'s comparison of what the page opened against what the job named. It '
+      + 'needs the render block, and its fixture is a job the front door cannot make: the '
+      + 'queue derives the list off the clips, so a record whose list disagrees with its own '
+      + 'document is planted by hand. Reddens **two** rows, measured, and the second is the '
+      + 'one that matters - the job comes back `done` with a *file written* under it, which '
+      + 'is a video of footage nobody asked for and nothing in it saying so',
+  },
   'finish-accepts-any-state': { file: 'server/jobs.js', edits: [[
     "      if (isTerminal(job.state)) {\n        throw new Error(`job ${id} is already ${job.state}, so this report is from a worker that lost a race`);\n      }\n      if (job.state !== 'running') {",
     '      if (false) {',
@@ -112,7 +151,14 @@ const MUTATIONS = {
   'worker-door-waved-open': { file: 'tools/render-worker.mjs', edits: [[
     "    return (job.requires ?? []).filter((e) => !installed.has(e.id) && !allowed.has(e.id));",
     '    return [];',
-  ]] },
+  ]],
+    fails: 'the worker\'s door on an effect it has not got. It needs a render, like '
+      + '`heartbeat-stops-on-first-error`, and it reddens **one** row: the *reason*. The '
+      + 'state row beside it stays green, because `exportClip` refuses the same clip from the '
+      + 'other end and the job comes back failed either way. That is the split stated as a '
+      + 'measurement - the two gates agree about whether the render happens and differ in '
+      + 'what they say and in what it cost to say it',
+  },
   'envelope-takes-the-callers-requires': { file: 'server/jobs.js', edits: [
     [
       "codec = 'h264', suppressEffects = [] }) {",
@@ -122,7 +168,11 @@ const MUTATIONS = {
       '    const requires = used.map((id) => ({ ...carried.find((e) => e?.id === id) }));',
       '    const requires = asked ?? used.map((id) => ({ ...carried.find((e) => e?.id === id) }));',
     ],
-  ] },
+  ],
+    fails: 'the effects a job needs, taken from a field beside the document instead of derived '
+      + 'from it - a job that can lie about what it needs. Queue semantics, so `--no-render`. '
+      + 'One row',
+  },
   'envelope-trusts-the-documents-requires': { file: 'server/jobs.js', edits: [
     [
       '    if (unlisted.length || unclaimed.length) {',
@@ -132,11 +182,23 @@ const MUTATIONS = {
       '    const requires = used.map((id) => ({ ...carried.find((e) => e?.id === id) }));',
       '    const requires = Array.isArray(project.requires) ? project.requires.map((e) => ({ ...e })) : [];',
     ],
-  ] },
+  ],
+    fails: 'and the same lie one field in, which is the shape this door actually shipped: '
+      + '`project.requires` copied whole, and the caller hands over the whole body. Reddens '
+      + 'the two document-disagreement rows and leaves the row above\'s and the carried-whole '
+      + 'row green - the two are not one control',
+  },
   'envelope-takes-a-repeated-requires-id': { file: 'server/jobs.js', edits: [[
     '    if (duplicated.length) {',
     '    if (false) {',
-  ]] },
+  ]],
+    fails: 'one id claimed twice in a document\'s requires list, which the two disagreement '
+      + 'rules beside it read as claimed once: one asks membership and the other asks a set, '
+      + 'and the envelope then resolves each used id with `find`, keeping the first entry and '
+      + 'dropping the rest. A document claiming two versions of one effect was recorded as '
+      + 'whichever came first and refused late, at the loader. Queue semantics, so '
+      + '`--no-render`. One row',
+  },
   'queue-takes-any-requires-shape': { file: 'server/jobs.js', edits: [
     [
       '    if (project.requires !== undefined) {\n'
@@ -153,7 +215,16 @@ const MUTATIONS = {
       '    const carried = project.requires ?? [];',
       '    const carried = Array.isArray(project.requires) ? project.requires : [];',
     ],
-  ] },
+  ],
+    fails: 'the entries\' own shape, read but never held to one, which is how this door shipped: '
+      + 'the list was taken if it happened to be an array and dropped otherwise, and no entry '
+      + 'in it was ever asked what it was. The comparisons beside it are about which *ids* a '
+      + 'list claims and an unreadable entry claims none, so `[{}]`, an entry with no '
+      + 'version, an id that could never name a package and a stray key all agreed with a '
+      + 'document that names nothing. Queue semantics, so `--no-render`. Reddens **seven** '
+      + 'rows - one per shape, measured - and leaves the twin beside them green, because a '
+      + 'well-formed entry is taken on both builds',
+  },
   'preflight-snapshot-is-taken-once': { file: 'tools/render-worker.mjs', edits: [[
     "  const readInstalledEffects = () => readStore(\n    '/effects',",
     '  let snapshotOnce = null;\n'
@@ -162,10 +233,31 @@ const MUTATIONS = {
     + '    return snapshotOnce;\n'
     + '  };\n'
     + "  const readEffectsNow = () => readStore(\n    '/effects',",
-  ]] },
+  ]],
+    fails: 'the worker\'s `/effects` read memoised, which is how it shipped: one fetch before '
+      + 'the first claim answering for every job the worker went on to take, so an install or '
+      + 'a retune landing mid-run was invisible for the rest of it. It needs the render '
+      + 'block, because the arm is two jobs one worker takes in sequence with the store '
+      + 'forked between them - neither of them renders, since both name a capture no take '
+      + 'here hashes and so fail one step past the line being read. Reddens **one** row, '
+      + 'measured: the *second* job\'s version. The first job\'s is the control and stays '
+      + 'green, because a worker that read the store once is right about the first job by '
+      + 'construction',
+  },
   'preflight-asks-once': { file: 'tools/render-worker.mjs', edits: [[
     '  const STORE_READ_TRIES = 4;', '  const STORE_READ_TRIES = 1;',
-  ]] },
+  ]],
+    fails: 'the retry budget cut to one attempt, which is how it shipped. One budget covers both '
+      + 'of the worker\'s store readings - the installed effects and the library\'s takes - '
+      + 'since a server that cannot be reached is one condition however many routes a job '
+      + 'needs from it. The read runs after the claim and before the first heartbeat, so one '
+      + 'connection reset there failed a claimed job through `/finish` into a terminal state '
+      + '- and a worker and its server are two processes with a restart, a proxy or a moment '
+      + 'of `EHOSTUNREACH` between them. Reddens **three** rows, measured: the blip arm\'s '
+      + 'take-resolution row and its skew line, because the job now comes back naming a read '
+      + 'instead of getting past the preflight, and the outage arm\'s row asserting the '
+      + 'worker asked more than once',
+  },
   'preflight-reads-a-failure-as-an-empty-store': { file: 'tools/render-worker.mjs', edits: [
     [
       '        const res = await fetch(`${URL_}${path}`, { signal: AbortSignal.timeout(5000) });\n'
@@ -190,7 +282,21 @@ const MUTATIONS = {
       + '        versions: new Map(listing.map((e) => [e.id, e.version])),\n'
       + '      };',
     ],
-  ] },
+  ],
+    fails: 'the status check, the shape check and the entry check pulled off that read, leaving '
+      + '`?? []` where they were, which is how it shipped. `.json()` parses an error body '
+      + 'perfectly well and a missing `effects` key read as an empty listing, so a 500 - or a '
+      + '200 from a proxy reporting its own failure, which no status check can see - came '
+      + 'back as the sentence about a worker that has no `rain`, from a machine that has '
+      + 'rain. Reddens **six** rows, measured, across both arms; the pair that discriminates '
+      + 'is *which sentence* each job came back under, because the state is `failed` on both '
+      + 'builds. **Two fixtures and two proxy policies**: a 500 served once is the blip a '
+      + 'retry clears, a 200 carrying an error body every time is the outage a status check '
+      + 'cannot see. Both answer only *referer-less* `GET /effects` - the worker\'s page '
+      + 'polls the same address through the same proxy, so a plant that could not tell them '
+      + 'apart would be spent on a tick of that poll as readily as on the read it was staged '
+      + 'for',
+  },
   'heartbeat-stops-on-first-error': { file: 'tools/render-worker.mjs', edits: [[
     '      const beatOnce = () => { heartbeat().catch((err) => missedBeat(err.message)); };',
     '      const beatOnce = () => { heartbeat().catch((err) => { stopBeating(); console.error(`[worker] ${job.id} heartbeat: ${err.message}`); }); };',
@@ -1338,6 +1444,7 @@ if (crashed) {
   process.exit(2);
 }
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[jobs] it should redden: ${MUTATIONS[MUTATE].fails}`);
   console.log('[jobs] NOT CAUGHT - the check passed a queue it should have rejected');
   process.exit(1);
 }

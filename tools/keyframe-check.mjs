@@ -55,13 +55,21 @@ const MUTATIONS = {
   'rate-anchor-skips-clip-start': { file: 'web/main.js', edits: [[
     '    source: sourceSecOfProgram(timeline.programSec),',
     '    source: retime.sourceSecAt(timeline.programSec),',
-  ]] },
+  ]],
+    fails: 'the speed gesture anchoring on the source second read out of a clip-local curve with '
+      + 'a project second. Reddens 1 in 6h: on a clip starting at 10s the anchor is ten '
+      + 'seconds of source too late, so the playhead lands at 16s where it should land at 11s',
+  },
   // And the landing runs back the same way, so the playhead is put at a clip second read as a
   // project one and leaves the clip being edited.
   'rate-landing-skips-clip-start': { file: 'web/main.js', edits: [[
     '  return Math.max(0, Math.min(programSecOfSource(rateGesture.source), timeline.duration));',
     '  return Math.max(0, Math.min(retime.programSecAt(rateGesture.source), timeline.duration));',
-  ]] },
+  ]],
+    fails: 'and the same conversion run back the other way, so the landing is a clip second read '
+      + 'as a project one. Reddens 2 in 6h, and the second is the shape of the bug: the '
+      + 'playhead ends up at 1s, before the head of the clip being edited',
+  },
   // Ease handles stop bending the timing, so every scalar segment is a straight lerp.
   'ease-ignored': { file: 'web/curve.js', edits: [[
     `function easeAt(a, b, x) {
@@ -97,7 +105,12 @@ const MUTATIONS = {
   'pose-ignores-ease': { file: 'web/main.js', edits: [[
     '  const u = easeAt(a.easeOut, b.easeIn, (t - a.t) / span);',
     '  const u = (t - a.t) / span;',
-  ]] },
+  ]],
+    fails: 'the camera\'s handles, which shape when it arrives and never where it goes. '
+      + 'Separable from `pose-linear` on purpose and the counts are how you tell: 4 rows here '
+      + 'against that one\'s 6, and every route row stays green, because a camera ignoring '
+      + 'its handles still travels the same curve at the wrong times',
+  },
   // The pre-roll reads the slope at the target instead of asking how far back the curve
   // covers the span, so a hold answers "no frames needed".
   'preroll-slope-at-target': { file: 'web/main.js', edits: [[
@@ -123,14 +136,30 @@ const MUTATIONS = {
   'clip-keys-on-the-program-clock': { file: 'web/main.js', edits: [[
     "const trackEpoch = (name, clip) => (specOf(name).scope === 'clip' && clip ? clip.start : 0);",
     'const trackEpoch = () => 0;',
-  ]] },
+  ]],
+    fails: 'everything a clip owns read and written at program time rather than on the clip\'s '
+      + 'own clock, which is the whole of what clip-local comes to. Reddens 9: two rows of 6f '
+      + 'and seven of 6g - the placement, the keyed look either side of a real drag, the lane '
+      + 'its diamonds draw in, and the key a hand plants from the panel. The lane row reads '
+      + '10.63% off, which is where the edit\'s clock puts those two keys exactly. 6e stays '
+      + 'green because the clip it keys sits at the head of the edit, where an in-point of '
+      + 'zero makes the two clocks the same number. The equality rows cannot catch it - both '
+      + 'arms read past the last key and agree - which is why the rows that discriminate are '
+      + 'written out separately',
+  },
   // The boundary from the other side: every track on its clip's clock, scope unasked. Evaluation
   // is unmoved, because the project's tracks are written at a hard zero rather than through here -
   // what breaks is `keyPlayhead`, which stamps a project key at the selected clip's in-point.
   'every-key-on-the-clip-clock': { file: 'web/main.js', edits: [[
     "const trackEpoch = (name, clip) => (specOf(name).scope === 'clip' && clip ? clip.start : 0);",
     'const trackEpoch = (name, clip) => (clip ? clip.start : 0);',
-  ]] },
+  ]],
+    fails: 'the same boundary from the other side: every track on its clip\'s clock, scope '
+      + 'unasked. Reddens exactly 1, in 6g: the project key stamped at the selected clip\'s '
+      + 'in-point. Evaluation is untouched, because the project\'s tracks are written at a '
+      + 'hard zero rather than through `trackEpoch`, so the panel\'s own write is the only '
+      + 'arm in the suite that can see it',
+  },
   // The rotation between two keys lerped and normalised rather than slerped. It reaches every
   // rotation this build interpolates, because a placement and a camera pose share `poseAt` -
   // which is the claim 6f's quarter-turn row is about.
@@ -138,7 +167,12 @@ const MUTATIONS = {
     '  slerpA.slerp(slerpB, u);',
     '  slerpA.set(slerpA.x + (slerpB.x - slerpA.x) * u, slerpA.y + (slerpB.y - slerpA.y) * u,\n'
     + '    slerpA.z + (slerpB.z - slerpA.z) * u, slerpA.w + (slerpB.w - slerpA.w) * u).normalize();',
-  ]] },
+  ]],
+    fails: 'the rotation between two keys lerped and normalised rather than slerped. Reddens '
+      + 'three rows measured: the two camera-pose arms and 6f\'s quarter-turn, which reads '
+      + '27.7958 against the 30 a slerp gives - a placement and a camera pose share `poseAt`, '
+      + 'which is what that row says',
+  },
   'evaluator-repaints': { file: 'web/main.js', edits: [[
     `  withoutRepaint(() => {
     // Each clip's own look through its own tables, and then the project's once. Every clip and
@@ -3001,4 +3035,5 @@ if (SHOTS) {
 
 console.log(`\n[keyframe] ${failures ? `FAIL (${failures})` : 'PASS'}`);
 await browser.close();
+if (MUTATE && MUTATIONS[MUTATE]?.fails) console.log(`[keyframe] it should redden: ${MUTATIONS[MUTATE].fails}`);
 process.exit(failures ? 1 : 0);

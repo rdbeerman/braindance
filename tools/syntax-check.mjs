@@ -59,16 +59,22 @@ const MUTATIONS = {
       "  'pointsize-absolute': { file: 'effects-builtin/glyph/size.vert.glsl', edits: [[",
       "  'pointsize-absolute': { file: 'web/cloud-shader.js', edits: [[",
     ]],
+    fails: 'and a shader anchor that matches its file exactly once while sitting in a slot\'s '
+      + 'fallback, which is a second copy of the shipped text that nothing compiles',
   },
 
   'anchor-duplicated-into-a-second-chunk': {
     file: 'effects-builtin/glitch/tear.vert.glsl',
     edits: [['  vGlitch = 0.0;', '  vGlitch = 0.0;\n  if (lattice > 0.0) {']],
+    fails: 'and the other half of the same row: one anchor over two sites in the assembled text, '
+      + 'where the edit reaches one and the count reads whole',
   },
 
   'anchor-duplicated-into-a-second-program': {
     file: 'effects-builtin/thermal/heat.frag.glsl',
     edits: [['  if (thermal > 0.0) {', '  if (thermal > 0.0) {\n      if (streak > 0.0) {']],
+    fails: 'and the same duplicate placed in the *other* program, which is the arm that says the '
+      + 'count sums over every assembled string rather than asking each one on its own',
   },
 
   'citation-outside-the-prose': {
@@ -82,6 +88,8 @@ const MUTATIONS = {
   'doc-invokes-an-undeclared-mutation': {
     file: 'docs/proof-tools.md',
     edits: [['--mutate crop-still-draws-characters', '--mutate crop-still-draws-nothing']],
+    fails: 'and a `--mutate` this prose offers that no tool\'s table declares, which is a run '
+      + 'nobody can make listed as one anybody can',
   },
 
   'doc-lists-a-mutation-under-the-wrong-tool': {
@@ -90,16 +98,22 @@ const MUTATIONS = {
       'node tools/registry-check.mjs --mutate crop-still-draws-characters',
       'node tools/editor-check.mjs --mutate crop-still-draws-characters',
     ]],
+    fails: 'and one listed under a tool that does not declare it, which the row above cannot see '
+      + 'because the name resolves somewhere',
   },
 
   'doc-bullets-an-undeclared-mutation': {
     file: 'docs/proof-tools.md',
     edits: [['- **`reveal-ignores-tracks`**', '- **`reveal-ignores-nothing`**']],
+    fails: 'and the other form the reference offers a control in, a bullet naming one nothing '
+      + 'declares',
   },
 
   'doc-line-ends-in-whitespace': {
     file: 'docs/proof-tools.md',
     edits: [['#     "and on no other clip"', '#     "and on no other clip" ']],
+    fails: 'and a prose line ending in a space, which is invisible on the page and invisible to '
+      + 'a clean `git diff --check`',
   },
 };
 
@@ -890,4 +904,5 @@ console.log(`\n${total} JavaScript files, ${failed} failed`);
 // row imports the two spines and calls `assembleShaders`. Everything else is `node --check`.
 
 console.log('syntax only - no proof tool ran here; see CLAUDE.md "Proof tools" for the suite and what each of them needs');
+if (mutation && MUTATIONS[mutation]?.fails) console.log(`it should redden: ${MUTATIONS[mutation].fails}`);
 process.exit(failed ? 1 : 0);

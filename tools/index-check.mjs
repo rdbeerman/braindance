@@ -51,7 +51,16 @@ const MUTATIONS = {
     + '    }\n'
     + '    return buf;',
     '    return (await readFile(this.path)).subarray(position, position + bytes);',
-  ]] },
+  ]],
+    fails: '`Capture.readAt` reading the file whole and slicing, which is the hazard '
+      + '`server/capture.js` opens by naming. Implies --stage, and only the *server\'s* copy '
+      + 'is edited - this tool\'s own imports stay unmutated, so the oracle every row '
+      + 'compares against cannot move with the thing under test. Reddens **four** rows, '
+      + 'measured: every frame at every offset, because a whole-file read of a 2.5 GB take '
+      + 'fails wherever you aim it. Then the run ends early in the victim section, where the '
+      + 'same read meets a deleted file - `caught, and the count is a floor`, which is a '
+      + 'different animal from a control that fires nothing before it dies',
+  },
   // The same hazard as a regression rather than a rewrite: an offset that wrapped at 32 bits.
   // It serves the frame at `offset % 2**31` with a 200, so the row can only redden through its own
   // byte comparison - and every offset below the mark is its own answer, which leaves the three
@@ -59,7 +68,15 @@ const MUTATIONS = {
   'frame-offsets-truncated-to-32-bits': { file: 'server/capture.js', edits: [[
     '      const { bytesRead } = await this.handle.read(buf, got, bytes - got, position + got);',
     '      const { bytesRead } = await this.handle.read(buf, got, bytes - got, (position + got) % 2 ** 31);',
-  ]] },
+  ]],
+    fails: 'the same hazard as a regression rather than a rewrite: a positioned read whose '
+      + 'offset wrapped at 32 bits. This is the sharp one. It serves the frame at `offset % '
+      + '2**31` **with a 200**, so the row can only redden through its own byte comparison '
+      + 'rather than through a status - a mutation that 500s would prove only that the check '
+      + 'reads status codes. Reddens **two** rows, measured: the two picks past the mark, at '
+      + '2147533537 and 2502006469. The two below it stay green and are the positive twin, '
+      + 'because `x % 2**31 === x` under the line',
+  },
 };
 if (MUTATE && !MUTATIONS[MUTATE]) {
   console.error(`unknown mutation ${MUTATE} - have ${Object.keys(MUTATIONS).join(', ')}`);
@@ -125,6 +142,7 @@ function verdict(crashed) {
     process.exit(2);
   }
   if (MUTATE) {
+  if (MUTATIONS[MUTATE]?.fails) console.log(`[index] it should redden: ${MUTATIONS[MUTATE].fails}`);
     console.log('\n[index] NOT CAUGHT - the check passed a build it should have rejected');
     process.exit(1);
   }

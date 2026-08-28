@@ -1627,6 +1627,7 @@ if (MUTATE && mutationApplied === 0) {
   process.exit(2);
 }
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[module] it should redden: ${MUTATIONS[MUTATE].fails}`);
   // Exit code alone cannot tell a caught mutation from a tool that fell over before asserting.
   if (failed === 0) { console.log('[module] NOT CAUGHT - the check passed a tree it should have refused'); process.exit(1); }
   console.log(`[module] caught, as required (${failed} assertion${failed === 1 ? '' : 's'} fired)`);

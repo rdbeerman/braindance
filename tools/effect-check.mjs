@@ -41,10 +41,26 @@ const MUTATIONS = {
       '.filter((e) => e.isDirectory() && VALID_EFFECT_ID.test(e.name))',
       '.filter((e) => e.isDirectory())',
     ]],
+    fails: 'the id filter the store lists directories through, widened, so a crashed install\'s '
+      + '`<id>.<seq>.tmp` becomes a package `/effects` lists and `rootFor` resolves. Reddens '
+      + '**six** rows, measured: the two of section 10 that are about a half-written package, '
+      + 'section 12\'s page-boot row, and section 14\'s three, which need a page that came '
+      + 'up. Section 10 is late for the reason those first two are the ones it is *about* - '
+      + 'staged earlier it would redden every section after it with a fault five sections '
+      + 'away. **It reddened two and ended early at 110 before this round**, measured in a '
+      + 'detached worktree at `5d8cd33` with the unmutated control green at 119/0 there: the '
+      + 'mutated store\'s gate ran in the constructor and the server never came up at section '
+      + '11\'s restart, so a third of the tool was never put to that build. Running the gate '
+      + 'after the bind, and a `setAside` that logs a rename it cannot make instead of '
+      + 'throwing, is what turned a truncated run into four more measured rows',
   },
   'rebuild-skips-the-panel': {
     file: 'web/main.js',
     edits: [['\n  buildPanel();\n', '\n  if (!panelControls.size) buildPanel();\n']],
+    fails: 'the panel built on the first run and never again, which is the rebuild somebody '
+      + 'writes who thinks of the panel as boot furniture. `boot-check` stays green, because '
+      + 'boot is the run that builds it; six rows redden, one in section 3 and the rest '
+      + 'across 7, 8 and 9 - everything downstream of a panel that is not the registry',
   },
   'install-skips-the-uniform-cells': {
     file: 'web/main.js',
@@ -54,6 +70,10 @@ const MUTATIONS = {
         + '    };',
       '    if (Object.hasOwn(table, bind.uniform)) table[bind.uniform] = { value: 0 };',
     ]],
+    fails: 'the JavaScript cell a new binding needs, never minted. No shipped package notices - '
+      + 'every one of the sixteen binds a uniform some hand-written table already holds - and '
+      + 'a seventeenth throws inside the value walk. Reddens six rows of section 3 and ends '
+      + 'the run early; the count is a floor',
   },
   'reinstall-leaves-it-parked': {
     file: 'web/main.js',
@@ -61,6 +81,16 @@ const MUTATIONS = {
       '  return id !== null && !effectInstalled(id);',
       '  return id !== null;',
     ]],
+    fails: 'the parking predicate widened to every dotted name, so a value belonging to an '
+      + 'installed effect parks anyway. The badge still appears on the uninstall, which is '
+      + 'what makes it worth having: nine rows redden, four across sections 4 and 5 and five '
+      + 'more in section 6, and the badge-appeared row stays green. The document it leaves '
+      + 'behind is one the loader refuses in both directions, so section 6\'s rebuild reddens '
+      + 'on the rollback\'s own refusal rather than on the install\'s. **It ends the run '
+      + 'early and always has**, which this line did not say: the document it leaves behind '
+      + 'makes section 7\'s first unguarded `reload()` throw. Measured 2026-08-24 at both '
+      + 'ends of this round\'s changes - 52 of the 91 assertions the tool had at `4b63f80`, '
+      + 'and 55 of 111 now, nine red either way. The count is a floor and the tool says so',
   },
   'rollback-keeps-the-new-registry': {
     file: 'web/main.js',
@@ -68,6 +98,16 @@ const MUTATIONS = {
       '      adoptEffectPackages(heldPackages, heldPrograms, held);',
       '      adoptEffectPackages(fetched, programs, held);',
     ]],
+    fails: 'the rollback runs the loader again and runs it against the packages that just '
+      + 'arrived rather than the ones this page had - the half-rollback somebody writes who '
+      + 'reads the failure as being about the document. Reddens six rows: four in section 6 - '
+      + 'the sentence, the registry\'s contents, the signature, and what a save writes - and '
+      + 'the two rollbacks of section 9. The picture cannot see it, because the parameter the '
+      + 'fork adds is inert at its default and the image is identical either way, which is '
+      + 'why a pixel row is not enough to hold this. **Ten now, measured 2026-08-24**: the '
+      + 'four extra are the two blocks at the end of section 9, which are second rollback '
+      + 'fixtures and go red with the first. Six at `4b63f80`, so the four are this round\'s '
+      + 'and the line above was right about its own tree',
   },
 
   'rebuild-remakes-the-buttons': {
@@ -79,31 +119,58 @@ const MUTATIONS = {
         "      panelButtonRow(['camLevelReset', 'reset rotation']),\n    ],\n    after: () => ["],
       ["      panelNote('recRange', 'preview only'),\n    ]),", "      panelNote('recRange', 'preview only'),\n    ],"],
     ],
+    fails: 'the memo taken off the two closures that emit the framing group\'s hand-written '
+      + 'rows, so every rebuild makes fresh buttons carrying the right ids and none of the '
+      + 'wiring. Reddens three rows of section 7: the control pressed and the node the status '
+      + 'was written into carry the claim, and the precondition above them goes red because '
+      + 'the status write it builds the fixture out of is the very thing the mutation stops '
+      + 'landing. Measured, 2026-08-24 - this line said "two rows and nothing else" for as '
+      + 'long as nobody had counted, which is the undercount docs/instruments.md warns a '
+      + 'Must-redden line produces when it names the claim rows alone',
   },
 
   'rebuild-forgets-the-tab': {
     file: 'web/main.js',
     edits: [['\n  hideOffTab();\n\n', '\n\n']],
+    fails: 'the showing tab not re-applied to the groups the generator has just made, so one '
+      + 'install puts every tab\'s groups on screen at once. Reddens one row of section 7',
   },
 
   'rebuild-keeps-the-paint': {
     file: 'web/main.js',
     edits: [['\n  groupPainted.clear();', '']],
+    fails: '`groupPainted` left holding state strings written against elements the rebuild threw '
+      + 'away, so a group whose values did not move is skipped by the first refresh and comes '
+      + 'back open with no `aria-expanded`. Reddens two rows of section 7: the claim, and the '
+      + 'precondition above it, which is the group the mutation prevents from being shut in '
+      + 'the first place. Measured 2026-08-24; one run also reddened section 8\'s '
+      + 'read-across-two-revisions row and a re-run on the same tree did not, so that one is '
+      + 'the intermittent that row\'s own poll is about rather than a cascade',
   },
 
   'rebuild-keeps-the-picker': {
     file: 'web/main.js',
     edits: [['\n  buildPresetPicker();\n}', '\n  if (!presetPickBoxes.size) buildPresetPicker();\n}']],
+    fails: 'the preset subset dialog built once and never again. An installed effect gets no '
+      + 'checkbox and an uninstalled one leaves a box whose handler reads `PARAMS` for a name '
+      + 'that is gone. Reddens two rows of section 7, one per direction',
   },
 
   'gates-are-frozen-at-boot': {
     file: 'web/main.js',
     edits: [['  PASS_GATES = passGatesOf(packages);\n', '  PASS_GATES ??= passGatesOf(packages);\n']],
+    fails: 'the grade gate list computed once, off the packages installed while the module '
+      + 'evaluated. All sixteen shipped effects are in it, so nothing about them notices; a '
+      + 'grade effect installed afterwards writes into a pass that stays shut. Reddens one '
+      + 'row of section 8',
   },
 
   'every-reload-warms': {
     file: 'web/main.js',
     edits: [['    if (!sameProgram) warmPrograms();', '    warmPrograms();']],
+    fails: 'the warm run whether or not the programs moved, so a package that changed only its '
+      + 'manifest clears the accumulators a page mid-playback is holding. Reddens one row of '
+      + 'section 8, and the control beside it stays green because that one must warm',
   },
 
   'swap-keeps-the-old-program': {
@@ -114,6 +181,9 @@ const MUTATIONS = {
       + '  material.dispose();\n',
       '',
     ]],
+    fails: 'the program swap put back to `needsUpdate` alone. Three releases a program only from '
+      + 'a material\'s `dispose` event, so every GLSL-changing install leaves one linked and '
+      + 'cached. Reddens one row of section 8',
   },
 
   'poll-checks-once': {
@@ -122,6 +192,8 @@ const MUTATIONS = {
       '  const blocked = effectRebuildBlocked();\n  if (blocked) return null;',
       '  const blocked = null;\n  if (blocked) return null;',
     ]],
+    fails: 'the stand-down asked on the way into the tick and never again, so a rebuild lands '
+      + 'inside a gesture that opened while it was reading. Reddens one row of section 8',
   },
 
   /**
@@ -137,6 +209,12 @@ const MUTATIONS = {
       + '    );',
       '    console.warn(`shaders did not compile: ${linkFailures[0]}`);',
     ]],
+    fails: 'the throw dropped from the end of the warm, leaving a link failure where three.js '
+      + 'puts it: a console line. The install succeeds, the poll announces success, and the '
+      + 'cloud draws nothing. Reddens **six** rows, measured, all in section 9: the two the '
+      + 'mutation is about - the rebuild reporting success and the broken line reaching the '
+      + 'assembled program - and the four under them, which are the quarantine not happening '
+      + 'because there is no longer a link failure to mark',
   },
 
   /** Aimed at the `if (bind.gates)` guarding both halves, so one mutation takes the whole rule. */
@@ -161,6 +239,12 @@ const MUTATIONS = {
       + '    : null;',
       '  const setAside = null;',
     ]],
+    fails: 'the throw and its mark left exactly where they are and the one call that acts on '
+      + 'them dropped, which is the build this replaced. The page still refuses the package, '
+      + 'still rolls back and still says which shader did not compile - and the package sits '
+      + 'in the store afterwards, so the next browser to open compiles it at boot, outside '
+      + 'any transaction, and dies there. Reddens **four** rows, measured, all in section 9, '
+      + 'and the third is the point: the fresh page comes back `no __kinect published`',
   },
 
   /**
@@ -174,6 +258,14 @@ const MUTATIONS = {
       '  const setAside = failure?.shaderLinkFailure\n',
       '  const setAside = failure\n',
     ]],
+    fails: 'the mark test dropped and the call kept, so every failure the rollback catches '
+      + 'reaches the refusal route. This is the direction the fix does damage in rather than '
+      + 'merely fails in, and the page reads correctly through all of it - the refusal is '
+      + 'right, the sentence is right, the rollback is right, and a package nothing is wrong '
+      + 'with has been renamed out of the way behind them. Reddens **three** rows, measured, '
+      + 'and only the first is a finding: section 6 asks the store whether the fork the '
+      + 'completeness rule refused is still installed, and it answers 404. The two under it '
+      + 'are section 9\'s aside count seeing two where it expects one',
   },
 
   'adopt-outside-the-transaction': {
@@ -183,6 +275,10 @@ const MUTATIONS = {
         '  adoptEffectPackages(fetched, programs, held);\n  let failure = null;\n  try {'],
       ['    adoptEffectPackages(fetched, programs, held);\n', ''],
     ],
+    fails: 'the adoption put back outside the `try` the rollback hangs off, so a throw out of '
+      + 'the adoption itself - a package written into the store past the door, naming a panel '
+      + 'group nothing holds - walks past it and leaves a registry with no panel drawn from '
+      + 'it. Reddens one row of section 9',
   },
 
   'the-sweep-eats-the-last-copy': {
@@ -191,12 +287,21 @@ const MUTATIONS = {
       ["      if (entry.name.endsWith('.old') && !liveHere) continue;\n", ''],
       ['    this.recoverInterruptedInstalls();\n', ''],
     ],
+    fails: 'the sweep removing every aside it finds and the recovery pass removed with it, so a '
+      + 'crash between an install\'s two renames loses the package to the next install of '
+      + 'that id. Reddens **three** rows of section 11, measured 2026-08-24 at `4b63f80` as '
+      + 'well as here: the copy that does not come back, the aside left beside nothing, and '
+      + 'the uninstall row under them, which needs a package to have been there to remove. '
+      + 'This line said two for as long as nobody had counted',
   },
 
   'package-files-follow-links': {
     file: 'server/effect-store.js',
     edits: [['    if (!existsSync(path) || !lstatSync(path).isFile()) return null;',
       '    if (!existsSync(path) || !statSync(path).isFile()) return null;']],
+    fails: '`statSync` back where `lstatSync` is, so the file route asks what a name points at '
+      + 'rather than what it is. Reddens one row of section 10, and the ordinary file beside '
+      + 'it stays green',
   },
 
   'poll-takes-any-body': {
@@ -205,6 +310,11 @@ const MUTATIONS = {
       ['  if (!body || !Array.isArray(body.effects) || !Number.isFinite(body.generation)) {', '  if (body === undefined) {'],
       ['  for (const entry of body.effects) {', '  for (const entry of body.effects ?? []) {'],
     ],
+    fails: '`GET /effects` no longer held to the shape its readers assume, so a 200 carrying '
+      + 'anything else reaches the signature comparison and throws out of the interval '
+      + 'callback. Reddens one row of section 8. Two edits, because defusing the array check '
+      + 'alone leaves the entry loop throwing inside the poll\'s own catch - which is '
+      + 'handled, so the mutation reproduced nothing and the run came back NOT CAUGHT',
   },
 
   'poll-guards-late': {
@@ -215,12 +325,19 @@ const MUTATIONS = {
       ['    if (listedSignature === refusedEffectSignature) return;\n    await pollRebuild(listedSignature);',
         '    if (listedSignature === refusedEffectSignature) return;\n    effectReloading = true;\n    await pollRebuild(listedSignature);'],
     ],
+    fails: 'the reentrancy guard raised after the list comes back rather than on the way in, so '
+      + 'two ticks overlap and the older read can win. Reddens one row of section 8',
   },
 
   'reads-need-not-agree': {
     file: 'web/main.js',
     edits: [['    if (closed.generation === opened.generation && revSignature(closed.effects) === revSignature(opened.effects)) return packages;',
       '    if (opened) return packages;']],
+    fails: 'the verification read taken off the end of the package fetch, so a set read across '
+      + 'an install is one package from before it beside another from after. Reddens **two** '
+      + 'rows of section 8, measured 2026-08-24: it takes the whole comparison out, so both '
+      + 'the moved-revision row and the generation row below it go. This line read "one row" '
+      + 'for as long as there was one term to remove',
   },
 
   /**
@@ -231,33 +348,69 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [['    if (closed.generation === opened.generation && revSignature(closed.effects) === revSignature(opened.effects)) return packages;',
       '    if (revSignature(closed.effects) === revSignature(opened.effects)) return packages;']],
+    fails: 'the generation term dropped from that same comparison, leaving the contents term it '
+      + 'had before. A revision is a hash of bytes, so a change that is *undone* hashes back '
+      + 'to what it was: a fork installed and deleted again restores the shipped package, and '
+      + 'both listings are then identical across a window the page read some of its chunks '
+      + 'out of. Its own spec rather than a second edit of the row above, because no '
+      + 'comparison and the wrong comparison fail differently. Reddens one row of section 8',
   },
 
   'package-read-need-not-match-the-list': {
     file: 'web/main.js',
     edits: [['    if (pkg?.rev !== rev) {', '    if (false) {']],
+    fails: 'and the same window one request further in, where neither listing can reach: a '
+      + 'package answering for a revision the list did not name hands this page that '
+      + 'package\'s manifest and file index out of the other revision. Reddens one row of '
+      + 'section 8',
   },
 
   'door-takes-any-expansion': {
     file: 'server/effect-door.js',
     edits: [['  if (expandedBytes > MAX_PACKAGE_BYTES) {', '  if (false) {']],
+    fails: 'the bound on how much text a manifest asks to have spliced, leaving the two that '
+      + 'count what it carries. A file counts once in each of those and once per descriptor '
+      + 'in the assembler, so the two numbers come apart without limit. Reddens two rows of '
+      + 'section 2 - the refusal and the residue, because the package now lands on disk - and '
+      + 'the sweep after them is what keeps it to two rather than carrying a sixty-file '
+      + 'fixture into every section below',
   },
 
   'seeding-skips-existing-cells': {
     file: 'web/main.js',
     edits: [['    if (uniformCellFits(table[bind.uniform], bind)) continue;',
       '    if (Object.hasOwn(table, bind.uniform)) continue;']],
+    fails: 'the uniform seeding back to minting only what is missing, so a cell whose binding '
+      + 'changed shape keeps the shape from the build before. Reddens four rows at the end of '
+      + 'section 9 and the run still finishes: the rollback dies inside the table it is '
+      + 'rolling back through and prints the reload-the-page sentence, `probeShapeAxis is a '
+      + 'number` where the registry demands a vector, and three values are left parked by a '
+      + 'page that never got its document back',
   },
 
   'departed-uniforms-keep-their-value': {
     file: 'web/main.js',
     edits: [['  restoreDepartedUniforms(wasBound, boundUniforms(EFFECT_PARAMS));',
       '  void wasBound;']],
+    fails: 'a uniform the registry has stopped binding left holding whatever the slider last put '
+      + 'there. Nothing else ever writes those cells and the chunk reading it does not stop, '
+      + 'so the term runs on with no control anywhere that can move it. Reddens three rows of '
+      + 'section 8, and the third is the one worth reading: with every control back at its '
+      + 'default the picture is the one the raised term drew, hash for hash. The first is the '
+      + 'grade gate\'s uninstall row, which asserted this defect approvingly until this round '
+      + '- see docs/instruments.md',
   },
 
   'poll-retries-a-refused-set': {
     file: 'web/main.js',
     edits: [['    if (listedSignature === refusedEffectSignature) return;\n', '']],
+    fails: 'the block on a set this page has already failed to adopt. A rollback puts the old '
+      + 'signature back on purpose, so the tick\'s own comparison goes on saying the store '
+      + 'has moved and the same rebuild is attempted every six seconds forever - every '
+      + 'package refetched, both programs reassembled, the material disposed, the '
+      + 'accumulators reset. Reddens two rows, measured: the one at the end of section 9 and '
+      + 'section 14\'s, which is the same block asked about a shape refusal rather than an '
+      + 'assembly one',
   },
 
   /**
@@ -270,6 +423,14 @@ const MUTATIONS = {
       '    if (err.effectRefusal) refusedEffectSignature = listedSignature;',
       '    refusedEffectSignature = listedSignature;',
     ]],
+    fails: 'the block on a refused set put back on *every* way a rebuild can fail, which is how '
+      + 'it shipped: a refusal and a read error are the same three lines from the poll\'s '
+      + 'side, so one server restart between the listing and a package fetch blocked a '
+      + 'revision that was never anything but good until something else moved the store. '
+      + 'Reddens **one** row, measured - the read error\'s "next tick adopts it" - and leaves '
+      + 'the two refusal rows beside it green, which is what makes the pair a discrimination '
+      + 'rather than two rows about one thing. `poll-retries-a-refused-set` is its mirror and '
+      + 'fires the other row, measured, so the two terms separate exactly',
   },
 
   /**
@@ -279,6 +440,17 @@ const MUTATIONS = {
   'boot-adopts-a-stale-fork': {
     file: 'server/effect-store.js',
     edits: [['    this.refuseIncompatiblePackages();', '    void this.refuseIncompatiblePackages;']],
+    fails: 'the store\'s boot gate never asked, which is every build before it existed: a '
+      + 'package that got through the door once is served forever, whatever this build\'s '
+      + 'spines have done since, so a fork naming a joint an upgrade removed goes on '
+      + 'shadowing the builtin it forks. Aimed at the call rather than at the method body, '
+      + 'because the defect was that nothing re-validated rather than that something '
+      + 'validated wrongly. Reddens **ten** rows, measured: seven in section 12 and the three '
+      + 'of section 14, which need a page that came up. The staging row stays green and so '
+      + 'does the must-accept row - a gate that never ran serves the healthy fork too, which '
+      + 'is what makes that row a control for over-refusal rather than for this. The one the '
+      + 'finding is about is the page: it publishes no `__kinect` at all, because '
+      + '`assembleShaders` throws while `web/main.js` is still evaluating',
   },
 
   /**
@@ -293,12 +465,27 @@ const MUTATIONS = {
       + '        const beside = [...standing.values()].sort((a, b) => (a.id < b.id ? -1 : 1));',
       '        const beside = this.loaded(candidate.id);',
     ]],
+    fails: 'the boot gate\'s second pass back to asking the door about each candidate with every '
+      + 'other package beside it, checked or not, which is how it shipped. The door assembles '
+      + '`[...beside, candidate]` and reports what fails under the *candidate\'s* name, so '
+      + 'one fork this build cannot assemble made its innocent neighbours come back "does not '
+      + 'assemble" - and which was blamed depended on the lexical order the walk reached them '
+      + 'in. Reddens **two** rows, measured: the healthy fork staged beside the broken one, '
+      + 'and the count of what is left standing. Every other row of section 12 stays green, '
+      + 'because a store that quarantines too much still hands the id back to the builtin and '
+      + 'still boots',
   },
 
   /** The call in `listen` still stands, so only the last row of section 13 may redden. */
   'the-gate-runs-before-the-bind': {
     file: 'server/effect-store.js',
     edits: [['    this.generation = 0;\n  }', '    this.generation = 0;\n    this.claimUserRoot();\n  }']],
+    fails: 'the recovery and the gate back at construction, which is where they were: every '
+      + 'process that got as far as building a store ran them, including one about to die on '
+      + '`EADDRINUSE` over a root another server was already serving. The call in `listen` is '
+      + 'left standing, so the winner still gates once and nothing else moves. Reddens '
+      + '**one** row, measured - section 13\'s last - and the two before it stay green, '
+      + 'because the loser still loses the bind and still exits either way',
   },
 
   /**
@@ -308,6 +495,16 @@ const MUTATIONS = {
   'the-aside-keeps-the-whole-name': {
     file: 'server/effect-store.js',
     edits: [['    const stem = id.slice(0, MAX_EFFECT_ID);', '    const stem = id;']],
+    fails: 'the truncation dropped from the stem an aside is built from, which is how it shipped '
+      + 'when nothing bounded an id\'s length. `NAME_MAX` is 255 and the suffix is about '
+      + 'thirty characters, so a directory from that build cannot be renamed at all. Reddens '
+      + '**two** rows, measured: the over-long directory and the count of what is left '
+      + 'standing. The server still comes up, which is the other half of the repair - the '
+      + 'rename is caught and the package left where it is. **The fixture is 240 characters '
+      + 'and the first one was 100**, which proved nothing: 100 renames to 128 and lands '
+      + 'inside the 255 a filesystem takes, so the mutated build renamed it perfectly well '
+      + 'and the row stayed green on a build with the defect in it. A fixture has to sit '
+      + 'outside the bound it is about',
   },
 
   /**
@@ -321,6 +518,15 @@ const MUTATIONS = {
       + '    throw err.effectRefusal ? effectRefusal(framed) : new Error(framed);',
       '    throw new Error(`the installed effects changed and this page could not read them: ${err.message}`);',
     ]],
+    fails: 'the frame that erases the refusal mark on its way out of the fetch. Every '
+      + 'deterministic shape refusal a read can make - a listing that is not a list, a '
+      + 'manifest that is not an object, a `chunks` that arrived as a string - is minted as a '
+      + 'refusal at its throw site, and a plain `new Error` at that frame threw the '
+      + 'classification away, so the set the store is serving was refetched whole every six '
+      + 'seconds forever. Aimed at the frame rather than at a throw site, because every one '
+      + 'of them passes through it. Reddens **one** row, measured: section 14\'s second. The '
+      + 'first stays green, because both builds refuse the package - what differs is whether '
+      + 'they go on asking',
   },
 
   /**
@@ -380,6 +586,12 @@ const MUTATIONS = {
       ['    this.generation += 1;\n    return { removed: id, restored: existsSync(join(this.builtinDir, id)) };',
         '    return { removed: id, restored: existsSync(join(this.builtinDir, id)) };'],
     ],
+    fails: 'the store no longer counting its own changes, which is the control neither '
+      + 'client-side mutation above can be: the arm that drives them fabricates a moved '
+      + 'generation in an interception, so a store that never moved the number would satisfy '
+      + 'every one of them while the coherent read compared equal numbers forever. Reddens '
+      + 'the two rows of section 2 that read it off the real store, and must leave section '
+      + '8\'s arm green - the two measure opposite ends of one wire',
   },
 };
 
@@ -2638,6 +2850,7 @@ if (crashed) {
   process.exit(2);
 }
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[effect] it should redden: ${MUTATIONS[MUTATE].fails}`);
   console.log('[effect] NOT CAUGHT - the check passed a build it should have rejected');
   process.exit(1);
 }

@@ -418,6 +418,7 @@ if (crashed) {
   process.exit(2);
 }
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[conformance] it should redden: ${MUTATIONS[MUTATE].fails}`);
   console.log('[conformance] NOT CAUGHT - the check passed a build it should have rejected');
   process.exit(1);
 }

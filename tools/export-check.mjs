@@ -139,7 +139,12 @@ const MUTATIONS = {
     `  const refWidth = (bufferWidth / bufferHeight) * 600;
   return { width: Math.max(1, refWidth / 2), height: 300 };`,
     '  return { width: Math.max(1, bufferWidth / 2), height: Math.max(1, bufferHeight / 2) };',
-  ]] },
+  ]],
+    fails: 'the glow\'s chain following the buffer, which is the only live catcher in this suite '
+      + 'for the reference the chain is frozen at. Its sibling `bloom-reference-1080` is NOT '
+      + 'caught by anything here and is not a regression - `test/bloom-chain.test.mjs` is '
+      + 'what holds that half, and docs/instruments.md has the measurement',
+  },
   // The chain frozen against 1080 rather than the height the look was graded at, so every output
   // size gets the same halo.
   'bloom-reference-1080': { file: 'web/bloom-pass.js', edits: [[
@@ -152,18 +157,30 @@ const MUTATIONS = {
   'export-ignores-missing-effects': { file: 'web/main.js', edits: [[
     '  const blocking = missing.filter((m) => !suppress.has(m.id));',
     '  const blocking = [];',
-  ]] },
+  ]],
+    fails: 'the door on a clip whose look this build cannot draw whole. Reddens 4: the refusal '
+      + 'row, the still-refused-for-the-other row, and the two in the leak block that stand '
+      + 'on a refusal happening at all - the second document\'s export and the console line '
+      + 'it drains. The suppress, record and complete rows stay green',
+  },
   // The door answers a per-effect question globally, letting the second missing effect through on a
   // decision about the first.
   'suppress-is-global': { file: 'web/main.js', edits: [[
     '  const blocking = missing.filter((m) => !suppress.has(m.id));',
     '  const blocking = suppress.size ? [] : missing;',
-  ]] },
+  ]],
+    fails: 'and the same door answering a per-effect question globally, which only the '
+      + 'two-missing-effects row can see - with one missing, both implementations refuse '
+      + 'nothing',
+  },
   // The record loses the note that a layer was skipped.
   'deliverable-forgets-suppressed': { file: 'web/main.js', edits: [[
     '      project: serialiseProjectBody(suppressed.length ? { suppressed } : {}),',
     '      project: serialiseProjectBody(),',
-  ]] },
+  ]],
+    fails: 'and the record\'s half: a file that went without a layer of the look and does not '
+      + 'say so. One row',
+  },
   // The click handler stops handing the door what the badge holds, so an operator can suppress an
   // effect and still be refused.
   'export-button-drops-the-suppression': { file: 'web/main.js', edits: [[
@@ -174,7 +191,13 @@ const MUTATIONS = {
   'suppression-outlives-its-document': { file: 'web/main.js', edits: [[
     '  if (suppressedEffects.size) {\n    suppressedEffects.clear();\n    paintMissingEffects();\n  }',
     '  // the clear this mutation removes',
-  ]] },
+  ]],
+    fails: 'a suppression made about one clip carried into the next document opened, which is '
+      + 'how it shipped: the loader prunes the set and two documents missing one effect are '
+      + 'indistinguishable to a prune. Reddens the leak row and the refusal beside it, and '
+      + 'leaves the keep row green, because the prune it does not touch is what makes a '
+      + 'suppression survive an undo',
+  },
   // Only the split reverts, so the claim cannot be carried by the other two.
   'rgbsplit-absolute': { file: 'effects-builtin/rgbsplit/split.grade.glsl', edits: [[
     'vec2 off = dir * rgbSplit * texel * 8.0;',
@@ -2008,4 +2031,5 @@ if (!parkedRun.ok) {
 check(pageErrors.length === 0, 'no page errors', pageErrors.slice(0, 3).join(' | '));
 
 console.log(`\n[export] ${checks - failures}/${checks} passed, ${failures} failed`);
+if (MUTATE && MUTATIONS[MUTATE]?.fails) console.log(`[export] it should redden: ${MUTATIONS[MUTATE].fails}`);
 process.exit(failures > 0 ? 1 : 0);

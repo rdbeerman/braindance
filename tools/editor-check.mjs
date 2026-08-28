@@ -107,6 +107,8 @@ const MUTATIONS = {
   'head-trim-slides-the-footage': {
     file: 'web/main.js',
     edits: [['  const value = held + (start - clip.start) * rate;', '  const value = held;']],
+    fails: 'a head trim that moves the clip and lets the footage travel with it, which is a slip '
+      + 'and not a trim',
   },
 
   // The head edge takes a keyed curve's clip anyway, silently, which is the shape this refusal
@@ -115,6 +117,8 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [["    if (side === 'head' && clip.retime.keys.length > 1) {",
              '    if (false) {']],
+    fails: 'the head edge taking a keyed clip anyway and silently, which is the shape the '
+      + 'refusal exists to avoid',
   },
 
   // A clip lands at the head of the edit rather than under the playhead. Must redden 'it lands
@@ -123,6 +127,8 @@ const MUTATIONS = {
   'add-clip-ignores-the-playhead': {
     file: 'web/main.js',
     edits: [['  clip.start = timeline ? timeline.programSec : 0;', '  clip.start = 0;']],
+    fails: 'a clip landing at the head of the edit rather than under the playhead. Two rows: the '
+      + 'placement, and the row that says the mark arm has a placement to be about at all',
   },
 
   // A mark is drawn through its clip's curve and not through where that clip sits.
@@ -134,6 +140,8 @@ const MUTATIONS = {
       + '  + selectedClip.retime.programSecAt(sourceSec);',
       'const programSecOfSource = (sourceSec) => selectedClip.retime.programSecAt(sourceSec);',
     ]],
+    fails: 'a mark drawn through its clip\'s curve and not through where that clip sits, so two '
+      + 'clips of one take draw their marks on top of each other',
   },
 
   // Selecting a row moves the strip's idea of the selection and not the page's.
@@ -142,6 +150,8 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [['  clipRow = clip;\n  selectClip(clip);',
              '  clipRow = clip;']],
+    fails: 'a row selection the page never follows, which leaves the panel and the marks on '
+      + 'whatever clip the editor opened with',
   },
 
   // The door a restore comes through refuses a slot that grew back, which is what an undo of a
@@ -152,6 +162,8 @@ const MUTATIONS = {
       '    const open = planned.take ? takeOpenedAs(planned.take.hash) : null;',
       '    const open = null;',
     ]],
+    fails: 'the synchronous restore refusing a clip slot that grew back, which is what the undo '
+      + 'of a delete is',
   },
 
   // ---- section 15b, the badge for an effect this build has not got ----
@@ -164,6 +176,9 @@ const MUTATIONS = {
       '  values: effectParamNames(entry.id).length,\n'
       + '  tracks: effectParamNames(entry.id).filter((n) => tracks.has(n)).length,',
     ]],
+    fails: 'the badge for a missing effect counting off the registry rather than off the parked '
+      + 'pool, which prints `0 values, 0 tracks parked` - the same line a build that '
+      + '*dropped* them would print. Reddens the exact-sentence row of 15b',
   },
 
   // Must redden: the press-it-again row of 15b, alone.
@@ -173,6 +188,8 @@ const MUTATIONS = {
       '  if (suppressedEffects.has(id)) suppressedEffects.delete(id);\n  else suppressedEffects.add(id);',
       '  suppressedEffects.add(id);',
     ]],
+    fails: 'and the toggle beside it going only one way, so a decision about one render becomes '
+      + 'a decision about the session. Reddens the press-it-again row alone',
   },
 
   // ---- section 21, the collapsed panel and its dock ----
@@ -232,6 +249,11 @@ const MUTATIONS = {
   'commit-ignores-null-baseline': {
     file: 'web/main.js',
     edits: [['    if (this.baseline === null) return false;\n', '']],
+    fails: 'the recovery slot of the take that *was* open, spent by a take that never opened. '
+      + 'The `!EDITING` guard beside it is about the surface and cannot see this: `begin()` '
+      + 'is the last thing `openTake` does, so a failed open leaves `/edit` interactive with '
+      + 'a null baseline. Reddens exactly two rows in section 13 - the press being recorded, '
+      + 'and what it destroyed - so read the rows',
   },
 
   // Must redden the two pre-roll rows and leave the space-bar rows above them green: the key was
@@ -243,6 +265,14 @@ const MUTATIONS = {
       '  if (timeline.playing || timeline.pendingPlay) pauseTransport();\n  else timeline.play().catch(showTimelineError);',
       '  if (timeline.playing || timeline.pendingPlay) timeline.pause();\n  else timeline.play().catch(showTimelineError);',
     ]],
+    fails: 'the one pause on this surface that did not take the transport. **NOT caught by this '
+      + 'suite**, and that is recorded rather than left to be rediscovered: the two pre-roll '
+      + 'rows beside it pass on both builds, because a pause pressed inside a play\'s own '
+      + 'pre-roll holds either way. The generation guard protects a resume queued by '
+      + '*another* gesture, and in each of those the transport is already paused, so the '
+      + 'button is a play rather than a pause. The fix is consistency with the helper this '
+      + 'file\'s own comment mandates, not a demonstrated defect - docs/instruments.md has '
+      + 'the measurement',
   },
 
   // Must redden the pending-play outcome row and leave the pending-window row above it green,
@@ -254,6 +284,10 @@ const MUTATIONS = {
       '  if (timeline.playing || timeline.pendingPlay) pauseTransport();\n  else timeline.play().catch(showTimelineError);',
       '  if (timeline.playing) pauseTransport();\n  else timeline.play().catch(showTimelineError);',
     ]],
+    fails: 'the *demonstrated* defect on the same button: the toggle reading `playing` alone, '
+      + 'which is false for the whole stretch a play spends awaiting the accurate seek a '
+      + 'draft forces, so the press that meant stop started a second play. Reddens the '
+      + 'pending-outcome row and leaves the pending-window row above it green - read the rows',
   },
 
   // Must redden the pending-play outcome row alone, same as the toggle mutation - two ways to
@@ -264,6 +298,9 @@ const MUTATIONS = {
       '    if (gen !== this.playGen) {\n      this.paint();\n      return;\n    }\n',
       '',
     ]],
+    fails: 'and the transport\'s half of that claim: a pending play that never rechecks its '
+      + 'generation resolves into `playing` over the pause that landed inside it. Same row - '
+      + 'two ways to break one claim, and it needs both halves standing',
   },
 
   // Must redden the revert row and leave the row above it green, since the refusal
@@ -271,6 +308,9 @@ const MUTATIONS = {
   'picker-keeps-a-refused-look': {
     file: 'web/main.js',
     edits: [["          showPickerChoice(picker, appliedPreset()?.name ?? '');\n", '']],
+    fails: 'and the picker left naming a look the apply refused, which the deliverable menu '
+      + 'forty lines away already reverts. The refusal itself is unchanged, so only the '
+      + 'revert row reddens',
   },
 
   // Must redden the two per-side refusal rows - a point outside the segment, a camera handle
@@ -284,6 +324,10 @@ const MUTATIONS = {
       + '    }\n',
       '',
     ]],
+    fails: 'the ease-handle invariants asked of the drag that makes a value and never of the '
+      + 'loader that reads one back, though the docstring over it claimed them. Reddens the '
+      + 'two per-side refusal rows and leaves the look-overshoot and fold rows green, because '
+      + 'the bound is per kind and the fold is the segment\'s own check',
   },
 
   // Must redden the fold row alone and leave the per-side rows and the legal-crossed row green.
@@ -294,6 +338,11 @@ const MUTATIONS = {
       ["  refuseFolds('track camera', camera);\n", ''],
       ["    refuseFolds('the retime curve', keys);\n", ''],
     ],
+    fails: 'that check: whole-curve monotonicity asked once per segment with both handles in '
+      + 'hand. The per-side ordering rule it replaced refused the legal crossed polygons '
+      + '`elevate` produces - the editor could save a document its own reload declined - and '
+      + 'could not see a fold spanning the join at all. Reddens the fold row alone; the '
+      + 'legal-crossed row beside it is the half that fails on the build this replaced',
   },
 
   // Must redden the descending-times row alone and leave the fold and legal-crossed rows green.
@@ -308,6 +357,9 @@ const MUTATIONS = {
       + '    if (keys[i + 1].t === keys[i].t) continue;\n',
       '    if (!(keys[i + 1].t > keys[i].t)) continue;\n',
     ]],
+    fails: 'the walk\'s other question: a pair whose times descend skipped as merely coincident, '
+      + 'so a damaged track installs unsorted and keyBefore\'s binary search selects segments '
+      + 'nobody authored. Reddens the descending-times row alone',
   },
 
   // Must redden the two pivot rows and leave `Default camera position reaches
@@ -320,6 +372,10 @@ const MUTATIONS = {
        + '    controls.zoom0 = previous.zoom0;\n', ''],
       ['    controls.saveState();\n', ''],
     ],
+    fails: 'the orbit\'s home aim, which `OrbitControls` captures in its constructor before the '
+      + 'target is written and which no rebuild carried across. Reddens the two pivot rows '
+      + 'and leaves the position row green, because the position was never the half that was '
+      + 'broken - read the rows',
   },
 
   'import-skips-normalise': {
@@ -671,6 +727,11 @@ const MUTATIONS = {
       '  (REQUESTED_PROJECT ? loadProjectNamed(REQUESTED_PROJECT) : openTake(REQUESTED_TAKE))\n'
       + '    .then(() => fitCropToTake(openTakeId(), params.get(\'near\'), params.get(\'far\')).catch(() => {}))',
     ]],
+    fails: 'and a document\'s own box, which the entry point protects by structure: the fit '
+      + 'belongs to opening a bare take and a named project never runs it. The mutation puts '
+      + 'one back into the boot chain, and reddens 4 - the planted-box row plus the three '
+      + 'reset rows on a page the late fit lands on. The box row reads its planes twice, '
+      + 'because a fit is a fetch and one landing after a single read passes on nothing',
   },
   'fit-lands-after-history-begins': {
     file: 'web/main.js',
@@ -693,6 +754,9 @@ const MUTATIONS = {
       'ui.exportName.addEventListener(\'input\', () => {\n  takeExportName();\n  paintExportName();\n});',
       'ui.exportName.addEventListener(\'input\', () => {\n  paintExportName();\n});',
     ]],
+    fails: 'the output name read out of a deliverable and never written into one, which is the '
+      + 'defect this branch shipped: the row walks it out to the server and back through an '
+      + 'adoption, because a field read straight back proves only that an input holds text',
   },
 
   'aspect-skips-the-letterbox': {
@@ -701,6 +765,10 @@ const MUTATIONS = {
       '  void fromDocument;\n  paintDeliverable();\n  resize();\n  return true;',
       '  void fromDocument;\n  paintDeliverable();\n  return true;',
     ]],
+    fails: 'the shape written into the document and the stage not framed to it, which is the one '
+      + 'thing putting the shape on the document was for. Reads the stage\'s own box rather '
+      + 'than the button that was just pressed, so a build that lights the control and '
+      + 'reframes nothing fails here and passes on the attribute',
   },
 
   'plant-unswept-control': {
@@ -953,6 +1021,9 @@ const MUTATIONS = {
       + '  // Before the cloud goes, because the render core is pointed at whatever is selected.\n'
       + '  if (selectedClip === clip) selectClip(clips[Math.min(at, clips.length - 1)]);',
     ]],
+    fails: 'the delete leaving the strip on no clip at all, which greys the panel\'s clip half '
+      + 'over an edit that still has clips to edit. Reddens section 22\'s "puts the strip on '
+      + 'whatever took its place"',
   },
   // The project loader choosing the clip the page happened to be on, which is a guess wearing
   // the shape of an answer. Must redden exactly 22b's "loading a project selects no clip" - the
@@ -967,6 +1038,9 @@ const MUTATIONS = {
       + '  deselectClipRow();\n',
       '',
     ]],
+    fails: 'the project loader keeping whichever clip the page happened to be on, which is a '
+      + 'guess wearing the shape of an answer. Reddens 22b\'s "loading a project selects no '
+      + 'clip"; the take half is a different door and is untouched by it',
   },
   'gizmo-renders-from-the-pointer': {
     file: 'web/main.js',
@@ -974,6 +1048,9 @@ const MUTATIONS = {
       "  gizmo.addEventListener('objectChange', () => { gizmoWriteWanted = true; });",
       "  gizmo.addEventListener('objectChange', () => { gizmoWriteWanted = true; pumpGizmo(); lanesChanged(); });",
     ]],
+    fails: 'the clip handles writing and rebuilding the lane stack from the pointer event rather '
+      + 'than arming a redraw the animation loop pumps. Reddens the two rebuild rows of 22b: '
+      + '30 rebuilds for 30 moves, against the 34-for-one this program has shipped',
   },
   // A preset's cloud half written to every clip rather than to the selected one, which is the
   // whole of what makes a look a clip's own. Must redden 22b's "and on no other clip".
@@ -984,6 +1061,9 @@ const MUTATIONS = {
       ['  } else {\n    params.apply(values);\n  }\n  if (stamped) stampPreset',
         '  } else {\n    forEachLook(() => params.apply(values));\n  }\n  if (stamped) stampPreset'],
     ],
+    fails: 'a preset\'s cloud half written to every clip rather than to the selected one, which '
+      + 'is the whole of what makes a look a clip\'s own. Reddens 22b\'s "and on no other '
+      + 'clip"',
   },
   'orbit-arms-into-playback': {
     file: 'web/main.js',
@@ -1346,6 +1426,8 @@ const MUTATIONS = {
       '  if (!row || !KINDS[row.kind].eases) return null;',
       "  if (!row || row.kind !== 'scalar') return null;",
     ]],
+    fails: 'the ease gate naming one kind instead of asking the table, which is what locked the '
+      + 'camera out',
   },
 
   'pose-handle-overshoots': {
@@ -1354,6 +1436,8 @@ const MUTATIONS = {
       "    if (row.owner === 'retime' || !KINDS[row.kind].overshoots) h[1] = Math.min(1, Math.max(0, h[1]));",
       "    if (row.owner === 'retime') h[1] = Math.min(1, Math.max(0, h[1]));",
     ]],
+    fails: 'a pose handle leaving the unit box, which sends the camera past the pose it was '
+      + 'keyed at',
   },
 
   'pose-lane-draws-flat': {
@@ -1362,6 +1446,8 @@ const MUTATIONS = {
       '  at: (owner, t) => poseLaneFraction(keysOf(owner), t),',
       '  at: () => 0.5,',
     ]],
+    fails: 'the lane\'s drawn curve, which every other pose row reads past on its way to the '
+      + 'evaluator',
   },
 
   'beads-evenly-spaced': {
@@ -1388,6 +1474,8 @@ const MUTATIONS = {
       + '  }\n'
       + '  return out;',
     ]],
+    fails: 'and the path\'s beads marking distance rather than time, which is an overlay that '
+      + 'redraws the route',
   },
 
   'pose-segments-never-shaped': {
@@ -1396,6 +1484,8 @@ const MUTATIONS = {
       '  moved: (a, b) => poseMoved(a.value, b.value),',
       '  moved: () => false,',
     ]],
+    fails: 'and a pose segment that never has a shape to edit, which is the NaN the old '
+      + 'subtraction returned',
   },
 
   'handle-clamped-to-the-segment': {
@@ -1407,6 +1497,10 @@ const MUTATIONS = {
       `    h[0] = Math.min(1, Math.max(0,
       (programToLane(row.owner, laneProgramAt(e.clientX)) - a.t) / dt));`,
     ]],
+    fails: 'a control point clamped to the segment\'s ends rather than to its own neighbours, '
+      + 'which was complete while a side held one point - then the neighbours *were* the ends '
+      + '- and lets two cross once a side holds more. Only a drag of a point that is not '
+      + 'index 0 can see it',
   },
 
   'elevation-moves-the-curve': {
@@ -1417,6 +1511,10 @@ const MUTATIONS = {
       `  const grown = side === 'easeOut' ? { easeOut: [...a, [0.5, 0.5]], easeIn: b } : { easeOut: a, easeIn: [[0.5, 0.5], ...b] };
   return raised.length ? grown : grown;`,
     ]],
+    fails: '`+pt` appending a control point rather than elevating, which is the one wrong '
+      + 'implementation that leaves the count right and moves the camera. Only the '
+      + 'sampled-curve row can see it, which is why that row samples the render instead of '
+      + 'reading the handles back - every handle is meant to move',
   },
 
   'ends-reaches-the-selection': {
@@ -1429,6 +1527,8 @@ const MUTATIONS = {
     keys[i].easeOut = copyHandle(spec.firstOut);
   }`,
     ]],
+    fails: '`ends` shaping the selected key instead of the move\'s two ends, which is `smooth` '
+      + 'under another name and halts the camera at an interior key',
   },
 
   'ends-skips-the-arrival': {
@@ -1439,6 +1539,8 @@ const MUTATIONS = {
   }`,
       '  if (false && spec.lastIn) { /* mutated */ }',
     ]],
+    fails: 'and reaching only the departure, which is half the reported defect surviving the fix '
+      + 'for it',
   },
 
   'glide-is-a-cubic': {
@@ -1447,6 +1549,9 @@ const MUTATIONS = {
       "  glide: { out: [[0.2, 0], [0.4, 0]], in: [[0.6, 1], [0.8, 1]] },",
       "  glide: { out: [[0.2, 0]], in: [[0.8, 1]] },",
     ]],
+    fails: 'the quintic dropped to a cubic, whose rate still reaches zero at the key - so every '
+      + 'velocity row stays green and only the degree is gone with the acceleration claim '
+      + 'resting on it',
   },
 
   'points-reach-the-retime': {
@@ -1455,6 +1560,8 @@ const MUTATIONS = {
       "  if (!state || selection.owner === 'retime') return [];",
       '  if (!state) return [];',
     ]],
+    fails: 'and the point controls offered on the retime, whose unit-box monotonicity proof is a '
+      + 'proof about a cubic and nothing else',
   },
 
   'ease-preset-ignored': {
@@ -9482,6 +9589,7 @@ console.log(`\n[editor] ${checks} assertions, ${failures} failed`);
 if (NO_RENDER) console.log('[editor] --no-render: the real export and the saved copy were not driven');
 
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[editor] it should redden: ${MUTATIONS[MUTATE].fails}`);
   if (failures === 0) {
     console.log(`[editor] NOT CAUGHT - ${MUTATE} passed every assertion, so nothing here tests it`);
     process.exit(1);

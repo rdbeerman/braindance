@@ -133,6 +133,7 @@ rmSync(scratch, { recursive: true, force: true });
 
 console.log(`\n${failed} failed`);
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[release-gate] it should redden: ${MUTATIONS[MUTATE].fails}`);
   if (failed === 0) { console.log(`NOT CAUGHT - ${MUTATE} passed a check that exists to reject it`); process.exit(1); }
   console.log(`caught, as required (${failed} assertions fired)`);
   process.exit(0);

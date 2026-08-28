@@ -1024,6 +1024,7 @@ if (untested) {
   process.exit(2);
 }
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[monitor] it should redden: ${MUTATIONS[MUTATE].fails}`);
   // Exit code alone cannot tell "the mutation was caught" from "the tool crashed before asserting
   // anything", and this repo has been bitten by exactly that twice.
   if (failed === 0) { console.log('[monitor] NOT CAUGHT - the check passed a server it should have rejected'); process.exit(1); }

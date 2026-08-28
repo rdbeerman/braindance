@@ -165,7 +165,14 @@ const MUTATIONS = {
       '        ...parked.tracks,\n      },',
       '      },',
     ],
-  ] },
+  ],
+    fails: 'a document opened on a machine without one of its effects and saved back with that '
+      + 'effect\'s values gone, which is the destructive shape parking exists to prevent. '
+      + 'Reddens 6: the reopen row, the two value rows, the row about which block each key '
+      + 'came back in, the row asking what else is under the prefix, and the second-trip row. '
+      + 'The requires row stays green - this mutation keeps the entry - and so do the two '
+      + 'load rows, because the load half is untouched - read the rows',
+  },
   // The pool stops recording which block a key arrived in, which is the one thing a build
   // without the effect cannot work out for itself.
   'park-forgets-its-block': { file: 'web/main.js', edits: [[
@@ -176,23 +183,41 @@ const MUTATIONS = {
     + '  };',
     '  const oneBlock = { params: {}, tracks: {} };\n'
     + '  const parked = { clip: oneBlock, project: oneBlock, requires: [] };',
-  ]] },
+  ]],
+    fails: 'which block each parked key arrived in, which is the one thing a build without the '
+      + 'effect cannot work out for itself: the pool\'s two blocks become one object, so '
+      + 'every parked key is saved into both. Reddens the which-block row alone - the value '
+      + 'rows read across both blocks and still find everything',
+  },
   // The other half of the same merge, with its own control because the row about the
   // `requires` entry stays green under the one above.
   'save-forgets-the-parked-requires': { file: 'web/main.js', edits: [[
     '    ...writableRequires(),\n  ];',
     '  ];',
-  ]] },
+  ]],
+    fails: 'and the same merge\'s other half, keeping the values and dropping the claim. Reddens '
+      + 'the entry row, the reopen row, and the second-trip row that stands on it',
+  },
   // The version a document was authored against, compared with nothing.
   'skew-goes-unreported': { file: 'web/main.js', edits: [[
     '    .filter((e) => e.wanted !== e.installed);',
     '    .filter(() => false);',
-  ]] },
+  ]],
+    fails: 'the version a document was authored against, compared with nothing, which is how it '
+      + 'shipped. Reddens the two rows about the mismatched document - the hook and the '
+      + 'sentence on the bar - and leaves the matched control green, since a build reporting '
+      + 'nothing agrees with a correct one about a document with nothing to report',
+  },
   // The completeness rule reading the values and not the tracks.
   'completeness-reads-the-values-only': { file: 'web/main.js', edits: [[
     '  for (const id of effectIdsIn(names).filter((n) => effectInstalled(n))) {',
     '  for (const id of effectIdsIn(Object.keys(block.params)).filter((n) => effectInstalled(n))) {',
-  ]] },
+  ]],
+    fails: 'the per-effect completeness rule asked of the values and not the tracks, so a clip '
+      + 'whose only use of an effect is a keyframe track loaded and was rewritten on save. '
+      + 'Reddens the track-only refusal alone; the values-truncation row beside it stays '
+      + 'green, because that document reaches the loop either way',
+  },
   // The capture format's band comes off.
   'open-ignores-format': { file: 'web/format.js', edits: [[
     "  if (format === CAPTURE_FORMAT) return '';",
@@ -396,26 +421,40 @@ const MUTATIONS = {
     + '        const why = manifestRefusal(t);\n',
     '      for (const t of []) {\n'
     + '        const why = manifestRefusal(t);\n',
-  ]] },
+  ]],
+    fails: 'a peer\'s manifest checked on every field rather than on the two that reach a path, '
+      + 'because the rest are spread into the listing and drawn. Reddens the field row and '
+      + 'leaves the two build-gate rows green',
+  },
 
   // The gallery goes back to ending a press only on `pointerup`, which is how it shipped: the
   // editor handles `pointercancel` in nine places and this page handled it in zero.
   'press-survives-a-cancelled-gesture': { file: 'web/library.js', edits: [[
     "  skimEl.addEventListener('pointercancel', () => { pressX = null; dragged = false; });\n",
     '',
-  ]] },
+  ]],
+    fails: 'a press the browser took back, ended - the editor handles `pointercancel` in nine '
+      + 'places and the gallery handled it in none. The tap row after it stays green',
+  },
 
   // The gallery goes back to assigning whatever listing comes back last.
   'refresh-paints-a-stale-listing': { file: 'web/library.js', edits: [[
     '  if (mine !== refreshGeneration) return newestRefresh;\n',
     '',
-  ]] },
+  ]],
+    fails: 'and a slow listing does not paint over a newer one, which is a second caller rather '
+      + 'than the poll twice - the three rows above it stay green, and that is the split',
+  },
 
   // The superseded caller goes back to reporting success on its own authority.
   'superseded-refresh-reports-success': { file: 'web/library.js', edits: [[
     '  if (mine !== refreshGeneration) return newestRefresh;\n',
     '  if (mine !== refreshGeneration) return undefined;\n',
-  ]] },
+  ]],
+    fails: 'and the discarded caller is told the newer one\'s answer rather than a success of '
+      + 'its own - the poll acts on that sentence, so a success nothing earned advanced its '
+      + 'fingerprint past a transition no paint ever showed',
+  },
 
   // The download stops asking the volume and goes back to asking only the node.
   'download-ignores-the-volume': { file: 'server/library.js', edits: [[
@@ -426,7 +465,11 @@ const MUTATIONS = {
     + "      + 'recording headroom for the shoot this disk may be carrying');\n"
     + '  }\n',
     '',
-  ]] },
+  ]],
+    fails: 'a download asked against the disk before a byte moves, because the byte ceiling '
+      + 'holds the node to its claim and a truthful take larger than the free space breaks '
+      + 'the shoot recording to the same volume',
+  },
 
   // The signal put back where it shipped: after the directory walk rather than before it.
   'signal-bound-after-an-await': { file: 'server/index.js', edits: [
@@ -441,7 +484,12 @@ const MUTATIONS = {
       '    const here = (await localTakes()).takes.find((t) => t.id === id);\n'
       + '    const left = untilCallerLeaves(res);\n',
     ],
-  ] },
+  ],
+    fails: 'and bound before the walk rather than after it, which is the shape three of the four '
+      + 'routes shipped: every call site passes a signal and the presence row stays green, '
+      + 'because what is wrong is when it was created. Reddens the ordering row alone - read '
+      + 'the rows',
+  },
 
   // The listing route stops telling the node that its caller has gone, so a browser that gave
   // up leaves the outbound fetch running here.
@@ -653,7 +701,11 @@ const MUTATIONS = {
   // conversion path is told the thing that is true of a document from the future.
   'one-refusal-for-older-versions': { file: 'web/format.js', edits: [[
     '    : version > PROJECT_VERSION', '    : false',
-  ]] },
+  ]],
+    fails: 'one sentence for every version, which collapses the three bands `versionRefusal` '
+      + 'still keeps now the migration is gone: older, later, and a version field that is not '
+      + 'a number at all',
+  },
   'skim-ignores-state': { file: 'web/library.js', edits: [[
     'const DIVISOR = { local: 1, both: 1, remote: 4 };',
     'const DIVISOR = { local: 1, both: 1, remote: 1 };',
@@ -804,7 +856,10 @@ const MUTATIONS = {
   'refusals-must-be-nonempty': { file: 'server/library.js', edits: [[
     'const carriesRefusals = (take) => Array.isArray(take.openRefusals)\n',
     'const carriesRefusals = (take) => Array.isArray(take.openRefusals)\n  && take.openRefusals.length > 0\n',
-  ]] },
+  ]],
+    fails: 'and a healthy node not refused for being healthy (wide: takes the link off, so it '
+      + 'stops at 125 of 392 - read the rows, not the total. docs/instruments.md says why)',
+  },
   // The link admits a manifest from the build before the refusals moved.
   'node-admits-an-old-manifest': { file: 'server/library.js', edits: [[
     '      const older = takes.find((t) => !carriesRefusals(t));\n      if (older) {',
@@ -1540,6 +1595,7 @@ const verdict = failures ? `FAIL (${failures})`
   : skipped.length ? `PASS WITH ${skipped.length} CLAIM${skipped.length === 1 ? '' : 'S'} UNPROVEN HERE (${skipped.join('; ')})`
     : 'PASS';
 console.log(`[library] ${verdict}`);
+if (MUTATE && MUTATIONS[MUTATE]?.fails) console.log(`[library] it should redden: ${MUTATIONS[MUTATE].fails}`);
 process.exit(failures ? 1 : skipped.length ? 2 : 0);
 
 async function runChecks() {

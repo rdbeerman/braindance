@@ -62,6 +62,10 @@ const MUTATIONS = {
       + "    }\n",
       '    view = patch.view;\n',
     ]],
+    fails: 'the camera pose in a socket patch, put through the registry the parameters beside it '
+      + 'already go through. Four finite numbers are not a rotation, and the source was '
+      + 'drawing with whatever arrived. Reddens the refusal row and leaves the '
+      + 'pose-still-arrives row green',
   },
 
   // The parameter half of the patch goes back to landing one name at a time with a catch per entry,
@@ -89,6 +93,9 @@ const MUTATIONS = {
       + '    }\n'
       + '  }\n',
     ]],
+    fails: 'and the parameter half of the same patch, whole or not at all - applied one name at '
+      + 'a time, a refused name kept the rest and the source drew half a frame nobody sent. '
+      + 'Reddens the half-right-patch row alone',
   },
 
   // The endpoint serves the registered colour scaled up to 1080p instead of the colour camera's own
@@ -733,6 +740,7 @@ if (untested.length) {
   process.exit(2);
 }
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[vcam] it should redden: ${MUTATIONS[MUTATE].fails}`);
   // Exit code alone cannot tell "the mutation was caught" from "the tool crashed before asserting
   // anything", so the count is what the verdict is made of.
   if (failed === 0) { console.log('[vcam] NOT CAUGHT - the check passed a server it should have rejected'); process.exit(1); }

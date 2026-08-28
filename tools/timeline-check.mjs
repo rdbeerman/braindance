@@ -56,13 +56,21 @@ const MUTATIONS = {
       + valueAtProgram('wake', this.start, this)) / 1000;`,
     `    const surfaceSec = (valueAtProgram('fade', this.start)
       + valueAtProgram('wake', this.start)) / 1000;`,
-  ]] },
+  ]],
+    fails: 'every clip warming on the selected clip\'s persistence rather than on its own, so '
+      + 'two clips at one instant stop differing in whether they touch the take there. '
+      + 'Section 8b is the catch',
+  },
   // The cache goes back to one constant however many clips share a take, which is what capped a
   // four-clip pre-roll at a quarter of what it computed. Must redden section 8's first two rows.
   'cache-is-a-constant': { file: 'web/main.js', edits: [[
     'const MAX_SPAN_FRAMES = CACHE_CEILING_FRAMES - CACHE_HEADROOM;',
     'const MAX_SPAN_FRAMES = CACHE_FRAMES - 16;',
-  ]] },
+  ]],
+    fails: 'a take\'s cache back to one constant however many clips share it, which caps a '
+      + 'four-clip pre-roll at 41 of the 60 frames it computed and an eight-clip one at 20. '
+      + 'Section 8\'s first two rows are the catch, and it fires seven in all',
+  },
   // The pre-roll stops being a function of anything.
   'preroll-constant': { file: 'web/main.js', edits: [[
     'const frames = Math.max(surface, trails, back3.frames);',
@@ -146,13 +154,21 @@ const MUTATIONS = {
   'rain-accumulates': { file: 'web/main.js', edits: [[
     '      uniforms.rainPhase.value = local;',
     '      uniforms.rainPhase.value += 1 / 30;',
-  ]] },
+  ]],
+    fails: 'the rain integrated frame to frame, so a seek lands where playback never would. Its '
+      + 'section applies a rain-raised look of its own, because every other arm in that file '
+      + 'renders the term completely inert',
+  },
   // A clip is shown the instant it starts, with whatever its ping-pong pair last drew still in
   // it. Section 7's entry rows are the only ones that can see it: with one clip there is no cut.
   'warm-skipped': { file: 'web/main.js', edits: [[
     "  return t >= clip.start - warmSec - CLIP_EDGE ? 'warming' : 'off';",
     "  return 'off';",
-  ]] },
+  ]],
+    fails: 'a clip shown the instant it starts, with whatever its pair last drew still in it. '
+      + 'Both arms lose it together, so the entry equality stays green: what reddens is the '
+      + 'surface-memory reading and the counters',
+  },
   // A clip warms and is shown without ever being put back to nothing, so it builds on whatever
   // its ping-pong pair last held. Both clears go, because on every path this build can reach the
   // reset clears the pair a moment before the entry does and either one alone still leaves it
@@ -169,35 +185,55 @@ const MUTATIONS = {
       '    [...clipStateTargets(), afterimage._textureComp, afterimage._textureOld, ...mosh.history],',
       '    [afterimage._textureComp, afterimage._textureOld, ...mosh.history],',
     ],
-  ] },
+  ],
+    fails: 'a clip warmed and shown without ever being put back to nothing. Removes both clears, '
+      + 'because either one alone still leaves the pair empty on every path this build can '
+      + 'reach',
+  },
   // Every clip is written the first clip's look, which is the union `checkProject` used to build
   // and the silent wrong render that made a clip's look its own.
   'look-broadcast': { file: 'web/main.js', edits: [[
     '      params.apply(planned.look.applied);',
     '      params.apply(plan.clips[0].look.applied);',
-  ]] },
+  ]],
+    fails: 'every clip written the first clip\'s look, which is the union `checkProject` used to '
+      + 'build and the silent wrong render that made a clip\'s look its own',
+  },
   // A clip value at a program position is read off the selected clip rather than off the clip
   // being asked about, so one clip's persistence decides every clip's pre-roll.
   'clip-look-reads-selection': { file: 'web/main.js', edits: [[
     "  const on = spec.scope === 'clip' ? (clip ?? clipOfLook()) : null;\n  const look = on ? on.look : homeOf(spec);",
     '  const on = null;\n  const look = homeOf(spec);',
-  ]] },
+  ]],
+    fails: 'a clip value read off the selected clip rather than the clip being asked about, so '
+      + 'one clip\'s persistence decides every clip\'s pre-roll',
+  },
   // Draw order comes off the array rather than off the clip ids, so one document composites
   // differently depending on the order its clips happen to be listed in.
   'draw-order-by-array': { file: 'web/main.js', edits: [[
     '  for (const [at, clip] of order.entries()) clip.points.renderOrder = at;',
     '  for (const [at, clip] of clips.entries()) clip.points.renderOrder = at;',
-  ]] },
+  ]],
+    fails: 'draw order off the array rather than the clip ids, so one document composites '
+      + 'differently depending on the order its clips happen to be listed in',
+  },
   // Every clip opens its own copy of its take, so two clips of one take carry two indexes, two
   // caches and two decodes of every frame they both want.
   'take-not-shared': { file: 'web/main.js', edits: [[
     '  const take = openTakes.get(id) ?? await IndexedTake.open(id);',
     '  const take = await IndexedTake.open(id);',
-  ]] },
+  ]],
+    fails: 'every clip opening its own copy of its take, so two clips of one take carry two '
+      + 'indexes, two caches and two decodes of every frame they both want',
+  },
   'rain-phase-unread': { file: 'effects-builtin/rain/cell.vert.glsl', edits: [[
     '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
     '    vRain = (0.0 * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
-  ]] },
+  ]],
+    fails: 'and the same clock written correctly and read by nothing, which both arms agree '
+      + 'about perfectly. It is the control for the guard rather than for the claim: what '
+      + 'reddens is the row that moves the clock alone under a still frame',
+  },
 };
 
 // Returned with its file rather than as a bare string so the caller can install the
@@ -2154,4 +2190,5 @@ check(errors.length === 0, 'the page logged no errors');
 
 await browser.close();
 console.log(`\n[timeline] ${failures === 0 ? 'PASS' : `FAIL (${failures})`}`);
+if (MUTATE && MUTATIONS[MUTATE]?.fails) console.log(`[timeline] it should redden: ${MUTATIONS[MUTATE].fails}`);
 process.exit(failures === 0 ? 0 : 1);

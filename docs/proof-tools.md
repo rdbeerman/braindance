@@ -1013,6 +1013,11 @@ node tools/effect-conformance-check.mjs --mutate leaks-at-zero # ... a floor und
                                                           #     Reddens exactly one row - rain's drop equality - and no other
                                                           #     effect's; the two arms that hold the master at zero cannot see
                                                           #     it, because the sub-keys are behind the `rain > 0.0` gate
+                                                          #     This description stays here rather than moving into a
+                                                          #     `fails:` like the rest: it is the one control in the tree
+                                                          #     declared as a function, so it has no field to hold one, and
+                                                          #     reshaping it so a uniform rule can reach it is more change
+                                                          #     than the rule is worth. Not an oversight
 node tools/monitor-check.mjs                              # step 9: the monitor's decimation, the take it must not touch, and the picture it shows
 node tools/monitor-check.mjs --mutate decimate-reaches-recorder  # ... and must FAIL mutated
 node tools/monitor-check.mjs --mutate bind-ignores-grid          # ... and must FAIL mutated

@@ -216,4 +216,5 @@ if (mutation) {
   process.exit(0);
 }
 console.log(failed === 0 ? 'PASS - bit-identical' : 'FAIL');
+if (mutation && MUTATIONS[mutation]?.fails) console.log(`[registration] it should redden: ${MUTATIONS[mutation].fails}`);
 process.exit(failed === 0 ? 0 : 1);

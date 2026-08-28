@@ -51,7 +51,9 @@ const MUTATIONS = {
       '  levelAngles = points.levelAngles;',
       '  levelAngles = levelAngles ?? points.levelAngles;',
     ]],
-    fails: 'the drawn-rotation row for the clip written last, and nothing else - the clip '
+    fails: 'the two levelling angles held as one pair the program shares rather than one pair '
+      + 'per clip, so a clip\'s tilt composes with another clip\'s roll. '
+      + 'The drawn-rotation row for the clip written last, and nothing else - the clip '
       + 'written first is never rewritten so it cannot pick anything up, and both clips go on '
       + 'serialising the right two angles, which is the whole shape of the bug',
   },
@@ -364,7 +366,9 @@ const MUTATIONS = {
       ['  if (glyph > 0.0) {', '  if (false) {'],
       ['  if (glyphMix > 0.0) {', '  if (false) {', 'effects-builtin/glyph/index.frag.glsl'],
     ],
-    fails: 'twenty-two rows in total, on a tree that is otherwise green, counted out '
+    fails: 'the mark the room is drawn out of, switched off at both of the stages it gates - one '
+      + 'anchor leaves the characters still being drawn at the old sprite size. '
+      + 'Twenty-two rows in total, on a tree that is otherwise green, counted out '
       + 'because a list that undercounts sends the next reader hunting a defect that is not '
       + 'there. **Two carry the claim**: the drop-one sweep, '
       + 'naming glyph.amount, glyph.tone, glyph.hash and glyph.rain unexplained, and the count beneath '
@@ -405,7 +409,10 @@ const MUTATIONS = {
       '    vCellSeed = hash(dot(wc, vec3(127.1, 311.7, 74.7)));',
       '    vCellSeed = hash(dot(vec3(position.xy, 0.0), vec3(127.1, 311.7, 74.7)));',
     ]],
-    fails: 'three rows. The claim is the thinning equality, at 1b30eba90301 against '
+    fails: 'a character keyed on the point rather than on the cell it fell in, which draws '
+      + 'characters either way and is the difference between a room made of code and a fog of '
+      + 'it. '
+      + 'Three rows. The claim is the thinning equality, at 1b30eba90301 against '
       + 'bc9087ff1fc0. With it go both of the turbulence section\'s claims - the noise one at '
       + '0.042/255 against a clean 11.565 and the ripple one at 0.000 against a clean 1.370 - '
       + 'and those are the mutation rather than two more defects: four hundred per-point '
@@ -420,7 +427,10 @@ const MUTATIONS = {
       '    vec3 room = mat3(modelMatrix) * (p0 + (noise + regionNoise * rw) '
         + '* vnoise3(p0 * noiseScale + time * noiseSpeed * vec3(0.7, 1.13, 0.31)));',
     ]],
-    fails: 'the row that says a character travels with its point through the turbulence, '
+    fails: 'and read after the turbulence moved the point, which is the defect the probe this '
+      + 'came out of shipped and which is bit-identical to the fix wherever nothing is '
+      + 'displacing. '
+      + 'The row that says a character travels with its point through the turbulence, '
       + 'alone, and it collapses rather than drifting: 0.000/255 against a clean 11.537, with '
       + 'the control beside it still green at exactly 0. Nothing else moves - with the noise '
       + 'at zero, which is where every other arm in this file leaves it, this mutation is the '
@@ -435,7 +445,11 @@ const MUTATIONS = {
         + '+ sin((length(p0 - regionCentre) * rippleFreq '
         + '- floor(time * rippleSpeed * 8.0) * 0.125) * 6.2831853) * ripple * rw) : vec3(0.0)));',
     ]],
-    fails: 'the ripple half of the turbulence section, alone: the row that says a character '
+    fails: 'and read after the other two displacements, which run before the turbulence and sat '
+      + 'at zero in every arm - so the one above cannot see it. Both are inlined together, '
+      + 'because the pair share a radial direction and a build hashing after them hashes the '
+      + 'drawn position exactly. '
+      + 'The ripple half of the turbulence section, alone: the row that says a character '
       + 'was hashed before the ripple and the push. Its control beside it stays green at '
       + 'exactly 0, so the two phases still hold every point inside its own cell and this is '
       + 'the characters going still rather than the geometry moving. The noise rows above it '
@@ -460,7 +474,10 @@ const MUTATIONS = {
       '    float f = (glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep) '
         + '/ max(1e-4, glyphTone + glyphHash + glyphRain);',
     ]],
-    fails: 'two rows: the one that says doubling two keys renders a different frame, and the '
+    fails: 'the three keys mixed rather than summed, caught on scale rather than on the '
+      + 'character - the document\'s own discriminator is the same number under both '
+      + 'compositions. '
+      + 'Two rows: the one that says doubling two keys renders a different frame, and the '
       + 'fitted index row beneath it, where a normalising mix with the other two keys down '
       + 'draws one character at every tone and the painted count sits at 20104px across the '
       + 'whole sweep. The guard and the solo-key control stay green, because a mix still draws '
@@ -485,7 +502,9 @@ const MUTATIONS = {
       '    float f = fract(glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
       '    float f = fract(0.0 * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
     ]],
-    fails: 'four rows: glyph.tone unexplained in the drop-one sweep, the count beneath it one '
+    fails: 'the tonal key, and the ink ordering under it that no comparison of two pictures can '
+      + 'see. '
+      + 'Four rows: glyph.tone unexplained in the drop-one sweep, the count beneath it one '
       + 'lower than the clean run\'s, the ink ramp\'s strict row at 1.55% to 1.55%, and the '
       + 'fitted index row, where every arm of the sweep draws index 0 and paints the same '
       + '2852px. The count is quoted as a delta rather than as a figure because the clean run '
@@ -518,7 +537,9 @@ const MUTATIONS = {
       '  float rainLift = 1.0 - smoothstep(0.0, rainTrail / rainSpan, fract(vRain));',
       '  float rainLift = 1.0 - smoothstep(0.0, rainTrail / rainSpan, 1.0 - fract(vRain));',
     ]],
-    fails: 'the row that says the afterglow is above the head, alone, and it reads as the '
+    fails: 'and which side of the head its afterglow sits on, without which the wave reads as '
+      + 'rising. '
+      + 'The row that says the afterglow is above the head, alone, and it reads as the '
       + 'exact mirror of the clean run rather than as a collapse: 0.0000 above the head and '
       + '0.5282 below, against 0.5363 above and 0.0000 below. The guard above it stays green, '
       + 'so the column still carries a drop and this is a direction rather than an absence',
@@ -530,7 +551,9 @@ const MUTATIONS = {
       '    vRain = (rainPhase * rainSpeed + room.y) / (rainSpan * spanSec * 30.0) '
         + '+ hash(dot(wc.xz, vec2(269.5, 183.3)));',
     ]],
-    fails: 'five rows. The claim is the link-speed equality, 8d8414c35504 at 33ms against '
+    fails: 'its head gap in metres of room rather than in frames of whatever the link is doing, '
+      + 'which only two link speeds see. '
+      + 'Five rows. The claim is the link-speed equality, 8d8414c35504 at 33ms against '
       + '074d7390ee19 at 111ms. The other four are the whole trail section, which is fixture '
       + 'rather than finding: it renders at the default quarter-second span, so the mutated '
       + 'divisor multiplies its head gap by seven and a half, no head is left inside the '
@@ -544,7 +567,9 @@ const MUTATIONS = {
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);',
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vSize);',
     ]],
-    fails: 'four rows, on a tree that is otherwise green. **Two carry the claim** and they '
+    fails: 'the legibility band counted in reference pixels alone, which is the unit every other '
+      + 'glyph arm agrees with and so the one none of them can refuse. '
+      + 'Four rows, on a tree that is otherwise green. **Two carry the claim** and they '
       + 'are the two halves of it: the in-band '
       + 'cell coming back a hard bit at one colour, and the cut-away pair parting company - '
       + 'vSize is the un-halved reference size and carries no crop state at all, so a cut-away '
@@ -568,7 +593,9 @@ const MUTATIONS = {
       '  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize / max(k, 1.0);',
       '  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize;',
     ]],
-    fails: 'the claim row of the above-1080 section, alone: the two key settings parting '
+    fails: 'and the same band counted in the buffer\'s pixels alone, which no arm below 1080 can '
+      + 'refuse and which lets a view parameter move the graded look. '
+      + 'The claim row of the above-1080 section, alone: the two key settings parting '
       + 'company at a cell the look asked to draw as a splat. Its guard row stays green - the '
       + 'buffer, the scale and the two readings are geometry and this mutation moves none of '
       + 'them - and so does the control beside it, because a cell above the band on both '
@@ -582,7 +609,9 @@ const MUTATIONS = {
       '  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize / max(k, 1.0);',
       '  vLegiblePx = gl_PointSize / max(k, 1.0);',
     ]],
-    fails: 'the cut-away row of the unit section, alone: the three keys parting company on a '
+    fails: 'the same reading with the crop taken out of it, so a cut-away point keeps a sprite '
+      + 'above the legibility band and draws a smaller character where dust is promised. '
+      + 'The cut-away row of the unit section, alone: the three keys parting company on a '
       + 'frame every point of which the crop has cut away. Its guard stays green, because the '
       + 'cut-away wall still paints, and so does the uncropped control beside it - that arm is '
       + 'inside no crop, so this mutation is the shipped expression there',
@@ -593,7 +622,9 @@ const MUTATIONS = {
       '    float rainStep = floor(vRain) * 0.6180339887498949;',
       '    float rainStep = floor(vRain);',
     ]],
-    fails: 'three rows, and it has two catchers because the scrambled set was moved onto this '
+    fails: 'the drop counter handed to the index raw, which is inert at exactly the weight the '
+      + 'key should be loudest at. '
+      + 'Three rows, and it has two catchers because the scrambled set was moved onto this '
       + 'weight for it. The row that names it is the rain-key row of the index section - the '
       + 'key at exactly 1 drawing the picture it draws with the key at 0. Its nonblank guard '
       + 'stays green, because the frame is still full of characters; what has gone is the '
@@ -609,7 +640,10 @@ const MUTATIONS = {
       '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
       '    vRain = (-rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
     ]],
-    fails: 'the descent row of the trail section, alone. Its guard above it stays green - the '
+    fails: 'and which way the whole pattern travels, which is a different claim from that one '
+      + 'and which no single frame holds - the trail is still above a head going the wrong '
+      + 'way. '
+      + 'The descent row of the trail section, alone. Its guard above it stays green - the '
       + 'head is still found at all four phases and still clear of both ends of the column - '
       + 'and so does the afterglow row, which is the whole point of the pair: the trail is '
       + 'still on the upper side of the head in a wave that is going the wrong way',
@@ -621,7 +655,11 @@ const MUTATIONS = {
         + '  fragColor = vec4(col * exposure, alpha * falloff);',
       '  fragColor = vec4(col * exposure, alpha * falloff);',
     ]],
-    fails: 'eight rows. **Two carry the claim**, one from each two-surface section: the '
+    fails: 'a fragment at exactly zero alpha writing depth, which is invisible geometry per '
+      + 'point on the hard-edged path. Its two sections are the only ones here standing two '
+      + 'surfaces up: every other plants one wall coincident with itself, where nothing is '
+      + 'behind anything to be hidden. '
+      + 'Eight rows. **Two carry the claim**, one from each two-surface section: the '
       + 'character section\'s is the far surface moving under pixels the near marks never drew '
       + 'on; the newborn section\'s is the frame with an invisible cloud in it no longer being '
       + 'the frame without it. Every guard beside them stays green, because both fixtures '
@@ -645,7 +683,9 @@ const MUTATIONS = {
       '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;',
       '  if (softEdge == 0 && glyphMix > 0.0 && alpha * falloff <= 0.0) discard;',
     ]],
-    fails: 'seven rows. **The claim is the newborn section\'s**, at 365 of 184184 pixels moved '
+    fails: 'the same discard narrowed back to characters, which is the state one commit of this '
+      + 'history was in and the wrong fix the character section cannot refuse. '
+      + 'Seven rows. **The claim is the newborn section\'s**, at 365 of 184184 pixels moved '
       + 'with all 365 behind a newborn sprite. Both guards beside it stay green - the plant is '
       + 'geometry and a condition does not move it - and so does every row of the character '
       + 'section next door, which is the whole point of this control: that section holds the '
@@ -667,7 +707,9 @@ const MUTATIONS = {
       '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;',
       '  if (softEdge == 0 && (glyphMix > 0.0 || falloff <= 0.0) && alpha * falloff <= 0.0) discard;',
     ]],
-    fails: 'seven rows. The claim is the newborn section\'s, at the same 365 of 184184 - the '
+    fails: 'and narrowed the other way, to the disc\'s rim and not the point that has not faded '
+      + 'in yet. '
+      + 'Seven rows. The claim is the newborn section\'s, at the same 365 of 184184 - the '
       + 'two narrowings are indistinguishable on that fixture and that is correct rather than a '
       + 'gap, because on it every zero-alpha fragment is a birth. It is a separate control '
       + 'because it is a separate reachable mistake: this one is what a reader repairing the '
@@ -687,7 +729,9 @@ const MUTATIONS = {
       '  if (softEdge == 1) alpha *= min(116.64 / (vSize * vSize), 1.0) * vCellNorm;',
       '  if (softEdge == 1) alpha *= clamp(116.64 / (vSize * vSize), 0.05, 1.0) * vCellNorm;',
     ]],
-    fails: 'the energy-invariance row of the sprite-size section, alone, at a spread of '
+    fails: 'the pile-up fix, planted because no shipped look reaches the band - a sprite grown '
+      + 'to a cell moves the floor from 19cm out to where a person stands. '
+      + 'The energy-invariance row of the sprite-size section, alone, at a spread of '
       + '4.055 against a clean 1.046 and a band of 1.15 - the two arms past the floor carry '
       + '6391 and 13041 where every arm should carry about 3200. The guards either side stay '
       + 'green, so the sprites still render and still grow',
@@ -698,7 +742,11 @@ const MUTATIONS = {
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);',
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx) + 0.02;',
     ]],
-    fails: 'eight rows, and they are one fact arriving in three places. The row that names it '
+    fails: 'and the master exactly absent at 0, which is what eleven of the twelve shipped looks '
+      + 'rest on - cascade is the exception and the only one that draws a character at all. '
+      + 'The ten-of- twelve population next door is a different set: that one is the '
+      + 'lattice-zero looks the compensation has to leave alone. '
+      + 'Eight rows, and they are one fact arriving in three places. The row that names it '
       + 'is the glyph-of-0-is-inert equality in the defaults section. **Six are '
       + 'section 1b** - all five readings at 6 of 6 frames, plus the raster\'s cross-build row - '
       + 'because 1b renders at parameter defaults against a build that predates the glyph '
@@ -734,7 +782,8 @@ const MUTATIONS = {
       '  vCellNorm = max((1.0 - lattice) * (1.0 - lattice), min(1.0, spriteCells * spriteCells));',
       '  vCellNorm = max((1.0 - lattice) * (1.0 - lattice), spriteCells * spriteCells);',
     ]],
-    fails: 'the cell-size-at-lattice-zero row of the defaults section, alone, at c4c44f0faac5 '
+    fails: 'and the energy correction, which rides no master at all and so is excused by neither. '
+      + 'The cell-size-at-lattice-zero row of the defaults section, alone, at c4c44f0faac5 '
       + 'against 68f63ae52440. The control beside it stays green, so the two cell sizes still '
       + 'reach the picture with the lattice raised and this is the compensation failing to be '
       + 'one rather than a parameter going dark',
