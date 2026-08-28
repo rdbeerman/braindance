@@ -1003,6 +1003,9 @@ const LANDING = {
   'datamosh.splay': 'k.mosh.uniforms.moshSplay.value',
   'datamosh.line': 'k.mosh.uniforms.moshLine.value',
   'datamosh.grain': 'k.mosh.uniforms.moshGrain.value',
+  'datamosh.drift': 'k.mosh.uniforms.moshDrift.value',
+  'datamosh.speed': 'k.mosh.uniforms.moshSpeed.value',
+  'datamosh.cycleRefresh': 'k.mosh.uniforms.moshCycleRefresh.value',
   'datamosh.refresh': 'k.mosh.uniforms.moshRefresh.value',
   denoise: 'k.uniforms.denoise.value',
   edgeTol: 'k.uniforms.edgeTol.value',
@@ -1145,6 +1148,9 @@ const EXPECT = {
   'datamosh.splay': (v) => v,
   'datamosh.line': (v) => v,
   'datamosh.grain': (v) => v,
+  'datamosh.drift': (v) => v,
+  'datamosh.speed': (v) => v,
+  'datamosh.cycleRefresh': (v) => v,
   'datamosh.refresh': (v) => v,
   denoise: (v) => (v ? 1 : 0),
   edgeTol: (v) => v,
@@ -1261,6 +1267,9 @@ const SCRAMBLE = {
   'datamosh.splay': 0.34,
   'datamosh.line': 0.38,
   'datamosh.grain': 7,
+  'datamosh.drift': 3.7,
+  'datamosh.speed': 4.2,
+  'datamosh.cycleRefresh': true,
   'datamosh.refresh': 1.85,
   denoise: false,
   edgeTol: 340,
@@ -1619,6 +1628,11 @@ const GOLDEN_ABSENT = new Set([
   'tPresetFile',
   'datamosh.amount', 'datamosh.reach', 'datamosh.decay', 'datamosh.splay',
   'datamosh.line', 'datamosh.grain', 'datamosh.refresh',
+  // The three added after the pass first shipped and missed here, which stopped the golden boot
+  // comparison and took every assertion after it down with it: main ran 13 of 155. Checked
+  // against the manifest rather than found one run at a time - all ten of its params are named
+  // here now, so the next one added is a row that reddens rather than a tool that stops.
+  'datamosh.drift', 'datamosh.speed', 'datamosh.cycleRefresh',
   'camLens',
   'transform',
 ]);
