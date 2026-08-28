@@ -44,7 +44,7 @@ const MOSH_UNIFORMS = {
   time: { value: 0 },
   moshIFrame: { value: 1 },
   resolution: { value: new THREE.Vector2(1, 1) },
-  // The datamosh package's seven, defaulting to what its manifest declares, so a page whose
+  // The datamosh package's ten, defaulting to what its manifest declares, so a page whose
   // registry has not landed yet holds the same look the first slider read will.
   mosh: { value: 0 },
   moshReach: { value: 14 },
@@ -52,6 +52,8 @@ const MOSH_UNIFORMS = {
   moshSplay: { value: 1 },
   moshLine: { value: 0.55 },
   moshGrain: { value: 3 },
+  moshDrift: { value: 0 },
+  moshSpeed: { value: 1 },
   moshCycleRefresh: { value: 0 },
   moshRefresh: { value: 1.2 },
 };

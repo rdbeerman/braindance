@@ -534,7 +534,7 @@ const EFFECT_PARAM_ORDER = [
   'stock.amount', 'stock.balance', 'stock.split', 'stock.latitude',
   'vignette.amount',
   'datamosh.amount', 'datamosh.reach', 'datamosh.decay', 'datamosh.splay',
-  'datamosh.line', 'datamosh.grain', 'datamosh.cycleRefresh', 'datamosh.refresh',
+  'datamosh.line', 'datamosh.grain', 'datamosh.drift', 'datamosh.speed', 'datamosh.cycleRefresh', 'datamosh.refresh',
 ];
 
 // The list places the shipped set and is never a census of what is installed.

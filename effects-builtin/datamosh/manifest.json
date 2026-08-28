@@ -107,6 +107,40 @@
       },
       "under": "amount"
     },
+    "drift": {
+      "def": 0,
+      "min": 0,
+      "max": 10,
+      "step": 0.1,
+      "kind": "scalar",
+      "label": "drift",
+      "panel": {
+        "group": "datamosh",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "mosh",
+        "uniform": "moshDrift"
+      },
+      "under": "amount"
+    },
+    "speed": {
+      "def": 1,
+      "min": 0,
+      "max": 10,
+      "step": 0.1,
+      "kind": "scalar",
+      "label": "speed",
+      "panel": {
+        "group": "datamosh",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "mosh",
+        "uniform": "moshSpeed"
+      },
+      "under": "amount"
+    },
     "cycleRefresh": {
       "def": false,
       "kind": "step",
