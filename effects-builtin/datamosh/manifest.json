@@ -107,6 +107,20 @@
       },
       "under": "amount"
     },
+    "cycleRefresh": {
+      "def": false,
+      "kind": "step",
+      "label": "cycle",
+      "panel": {
+        "group": "datamosh",
+        "tab": "look"
+      },
+      "bind": {
+        "on": "mosh",
+        "uniform": "moshCycleRefresh"
+      },
+      "under": "amount"
+    },
     "refresh": {
       "def": 1.2,
       "min": 0.1,
@@ -123,7 +137,7 @@
         "uniform": "moshRefresh",
         "bounds": true
       },
-      "under": "amount"
+      "under": "cycleRefresh"
     }
   },
   "panelGroups": [

@@ -521,9 +521,12 @@ export function doorRefusal(candidate, { beside = [], spines }) {
         return `${name} declares under as ${JSON.stringify(spec.under)} - it names another parameter key in the same package`;
       }
       const parent = manifest.params[spec.under];
-      if (!parent || parent === spec || parent.role !== 'master') {
-        return `${name} declares itself under ${JSON.stringify(spec.under)}, which is not another master in ${id} - `
-          + 'the parent is the term whose non-zero value reveals this row';
+      // A step defaulting to false is absent at false, so its children hide when it is unchecked.
+      const validParent = parent && parent !== spec
+        && (parent.role === 'master' || (parent.kind === 'step' && parent.def === false));
+      if (!validParent) {
+        return `${name} declares itself under ${JSON.stringify(spec.under)}, which is not a valid parent in ${id} - `
+          + 'the parent is a master or a step defaulting to false, whose non-zero value reveals this row';
       }
     }
   }

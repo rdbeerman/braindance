@@ -52,6 +52,7 @@ const MOSH_UNIFORMS = {
   moshSplay: { value: 1 },
   moshLine: { value: 0.55 },
   moshGrain: { value: 3 },
+  moshCycleRefresh: { value: 0 },
   moshRefresh: { value: 1.2 },
 };
 

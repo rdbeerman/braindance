@@ -103,7 +103,7 @@ const MUTATIONS = {
   // from a frame that was never a keyframe and lands somewhere playback never was.
   'mosh-never-refreshes': { file: 'web/main.js', edits: [[
     `    mosh.uniforms.moshIFrame.value = (moshFresh || !moshWasLive
-      || moshRefreshes(lastProgramTime, lastMoshPeriod, t, moshPeriod)) ? 1 : 0;`,
+      || (moshCycles && moshRefreshes(lastProgramTime, lastMoshPeriod, t, moshPeriod))) ? 1 : 0;`,
     '    mosh.uniforms.moshIFrame.value = (moshFresh || !moshWasLive) ? 1 : 0;',
   ]] },
   // The mosh contributes nothing to the pre-roll, so the seek starts wherever the surface memory
