@@ -2966,9 +2966,12 @@ Two things the fix needed that the shape did not make obvious. The guard belongs
 **handlers** and not inside `applyStoredPreset`, because that function and `restoreProject`
 beside it are exposed raw for the proof tools to drive, and a guard pushed down there
 starts silently dropping calls that are not gestures. And each door keeps **its own
-`catch`**: the recorder's apply writes `ui.recLookNote` deliberately, since
+`catch`**: the recorder's apply wrote `ui.recLookNote` deliberately, since
 `showTimelineError` targets a strip that surface does not show, so a shared catch in the
-wrapper would move that sentence somewhere nobody can see it.
+wrapper would have moved that sentence somewhere nobody can see it. Past tense on that one
+door: the record view gained tabs on 2026-08-05 and the recorder's apply went with them,
+taking its note. The guard, `applyStoredPreset` and the editor's doors onto `appliedPreset`
+are all still here, so the argument holds and one of the doors it was made about does not.
 
 **The same guard stranded the caret its comment said it preserved**, which is the smaller
 half and the one a row can hold. `pickPresetSubset` hands focus to the control that opened

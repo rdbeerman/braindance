@@ -106,9 +106,9 @@ node tools/registry-check.mjs --mutate glyph-hash-after-the-region # ... and rea
 node tools/registry-check.mjs --mutate crossfade-reads-the-reference # ... the legibility band counted in reference pixels alone,
                                                                   #     which is the unit every other glyph arm agrees with and
                                                                   #     so the one none of them can refuse
-node tools/registry-check.mjs --mutate crossfade-before-the-halving # ... and the same reading taken one line early, so a cut-away
-                                                                  #     cell drawn at half its pixels is crossfaded as though it
-                                                                  #     had all of them
+node tools/registry-check.mjs --mutate crop-still-draws-characters # ... the same reading with the crop taken out of it, so a
+                                                                  #     cut-away point keeps a sprite above the legibility band
+                                                                  #     and draws a smaller character where dust is promised
 node tools/registry-check.mjs --mutate crossfade-ignores-the-buffer-scale # ... and the same band counted in the buffer's pixels
                                                                   #     alone, which no arm below 1080 can refuse and which lets
                                                                   #     a view parameter move the graded look
@@ -432,7 +432,7 @@ node tools/editor-check.mjs --mutate gizmo-renders-from-the-pointer    # ... the
 node tools/editor-check.mjs --mutate preset-writes-every-clip          # ... a preset's cloud half written to every clip rather
                                                                       #     than to the selected one, which is the whole of
                                                                       #     what makes a look a clip's own. Reddens 22b's
-                                                                      #     "and on no other clip" 
+                                                                      #     "and on no other clip"
 node tools/editor-check.mjs --mutate restore-refuses-a-regrown-slot    # ... the synchronous restore refusing a clip slot that
                                                                       #     grew back, which is what the undo of a delete is
 node tools/editor-check.mjs --mutate lanes-clear-siblings --no-render  # ... and must FAIL
@@ -1315,6 +1315,18 @@ node tools/syntax-check.mjs --mutate anchor-duplicated-into-a-second-program # .
                                                      #   in the *other* program, which is the arm that says the
                                                      #   count sums over every assembled string rather than
                                                      #   asking each one on its own
+node tools/syntax-check.mjs --mutate doc-invokes-an-undeclared-mutation # ... and a `--mutate` this prose offers
+                                                     #   that no tool's table declares, which is a run nobody
+                                                     #   can make listed as one anybody can
+node tools/syntax-check.mjs --mutate doc-lists-a-mutation-under-the-wrong-tool # ... and one listed under a tool
+                                                     #   that does not declare it, which the row above cannot
+                                                     #   see because the name resolves somewhere
+node tools/syntax-check.mjs --mutate doc-bullets-an-undeclared-mutation # ... and the other form the reference
+                                                     #   offers a control in, a bullet naming one nothing
+                                                     #   declares
+node tools/syntax-check.mjs --mutate doc-line-ends-in-whitespace # ... and a prose line ending in a space,
+                                                     #   which is invisible on the page and invisible to a
+                                                     #   clean `git diff --check`
 node tools/release-gate-check.mjs                    # the .npmrc supply-chain gate is actually armed
 node tools/release-gate-check.mjs --mutate wrong-unit # ... and must FAIL (also: no-gate, absent)
 node tools/cpp-check.mjs                             # both C++ files parse and typecheck, in all four
@@ -1866,8 +1878,8 @@ the time the click lands. Nothing in either file says so, and the two ends can m
 independently: a look re-graded to leave `optical` alone, or a change to the reveal predicate,
 turns those clicks into thirty-second timeouts - which arrive as a crash with **zero failed
 assertions**, the shape this repo has twice recorded being written down as a bug found. If you
-touch either end, run `keyframe-check`; `editor-check` section 13c is the row that grades the
-mechanism itself.
+touch either end, run `keyframe-check`; `editor-check`'s row 'moving one parameter off its
+default opens the group that holds it' is the one that grades the mechanism itself.
 
 **Section 6g presses two diamonds and asks first whether it can.** It keys `exposure` and `bloom`
 at one playhead over a clip that does not start at zero, which is the pair that says the boundary
@@ -2450,16 +2462,6 @@ moment the derivation catches up with them.
   there, before the row means anything. Without the term the groups breathe open and shut as
   the playhead crosses a curve's default, because the evaluator writes through `params.set` and
   `params.get` therefore answers the evaluated value.
-- **`detail-ignores-the-reading`** puts `Reading · detail` back onto the default rule. It takes
-  the *reading* terms out of that group's closure and leaves `revealsItself('detail')` standing,
-  so tuning a parameter inside the group still opens it exactly as before — the loss is narrower
-  than this document once claimed, and precisely so: the group's seven parameters sit at the
-  shader literals they replaced, so on the default rule alone it stays shut whichever reading is
-  live, which is the one case its closure exists for. It reddens **three rows**; the first
-  carries the claim and the two below it are the fixture saying it could not establish a live
-  `detail` to test the store rule against. It was four until 15i stopped needing a `detail` that a
-  reading had opened: that block pins `detail` open while it is *quiet* now, which is a
-  disagreement whether or not the closure reads the readings.
 
 Two things about the section that are not obvious from reading it. **It reloads the page rather
 than opening a second one**, because `page.route` is installed per page — a second page would
