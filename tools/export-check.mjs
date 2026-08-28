@@ -89,6 +89,38 @@ const RES_LOOK = { far: 4.0, near: 0.05, pointSize: 12 };
 const CONTROL_MARGIN = 5;
 
 const MUTATIONS = {
+  // The guard removed at its source rather than door by door: one predicate answers for all
+  // eighteen call sites, so this is the whole of it and no door can be left accidentally armed.
+  // Must redden **ten** rows of section 9, measured: the six door rows, the render-finished row,
+  // the document row, the backstop counter and the record row. Two of those are worth reading
+  // rather than counting. The render does not merely draw the wrong look - an unguarded undo
+  // re-enters the transport and the render dies with "reached the export 3 times, not once", so
+  // the shipped defect is louder than a changed picture. And the counter reads 2 rather than 6,
+  // because only the doors that commit reach the backstop: the four that do not are exactly why
+  // the guard is at the doors and not at `history.commit`.
+  //
+  // The value row stays green, and that is the row being honest rather than weak: the last door
+  // reloads the document the render started from, so the closing look is the opening one. It is
+  // why the document is read after every press instead of only at the end.
+  'edits-during-an-export-are-not-refused': {
+    file: 'web/main.js',
+    edits: [["function editsBlocked() {\n  if (exporting) return 'an export is running';\n  return null;\n}",
+      'function editsBlocked() {\n  return null;\n}']],
+    fails: 'section 9: every door lets a write through while a render is reading the document',
+  },
+  // The painter stops reaching the two bars while still keeping the reading, which is the half a
+  // check reading `k.export.progress()` alone cannot see - `onProgress` fires either way, so a
+  // row over the number proves the plumbing that was already there. Must redden exactly **one**
+  // row, measured: the one reading the bar's width and its aria value. The chip's own row stays
+  // green, because the count and the hiding are written below this loop rather than inside it,
+  // and that split is deliberate - two rows over two writers, so a painter that reaches one and
+  // not the other is named rather than averaged.
+  'the-progress-bar-is-never-painted': {
+    file: 'web/main.js',
+    edits: [['  for (const bar of [ui.exportBar, ui.exportingBar]) {\n    if (!bar) continue;\n',
+      '  for (const bar of []) {\n    if (!bar) continue;\n']],
+    fails: 'section 9: the bar and the chip stop following the render they report',
+  },
   // The container kept and the stream swapped, so only what is inside the .mov moves.
   'prores-writes-h264': { file: 'server/export.js', edits: [[
     "    args: ['-c:v', 'prores_ks', '-profile:v', '3', '-pix_fmt', 'yuv422p10le'],",
@@ -2016,6 +2048,185 @@ if (!parkedRun.ok) {
     check(!Object.hasOwn(record.project ?? {}, 'suppressed'),
       'and its deliverable records no suppression, because there was nothing to suppress',
       `suppressed ${JSON.stringify(record.project?.suppressed ?? null)}`);
+  }
+}
+
+console.log('\n[9] an edit is refused while a render runs, and the file is the document the record names');
+// One Ctrl+Z during an export used to change the look halfway through the delivered file, and the
+// job record beside it - serialised once when the sink is built - then described the look at the
+// start. So the record was a lie about the file next to it and a re-render from it produced a
+// different video. The window is the whole export rather than a few microtasks, so nothing here
+// is timed: `exportClip` sets its flag before its first await, so the doors below are pressed in
+// the same task that starts the render and the render is still running for every one of them.
+{
+  const GUARD = {
+    width: STAGE.width, height: STAGE.height, fps: EXPORT_FPS,
+    from: 0, to: EXPORT_FRAMES, name: 'check-guard', codec: 'lossless',
+  };
+  const guarded = await onFreshPage('the edit-during-export run', async (page) => {
+    await setStage(page, STAGE);
+    return page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const note = () => document.getElementById('tNote').textContent;
+      // A value away from its default and committed, so the document under the render is one
+      // this section put there and the undo below has somewhere to land.
+      k.params.set('opacity', 0.42);
+      k.keyframes.undo.commit();
+      const before = JSON.stringify(k.library.serialiseProjectBody());
+      const opacityBefore = k.params.get('opacity');
+
+      // One door per rendered frame, pressed from inside the render's own progress callback.
+      // That is the reported scenario - a hand landing part-way through a long render - rather
+      // than a burst before the first frame, and it is still deterministic: the callback fires
+      // once per frame, so door N is pressed while frame N is on the way to the encoder.
+      const doors = [];
+      const samples = [];
+      const presses = [
+        ['a look value', () => k.params.set('opacity', 0.93)],
+        ['an undo', () => k.keyframes.undo.pop()],
+        ['a keyframe', () => k.keyframes.toggle('opacity')],
+        ['a retime', () => k.keyframes.setRetime({ rate: 2, keys: [] })],
+        ['a trim', () => k.editor.setClipRange(0.1, 0.4)],
+        ['a project load', () => k.library.loadProject('check-guard-doc', JSON.parse(before))],
+      ];
+      const running = k.export.run(Object.assign(${JSON.stringify(GUARD)}, {
+        onProgress: (n, total) => {
+          const bar = document.getElementById('exportBar');
+          samples.push({
+            n,
+            total,
+            width: bar.firstElementChild.style.width,
+            aria: bar.getAttribute('aria-valuenow'),
+            chipShown: !document.getElementById('tExporting').hidden,
+            chipText: document.getElementById('tExportingCount').textContent,
+          });
+          const door = presses[n - 1];
+          if (!door) return;
+          document.getElementById('tNote').textContent = '';
+          let threw = null;
+          try { door[1](); } catch (e) { threw = e.message; }
+          // Read straight after the press rather than only at the end: a door that moved the
+          // document and a later door that moved it back would leave the closing comparison
+          // agreeing with itself, and the frames in between are the file.
+          doors.push({
+            what: door[0],
+            said: note(),
+            threw,
+            doc: JSON.stringify(k.library.serialiseProjectBody()),
+          });
+        },
+      }));
+      const startedRunning = k.export.running();
+
+      // Held rather than thrown: a render that a door broke is a finding this section reports,
+      // and every door pressed before the break still has its row.
+      let failed = null;
+      let done = null;
+      try { done = await running; } catch (e) { failed = e.message; }
+      return {
+        startedRunning,
+        doors,
+        samples,
+        failed,
+        before,
+        after: JSON.stringify(k.library.serialiseProjectBody()),
+        opacityBefore,
+        opacityAfter: k.params.get('opacity'),
+        editsDuringExport: k.export.editsDuringExport(),
+        endProgress: k.export.progress(),
+        barHidden: document.getElementById('exportBar').hidden,
+        chipHidden: document.getElementById('tExporting').hidden,
+        output: done === null ? null : done.output,
+      };
+    })()`);
+  });
+
+  if (!guarded.ok) {
+    check(false, 'the edit-during-export run completed', guarded.error);
+  } else {
+    const g = guarded.value;
+    check(g.startedRunning === true && g.doors.length === 6,
+      'the render was running while every one of the six doors was pressed, one per frame',
+      `running ${g.startedRunning}, ${g.doors.length} of 6 pressed`);
+    // Kept beside the door rows rather than after them: a render a door broke is the same defect
+    // arriving louder, and a section that only reported the look moving would call this a crash.
+    check(g.failed === null,
+      'and the render finished, so an edit reaching it does not merely change the picture but is '
+      + 'refused before it can disturb the frame accounting either',
+      g.failed === null ? 'completed' : g.failed.slice(0, 130));
+    // Every door, one row, so a door that stops refusing is named rather than averaged away.
+    for (const door of g.doors) {
+      check(/an export is running/.test(door.said),
+        `${door.what} is declined, and the editor says why rather than doing nothing`,
+        door.said ? `"${door.said.slice(0, 90)}"` : 'the editor said nothing at all');
+    }
+    check(g.opacityAfter === g.opacityBefore,
+      'the value a hand tried to move is where it was, so the refusal was a refusal and not a '
+      + 'message beside a write that happened anyway',
+      `${g.opacityBefore} before, ${g.opacityAfter} after, and 0.93 was asked for`);
+    const moved = g.doors.filter((d) => d.doc !== g.before);
+    check(g.doors.length === 6 && moved.length === 0,
+      'and the whole document is byte-identical after every one of the six presses, which is the '
+      + 'claim the rows above are each one door of',
+      moved.length
+        ? `${moved.length} of ${g.doors.length} left it changed: ${moved.map((d) => d.what).join(', ')}`
+        : `${g.before.length} bytes, unchanged at all ${g.doors.length} presses`);
+    check(g.after === g.before,
+      'and it is that document again when the render ends, so nothing landed late',
+      g.after === g.before ? `${g.before.length} bytes` : 'the document moved');
+    // The backstop, and the row that covers the doors this section does not know about: a writer
+    // reaching the document during a render increments it whether or not anything drove it here.
+    check(g.editsDuringExport === 0,
+      'and no edit reached the document by a door this section never pressed',
+      `${g.editsDuringExport} recorded`);
+
+    // A floor first, because every row below it is over this list and a row over an empty list
+    // passes. A render this short can be sampled few times, so the floor is one rather than many.
+    check(g.samples.length > 0,
+      'the render was caught part-way at least once, so the rows below are about something',
+      `${g.samples.length} samples, reaching frame `
+      + `${Math.max(0, ...g.samples.map((x) => x.n))} of ${EXPORT_FRAMES + 1}`);
+    const offBy = g.samples.filter((x) => {
+      const percent = String(Math.round((x.n / x.total) * 100));
+      return x.width !== `${percent}%` || x.aria !== percent;
+    });
+    check(g.samples.length > 0 && offBy.length === 0,
+      'and the bar the dialog draws is the fraction the render reports, in its width and in what '
+      + 'it tells a screen reader',
+      offBy.length
+        ? `${offBy.length} of ${g.samples.length} disagree, first ${JSON.stringify(offBy[0])}`
+        : `${g.samples.length} samples agreeing, last ${JSON.stringify(g.samples.at(-1) ?? null)}`);
+    const unseen = g.samples.filter((x) => !x.chipShown || x.chipText !== `${x.n}/${x.total}`);
+    check(g.samples.length > 0 && unseen.length === 0,
+      'and the application bar carries the same count all the while, so a render whose dialog is '
+      + 'shut is still visible',
+      unseen.length ? `${unseen.length} of ${g.samples.length} hidden or mislabelled`
+        : `chip read ${g.samples.at(-1)?.chipText ?? 'nothing'} last`);
+    check(g.samples.some((x) => x.total === EXPORT_FRAMES + 1),
+      'and the total it counts against is the frame count that was asked for',
+      `totals ${JSON.stringify([...new Set(g.samples.map((x) => x.total))])} against ${EXPORT_FRAMES + 1}`);
+    check(g.endProgress === null && g.barHidden === true && g.chipHidden === true,
+      'and both bars are put away when it finishes, so a finished render does not leave a full '
+      + 'one standing',
+      `progress ${JSON.stringify(g.endProgress)}, bar hidden ${g.barHidden}, chip hidden ${g.chipHidden}`);
+
+    // The record beside the file. `serialiseProjectBody` reads `timeline.outputFps`, and the
+    // export sets that to its own rate before the sink is built, so the one term that is allowed
+    // to differ is substituted rather than excused - anything else differing is the defect.
+    if (g.output === null) {
+      check(false, 'the job record is the document the frames were rendered from',
+        'the render did not finish, so there is no record beside a file to read');
+    } else {
+    const record = JSON.parse(readFileSync(`${g.output}.job.json`, 'utf8'));
+    const expected = { ...JSON.parse(g.before), outputFps: GUARD.fps };
+    check(JSON.stringify(record.project) === JSON.stringify(expected),
+      'and the job record is the document the frames were rendered from, so a re-render from it '
+      + 'produces this file rather than another one',
+      JSON.stringify(record.project) === JSON.stringify(expected)
+        ? `${JSON.stringify(record.project).length} bytes agreeing`
+        : `record opacity ${record.project?.clips?.[0]?.params?.opacity}, document `
+          + `${JSON.parse(g.before).clips?.[0]?.params?.opacity}`);
+    }
   }
 }
 

@@ -796,6 +796,13 @@
      the bar keeps its 51px and the lanes stay where a dragged key expects them. */
   .tchips.more { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
 
+  /* One bar, two homes: the dialog gets the wide one, the application bar chip a short one.
+     A track and a fill, no animation - the fill moves when a frame lands and at no other
+     time, so a stalled render looks stalled instead of looking busy. */
+  .pbar { display: block; width: 100%; height: 3px; background: var(--line); overflow: hidden; }
+  .pbar > i { display: block; height: 100%; width: 0; background: var(--accent); }
+  #exportBar { margin: 10px 0 0; }
+  #tExporting .pbar { width: 46px; }
   .tchip {
     flex: none;
     display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px;
@@ -1332,6 +1339,19 @@
          it since the bar arrived and there was nothing here to write to. -->
     <div class="appstatus" id="appStatusSlot">
       <span class="tchip" id="tNote"></span>
+      <!-- Progress lives here and deliberately not in `#tNote`. That chip is where every
+           refusal in the editor arrives and nowhere else, and a render writes progress once
+           per frame - so sharing the element would rub out a refusal within one frame, which
+           is the same "the write silently did nothing" failure the refusal exists to prevent.
+           It is here rather than only in the export dialog because that dialog closes: an
+           export the operator cannot see is an editor that refuses everything for no visible
+           reason. A frame count and no estimate - an estimate that is wrong is worse than a
+           count that is right. -->
+      <span class="tchip" id="tExporting" hidden>
+        <span class="pbar" id="tExportingBar" role="progressbar"
+              aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span>
+        <b id="tExportingCount"></b>
+      </span>
       <span class="tchip" id="tResume" hidden><b id="tResumeWhen"></b><button id="tResumeOpen" type="button">restore autosave</button></span>
       <span class="tchip warn" id="tMissing" hidden></span>
       <span id="appStatus"></span>
@@ -1748,6 +1768,12 @@
          row around it was rewritten because nothing about the aspect/rate split touches
          what a finished file is - the merge above took `Render` and `Export` down to one
          command, and neither of those was this. -->
+    <!-- Determinate and nothing else: the frame count is known exactly, so a bar that
+         reports it is honest where a spinner or a remaining-time guess is not. Hidden
+         between renders, so a dialog opened to set something up is not carrying a
+         zero-width bar that reads as a stalled one. -->
+    <div class="pbar" id="exportBar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+         aria-valuenow="0" hidden><i></i></div>
     <div class="dialog-actions">
       <span class="note" id="tExportNote"></span>
       <button class="dialog-secondary" id="tExportSave" type="button" disabled>save a copy&hellip;</button>

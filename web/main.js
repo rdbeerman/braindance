@@ -368,6 +368,7 @@ function paintAspectSelection(buttons) {
 
 /** Adopts a shape: the editor reframes to it and the project remembers it. */
 function setProjectAspect(aspect, { fromDocument = false } = {}) {
+  if (!fromDocument && refuseEdit('changing the shape')) return false;
   const [w, h] = reduceAspect(aspect[0], aspect[1]);
   if (!(w > 0 && h > 0)) return false;
   const leaving = projectAspect.join(':');
@@ -1108,6 +1109,18 @@ function specOf(name) {
   return PARAMS[name];
 }
 
+// Two flags declared here rather than beside the code that owns them, because `params.set`
+// below reads both and the boot value walk calls it while this module is still evaluating. A
+// `let` read above its declaration throws, and a page that throws here publishes no `__kinect`
+// and boots into nothing.
+
+// Applying a preset is a user action and can never be an evaluation-time effect.
+let evaluating = false;
+
+// Whether an export owns the renderer. Nothing else may draw while one does, and nothing may
+// write the document it is reading.
+let exporting = false;
+
 const params = {
   spec(name) {
     const spec = specOf(name);
@@ -1132,6 +1145,15 @@ const params = {
   /** The single write path. UI, presets and the tracks all go through here. */
   set(name, value) {
     const spec = specOf(name);
+    // The export renders through this same path - `evaluateTracks` writes every keyed value on
+    // every frame it draws - so the carve-out is what lets the render proceed while a hand on a
+    // control is refused. The control is written back from the registry rather than left showing
+    // the number nobody accepted, which is the second place the refusal is visible.
+    if (!evaluating && refuseEdit(`a change to ${name}`)) {
+      const held = homeOf(spec).values.get(name);
+      writeControl(name, held);
+      return held;
+    }
     const v = normalise(name, spec, value);
     homeOf(spec).values.set(name, v);
     // Straight through: the render core is already pointed at the clip this write is about,
@@ -1704,6 +1726,35 @@ async function reloadEffects() {
 const EFFECT_POLL_MS = 6000;
 let effectReloading = false;
 
+/**
+ * Why a document edit cannot happen right now, by name, or null.
+ *
+ * An export reads this document a frame at a time over minutes, so a write landing in the middle
+ * of one changes the look halfway through the file being encoded - and the job record beside it,
+ * serialised once when the sink is built, then describes a document that no longer exists.
+ */
+function editsBlocked() {
+  if (exporting) return 'an export is running';
+  return null;
+}
+
+/**
+ * Declines a document edit and says why, or lets it through. Named for the gesture rather than
+ * for the control that started it, because the sentence is what a person reads.
+ *
+ * A refusal has to be visible or it is worse than the corruption it prevents: a write that
+ * silently does nothing is one the operator makes again, harder.
+ */
+function refuseEdit(what) {
+  const why = editsBlocked();
+  if (why === null) return false;
+  say(`${what} is declined while ${why}: the file it is writing is this document`);
+  return true;
+}
+
+/** How many document edits reached the document while an export was reading it. */
+let editsDuringExport = 0;
+
 /** Why a rebuild may not happen right now, by name, or null. */
 function effectRebuildBlocked() {
   if (exporting) return 'an export is running';
@@ -1785,9 +1836,6 @@ function showInspector() {
 }
 
 if (!EDITING) setPanelTab(activePanelTab);
-
-// Applying a preset is a user action and can never be an evaluation-time effect.
-let evaluating = false;
 
 // Runs a bulk write without a repaint per value in it.
 function withoutRepaint(write) {
@@ -2142,6 +2190,7 @@ function addEffectToRack(id) {
 
 function removeEffectFromRack(id) {
   if (!effectInstalled(id)) return false;
+  if (refuseEdit('taking ' + id + ' out of the rack')) return false;
   const { names } = effectRackEntry(id);
   effectRackConfirming = null;
   rackedEffects.delete(id);
@@ -2436,6 +2485,7 @@ function writeFromControl(name, value) {
 
 /** Adds a key at the playhead, or removes the one already there. */
 function toggleKey(name) {
+  if (refuseEdit('keying ' + name)) return;
   retainEffectFor(name);
   const track = trackFor(name);
   const existing = track.keyAt(keyPlayhead(name), keyTolerance());
@@ -3112,6 +3162,15 @@ const history = {
     if (this.baseline === null) return false;
     const now = this.snapshot();
     if (now === this.baseline) return false;
+    // The backstop, and it records rather than refuses: by the time a commit runs the document
+    // has already moved, so declining the record would only make that change un-undoable. A
+    // commit reaching here during an export is a door this build does not guard - a different
+    // fact from an edit the operator should retry, so it gets a different sentence and a counter
+    // an instrument can read.
+    if (exporting) {
+      editsDuringExport++;
+      say('a document edit reached the export: the file being written may not be this document');
+    }
     this.stack.push(this.baseline);
     if (this.stack.length > UNDO_LIMIT) this.stack.shift();
     this.baseline = now;
@@ -3133,6 +3192,7 @@ const history = {
   },
 
   undo() {
+    if (refuseEdit('an undo')) return false;
     const previous = this.stack.pop();
     if (previous === undefined) return false;
     // The accumulators walk forward one output frame at a time and cannot be walked back.
@@ -5222,9 +5282,6 @@ class ExportTransport {
   }
 }
 
-// Whether an export owns the renderer. Nothing else may draw while one does.
-let exporting = false;
-
 const rendererClass = () => {
   const gl = renderer.getContext();
   const dbg = gl.getExtension('WEBGL_debug_renderer_info');
@@ -5312,7 +5369,18 @@ async function exportClip(options = {}) {
     }
 
     const run = new ExportTransport(timeline, {
-      width, height, fps, from, to, onProgress: options.onProgress,
+      width,
+      height,
+      fps,
+      from,
+      to,
+      // The bars are the render's own, not the button's: an export started by anything else drew
+      // nothing at all while the editor refused every edit, which is the state this guard creates.
+      onProgress: (n, total) => {
+        exportProgress = { n, total };
+        paintExportProgress();
+        options.onProgress?.(n, total);
+      },
     });
     const sink = new ExportSink({
       name: options.name ?? exportBaseName(),
@@ -5330,6 +5398,8 @@ async function exportClip(options = {}) {
     return await sink.finish();
   } finally {
     exporting = false;
+    exportProgress = null;
+    paintExportProgress();
     outputSize = null;
     resize();
     chromeOn = restore.chrome;
@@ -5390,6 +5460,10 @@ const ui = {
   exportDialog: document.getElementById('exportDialog'),
   exportGo: document.getElementById('tExport'),
   exportNote: document.getElementById('tExportNote'),
+  exportBar: document.getElementById('exportBar'),
+  exporting: document.getElementById('tExporting'),
+  exportingBar: document.getElementById('tExportingBar'),
+  exportingCount: document.getElementById('tExportingCount'),
   exportName: document.getElementById('tExportName'),
   exportNameChip: document.getElementById('tExportNameChip'),
   exportSave: document.getElementById('tExportSave'),
@@ -5645,6 +5719,31 @@ for (const chips of document.querySelectorAll('.tchips')) {
   new ResizeObserver(sayMore).observe(chips);
   new MutationObserver(sayMore).observe(chips, { subtree: true, childList: true, characterData: true });
   sayMore();
+}
+
+/** What the running render has drawn, or null between renders. */
+let exportProgress = null;
+
+/**
+ * The bar in the dialog and the chip in the application bar, from the one reading.
+ *
+ * Both, every time, because the dialog can be closed while a render runs: progress that lived
+ * only in the dialog would leave an editor refusing every edit with nothing on screen saying why.
+ */
+function paintExportProgress() {
+  const running = exportProgress !== null;
+  const { n, total } = exportProgress ?? { n: 0, total: 0 };
+  // A render of no frames is refused before it starts, so the guard is against a division rather
+  // than against a case: `total` is only ever 0 here between renders, where the bar is hidden.
+  const percent = total > 0 ? Math.round((n / total) * 100) : 0;
+  for (const bar of [ui.exportBar, ui.exportingBar]) {
+    if (!bar) continue;
+    bar.setAttribute('aria-valuenow', String(percent));
+    bar.firstElementChild.style.width = `${percent}%`;
+  }
+  if (ui.exportBar) ui.exportBar.hidden = !running;
+  if (ui.exporting) ui.exporting.hidden = !running;
+  if (ui.exportingCount) ui.exportingCount.textContent = running ? `${n}/${total}` : '';
 }
 
 const sayExport = (text) => {
@@ -6118,6 +6217,7 @@ function goTo(sec) {
 
 /** Puts one end of the export range where the playhead is. */
 function setClipRangeFromPlayhead(which) {
+  if (refuseEdit('setting the trim')) return;
   if (!timeline) return;
   const t = timeline.programSec;
   if (which === 'in') setClipInOut({ in: Math.max(0, Math.min(t, clipOut ?? timeline.duration)) });
@@ -6126,6 +6226,7 @@ function setClipRangeFromPlayhead(which) {
 }
 
 function clearClipRange() {
+  if (refuseEdit('clearing the trim')) return;
   // `null` rather than the duration, so the range still means to the end if the program grows.
   setClipInOut({ in: 0, out: null });
   history.commit();
@@ -6337,6 +6438,7 @@ function endRateGesture() {
 
 /** Puts the slope at `rate` and carries the document with it. The order is load-bearing. */
 function applyRate(rate) {
+  if (refuseEdit('a speed change')) return timeline ? timeline.programSec : 0;
   retime.rate = rate;
   rateGesture.applied = true;
   const program = programHoldingAnchor();
@@ -7878,6 +7980,7 @@ ui.beds.addEventListener('pointerdown', (e) => {
         + 'this build does not do that from the edge');
       return;
     }
+    if (refuseEdit('moving a clip')) return;
     clipDrag = {
       clip,
       side,
@@ -7915,6 +8018,7 @@ ui.beds.addEventListener('pointerdown', (e) => {
     lastKeyClick = { key: el.__key, at: now };
   }
 
+  if (refuseEdit('moving a key')) return;
   ui.beds.setPointerCapture(e.pointerId);
   const lane = el.closest('.tlane');
   laneDrag = {
@@ -8021,6 +8125,7 @@ function removeRetimeKey(key) {
 /** Removes whichever key is selected in a lane. */
 function deleteSelectedKey() {
   if (!timeline || !selection) return false;
+  if (refuseEdit('deleting a key')) return false;
   const { owner, key } = selection;
   // A stale selection is not an error: an undo rebuilds every track from a snapshot.
   if (!keysOf(owner).includes(key)) { selection = null; return false; }
@@ -8094,6 +8199,7 @@ function paintClipCommands() {
  * rather than as a new one.
  */
 async function addClipFromTake(id) {
+  if (refuseEdit('adding a clip')) return null;
   if (clips.length >= CLIP_CEILING) {
     say(`this build composites ${CLIP_CEILING} clips and this edit already holds ${clips.length}`);
     return null;
@@ -8144,6 +8250,7 @@ function headTrimTo(clip, wantStart, holdEnd) {
 function deleteSelectedClip() {
   const clip = selectedClipRow();
   if (!clip) return false;
+  if (refuseEdit('deleting a clip')) return false;
   if (clips.length === 1) {
     say('this is the only clip in the edit, and a project carries at least one');
     return false;
@@ -8236,6 +8343,7 @@ function applyEasePreset(name) {
   const state = selectionEaseState();
   const spec = EASE_PRESETS[name];
   if (!state || !spec) return false;
+  if (refuseEdit('shaping a key')) return false;
   const { keys, i, kind } = state;
   if (spec.out) keys[i].easeOut = copyHandle(spec.out);
   if (spec.in) keys[i].easeIn = copyHandle(spec.in);
@@ -8278,6 +8386,7 @@ function changePointCount(delta) {
   const state = selectionEaseState();
   const sides = pointSides(delta, state);
   if (sides.length === 0) return false;
+  if (refuseEdit('reshaping a curve')) return false;
   const { keys, i } = state;
   for (const side of sides) {
     const seg = side === 'easeOut' ? i : i - 1;
@@ -9285,6 +9394,7 @@ addEventListener('pointerdown', (e) => {
 
 function keyCameraHere() {
   if (!timeline) return;
+  if (refuseEdit('keying the camera')) return;
   const track = trackFor('camera');
   // The pose you are looking from, which makes orbiting to a shot and keying it one gesture.
   finishOrbitDrift();
@@ -9826,6 +9936,9 @@ document.addEventListener('pointerdown', (event) => {
 });
 
 function openDialog(dialog) {
+  // A dialog opened part-way through a render shows where the render is, rather than the
+  // bar it was left with when it was closed.
+  if (dialog === ui.exportDialog) paintExportProgress();
   // A menu command is hidden before the modal opens, and focus cannot be restored to it.
   const active = document.activeElement;
   const returnFocus = active instanceof HTMLElement
@@ -10116,6 +10229,7 @@ async function sourcesFor(plan) {
 
 /** Loads a project file and opens the footage its clips name. This is the untrusted door. */
 async function loadProjectNamed(name, offered = null) {
+  if (refuseEdit(`opening ${name}`)) return null;
   const doc = offered === null
     ? await (await fetch(`/projects/${encodeURIComponent(name)}`)).json()
     : { body: offered };
@@ -10641,6 +10755,7 @@ globalThis.__kinect = {
       lanesChanged();
     },
     setRetime({ rate = 1, keys = [] }) {
+      if (refuseEdit('a retime')) return;
       retime.rate = rate;
       // Built, then checked, then stored: the guard reads the handles a key will have.
       const built = keys.map((k) => ({
@@ -10688,7 +10803,13 @@ globalThis.__kinect = {
     /** Where a mark ticks in program seconds, through the selected clip's curve and placement. */
     markProgramSec: (sourceSec) => programSecOfSource(sourceSec),
     clipRange: () => ({ in: clipIn, out: clipOut }),
-    setClipRange: (inVal, outVal) => { setClipInOut({ in: inVal, out: outVal }); history.commit(); },
+    setClipRange: (inVal, outVal) => {
+      // Guarded like the gesture it stands in for: a handle that can do what the control it
+      // represents is refused would prove the guard against a door nobody can open.
+      if (refuseEdit('setting the trim')) return;
+      setClipInOut({ in: inVal, out: outVal });
+      history.commit();
+    },
     // The speed slider's travel is logarithmic, so its `value` is a position and not a rate.
     rateSlider: { toValue: sliderFromRate, toRate: rateFromSlider },
     /** The strip's height and what bounds it, so a check can drive the splitter. */
@@ -10921,6 +11042,15 @@ globalThis.__kinect = {
   export: {
     run: exportClip,
     running: () => exporting,
+    /** What both bars are drawn from, or null between renders. */
+    progress: () => (exportProgress === null ? null : { ...exportProgress }),
+    /**
+     * Document edits that reached the document while a render was reading it. Zero is the claim:
+     * every door is guarded, so this counts the doors that are not, and a check reads it rather
+     * than reading whether any particular door refused - a door added next year is counted here
+     * without anything being told about it.
+     */
+    editsDuringExport: () => editsDuringExport,
     rendererClass,
   },
 

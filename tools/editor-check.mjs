@@ -590,12 +590,16 @@ const MUTATIONS = {
   'whole-clip-does-nothing': {
     file: 'web/main.js',
     edits: [[
+      // The guard line is quoted with the rest because this anchor is the whole function body,
+      // so anything added inside it moves the anchor. The mutation still removes exactly the two
+      // writes: the range and the record of it.
       'function clearClipRange() {\n'
+        + '  if (refuseEdit(\'clearing the trim\')) return;\n'
         + '  // `null` rather than the duration, so the range still means to the end if the program grows.\n'
         + '  setClipInOut({ in: 0, out: null });\n'
         + '  history.commit();\n'
         + '}',
-      'function clearClipRange() {\n  history.commit();\n}',
+      'function clearClipRange() {\n  if (refuseEdit(\'clearing the trim\')) return;\n  history.commit();\n}',
     ]],
   },
 

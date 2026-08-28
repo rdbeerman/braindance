@@ -376,6 +376,13 @@ so it needs `--before` pointing at a commit before step 1.
 **`export-check`** needs ffmpeg and ffprobe (`--ffmpeg`, `--ffprobe`; 8.1.1 at
 `/opt/homebrew/bin`) and writes into `exports/`, which is gitignored.
 
+**Section 9 drives refused edits on purpose, and the refusals are DOM-only.** It presses six
+document doors from inside the render's own progress callback, one per frame, and each one is
+declined with a sentence on the status chip. None of them reaches the console, so the run's
+closing `no page errors` row stays green without anything being drained out of it - if a door is
+ever changed to report through `showTimelineError`, that row is where it will surface, and the
+repair is the drain this page describes for the missing-effect block rather than an exemption.
+
 **It was red on ten rows, and the question this page used to leave open — when they went
 red — is answered: `40ab241`, all ten in one commit.** Bisected over the 47 commits that
 touch `web/main.js` on this branch, using each tree's own copy of the tool. That is sound
