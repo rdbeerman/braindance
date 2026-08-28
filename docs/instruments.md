@@ -451,6 +451,35 @@ test: what would a broken version have to do to still pass. What found this one 
 populations separately — moved, merged, untouched — rather than reading the predicate, because
 three numbers that have to sum to the total cannot all be silently empty.
 
+### A stale claim has no token to search for, and a busy tree has no honest reading
+
+Two more from the same refactor as the entry above, and it is worth saying that all three arrived
+together: each one is an instrument measuring something other than what its reader thought.
+
+**A claim goes stale without leaving anything to grep for.** The census sentence lived twice — in
+`docs/proof-tools.md`'s invocation-list heading and in the paragraph forty lines above it — and
+the prune corrected the heading and left the paragraph promising "every `--mutate` control it must
+FAIL under" about a page that by then listed almost none. It stood through two commits. The same
+round's `serialiseProject` rename is the shape from the other direction: a count of call sites
+taken before the edit missed an export list entry, a property table entry, and a refusal message
+inside a string in `server/jobs.js` naming a function that would no longer exist. **A name is a
+token you can search for; a claim is a sentence somebody has to read.** What catches the first is
+the grep for the old name run *after* the edit and required to come back empty — a check whose
+passing state is nothing rather than a number anybody has to agree with. What catches the second
+is asking, at the moment of the deletion, which sentences on this page are now false. That is a
+question and not a search, and no walker will ever ask it for you.
+
+**And a check run across a tree somebody else is writing reports about nothing.** `syntax-check`
+came back `625 checked ... 1 not matching exactly once` on an anchor into `web/main.js` while
+another agent was editing that file and its tool together. Counting the anchor text by hand a
+minute later found it present, and a second run was clean. The tell generalises past the busy
+tree: **a reading that disagrees with a direct measurement of the same bytes is a reading about a
+file that changed between the two.** Noticing that the tree is busy only works if you happen to
+look; noticing that two measurements of one file disagree is a property of the readings. A
+mutation control makes this worse rather than better, because it writes to the tree and reverts
+it — so it must never be run against files an agent holds, and a run that was is void rather than
+interesting.
+
 ### A source row that reads the staged tree cannot be falsified by a page mutation
 
 The match-exactly-once rule guards the *anchor*. This is the same hole one layer out, in the
