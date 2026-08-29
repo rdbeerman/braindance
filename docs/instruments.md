@@ -671,6 +671,18 @@ the block, and the tool now **refuses to run** when the look's warm window is sh
 block, naming the arithmetic. With that, the arm warms 15 of 15 frames and the warming clip costs
 **+0.02 ms** - the same answer as the accident, arrived at by a run that was measuring it.
 
+**That repair was a precondition and the enforcement arrived later, which this entry read as
+though it had closed the case.** `WARM_FRAMES < BLOCK + 1` refuses a look whose warm window
+*could not* cover the block; nothing checked that a block *did* warm, and "the arm warms 15 of 15
+frames" above is an observation from the run that verified the fix, sitting where a reader takes
+it for a property of the tool. The block's own counters were being taken and thrown away -
+`clipsDrawn` and `clipsWarmed` are differenced per block and the acceptance test read neither, so
+a recurrence would have been averaged in exactly as the first one was. The harness now discards
+any block whose drawn and warmed counts are not its arm's declared clips on every frame, which is
+what makes the sentence above a reading rather than a hope. **A guard on the configuration and a
+check on the run are different instruments, and a page that records the first while stating the
+second's conclusion invites the next reader to trust a number nothing was watching.**
+
 ### A trim that keeps the run in front of it evicts the run behind it
 
 Splitting the fetch cache per take and the walk per clip meant several clips fetch into one cache

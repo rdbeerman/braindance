@@ -6,8 +6,12 @@
 // the texture upload and the surface-memory step - the fetch and the decode are measured
 // separately, on the pass that makes the block resident.
 //
-// The health number is whether a block rendered every frame it was asked for. A short block
-// means the cache did not hold the window, and its timing is a fact about the fetch instead.
+// Three readings decide whether a block is believable, and a block failing any of them is
+// discarded rather than reported. It rendered every frame it was asked for - a short block means
+// the cache did not hold the window, and its timing is a fact about the fetch instead. It drew
+// and warmed the clips its arm declares, counted per frame, so a block that quietly measured
+// four clips where the arm asked for four and a warming fifth cannot be averaged in. And the
+// page reported nothing: an error mid-block is a fact about that frame, not about layering.
 
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
@@ -295,7 +299,11 @@ console.log(`[layering] ${ROUNDS} rounds of ${BLOCK} output frames per arm, firs
   + 'discarded, arms rotated each round so a drifting machine drifts across all of them');
 
 const samples = new Map(ARMS.map((a) => [a.label, []]));
+// Measured clip-draws per frame, so the column that reports them is a reading rather than a
+// restatement of what the arm was configured to do.
+const drawnPerFrame = new Map(ARMS.map((a) => [a.label, []]));
 const shortBlocks = [];
+const unexercised = [];
 let refetches = 0;
 let drawRange = 0;
 let warmWindow = 0;
@@ -334,8 +342,20 @@ for (let round = 0; round < ROUNDS + WARMUP; round++) {
       refetches += out.refetched;
       continue;
     }
+    // Every clip the arm declares had to be drawn, or warmed, on every frame of the block. The
+    // counters increment once per clip per frame, so the arm's own numbers are the expectation -
+    // and without this the fifth clip can idle through the block while the row reads as though it
+    // warmed throughout, which is the one arm the whole harness exists to price.
+    const wantDrawn = arm.live * out.rendered;
+    const wantWarmed = arm.warming * out.rendered;
+    if (out.drawn !== wantDrawn || out.warmed !== wantWarmed) {
+      unexercised.push(`${arm.label} round ${round}: drew ${out.drawn} of ${wantDrawn} `
+        + `clip-frames and warmed ${out.warmed} of ${wantWarmed}`);
+      continue;
+    }
     if (round >= WARMUP) {
       samples.get(arm.label).push(out.ms / out.rendered);
+      drawnPerFrame.get(arm.label).push(out.drawn / out.rendered);
       if (arm.warming > 0) warmedPerBlock.push(out.warmed);
     }
   }
@@ -356,9 +376,10 @@ for (const arm of ARMS) {
   }
   const row = { arm, med: median(xs), lo: quantile(xs, 0.25), hi: quantile(xs, 0.75), n: xs.length };
   rows.push(row);
+  const drew = drawnPerFrame.get(arm.label);
   console.log(`  ${arm.label.padEnd(22)} ${row.med.toFixed(3).padStart(7)} `
     + `${row.lo.toFixed(3).padStart(7)} ${row.hi.toFixed(3).padStart(7)} ${String(row.n).padStart(4)}`
-    + `   ${arm.live}`);
+    + `   ${drew.length ? median(drew) : '-'}`);
 }
 
 // The health reading: the one-clip arm measured over the first half of the rounds against the
@@ -369,7 +390,11 @@ const one = samples.get('1 clip');
 const half = Math.floor(one.length / 2);
 const spread = quantile(one, 0.75) - quantile(one, 0.25);
 const moved = half > 0 ? Math.abs(median(one.slice(0, half)) - median(one.slice(half))) : Infinity;
-const drifted = !(moved <= spread);
+// A run with no accepted block cannot have drifted, and saying it did misattributes a gate's
+// refusal to the machine. The gates below discard blocks, so an empty arm is now a state worth
+// distinguishing rather than a division nobody reaches.
+const measured = one.length > 0;
+const drifted = measured && !(moved <= spread);
 console.log(`\n  health: the 1-clip arm reads ${median(one.slice(0, half)).toFixed(3)} ms/frame over `
   + `the first half of the rounds and ${median(one.slice(half)).toFixed(3)} over the second, `
   + `${moved.toFixed(3)} ms apart against its own ${spread.toFixed(3)} ms interquartile spread`);
@@ -437,11 +462,22 @@ for (const row of [four, plusWarm].filter(Boolean)) {
     + `= ${(row.med / budget * 100).toFixed(0)}% of it, `
     + `${row.med <= budget ? 'inside' : 'OVER'}`);
 }
-if (drifted) {
+if (!measured) {
+  console.log('\n[layering] THROW THIS RUN AWAY - not one block survived the gates, so there is no '
+    + 'reading here at all and nothing above is about layering. The discards below say why.');
+} else if (drifted) {
   console.log('\n[layering] THROW THIS RUN AWAY - the 1-clip arm moved further across the run than '
     + 'its own spread, so the machine was competing and the ratios above are a fact about that.');
 }
-if (errors.length) console.log(`\n[layering] page errors:\n  ${errors.join('\n  ')}`);
+if (errors.length) {
+  console.log('\n[layering] THROW THIS RUN AWAY - the page reported an error, so at least one '
+    + 'frame in this run did something other than draw the arm, and which frame is not recorded:'
+    + `\n  ${errors.join('\n  ')}`);
+}
+if (unexercised.length) {
+  console.log(`\n[layering] ${unexercised.length} block(s) discarded for not exercising their arm:`
+    + `\n  ${unexercised.slice(0, 6).join('\n  ')}`);
+}
 
 await browser.close();
-process.exit(drifted ? 1 : 0);
+process.exit(!measured || drifted || errors.length > 0 ? 1 : 0);

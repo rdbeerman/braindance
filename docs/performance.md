@@ -33,36 +33,59 @@ resolution, so the "runs at half resolution" half of it buys nothing. See
 ## What a second, third and fourth overlapping clip cost
 
 `node tools/layering-ab.mjs --url … --take fixture-1g` is the harness, and it interleaves the
-arms round-robin rather than running them in sequence. Method: 24 rounds after 4 discarded, one
+arms round-robin rather than running them in sequence. Method: 16 rounds after 4 discarded, one
 15-output-frame block per arm per round, `fixture-1g` at a 1280x720 drawing buffer on an M2 Max
 through ANGLE's Metal backend, a look of fade 300ms plus wake 300ms with no trails and depth
 writing on, so the geometry draws two vertices per point - 434,176 - which is the shedding draw
-and not the cheap one. Every block's bytes are resident before the clock starts, and a block that
-did not render its whole run or fetched inside it is discarded rather than timed. The health
-number is the one-clip arm's median over the first half of the rounds against the second, held
-against that arm's own interquartile spread: 0.010 ms apart against 0.093 ms on the run below.
+and not the cheap one. Every block's bytes are resident before the clock starts.
 
-| arm | ms per output frame | against one clip |
-| --- | --- | --- |
-| 1 clip | 5.330 | — |
-| 2 clips | 6.807 | +1.477 |
-| 4 clips | 10.393 | +5.063, 1.95x |
-| 4 live + 1 warming | 10.317 | +4.987, 1.94x |
+**Three readings decide whether a block is believable**, and a block failing any of them is
+discarded rather than timed: it rendered every frame it was asked for and fetched nothing inside
+the block, it drew and warmed the clips its arm declares on every one of those frames, and the
+page reported no error. The health number is the one-clip arm's median over the first half of the
+rounds against the second, held against that arm's own interquartile spread.
 
-Re-run after the cache was sized by demand, same harness and same fixture: 5.597 / 6.573 / 10.050
-/ 9.950, health 0.190 ms of drift against a 0.400 ms interquartile spread. Against the run above
-that is **+5.0%, -3.4%, -3.3% and -3.6%** - wider than the 2% those three runs agreed to, and
-straddling zero rather than pointing one way, on a machine carrying other agent sessions at a load
-average of 7 to 9 throughout. So **sizing the cache by demand did not move the draw** in any
-direction this rig can resolve, which is the claim; a tighter figure wants a quiet machine.
+| arm | run 1 | run 2 | run 3 | against one clip |
+| --- | --- | --- | --- | --- |
+| 1 clip | 5.500 | 5.200 | 5.337 | — |
+| 2 clips | 6.223 | 5.907 | 6.153 | +0.723, 1.14x |
+| 4 clips | 10.167 | 9.977 | 9.720 | +4.667, 1.85x |
+| 4 live + 1 warming | 9.977 | 10.037 | 9.840 | +4.503, 1.84x |
 
-**A clip costs about 1.7 ms and a warming one costs 0.02.** The warm binds its textures and steps
-its surface memory without ever drawing, and the difference between the last two rows is the
-whole of what that is worth - so the layering bound is the draw, and warming a clip through a cut
-is free next to showing it. Against a 33.3 ms budget at 30fps, four overlapping clips is 31% and
-four plus a warming one is 31%. Repeated end to end twice more in the same session:
-5.390 / 6.933 / 10.513 / 10.523 and 5.393 / 6.980 / 10.410 / 10.433, inside 2% of the run above -
-which is a reproducibility reading on one machine in one state, not an independent second day.
+Health on the three runs in order: 0.053 ms of movement against a 0.367 ms spread, 0.430 against
+0.680, and 0.433 against 0.620. Each arm's last column is its delta taken inside its own run and
+then the median of the three, because the 1-clip arm itself moves 0.3 ms between runs and a delta
+taken across runs would carry that. The three agree arm by arm to within 6%, which is what this
+rig reproduces to on a working machine.
+
+**A clip costs about 1.5 ms at four, the second clip costs about half that, and the warming clip's
+cost is under what this rig resolves.** Three extra clouds add 4.667 ms, so 1.56 each, while the
+second alone adds 0.723 - the marginal cost is not flat, and a number quoted for one clip is
+really a number for the fourth. The warming arm is the one this harness exists to price, and its
+difference from the 4-clip arm is -0.190, +0.060 and +0.120 ms across the three runs: the sign
+flips, and every one of those sits inside the arm's own interquartile spread. So the warm binds
+its textures and steps its surface memory for a cost this rig cannot separate from zero, which
+carries the claim that mattered - warming a clip through a cut is free next to showing it - on a
+reading rather than on a difference of two medians. Against a 33.3 ms budget at 30fps, four
+overlapping clips is 30% and four plus a warming one is 30%.
+
+**The earlier run of this table is withdrawn rather than corrected, because the harness that took
+it could not tell whether its arms had happened.** It read 5.330 / 6.807 / 10.393 / 10.317, and
+the -0.076 ms between its last two rows is what this page published as a warming clip costing
+0.02. The block's counters for clips drawn and clips warmed were being differenced per block and
+read by nothing, so a block whose fifth clip idled all the way through would have been averaged in
+as though it had warmed. That is not hypothetical: a planted control warms a median of 0
+clip-frames per 15-frame block while every row still prints a time. The three runs above are the
+first ones taken with a gate watching. `docs/instruments.md` carries why a guard on the
+configuration is not a check on the run.
+
+**Sizing the cache by demand did not move the draw in any direction this rig can resolve.** Two
+runs taken either side of that change read 5.330 / 6.807 / 10.393 / 10.317 before and 5.597 /
+6.573 / 10.050 / 9.950 after, which is +5.0%, -3.4%, -3.3% and -3.6%: straddling zero rather than
+pointing one way, and inside the 6% the gated runs above reproduce to. It was measured on a
+machine carrying other agent sessions at a load average of 7 to 9, and both sides of it were
+ungated in the sense above, so the null result is what survives and a signed figure was never
+available.
 
 **The harness reads its arms' blend back before it times them, and that guard was earned.** A look
 applied through the registry lands on the selected clip alone once a clip's look is its own, so an
