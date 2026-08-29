@@ -63,7 +63,7 @@ number for "a clip".** Per run the second clip adds 0.723, 0.707 and 0.816, whil
 fourth add 1.972, 2.035 and 1.784 each. Three extra clouds add 4.667 ms between them, which
 averages 1.54, and that average is the trap: it is dragged down by a cheap second clip, so it
 describes neither the second nor the fourth and understates the fourth by a fifth. Four clips is
-1.86x one, and against a 33.3 ms budget at 30fps four overlapping clips is 30%.
+1.85x one, and against a 33.3 ms budget at 30fps four overlapping clips is 30%.
 
 **The warming clip's cost is under this rig's floor rather than measured at some small number, and
 the floor is the caveat.** Its difference from the 4-clip arm is -0.190, +0.060 and +0.120 ms
@@ -72,7 +72,7 @@ those sits inside the arm's own interquartile spread. But those spreads are 0.36
 ms, four to seven times the 0.093 ms of the run this page once called healthy, so all three pass
 the drift gate on a machine that was carrying other work. The bound is about +/-0.2 ms and a quiet
 rig might yet resolve a warming clip below it. What holds without the hedge is the shape: the
-layering bound is the draw, 1.93 ms and 1.86x are large against these spreads, and warming a clip
+layering bound is the draw, 1.93 ms and 1.85x are large against these spreads, and warming a clip
 through a cut is not what to look at first.
 
 **The earlier run of this table is withdrawn rather than corrected, because the harness that took
