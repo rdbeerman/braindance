@@ -683,6 +683,22 @@ what makes the sentence above a reading rather than a hope. **A guard on the con
 check on the run are different instruments, and a page that records the first while stating the
 second's conclusion invites the next reader to trust a number nothing was watching.**
 
+**And the tool's exit answered whether the run broke rather than whether it measured.** Closing
+the two readings above cost a third, because a discard is only as good as what notices it: with
+the warming arm's every block discarded and the other three surviving, the harness printed their
+rows, printed `4 clips 10.86 ms/frame = 33% of it, inside`, and exited 0. The one comparison the
+tool exists to make was absent and every row that did print was correct, which is the worst shape
+a green run can have. A run where any arm has no accepted block now names that arm and exits
+non-zero. **An instrument's exit code is a claim about the question it was asked and not about
+whether it crashed** - all three gaps found here in one sitting were that same substitution, which
+is the tool-side face of this page's rule about counting assertions rather than exit codes.
+
+**The `+0.02 ms` above is withdrawn.** Three runs with all three readings armed put the warming
+clip's difference from the four-clip arm at -0.190, +0.060 and +0.120 ms: the sign flips, and each
+of them sits inside the arm's own interquartile spread. The figure was never resolvable at the
+precision it was published to, and it agreeing with the accident it replaced was luck rather than
+corroboration. `docs/performance.md` carries the bound and the noise it was read against.
+
 ### A trim that keeps the run in front of it evicts the run behind it
 
 Splitting the fetch cache per take and the walk per clip meant several clips fetch into one cache

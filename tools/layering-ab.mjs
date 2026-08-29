@@ -462,6 +462,16 @@ for (const row of [four, plusWarm].filter(Boolean)) {
     + `= ${(row.med / budget * 100).toFixed(0)}% of it, `
     + `${row.med <= budget ? 'inside' : 'OVER'}`);
 }
+// An arm with no accepted block cannot take part in the comparison the harness exists to make,
+// so a run missing one is not a run with a gap - it is a run that did not answer its question.
+// Found by the control that empties the warming arm alone: the other three arms survived, the
+// run printed their rows and exited 0, and the one comparison it is for was silently absent.
+const armsEmpty = ARMS.filter((a) => samples.get(a.label).length === 0).map((a) => a.label);
+if (measured && armsEmpty.length) {
+  console.log(`\n[layering] THROW THIS RUN AWAY - ${armsEmpty.join(' and ')} came back with no `
+    + 'block the gates would accept, so the arms cannot be compared and the rows that did print '
+    + 'are about a question nobody asked. The discards below say why.');
+}
 if (!measured) {
   console.log('\n[layering] THROW THIS RUN AWAY - not one block survived the gates, so there is no '
     + 'reading here at all and nothing above is about layering. The discards below say why.');
@@ -480,4 +490,4 @@ if (unexercised.length) {
 }
 
 await browser.close();
-process.exit(!measured || drifted || errors.length > 0 ? 1 : 0);
+process.exit(!measured || armsEmpty.length > 0 || drifted || errors.length > 0 ? 1 : 0);
