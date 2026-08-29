@@ -106,9 +106,22 @@ const MUTATIONS = {
   // a trim. Must redden 'the footage under what is left holds still', alone.
   'head-trim-slides-the-footage': {
     file: 'web/main.js',
-    edits: [['  const value = held + (start - clip.start) * rate;', '  const value = held;']],
+    edits: [[
+      '  const sourceAtHead = held + (start - clip.start) * rate;',
+      '  const sourceAtHead = held;',
+    ]],
     fails: 'a head trim that moves the clip and lets the footage travel with it, which is a slip '
       + 'and not a trim',
+  },
+
+  'head-trim-drops-single-key-offset': {
+    file: 'web/main.js',
+    edits: [[
+      '    key.value = sourceAtHead + key.t * rate;',
+      '    key.value = sourceAtHead;',
+    ]],
+    fails: 'a head trim writing the source-at-head value directly onto a single retime key away '
+      + 'from zero. The offset-key footage row reddens alone',
   },
 
   // The head edge takes a keyed curve's clip anyway, silently, which is the shape this refusal
@@ -151,6 +164,19 @@ const MUTATIONS = {
       + 'preset row reddens on the changed document and commit',
   },
 
+  'preset-none-skips-export-guard': {
+    file: 'web/main.js',
+    edits: [[
+      "      if (refuseEdit('resetting the selected clip to defaults')) {\n"
+        + "        showPickerChoice(picker, target.appliedPreset?.name ?? '');\n"
+        + '        return;\n'
+        + '      }\n',
+      '',
+    ]],
+    fails: 'choosing preset none during export clearing the stamp and committing while its value '
+      + 'resets are refused. The preset-none export row reddens alone',
+  },
+
   'import-applies-to-response-time-selection': {
     file: 'web/main.js',
     edits: [[
@@ -179,6 +205,22 @@ const MUTATIONS = {
     ]],
     fails: 'a zero-length clip drawing one endpoint frame. The imported zero-length clip row '
       + 'reddens alone',
+  },
+
+  'project-allows-unsafe-frame-range': {
+    file: 'web/main.js',
+    edits: [[
+      '    const lastFrame = Math.floor(end * fps);\n'
+        + '    if (!Number.isSafeInteger(lastFrame)) {\n'
+        + '      throw new Error(\n'
+        + '        `clip ${planned.id} ends at ${end}s, output frame ${lastFrame} at ${fps}fps: the timeline `\n'
+        + "        + 'enumerates frames as JavaScript integers, so its last frame must be a safe integer',\n"
+        + '      );\n'
+        + '    }\n',
+      '',
+    ]],
+    fails: 'a project whose last output frame cannot advance as a JavaScript integer. The unsafe '
+      + 'frame-range refusal row reddens alone',
   },
 
   'ruler-stops-scaling-beyond-hour': {
@@ -7289,7 +7331,7 @@ try {
     const enormous = await page.evaluate(`(() => {
       const original = JSON.parse(${JSON.stringify(original)});
       const body = JSON.parse(${JSON.stringify(original)});
-      body.clips[0].start = 1e20;
+      body.clips[0].start = 1e12;
       body.clips[0].length = 0;
       const began = performance.now();
       let result;
@@ -7301,7 +7343,7 @@ try {
           accepted: true,
           elapsed: performance.now() - began,
           duration: __kinect.timeline.read().duration,
-          showing: __kinect.timeline.showingAt(1e20)[0]?.showing ?? null,
+          showing: __kinect.timeline.showingAt(1e12)[0]?.showing ?? null,
           ticks,
         };
       } catch (err) {
@@ -7311,7 +7353,7 @@ try {
       __kinect.keyframes.undo.begin();
       return result;
     })()`);
-    check(enormous.accepted && enormous.duration === 1e20
+    check(enormous.accepted && enormous.duration === 1e12
       && enormous.ticks.length > 1 && enormous.ticks.length < 20
       && enormous.ticks.every((left, index) => index === 0 || left > enormous.ticks[index - 1]),
     'a finite project far beyond the one-hour tick ladder builds a width-sized increasing ruler',
@@ -7321,6 +7363,33 @@ try {
     check(enormous.accepted && enormous.showing === 'off',
       'a zero-length clip draws no endpoint frame at the program position where it starts and ends',
       enormous.accepted ? `showing ${enormous.showing} at ${enormous.duration}s` : 'the project was refused');
+
+    const unsafeFrames = await page.evaluate(`(() => {
+      const original = JSON.parse(${JSON.stringify(original)});
+      const body = JSON.parse(${JSON.stringify(original)});
+      body.clips[0].start = 1e20;
+      body.clips[0].length = 0;
+      const began = performance.now();
+      let result;
+      try {
+        __kinect.library.restoreProject(body);
+        result = { accepted: true, elapsed: performance.now() - began };
+      } catch (err) {
+        result = {
+          accepted: false,
+          elapsed: performance.now() - began,
+          error: String(err?.message ?? err),
+        };
+      }
+      __kinect.library.restoreProject(original);
+      __kinect.keyframes.undo.begin();
+      return result;
+    })()`);
+    check(!unsafeFrames.accepted && /safe integer/.test(unsafeFrames.error ?? ''),
+      'a project whose last output frame cannot advance as a JavaScript integer is refused before the timeline sees it',
+      unsafeFrames.accepted
+        ? `accepted in ${unsafeFrames.elapsed.toFixed(1)}ms`
+        : `refused in ${unsafeFrames.elapsed.toFixed(1)}ms: ${unsafeFrames.error}`);
 
     // ---- the handle a file arrives with, checked the way the drag that makes one is
     // The invariants lived in the drag handler and nowhere in the loader: `restoreKey` asked
@@ -9158,6 +9227,10 @@ try {
         'document.querySelector(".paneltab[aria-selected=true]")?.dataset.panelTab ?? null');
       await page.locator('.paneltab[data-panel-tab="look"]').click();
       await settle();
+      await page.locator('#tPreset').click();
+      await page.locator('#tPresetList .pickeroption[data-name="blackwall"]').click();
+      await page.waitForFunction(`!__kinect.library.presetGestureRunning()
+        && document.getElementById('tPreset').value === 'blackwall'`, null, { timeout: 15000 });
       await page.evaluate(`(() => {
         __kinect.params.set('pointSize', 17.25);
         __kinect.keyframes.undo.commit();
@@ -9227,6 +9300,30 @@ try {
             running: __kinect.export.running(),
           };
         }, beforeRace.selection);
+        const beforeNone = await page.evaluate((targetId) => {
+          const project = __kinect.library.serialiseProjectBody();
+          const target = project.clips.find((clip) => clip.id === targetId);
+          return {
+            pointSize: target?.params?.pointSize,
+            stamp: target?.appliedPreset ?? null,
+            edits: __kinect.export.editsDuringExport(),
+          };
+        }, beforeRace.selection);
+        await page.locator('#tPreset').click();
+        await page.locator('#tPresetList .pickeroption[data-name=""]').click();
+        await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        const afterNone = await page.evaluate((targetId) => {
+          const project = __kinect.library.serialiseProjectBody();
+          const target = project.clips.find((clip) => clip.id === targetId);
+          return {
+            pointSize: target?.params?.pointSize,
+            stamp: target?.appliedPreset ?? null,
+            edits: __kinect.export.editsDuringExport(),
+            picker: document.getElementById('tPreset').value,
+            note: document.getElementById('tNote').textContent,
+            running: __kinect.export.running(),
+          };
+        }, beforeRace.selection);
         const exportResult = await page.evaluate(`globalThis.__editorGuardExport.then((result) => ({
           ok: result.ok,
           error: result.error ?? null,
@@ -9246,6 +9343,18 @@ try {
         'an opened take cannot append a clip or commit after export starts',
         `clips ${beforeRace.clips.join(',')} -> ${afterRace.clips.join(',')}, `
           + `edits ${beforeRace.edits} -> ${afterRace.edits}`);
+        check(beforeNone.stamp?.name === 'blackwall',
+          'the selected clip is stamped before preset none is pressed during export, so the refusal below has document state to protect',
+          `stamp ${JSON.stringify(beforeNone.stamp)}`);
+        check(afterNone.running && afterNone.pointSize === beforeNone.pointSize
+          && JSON.stringify(afterNone.stamp) === JSON.stringify(beforeNone.stamp)
+          && afterNone.edits === beforeNone.edits && afterNone.picker === beforeNone.stamp?.name
+          && /declined/.test(afterNone.note) && /export/.test(afterNone.note),
+        'choosing preset none while an export owns the document changes no values, stamp, picker or history and says why',
+        `running ${afterNone.running}, pointSize ${beforeNone.pointSize} -> ${afterNone.pointSize}, `
+          + `stamp ${JSON.stringify(beforeNone.stamp)} -> ${JSON.stringify(afterNone.stamp)}, `
+          + `picker ${JSON.stringify(afterNone.picker)}, edits ${beforeNone.edits} -> ${afterNone.edits}, `
+          + `note ${JSON.stringify(afterNone.note)}`);
       } finally {
         releasePreset();
         releaseSource();
@@ -9502,14 +9611,13 @@ try {
     const insideBody = () => page.evaluate(`(() => {
       const k = globalThis.__kinect;
       const c = k.timeline.clips().find((x) => x.selected);
-      const clip = k.timeline.transport().clip;
-      // A source frame sampled inside what will still be the body after the trim, so the row is
+      // A source time sampled inside what will still be the body after the trim, so the row is
       // about the mapping holding rather than about a position that left the clip.
       const at = c.start + c.length - 0.5;
       return { id: c.id, start: c.start, end: c.end, length: c.length,
         keys: k.timeline.retime.keys.map((key) => [key.t, key.value]),
         rateDisabled: document.getElementById('tRate').disabled,
-        at, frame: clip.sourceFrameAt(at) };
+        at, sourceSec: k.timeline.retime.sourceSecAt(at - c.start) };
     })()`);
     await page.mouse.click((await boxAt(1)).x, (await boxAt(1)).y);
     await settle();
@@ -9527,18 +9635,19 @@ try {
     const afterHead = await insideBody();
     console.log(`  head trim: ${beforeHead.start.toFixed(3)}s -> ${afterHead.start.toFixed(3)}s, `
       + `out-point ${beforeHead.end.toFixed(3)} -> ${afterHead.end.toFixed(3)}, `
-      + `curve ${JSON.stringify(afterHead.keys)}, source frame at ${afterHead.at.toFixed(2)}s `
-      + `${beforeHead.frame} -> ${afterHead.frame}`);
+      + `curve ${JSON.stringify(afterHead.keys)}, source time at ${afterHead.at.toFixed(2)}s `
+      + `${beforeHead.sourceSec.toFixed(4)}s -> ${afterHead.sourceSec.toFixed(4)}s`);
     check(afterHead.start > beforeHead.start + 0.2,
       'dragging a clip\'s head edge moves its in-point later in the edit',
       `${beforeHead.start.toFixed(3)}s to ${afterHead.start.toFixed(3)}s`);
     check(near(afterHead.end, beforeHead.end, 1e-6),
       'and leaves its out-point where it was, so a head trim shortens the clip rather than moving it',
       `${beforeHead.end.toFixed(4)} against ${afterHead.end.toFixed(4)}`);
-    check(afterHead.frame === beforeHead.frame,
+    check(near(afterHead.sourceSec, beforeHead.sourceSec, 1e-9),
       'and the footage under what is left holds still, which is what makes it a trim rather than '
-      + 'a slip: the same project second stands on the same source frame',
-      `source frame ${beforeHead.frame} against ${afterHead.frame} at ${afterHead.at.toFixed(2)}s`);
+      + 'a slip: the same project second stands on the same source time',
+      `source ${beforeHead.sourceSec.toFixed(4)}s against ${afterHead.sourceSec.toFixed(4)}s `
+      + `at ${afterHead.at.toFixed(2)}s`);
     check(afterHead.keys.length === 1 && afterHead.keys[0][0] === 0 && afterHead.keys[0][1] > 0,
       'the in-point is written as the curve\'s single key at the origin, because a clip states '
       + 'where it starts in the take through its curve rather than through a field of its own',
@@ -9546,6 +9655,28 @@ try {
     check(afterHead.rateDisabled === false,
       'and the speed slider still answers, because a curve of one key is still a rate',
       `disabled ${afterHead.rateDisabled}`);
+
+    await page.evaluate(`globalThis.__kinect.keyframes.setRetime({
+      rate: 1.25, keys: [{ t: 2, value: 5 }],
+    })`);
+    await settle();
+    const beforeOffsetHead = await insideBody();
+    {
+      const r = (await boxAt(1)).r;
+      await page.mouse.move(r.x + 3, r.y + r.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(r.x + 3 + bed.width * 0.04, r.y + r.height / 2);
+      await page.mouse.up();
+      await settle();
+    }
+    const afterOffsetHead = await insideBody();
+    check(afterOffsetHead.start > beforeOffsetHead.start + 0.2
+      && afterOffsetHead.keys.length === 1 && afterOffsetHead.keys[0][0] === 2
+      && near(afterOffsetHead.sourceSec, beforeOffsetHead.sourceSec, 1e-9),
+    'a head trim preserves the offset of an imported single retime key and holds the remaining footage still',
+    `start ${beforeOffsetHead.start.toFixed(3)} -> ${afterOffsetHead.start.toFixed(3)}, `
+      + `key ${JSON.stringify(beforeOffsetHead.keys)} -> ${JSON.stringify(afterOffsetHead.keys)}, `
+      + `source ${beforeOffsetHead.sourceSec.toFixed(4)}s -> ${afterOffsetHead.sourceSec.toFixed(4)}s`);
 
     // The same edge on a clip whose curve says more than an in-point.
     await page.evaluate(`globalThis.__kinect.keyframes.setRetime({ rate: 1, keys: [

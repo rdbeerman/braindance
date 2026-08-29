@@ -3107,8 +3107,9 @@ function applyProject(plan, sources = null) {
   timingChanged();
 }
 
-/** Refuses a checked plan whose opened footage makes a clip end non-finite. */
+/** Refuses a checked plan whose resolved clip end cannot be enumerated as output frames. */
 function refuseResolvedDurations(plan, sources) {
+  const fps = plan.project.outputFps ?? 30;
   for (const [at, planned] of plan.clips.entries()) {
     const source = sources.get(at)?.take ?? clips[at]?.source;
     if (!source || source.streaming) continue;
@@ -3122,6 +3123,13 @@ function refuseResolvedDurations(plan, sources) {
       throw new Error(
         `clip ${planned.id} ends at ${String(end)} after resolving ${sourceDuration}s of footage: `
         + 'its start, trim and retime must produce a finite project duration',
+      );
+    }
+    const lastFrame = Math.floor(end * fps);
+    if (!Number.isSafeInteger(lastFrame)) {
+      throw new Error(
+        `clip ${planned.id} ends at ${end}s, output frame ${lastFrame} at ${fps}fps: the timeline `
+        + 'enumerates frames as JavaScript integers, so its last frame must be a safe integer',
       );
     }
   }
@@ -7861,6 +7869,10 @@ function choosePicker(picker, name, { close = false } = {}) {
     } else {
       // "none" selected: reset every look parameter to its default, and clear the stamp.
       if (!target) return;
+      if (refuseEdit('resetting the selected clip to defaults')) {
+        showPickerChoice(picker, target.appliedPreset?.name ?? '');
+        return;
+      }
       target.appliedPreset = null;
       const lookNames = params.names('look');
       params.reset(lookNames.filter((name) => PARAMS[name].scope === 'project'));
@@ -8407,12 +8419,16 @@ function headTrimTo(clip, wantStart, holdEnd) {
   // to grab at the other.
   const floor = clip.start - held / Math.max(1e-9, rate);
   const start = Math.max(0, Math.max(floor, Math.min(holdEnd - MIN_CLIP_SEC, wantStart)));
-  const value = held + (start - clip.start) * rate;
-  if (Math.abs(value) < 1e-9) curve.keys = [];
-  else if (curve.keys.length === 1) curve.keys[0].value = value;
+  const sourceAtHead = held + (start - clip.start) * rate;
+  if (Math.abs(sourceAtHead) < 1e-9) curve.keys = [];
+  else if (curve.keys.length === 1) {
+    const key = curve.keys[0];
+    key.value = sourceAtHead + key.t * rate;
+  }
   else {
     curve.keys = [{
-      t: 0, value, easeOut: copyHandle(EASE_OUT_LINEAR), easeIn: copyHandle(EASE_IN_LINEAR),
+      t: 0, value: sourceAtHead,
+      easeOut: copyHandle(EASE_OUT_LINEAR), easeIn: copyHandle(EASE_IN_LINEAR),
     }];
   }
   clip.start = start;
