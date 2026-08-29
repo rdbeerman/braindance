@@ -74,10 +74,11 @@ it could not tell whether its arms had happened.** It read 5.330 / 6.807 / 10.39
 the -0.076 ms between its last two rows is what this page published as a warming clip costing
 0.02. The block's counters for clips drawn and clips warmed were being differenced per block and
 read by nothing, so a block whose fifth clip idled all the way through would have been averaged in
-as though it had warmed. That is not hypothetical: a planted control warms a median of 0
-clip-frames per 15-frame block while every row still prints a time. The three runs above are the
-first ones taken with a gate watching. `docs/instruments.md` carries why a guard on the
-configuration is not a check on the run.
+as though it had warmed. The counters were collected and discarded rather than missing, so what
+closed this was reading them rather than adding them. A look whose warm window cannot cover the
+block is caught, but upstream by the render gate, which is not the reading the warming arm needs.
+The three runs above are the first ones taken with the new gate armed, and none of them tripped
+it. `docs/instruments.md` carries why a guard on the configuration is not a check on the run.
 
 **Sizing the cache by demand did not move the draw in any direction this rig can resolve.** Two
 runs taken either side of that change read 5.330 / 6.807 / 10.393 / 10.317 before and 5.597 /
