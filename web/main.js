@@ -1153,13 +1153,15 @@ const params = {
   /** The single write path. UI, presets and the tracks all go through here. */
   set(name, value) {
     const spec = specOf(name);
+    const paintControl = spec.scope !== 'clip'
+      || evaluatingClip === null || evaluatingClip === selectedClip;
     // The export renders through this same path - `evaluateTracks` writes every keyed value on
     // every frame it draws - so the carve-out is what lets the render proceed while a hand on a
     // control is refused. The control is written back from the registry rather than left showing
     // the number nobody accepted, which is the second place the refusal is visible.
     if (!evaluating && refuseEdit(`a change to ${name}`)) {
       const held = homeOf(spec).values.get(name);
-      writeControl(name, held);
+      if (paintControl) writeControl(name, held);
       return held;
     }
     const v = normalise(name, spec, value);
@@ -1167,7 +1169,7 @@ const params = {
     // Straight through: the render core is already pointed at the clip this write is about,
     // because the only way to be writing another clip's look is to be inside `withClip`.
     spec.apply(v);
-    writeControl(name, v);
+    if (paintControl) writeControl(name, v);
     paramWritten(name, spec.tag);
     // `paramWritten` says the image changed. This says a group may have appeared or gone.
     if (!transportWriting) groupRevealChanged();
@@ -4767,14 +4769,24 @@ class TimelineTransport {
    * How many output frames have to be rendered and discarded ahead of a seek.
    *
    * The two halves have different owners. Surface memory is per cloud, so the surface half is
-   * asked of each clip drawn here and the project's is the longest of them - one clip's curve
-   * can need three times another's to cover the same span of persistence. The afterimage is one
-   * screen-space buffer over the whole composite, so the trails half is asked once.
+   * asked of each clip drawn here. A clip already inside its warm window needs the elapsed part
+   * of that window rebuilt too. The project's surface half is the longest of them - one clip's
+   * curve can need three times another's to cover the same span of persistence. The afterimage
+   * is one screen-space buffer over the whole composite, so the trails half is asked once.
    */
   preroll(programSec = this.programSec) {
     let surface = 0;
     let surfaceCovered = true;
-    for (const clip of clipsLiveAt(programSec)) {
+    for (const clip of clipsActiveAt(programSec)) {
+      const showing = clipShowingAt(clip, programSec);
+      if (showing === 'warming') {
+        const warmFrames = clip.warmFrames(this.outputFps, this.lastFrame);
+        const warmStartFrame = Math.max(0, Math.ceil(
+          (clip.start - warmFrames / this.outputFps - CLIP_EDGE) * this.outputFps,
+        ));
+        surface = Math.max(surface, this.frameOf(programSec) - warmStartFrame);
+        continue;
+      }
       // Read from this clip's tracks at the target: the uniforms hold whatever the last render
       // left, and persistence is a clip value, so it is this clip's rather than the selection's.
       const surfaceSec = (valueAtProgram('fade', programSec, clip)
@@ -7168,6 +7180,9 @@ const programSecOfSource = (sourceSec) => selectedClip.start
   + selectedClip.retime.programSecAt(sourceSec);
 const sourceSecOfProgram = (programSec) => selectedClip.retime
   .sourceSecAt(programSec - selectedClip.start);
+const markSourceSecOfProgram = (programSec) => Math.max(
+  0, Math.min(selectedClip.source.duration, sourceSecOfProgram(programSec)),
+);
 
 /**
  * The program second a lane's own clock starts at, and the two conversions across it.
@@ -7252,7 +7267,7 @@ function paintMarks() {
       el.releasePointerCapture(e.pointerId);
       if (dragging) {
         const programSec = Math.max(0, Math.min(view.duration, view.timeAt(e.clientX)));
-        const sourceSec = sourceSecOfProgram(programSec);
+        const sourceSec = markSourceSecOfProgram(programSec);
         const newSourceMs = Math.round(sourceSec * 1000);
         moveMark(mark, newSourceMs).catch(showTimelineError);
       } else {
@@ -7323,7 +7338,7 @@ function adoptMarks(id, marks, updateSelection = null) {
 async function markHere() {
   const id = openTakeId();
   if (!id || !timeline) return false;
-  const sourceMs = Math.round(sourceSecOfProgram(timeline.programSec) * 1000);
+  const sourceMs = Math.round(markSourceSecOfProgram(timeline.programSec) * 1000);
   const rec = { id: `m${Date.now().toString(36)}`, sourceMs, label: `mark ${takeMarks.length + 1}`, at: Date.now() };
   const marks = await writeMarks(id, [rec]);
   return adoptMarks(id, marks);

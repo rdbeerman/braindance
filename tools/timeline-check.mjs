@@ -93,6 +93,17 @@ const MUTATIONS = {
     'let start = Math.max(0, target - asked);',
     'let start = target;',
   ]] },
+  // A seek made after a later clip has started warming rebuilds none of the warm history already
+  // elapsed. Must redden section 7f's equality and plan rows.
+  'preroll-ignores-warming': { file: 'web/main.js', edits: [[
+    `    for (const clip of clipsActiveAt(programSec)) {
+      const showing = clipShowingAt(clip, programSec);`,
+    `    for (const clip of clipsLiveAt(programSec)) {
+      const showing = clipShowingAt(clip, programSec);`,
+  ]],
+    fails: 'a seek made inside a later clip\'s warm window rebuilding none of the warm history '
+      + 'already elapsed. Section 7f\'s equality and plan rows are the catch',
+  },
   // Program time stops being scaled into source time.
   'rate-ignored': { file: 'web/main.js', edits: [[
     `  sourceSecAt(programSec) {
@@ -1970,6 +1981,75 @@ console.log('\n== 7. more than one clip: the composite, the cut, and what a clip
   check(warmed.showingBefore.some((s) => s.showing === 'warming'),
     'which is what the composite says it is doing just before the cut',
     warmed.showingBefore.map((s) => `${s.id} ${s.showing}`).join(', '));
+
+  // 7f. A seek can begin after a later clip has already entered its warm window. It has to
+  // rebuild the elapsed part of that invisible work before playback continues to the cut.
+  const WARM_SEEK_SEC = 2.5;
+  const WARM_CUT_SEC = 3.1;
+  const warmClip = {
+    ...FIXTURE_CLIPS.find((clip) => clip.id === 'c2'),
+    look: { fade: MULTI_LOOK.fade, wake: MULTI_LOOK.wake },
+  };
+  const warmSeekLook = { ...MULTI_LOOK, 'datamosh.amount': 0 };
+  const warmHeldDocument = await page.evaluate('__kinect.library.serialiseProjectBody()');
+  await page.evaluate(
+    `globalThis.__mc.load(${JSON.stringify([warmClip])}, ${JSON.stringify(SECOND_TAKE
+      ? { id: SECOND_TAKE.id, hash: SECOND_TAKE.hash } : null)}, ${JSON.stringify(warmSeekLook)})`,
+  );
+  await page.evaluate(`globalThis.__mc.warmArm = async (kind, label, frames) => {
+    const k = globalThis.__kinect;
+    const tl = globalThis.__tl;
+    const t = k.timeline.transport();
+    const before = tl.counters();
+    let seek;
+    if (kind === 'playback') {
+      await t.seek(0.5);
+      await t.runTo(t.frameAt(${WARM_CUT_SEC}));
+    } else {
+      seek = await t.seek(${WARM_SEEK_SEC}, frames === null ? {} : { frames });
+      await t.runTo(t.frameAt(${WARM_CUT_SEC}));
+    }
+    const pixels = tl.grab(label);
+    return {
+      hash: await tl.sha(pixels),
+      delta: tl.since(before),
+      seek,
+      showingAtSeek: k.timeline.showingAt(${WARM_SEEK_SEC}),
+      clip: k.timeline.clips()[0],
+    };
+  }`);
+  const warmPlayed = await page.evaluate("globalThis.__mc.warmArm('playback', 'warmPlayed', null)");
+  const warmSeeked = await page.evaluate("globalThis.__mc.warmArm('seek', 'warmSeeked', null)");
+  const warmControl = await page.evaluate("globalThis.__mc.warmArm('seek', 'warmControl', 0)");
+  const warmSame = await diff('warmPlayed', 'warmSeeked');
+  const warmApart = await diff('warmPlayed', 'warmControl');
+  console.log(`\n  seek at ${WARM_SEEK_SEC}s inside c2's warm window, then run to ${WARM_CUT_SEC}s: `
+    + `planned ${warmSeeked.seek.plan.surface} elapsed warm frames and rendered `
+    + `${warmSeeked.seek.frames}; played vs seeked ${show(warmSame)}, played vs no elapsed warm `
+    + `${show(warmApart)}`);
+  check(warmSeeked.showingAtSeek.length === 1
+    && warmSeeked.showingAtSeek[0].showing === 'warming',
+  'the seek starts while the later clip is warming but still invisible',
+  warmSeeked.showingAtSeek.map((clip) => `${clip.id} ${clip.showing}`).join(', '));
+  check(warmSeeked.seek.plan.surface > 0
+    && warmSeeked.seek.frames >= warmSeeked.seek.plan.surface,
+  'the seek plan includes the elapsed part of that warm window',
+  `${warmSeeked.seek.plan.surface} elapsed warm frames inside ${warmSeeked.seek.frames} total pre-roll frames`);
+  check(warmSame.max <= SAME_MAX,
+    'continuing from the seek reaches the cut with the same picture as uninterrupted playback',
+    show(warmSame));
+  check(warmApart.max >= 4 && warmApart.pct >= 0.5,
+    'and omitting the elapsed warm history reaches a different picture, so the equality above '
+      + 'is about work the later clip did before it appeared',
+    show(warmApart));
+  check(warmApart.max > warmSame.max + 4,
+    'the warm-window verdicts are separated rather than adjacent',
+    `control max ${warmApart.max} against ${warmSame.max}`);
+
+  await page.evaluate(async (body) => {
+    globalThis.__kinect.library.restoreProject(body);
+    await globalThis.__kinect.timeline.settled();
+  }, warmHeldDocument);
 
   // What the warm actually buys, read off the surface memory rather than off the counters: a
   // build that skipped it renders a self-consistent picture - the seek and the playback both

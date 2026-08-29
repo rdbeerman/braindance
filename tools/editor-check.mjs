@@ -154,6 +154,20 @@ const MUTATIONS = {
       + 'selected. The response-order row of section 22 is the catch',
   },
 
+  // A mark planted or dragged before the selected clip is written as a negative source time.
+  // Must redden the two source-bound rows of 22.
+  'marks-write-outside-the-take': {
+    file: 'web/main.js',
+    edits: [[
+      `const markSourceSecOfProgram = (programSec) => Math.max(
+  0, Math.min(selectedClip.source.duration, sourceSecOfProgram(programSec)),
+);`,
+      'const markSourceSecOfProgram = (programSec) => sourceSecOfProgram(programSec);',
+    ]],
+    fails: 'a mark planted or dragged before a placed clip writing a negative source second. '
+      + 'The two source-bound rows of section 22 are the catch',
+  },
+
   // Selecting a row moves the strip's idea of the selection and not the page's.
   // Must redden 'the panel and the retime binding follow it' and the mark rows with it.
   'select-row-does-not-select-the-clip': {
@@ -162,6 +176,19 @@ const MUTATIONS = {
              '  clipRow = clip;']],
     fails: 'a row selection the page never follows, which leaves the panel and the marks on '
       + 'whatever clip the editor opened with',
+  },
+
+  // Evaluating a keyed value for an unselected clip paints the shared inspector with it. Must
+  // redden 22b's selected-control and reset rows.
+  'nonselected-track-paints-control': {
+    file: 'web/main.js',
+    edits: [[
+      `    const paintControl = spec.scope !== 'clip'
+      || evaluatingClip === null || evaluatingClip === selectedClip;`,
+      '    const paintControl = true;',
+    ]],
+    fails: 'a keyed value evaluated for an unselected clip repainting the shared inspector. '
+      + 'Section 22b\'s selected-control and reset rows are the catch',
   },
 
   // The door a restore comes through refuses a slot that grew back, which is what an undo of a
@@ -9075,6 +9102,65 @@ try {
       'and the tick is drawn where that says, rather than where the curve alone would put it',
       `${marked.ticks[0]?.left.toFixed(2)}% against ${wantLeft.toFixed(2)}%`);
 
+    // Both write gestures at a program second before this placed clip. The sidecar stores source
+    // time, so extrapolating the retime curve here would write a negative time the take has never
+    // contained. The route returns the submitted list and keeps the real sidecar untouched.
+    const markWrites = [];
+    const markPattern = '**/capture/*/marks';
+    const recordMarkWrite = async (route) => {
+      if (route.request().method() !== 'POST') {
+        await route.continue();
+        return;
+      }
+      const body = route.request().postDataJSON();
+      markWrites.push(body.marks[0]);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ marks: body.marks }),
+      });
+    };
+    await page.route(markPattern, recordMarkWrite);
+    try {
+      await page.evaluate(`(async () => {
+        const k = globalThis.__kinect;
+        await k.timeline.transport().seek(0);
+        await k.timeline.settled();
+        k.editor.setMarks([]);
+        return k.library.markHere();
+      })()`);
+
+      await page.evaluate(`(() => {
+        __kinect.editor.setMarks([{ id: 'dragged', sourceMs: ${MARK_SOURCE_MS}, label: 'dragged' }]);
+        __kinect.editor.view.fit();
+      })()`);
+      await settle();
+      const tickBox = await page.locator('#tMarks .tmk').boundingBox();
+      const bedBox = await page.locator('#tBed').boundingBox();
+      const draggedResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return response.request().method() === 'POST'
+          && url.pathname === `/capture/${encodeURIComponent(pickId)}/marks`;
+      });
+      await page.mouse.move(tickBox.x + tickBox.width / 2, tickBox.y + tickBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(bedBox.x + 1, tickBox.y + tickBox.height / 2, { steps: 8 });
+      await page.mouse.up();
+      await draggedResponse;
+    } finally {
+      await page.unroute(markPattern, recordMarkWrite);
+    }
+    check(markWrites.length === 2 && markWrites[0].sourceMs === 0,
+      'planting a mark before the selected clip pins it to the first source millisecond rather '
+        + 'than writing an extrapolated negative time',
+      `${markWrites.length} writes; planted at source ${markWrites[0]?.sourceMs}ms`);
+    check(markWrites.length === 2 && markWrites[1].id === 'dragged' && markWrites[1].sourceMs === 0,
+      'and dragging a mark there applies the same source bound through the pointer gesture',
+      `${markWrites.length} writes; dragged at source ${markWrites[1]?.sourceMs}ms`);
+    await page.evaluate(
+      `globalThis.__kinect.editor.setMarks([{ id: 'placed', sourceMs: ${MARK_SOURCE_MS}, label: 'placed' }])`,
+    );
+
     if (other) {
       const pattern = '**/capture/*/marks';
       let heldPost = null;
@@ -9337,6 +9423,49 @@ try {
     check(staged.length === 2 && staged[1].id === 'gz2',
       'two clips are staged for this section, which is what makes both arms below a comparison',
       staged.map((c) => `${c.id} at ${c.start}s`).join(', '));
+
+    // Both tracks are evaluated because both clouds must be ready to draw. Only the selected
+    // clip may paint the one inspector the clips share, regardless of which clip is evaluated
+    // last. The selected track sits at the default so the reset control checks the same owner.
+    const evaluatedPanel = await page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const clean = k.library.serialiseProjectBody();
+      const keyed = JSON.parse(JSON.stringify(clean));
+      const selected = keyed.clips[0];
+      const other = keyed.clips[1];
+      const defaultValue = k.params.spec('pointSize').default;
+      selected.tracks.pointSize = [{ t: 0, value: defaultValue }];
+      other.tracks.pointSize = [{ t: 0, value: defaultValue + 20 }];
+      k.library.restoreProject(keyed);
+      k.editor.selectClipRow(selected.id);
+      await k.timeline.transport().seek(5);
+      await k.timeline.settled();
+      const control = document.getElementById('pointSize');
+      const reset = document.querySelector('.reset[data-reset="pointSize"]');
+      const result = {
+        selected: k.editor.clipSelection(),
+        selectedValue: k.params.get('pointSize'),
+        otherValue: k.library.serialiseProjectBody().clips.find((c) => c.id === other.id)
+          .params.pointSize,
+        controlValue: Number(control.value),
+        resetDisabled: reset.disabled,
+      };
+      k.library.restoreProject(clean);
+      k.editor.selectClipRow('gz2');
+      return result;
+    })()`);
+    console.log(`  keyed values after a render: selected ${evaluatedPanel.selectedValue}, other `
+      + `${evaluatedPanel.otherValue}; the shared control shows ${evaluatedPanel.controlValue}, `
+      + `reset disabled ${evaluatedPanel.resetDisabled}`);
+    check(evaluatedPanel.selectedValue !== evaluatedPanel.otherValue
+      && evaluatedPanel.controlValue === evaluatedPanel.selectedValue,
+    'after every clip evaluates its keyed look, the shared control still shows the selected '
+      + 'clip rather than the last clip evaluated',
+    `selected ${evaluatedPanel.selectedValue}, other ${evaluatedPanel.otherValue}, control `
+      + `${evaluatedPanel.controlValue}`);
+    check(evaluatedPanel.resetDisabled === true,
+      'and its reset state is the selected clip\'s too',
+      `reset disabled ${evaluatedPanel.resetDisabled}`);
 
     // The handles, armed by the command they are drawn beside.
     await page.locator('#tMoveClip').click();
