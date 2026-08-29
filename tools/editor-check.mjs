@@ -177,6 +177,19 @@ const MUTATIONS = {
       + 'resets are refused. The preset-none export row reddens alone',
   },
 
+  'output-rate-skips-export-guard': {
+    file: 'web/main.js',
+    edits: [[
+      "  if (refuseEdit('changing the output rate')) {\n"
+        + '    ui.fps.value = String(timeline.outputFps);\n'
+        + '    return;\n'
+        + '  }\n',
+      '',
+    ]],
+    fails: 'changing the output rate during export moving the timeline grid and committing. Two '
+      + 'rows: the changed output-rate state and the real export it invalidates',
+  },
+
   'import-applies-to-response-time-selection': {
     file: 'web/main.js',
     edits: [[
@@ -9324,15 +9337,37 @@ try {
             running: __kinect.export.running(),
           };
         }, beforeRace.selection);
+        const beforeRate = await page.evaluate(`(() => ({
+          fps: __kinect.timeline.transport().outputFps,
+          edits: __kinect.export.editsDuringExport(),
+        }))()`);
+        await page.locator('#fileMenuButton').click();
+        await page.locator('#menuProjectSettings').click();
+        const otherRate = await page.evaluate(`[...document.getElementById('tFps').options]
+          .map((option) => option.value)
+          .find((value) => Number(value) !== __kinect.timeline.transport().outputFps)`);
+        await page.selectOption('#tFps', otherRate);
+        await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        const afterRate = await page.evaluate(`({
+          fps: __kinect.timeline.transport().outputFps,
+          picker: document.getElementById('tFps').value,
+          edits: __kinect.export.editsDuringExport(),
+          note: document.getElementById('tNote').textContent,
+          running: __kinect.export.running(),
+        })`);
+        await page.locator('#projectClose').click();
         const exportResult = await page.evaluate(`globalThis.__editorGuardExport.then((result) => ({
           ok: result.ok,
           error: result.error ?? null,
           bytes: result.done?.bytes ?? null,
           frames: result.done?.frames ?? null,
         }))`);
-        check(runningAtRelease && afterRace.running && exportResult.ok,
+        check(runningAtRelease && afterRace.running,
           'the held preset and clip requests resume while a real export still owns the document',
-          `running at release ${runningAtRelease}, after continuations ${afterRace.running}, export ${JSON.stringify(exportResult)}`);
+          `running at release ${runningAtRelease}, after continuations ${afterRace.running}`);
+        check(exportResult.ok && exportResult.frames === 601,
+          'the real export completes all 601 frames after every refused edit leaves its document untouched',
+          JSON.stringify(exportResult));
         check(afterRace.pointSize === beforeRace.pointSize
           && JSON.stringify(afterRace.stamp) === JSON.stringify(beforeRace.stamp),
         'a fetched preset cannot apply values, stamp the clip or commit after export starts',
@@ -9355,6 +9390,13 @@ try {
           + `stamp ${JSON.stringify(beforeNone.stamp)} -> ${JSON.stringify(afterNone.stamp)}, `
           + `picker ${JSON.stringify(afterNone.picker)}, edits ${beforeNone.edits} -> ${afterNone.edits}, `
           + `note ${JSON.stringify(afterNone.note)}`);
+        check(afterRate.running && afterRate.fps === beforeRate.fps
+          && Number(afterRate.picker) === beforeRate.fps && afterRate.edits === beforeRate.edits
+          && /declined/.test(afterRate.note) && /export/.test(afterRate.note),
+        'changing the output rate while an export owns the document leaves the timeline grid, picker and history unchanged and says why',
+        `running ${afterRate.running}, fps ${beforeRate.fps} -> ${afterRate.fps}, `
+          + `picker ${JSON.stringify(afterRate.picker)}, edits ${beforeRate.edits} -> ${afterRate.edits}, `
+          + `note ${JSON.stringify(afterRate.note)}`);
       } finally {
         releasePreset();
         releaseSource();

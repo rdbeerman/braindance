@@ -6568,6 +6568,10 @@ ui.rate.addEventListener('input', () => {
 // The output rate, which is project state now and undoable because of it.
 ui.fps?.addEventListener('change', () => {
   if (!timeline) return;
+  if (refuseEdit('changing the output rate')) {
+    ui.fps.value = String(timeline.outputFps);
+    return;
+  }
   const held = timeline.programSec;
   const fps = Number(ui.fps.value);
   timeline.outputFps = fps;
