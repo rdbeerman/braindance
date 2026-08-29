@@ -34,7 +34,7 @@ import {
 } from './effect-manifests.js';
 import { bloomChainSize } from './bloom-pass.js';
 import {
-  depthCurr, colorPrev, bindDepth, bindColor, plantColor, boundColorImages,
+  depthCurr, colorPrev, bindDepth, bindColor, resetColorSource, plantColor, boundColorImages,
 } from './gpu-textures.js';
 import {
   statePrev, stateNext, stepSurfaceMemory, refuseAgeCeiling,
@@ -207,6 +207,9 @@ let pendingClipAdds = 0;
 // strip because the panel greys its clip half off this, and the panel is generated long before
 // the strip exists.
 let clipRow = null;
+
+/** Whether a gesture has a clip on the strip to write. */
+const clipGestureLive = () => !EDITING || clipRow !== null;
 
 /** One look: the values it holds, the tracks that move them, and the pool it could not read. */
 const createLook = () => ({
@@ -6352,6 +6355,7 @@ addEventListener('keydown', (e) => {
   if (!EDITING || !timeline) return;
   if ((e.key === 'g' || e.key === 'G') && !e.metaKey && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
+    if (!clipGestureLive()) { say('select a clip before moving or turning it'); return; }
     // One key for both handle sets: off, move, turn, off.
     setGizmoMode(gizmoMode === 'translate' ? 'rotate' : 'translate');
     return;
@@ -6408,6 +6412,7 @@ addEventListener('keydown', (e) => {
     case 'm': case 'M': e.preventDefault(); markHere().catch(showTimelineError); return;
     case '[': case ']': {
       e.preventDefault();
+      if (!clipGestureLive()) { say('select a clip before moving to a mark'); return; }
       const here = timeline.programSec;
       const seconds = markSecondsInOrder().filter(reachableInClip);
       const to = e.key === '['
@@ -7220,7 +7225,8 @@ function paintMarks() {
   const host = ui.marks;
   if (!host) return;
   host.replaceChildren();
-  if (!timeline) return;
+  ui.miniMarks?.replaceChildren();
+  if (!timeline || !clipGestureLive()) return;
   const total = view.duration;
   for (const mark of takeMarks) {
     // Marks are source milliseconds and the ruler is program seconds, so ticks go
@@ -7336,6 +7342,10 @@ function adoptMarks(id, marks, updateSelection = null) {
 
 /** Flags the moment at the playhead, in source milliseconds: a mark describes the footage. */
 async function markHere() {
+  if (!clipGestureLive()) {
+    say('select a clip before adding a mark');
+    return false;
+  }
   const id = openTakeId();
   if (!id || !timeline) return false;
   const sourceMs = Math.round(markSourceSecOfProgram(timeline.programSec) * 1000);
@@ -7346,6 +7356,10 @@ async function markHere() {
 
 /** Deletes the given mark by writing a tombstone. */
 async function deleteMark(mark) {
+  if (!clipGestureLive()) {
+    say('select a clip before deleting a mark');
+    return false;
+  }
   const id = openTakeId();
   if (!id || !mark) return false;
   const rec = { id: mark.id, deleted: true, at: Date.now() };
@@ -7357,6 +7371,10 @@ async function deleteMark(mark) {
 
 /** Moves a mark to a new source position. */
 async function moveMark(mark, newSourceMs) {
+  if (!clipGestureLive()) {
+    say('select a clip before moving a mark');
+    return false;
+  }
   const id = openTakeId();
   if (!id || !mark) return false;
   if (mark.sourceMs === newSourceMs) { paintMarks(); return true; }
@@ -8280,13 +8298,16 @@ function selectClipRow(clip) {
 function deselectClipRow() {
   if (clipRow === null && selection === null) return;
   clipRow = null;
+  selectedMark = null;
   selection = null;
   paintPanelScope();
   paintGizmo();
   paintClipCommands();
   timingChanged();
   syncCropOutside();
+  chromeStale = true;
   lanesChanged();
+  requestRepaint();
 }
 
 /** How the two clip commands read: what the edit can still take, and what is selected. */
@@ -8752,17 +8773,19 @@ let showCropBox = false;
 // Whether anything has rendered since the furniture was last drawn.
 let chromeStale = false;
 
+const cropBoxLive = () => showCropBox && clipGestureLive();
+
 // How faintly a cut point draws, and the one function allowed to write the uniform.
 const CROP_FAINT = 0.14;
 function syncCropOutside() {
   if (clips.length === 0) {
-    uniforms.cropOutside.value = chromeOn && showCropBox ? CROP_FAINT : 0;
+    uniforms.cropOutside.value = chromeOn && cropBoxLive() ? CROP_FAINT : 0;
     return;
   }
   const target = !EDITING || selectedClipRow() === selectedClip ? selectedClip : null;
   for (const clip of clips) {
     withClip(clip, () => {
-      uniforms.cropOutside.value = clip === target && chromeOn && showCropBox ? CROP_FAINT : 0;
+      uniforms.cropOutside.value = clip === target && chromeOn && cropBoxLive() ? CROP_FAINT : 0;
     });
   }
 }
@@ -9033,7 +9056,7 @@ const CROP_GRAB_PX = 11;
 
 /** Where each face's handle sits and how far a metre of it travels on screen. */
 function cropHandles(plan, rect) {
-  if (!showCropBox) return [];
+  if (!cropBoxLive()) return [];
   const corners = cropBoxCorners();
   const project = cropProjector(plan, rect);
   const frame = plan
@@ -9192,7 +9215,7 @@ function drawChrome() {
   const rect = insetRect();
 
   // Outside the `EDITING` branch deliberately: the recorder has a box and no path.
-  if (showCropBox) drawCropBox(false, rect);
+  if (cropBoxLive()) drawCropBox(false, rect);
 
   if (topViewVisible) {
   chromeCtx.save();
@@ -9213,7 +9236,7 @@ function drawChrome() {
 
   drawPlanCloud(rect);
 
-  if (showCropBox) drawCropBox(true, rect);
+  if (cropBoxLive()) drawCropBox(true, rect);
 
   chromeCtx.strokeStyle = 'rgba(90, 209, 196, 0.9)';
   chromeCtx.lineWidth = 1.4;
@@ -9459,7 +9482,7 @@ function cropHandleUnder(view) {
 }
 
 addEventListener('pointerdown', (e) => {
-  if (!showCropBox || !chromeOn || nodeDrag) return;
+  if (!cropBoxLive() || !chromeOn || nodeDrag) return;
   if (e.target !== renderer.domElement || e.button !== 0) return;
   finishOrbitDrift();
   const view = viewUnder(e.clientX, e.clientY);
@@ -10634,7 +10657,7 @@ function adoptSource(clip, opened) {
   // clips on different footage unproject through different numbers.
   const was = selectedClip ? selectedClip.cloud : null;
   selectCloud(clip.cloud);
-  uniforms.hasColor.value = 0;
+  resetColorSource();
   uniforms.focal.value.set(opened.hello.fx, opened.hello.fy);
   uniforms.center.value.set(opened.hello.cx, opened.hello.cy);
   if (was) selectCloud(was);
@@ -10905,7 +10928,7 @@ globalThis.__kinect = {
   cropBoxCorners: () => cropBoxCorners().map((v) => v.toArray()),
   cropHandles: (plan = false) => cropHandles(plan, insetRect())
     .map(({ param, at, sx, sy }) => ({ param, x: at.x, y: at.y, sx, sy })),
-  cropBoxShown: () => showCropBox,
+  cropBoxShown: () => cropBoxLive(),
   applyProgramOut,
   undoDepth: () => history.depth,
   // `history.begin()` is the last thing `openTake` does that a document can observe.
@@ -11282,6 +11305,18 @@ globalThis.__kinect = {
     },
     /** A colour image the caller supplies, for the one arm that cannot work without one. */
     plantColor,
+    /** One decoded colour arrival, for proving the source pair in a real browser. */
+    bindColor,
+    colorPair: () => {
+      const [previous, current] = boundColorImages(selectedClip.cloud.textures);
+      const size = (image) => image ? [image.width, image.height] : null;
+      return {
+        same: previous === current,
+        previous: size(previous),
+        current: size(current),
+        hasColor: uniforms.hasColor.value,
+      };
+    },
     times() { return pinnedPairs.times.slice(); },
     /** One frame's depth straight into the current texture, bypassing every pair source. */
     injectDepth(depth) { bindDepth(depth); },

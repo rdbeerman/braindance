@@ -91,6 +91,7 @@ export function createTextures() {
     depthCurr: makeDepthTexture(),
     colorPrev: makeColorTexture(),
     colorCurr: makeColorTexture(),
+    colorPairReady: false,
     cells: {
       depthPrev: { value: null },
       depthCurr: { value: null },
@@ -208,6 +209,18 @@ export function bindDepth(data) {
 // later, once it is certainly unbound; the indexed cache holds its own until the
 // frame is evicted. Closing one here would free a bitmap the other still needs.
 export function bindColor(bitmap) {
+  if (!selected.colorPairReady) {
+    selected.colorPrev.image = bitmap;
+    selected.colorPrev.needsUpdate = true;
+    selected.colorCurr.image = bitmap;
+    selected.colorCurr.needsUpdate = true;
+    selected.cells.colorPrev.value = selected.colorPrev;
+    selected.cells.colorCurr.value = selected.colorCurr;
+    selected.cells.hasColor.value = 1;
+    selected.colorPairReady = true;
+    pointViews();
+    return;
+  }
   const swap = selected.colorPrev;
   selected.colorPrev = selected.colorCurr;
   selected.colorCurr = swap;
@@ -217,6 +230,12 @@ export function bindColor(bitmap) {
   selected.cells.colorCurr.value = selected.colorCurr;
   selected.cells.hasColor.value = 1;
   pointViews();
+}
+
+/** Makes the next colour arrival seed both samplers, without taking bitmap ownership. */
+export function resetColorSource() {
+  selected.colorPairReady = false;
+  selected.cells.hasColor.value = 0;
 }
 
 /**
@@ -244,5 +263,6 @@ export function plantColor(rgba, width, height) {
   selected.cells.colorPrev.value = tex;
   selected.cells.colorCurr.value = tex;
   selected.cells.hasColor.value = 1;
+  selected.colorPairReady = true;
   pointViews();
 }

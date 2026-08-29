@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { DEPTH_H, DEPTH_W } from '../web/format.js';
 import {
-  createTextures, selectTextures, bindDepth, bindColor, plantColor, depthCurr, colorPrev, colorCurr,
+  createTextures, selectTextures, bindDepth, bindColor, resetColorSource, plantColor,
+  depthCurr, colorPrev, colorCurr,
 } from '../web/gpu-textures.js';
 
 // One instance, selected, which is what the boot does and what the exported views below name.
@@ -84,15 +85,29 @@ test('a block on no grid at all is refused, and nothing is half written', () => 
   assert.ok(held.some((d) => d.every((v, i) => v === before[i])), 'the frame that had bound is intact');
 });
 
-test('the colour pair swaps too, and binding one is what says there is colour at all', () => {
-  const before = cells.colorCurr.value;
-  const bitmap = { width: 4, height: 4 };
-  bindColor(bitmap);
-  assert.equal(cells.colorPrev.value, before);
-  assert.equal(cells.colorCurr.value.image, bitmap);
+test('the first colour arrival seeds both samplers, then the pair swaps', () => {
+  const first = { width: 4, height: 4 };
+  bindColor(first);
+  assert.equal(cells.colorPrev.value.image, first);
+  assert.equal(cells.colorCurr.value.image, first);
   assert.equal(cells.hasColor.value, 1);
-  assert.equal(colorPrev, before);
-  assert.notEqual(colorCurr, before);
+  const wasCurrent = cells.colorCurr.value;
+  const second = { width: 5, height: 5 };
+  bindColor(second);
+  assert.equal(cells.colorPrev.value.image, first);
+  assert.equal(cells.colorCurr.value.image, second);
+  assert.equal(colorPrev, wasCurrent);
+  assert.notEqual(colorCurr, wasCurrent);
+});
+
+test('a source change makes its first colour arrival seed both samplers again', () => {
+  resetColorSource();
+  assert.equal(cells.hasColor.value, 0);
+  const nextSource = { width: 6, height: 6 };
+  bindColor(nextSource);
+  assert.equal(cells.colorPrev.value.image, nextSource);
+  assert.equal(cells.colorCurr.value.image, nextSource);
+  assert.equal(cells.hasColor.value, 1);
 });
 
 test('a planted colour points both samplers at one texture, so no side of the pair is favoured', () => {

@@ -263,6 +263,16 @@ const MUTATIONS = {
       + 'adopt. The two rows above it stay green and have to - they are the control saying '
       + 'the refusal happened at all',
   },
+  'source-switch-keeps-old-colour': {
+    file: 'web/main.js',
+    edits: [[
+      '  resetColorSource();\n  uniforms.focal.value.set(opened.hello.fx, opened.hello.fy);',
+      '  uniforms.hasColor.value = 0;\n  uniforms.focal.value.set(opened.hello.fx, opened.hello.fy);',
+    ]],
+    fails: 'a reused clip only hiding its old colour pair when its take changes. The first '
+      + 'arrival from the new take replaces one sampler and leaves the other on the old take; '
+      + 'the source-pair row reddens',
+  },
 };
 
 if (argv.includes('--mutate') && !MUTATIONS[MUTATE]) {
@@ -868,6 +878,61 @@ async function main() {
     `surface ${control.surface}, take ${control.take}, chrome ${control.editing ? 'up' : 'down'}`);
   check(bootErrors.length === 0, 'and it reported no errors opening it',
     bootErrors.length ? bootErrors.slice(0, 2).join(' | ') : 'clean');
+
+  console.log('\n[boot] changing a clip\'s take starts a new colour pair');
+  {
+    const pair = await opened.page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const original = k.library.serialiseProjectBody();
+      const listed = await (await fetch('/library/takes')).json();
+      const other = listed.takes.find((take) => take.id === '${OTHER_TAKE}');
+      if (!other) return { error: '${OTHER_TAKE} was not listed' };
+
+      const staged = JSON.parse(JSON.stringify(original));
+      const second = JSON.parse(JSON.stringify(staged.clips[0]));
+      second.id = 'bootcolour';
+      second.take = { id: other.id, hash: other.hash };
+      staged.clips.push(second);
+      await k.library.loadProject('boot-colour-pair', staged);
+      k.editor.selectClipRow(original.clips[0].id);
+
+      const bitmap = (width, height, fill) => {
+        const canvas = new OffscreenCanvas(width, height);
+        const context = canvas.getContext('2d');
+        context.fillStyle = fill;
+        context.fillRect(0, 0, width, height);
+        return canvas.transferToImageBitmap();
+      };
+      k.drive.bindColor(bitmap(2, 2, '#a01010'));
+      k.drive.bindColor(bitmap(2, 2, '#d08020'));
+      const before = k.drive.colorPair();
+
+      const repointed = k.library.serialiseProjectBody();
+      repointed.clips[0].take = { ...repointed.clips[1].take };
+      repointed.clips = [repointed.clips[0]];
+      k.library.restoreProject(repointed);
+      const take = k.timeline.clips()[0].take.id;
+      k.drive.bindColor(bitmap(3, 1, '#1040d0'));
+      const after = k.drive.colorPair();
+
+      k.library.restoreProject(original);
+      k.editor.selectClipRow(original.clips[0].id);
+      await k.timeline.transport().seek(0);
+      await k.timeline.settled();
+      return { before, after, take };
+    })()`);
+    check(!pair.error && pair.take === OTHER_TAKE
+      && pair.before.same === false
+      && JSON.stringify(pair.before.previous) === '[2,2]'
+      && JSON.stringify(pair.before.current) === '[2,2]',
+    'the probe repoints the reused clip after putting two distinguishable old-take images in its pair',
+    pair.error ?? `take ${pair.take}, before ${JSON.stringify(pair.before)}`);
+    check(!pair.error && pair.after.same === true && pair.after.hasColor === 1
+      && JSON.stringify(pair.after.previous) === '[3,1]'
+      && JSON.stringify(pair.after.current) === '[3,1]',
+    'the first colour arrival after the source change seeds both samplers from the new take',
+    pair.error ?? `after ${JSON.stringify(pair.after)}`);
+  }
 
   console.log('\n[boot] a clip naming no take is refused by the editor\'s document door');
   {

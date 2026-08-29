@@ -250,8 +250,8 @@ const MUTATIONS = {
   // The faint pass answers to the button alone, so a crop box left on puts the cut points into
   // the exported file.
   'cropoutside-reaches-the-export': { file: 'web/main.js', edits: [[
-    '  uniforms.cropOutside.value = chromeOn && showCropBox ? CROP_FAINT : 0;',
-    '  uniforms.cropOutside.value = showCropBox ? CROP_FAINT : 0;',
+    '  uniforms.cropOutside.value = chromeOn && cropBoxLive() ? CROP_FAINT : 0;',
+    '  uniforms.cropOutside.value = cropBoxLive() ? CROP_FAINT : 0;',
   ]] },
   // Both early returns go, so a point outside the box survives to the fragment stage and goes
   // on writing depth.

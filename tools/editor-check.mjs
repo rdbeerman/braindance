@@ -1083,6 +1083,42 @@ const MUTATIONS = {
       + 'guess wearing the shape of an answer. Reddens 22b\'s "loading a project selects no '
       + 'clip"; the take half is a different door and is untouched by it',
   },
+  'deselected-clip-gestures-stay-live': {
+    file: 'web/main.js',
+    edits: [[
+      'const clipGestureLive = () => !EDITING || clipRow !== null;',
+      'const clipGestureLive = () => true;',
+    ]],
+    fails: 'the clip gesture gate held open after the strip deselects every clip. Section 22b '
+      + 'reddens the crop furniture, an actual drag at its old handle, the M shortcut and the '
+      + 'hidden navigation shortcuts',
+  },
+  'deselected-mark-delete-stays-live': {
+    file: 'web/main.js',
+    edits: [
+      [[
+        '  clipRow = null;',
+        '  selectedMark = null;',
+        '  selection = null;',
+      ].join('\n'), [
+        '  clipRow = null;',
+        '  selection = null;',
+      ].join('\n')],
+      [[
+        'async function deleteMark(mark) {',
+        '  if (!clipGestureLive()) {',
+        "    say('select a clip before deleting a mark');",
+        '    return false;',
+        '  }',
+        '  const id = openTakeId();',
+      ].join('\n'), [
+        'async function deleteMark(mark) {',
+        '  const id = openTakeId();',
+      ].join('\n')],
+    ],
+    fails: 'deselection keeping the mark object selected and the delete door accepting it. '
+      + 'Section 22b reddens the hidden Delete POST row',
+  },
   'gizmo-renders-from-the-pointer': {
     file: 'web/main.js',
     edits: [[
@@ -9701,6 +9737,34 @@ try {
     await page.evaluate(`__kinect.editor.selectClipRow('gz2')`);
     await settle();
 
+    // Leave both gesture-only surfaces live before the strip is cleared. A proof that starts
+    // with either one already off cannot distinguish deselection from the state it inherited.
+    if (!await page.evaluate('__kinect.cropBoxShown()')) await page.locator('#cropBox').click();
+    await page.evaluate(`(() => {
+      for (const [name, value] of [
+        ['left', -0.8], ['right', 0.8], ['bottom', -0.8], ['top', 0.8], ['far', 3],
+      ]) __kinect.params.set(name, value);
+    })()`);
+    const hiddenMarks = [{ id: 'hidden-gesture-probe', sourceMs: 1000, label: 'probe', at: 1 }];
+    await page.evaluate((marks) => __kinect.editor.setMarks(marks), hiddenMarks);
+    await settle();
+    await page.locator('#tMarks .tmk').click();
+    await page.evaluate('__kinect.timeline.transport().seek(0)');
+    await page.evaluate('__kinect.timeline.settled()');
+    const liveClipGestures = await page.evaluate(`(() => {
+      const canvas = __kinect.renderer.domElement.getBoundingClientRect();
+      const handle = __kinect.cropHandles(false)[0] ?? null;
+      return {
+        handle: handle ? { ...handle, x: canvas.x + handle.x, y: canvas.y + handle.y } : null,
+        ticks: __kinect.library.markTicks().length,
+        shown: __kinect.cropBoxShown(),
+      };
+    })()`);
+    check(liveClipGestures.shown && liveClipGestures.handle !== null && liveClipGestures.ticks === 1,
+      'the selected clip has a crop handle and a mark tick before the deselection tests them',
+      `box ${liveClipGestures.shown}, handle ${liveClipGestures.handle?.param ?? 'none'}, `
+        + `${liveClipGestures.ticks} mark tick(s)`);
+
     // The gesture that reaches the greyed state, and the state itself. Pressed on the empty part
     // of a clip's own lane - the clip starts at 4s, so the head of its lane belongs to no clip.
     const emptyLane = await page.evaluate(`(() => {
@@ -9718,6 +9782,13 @@ try {
       clipControl: document.getElementById('pointSize').disabled,
       projectControl: document.getElementById('bloom').disabled,
       handles: __kinect.editor.gizmo().shown,
+      cropShown: __kinect.cropBoxShown(),
+      cropHandles: __kinect.cropHandles(false).length,
+      cropOutside: __kinect.cropOutside(),
+      markTicks: __kinect.library.markTicks().length,
+      miniMarks: document.querySelectorAll('#tMiniMarks span').length,
+      time: __kinect.timeline.transport().programSec,
+      gizmoMode: __kinect.editor.gizmo().mode,
       clipCommands: ['tAddClip', 'tDeleteClip', 'tMoveClip', 'tRotateClip', 'tKeyClip',
         'tRate', 'tRateKey', 'tPreset', 'tPresetSave', 'tPresetExport', 'tPresetImport',
         'tMark', 'camSensor', 'cropFit'].map((id) => [id, document.getElementById(id)?.disabled]),
@@ -9737,14 +9808,89 @@ try {
     check(off.handles === false,
       'and the handles go with it, because there is no clip for them to be on',
       `shown ${off.handles}`);
+    check(off.cropShown === false && off.cropHandles === 0 && off.cropOutside === 0
+      && off.markTicks === 0 && off.miniMarks === 0,
+    'and the crop box, its faint pass and the mark ticks leave with the clip, so none remains as '
+      + 'a gesture onto the hidden selection',
+    `crop shown ${off.cropShown}, ${off.cropHandles} handles, faint ${off.cropOutside}, `
+      + `${off.markTicks} ruler and ${off.miniMarks} overview mark ticks`);
     check(off.clipCommands.every(([, disabled]) => disabled === true),
       'and every command that needs a clip is disabled until a row is selected',
       off.clipCommands.map(([id, disabled]) => `${id}:${disabled}`).join(' '));
+
+    // Press where the crop handle was, rather than only reading that its list is empty. This is
+    // the stale visible furniture from the reported fault, driven through the real pointer path.
+    if (liveClipGestures.handle) {
+      const h = liveClipGestures.handle;
+      const before = await page.evaluate(`__kinect.params.get(${JSON.stringify(h.param)})`);
+      const length = Math.hypot(h.sx, h.sy);
+      await page.mouse.move(h.x, h.y);
+      await page.mouse.down();
+      await page.mouse.move(h.x + h.sx / length * 36, h.y + h.sy / length * 36);
+      await page.mouse.up();
+      await settle();
+      const after = await page.evaluate(`__kinect.params.get(${JSON.stringify(h.param)})`);
+      check(after === before,
+        'dragging where the old crop handle was cannot change the hidden clip',
+        `${h.param} ${before} -> ${after}`);
+    }
+
+    let hiddenMarkWrites = 0;
+    await page.route('**/capture/*/marks', async (route) => {
+      if (route.request().method() !== 'POST') { await route.continue(); return; }
+      hiddenMarkWrites++;
+      const body = route.request().postDataJSON();
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ marks: [...hiddenMarks, ...(body.marks ?? [])] }),
+      });
+    });
+    await page.keyboard.press('Delete');
+    await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    const afterHiddenDelete = await page.evaluate('__kinect.library.marks().map((mark) => mark.id)');
+    const writesAfterDelete = hiddenMarkWrites;
+    check(writesAfterDelete === 0
+      && afterHiddenDelete.length === 1 && afterHiddenDelete[0] === hiddenMarks[0].id,
+    'Delete cannot write the mark that was selected before its clip was deselected',
+    `${writesAfterDelete} POST(s), marks ${afterHiddenDelete.join(' ')}`);
+
+    await page.keyboard.press('m');
+    await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    const hiddenMarkResult = await page.evaluate(`(() => ({
+      ids: __kinect.library.marks().map((mark) => mark.id),
+      note: document.getElementById('tNote').textContent,
+    }))()`);
+    await page.unroute('**/capture/*/marks');
+    check(hiddenMarkWrites === writesAfterDelete
+      && JSON.stringify(hiddenMarkResult.ids) === JSON.stringify(afterHiddenDelete)
+      && /select a clip before adding a mark/.test(hiddenMarkResult.note),
+    'and M refuses before a network write when no clip row says which take it would mark',
+    `${hiddenMarkWrites - writesAfterDelete} POST(s) from M, marks ${hiddenMarkResult.ids.join(' ')}, note "${hiddenMarkResult.note}"`);
+
+    await page.keyboard.press('g');
+    await page.keyboard.press(']');
+    await settle();
+    const hiddenNavigation = await page.evaluate(`(() => ({
+      time: __kinect.timeline.transport().programSec,
+      gizmoMode: __kinect.editor.gizmo().mode,
+      note: document.getElementById('tNote').textContent,
+    }))()`);
+    check(hiddenNavigation.time === off.time && hiddenNavigation.gizmoMode === off.gizmoMode
+      && /select a clip before moving to a mark/.test(hiddenNavigation.note),
+    'and the mark-jump and clip-handle keys refuse rather than acting through the hidden clip',
+    `time ${off.time} -> ${hiddenNavigation.time}, gizmo ${off.gizmoMode} -> `
+      + `${hiddenNavigation.gizmoMode}, note "${hiddenNavigation.note}"`);
+
     await page.evaluate(`__kinect.editor.selectClipRow('gz2')`);
     await settle();
     check(await page.evaluate('__kinect.editor.scopeOff()') === 0,
       'and selecting a clip again brings the whole panel back',
       `${await page.evaluate('__kinect.editor.scopeOff()')} rows still greyed`);
+    check(await page.evaluate('__kinect.cropBoxShown()') === true,
+      'and the crop box can return once a clip is selected again');
+    await page.locator('#cropBox').click();
+    await page.evaluate('__kinect.editor.setMarks([])');
+    await page.evaluate("__kinect.params.reset(['left', 'right', 'bottom', 'top', 'near', 'far'])");
 
     // Put the page back on one clip with no handles up, so the sections after this one see what
     // they expect.
