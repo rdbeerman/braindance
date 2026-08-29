@@ -171,6 +171,16 @@ const MUTATIONS = {
       + 'clip whose look was written. The save target row reddens alone',
   },
 
+  'zero-length-clip-draws-endpoint': {
+    file: 'web/main.js',
+    edits: [[
+      '    const hasSpan = clip.end > clip.start;',
+      '    const hasSpan = true;',
+    ]],
+    fails: 'a zero-length clip drawing one endpoint frame. The imported zero-length clip row '
+      + 'reddens alone',
+  },
+
   'ruler-stops-scaling-beyond-hour': {
     file: 'web/view-window.js',
     edits: [[
@@ -7291,6 +7301,7 @@ try {
           accepted: true,
           elapsed: performance.now() - began,
           duration: __kinect.timeline.read().duration,
+          showing: __kinect.timeline.showingAt(1e20)[0]?.showing ?? null,
           ticks,
         };
       } catch (err) {
@@ -7307,6 +7318,9 @@ try {
     enormous.accepted
       ? `${enormous.ticks.length} ticks in ${enormous.elapsed.toFixed(1)}ms over ${enormous.duration}s`
       : `refused after ${enormous.elapsed.toFixed(1)}ms: ${enormous.error}`);
+    check(enormous.accepted && enormous.showing === 'off',
+      'a zero-length clip draws no endpoint frame at the program position where it starts and ends',
+      enormous.accepted ? `showing ${enormous.showing} at ${enormous.duration}s` : 'the project was refused');
 
     // ---- the handle a file arrives with, checked the way the drag that makes one is
     // The invariants lived in the drag handler and nowhere in the loader: `restoreKey` asked

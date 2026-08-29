@@ -3999,7 +3999,8 @@ function clipShowingAt(clip, t) {
     // belongs to whatever ended there unless something else starts there, which is what stops
     // the last frame of every edit rendering black and still lets a cut draw one clip.
     const ends = Math.abs(t - clip.end) <= CLIP_EDGE;
-    return ends && !clips.some((other) => coversAt(other, t)) ? 'live' : 'off';
+    const hasSpan = clip.end > clip.start;
+    return hasSpan && ends && !clips.some((other) => coversAt(other, t)) ? 'live' : 'off';
   }
   const warmSec = clip.warmFrames(outputFps(), warmCeiling()) / outputFps();
   return t >= clip.start - warmSec - CLIP_EDGE ? 'warming' : 'off';
