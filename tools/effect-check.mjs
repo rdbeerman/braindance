@@ -1557,7 +1557,10 @@ try {
   // has to be true either way is that the page reports the refusal, so that is what is waited for.
   await page.evaluate(() => globalThis.__kinect.effects.pollNow());
   await page.waitForFunction(
-    "document.getElementById('tNote')?.textContent?.length > 0", null, { timeout: 20000 },
+    `(() => {
+      const note = document.getElementById('tNote')?.textContent ?? '';
+      return note.includes('probe.glow') && note.includes('still running the effects it had');
+    })()`, null, { timeout: 20000 },
   ).catch(() => {});
   const afterFork = await page.evaluate(readPage, POSITIONS);
 

@@ -3872,8 +3872,8 @@ async function runChecks() {
 
     const flat = await page.evaluate('globalThis.__kinect.library.markTicks()');
     check(flat.length === marks.length, 'every mark draws a tick on the ruler', `${flat.length} ticks`);
-    check(flat[0].left === 0, 'a mark at source zero ticks at the left edge');
-    check(flat[flat.length - 1].beyond === true,
+    check(flat[0]?.left === 0, 'a mark at source zero ticks at the left edge');
+    check(flat[flat.length - 1]?.beyond === true,
       'and a mark the edit never reaches is drawn at the edge as unreachable rather than dropped');
 
     // The probe has to stand where a wrong implementation would disagree.
@@ -3900,14 +3900,14 @@ async function runChecks() {
     const expected = marks.map((m) => pct(programOf(m.sourceMs / 1000) / shown.duration));
     // Where the wrong implementation would draw each tick.
     const naive = marks.map((m) => pct(m.sourceMs / 1000 / shown.duration));
-    const off = retimed.map((t, i) => Math.abs(t.left - expected[i]));
+    const off = marks.map((_, i) => Math.abs((retimed[i]?.left ?? Infinity) - expected[i]));
     const discriminating = marks.map((_, i) => i).filter((i) => Math.abs(expected[i] - naive[i]) > 5);
     check(discriminating.length >= 2,
       'at least two marks land somewhere the source fraction cannot, which is what makes them probes',
       marks.map((m, i) => `${(m.sourceMs / 1000).toFixed(1)}s: curve ${expected[i].toFixed(1)}% against fraction ${naive[i].toFixed(1)}%`).join('; '));
     check(discriminating.every((i) => off[i] < 1.5),
       'and each tick sits where the curve puts it rather than where the fraction would',
-      marks.map((m, i) => `${(m.sourceMs / 1000).toFixed(1)}s -> ${retimed[i].left.toFixed(1)}% (want ${expected[i].toFixed(1)}%)`).join('; '));
+      marks.map((m, i) => `${(m.sourceMs / 1000).toFixed(1)}s -> ${retimed[i]?.left?.toFixed(1) ?? 'missing'}% (want ${expected[i].toFixed(1)}%)`).join('; '));
 
     // A mark written from the editor lands in the take's sidecar.
     await page.evaluate('globalThis.__kinect.timeline.transport().seek(1.0)');

@@ -7391,7 +7391,7 @@ async function moveMark(mark, newSourceMs) {
  * the post chain - is applied at the same time and stamped nowhere else.
  */
 const appliedPreset = () => selectedClip.appliedPreset;
-const stampPreset = (stamp) => { selectedClip.appliedPreset = stamp; };
+const stampPreset = (clip, stamp) => { clip.appliedPreset = stamp; };
 
 /** A preset is look values, and that is the whole of it. */
 function presetFromCurrentLook(names) {
@@ -7996,7 +7996,11 @@ function exportPresetFile(name, body) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-async function importPresetFile(file) {
+async function importPresetFile(
+  file,
+  target = EDITING ? selectedClipRow() : selectedClip,
+  generation = documentGeneration,
+) {
   const text = await file.text();
   let body;
   try {
@@ -8014,7 +8018,10 @@ async function importPresetFile(file) {
   });
   const saved = await res.json();
   if (saved.error) throw new Error(saved.error);
-  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body });
+  if (generation !== documentGeneration || (target && !clips.includes(target))) {
+    return { ...saved, applied: false };
+  }
+  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body }, target);
   return { ...saved, applied: applied !== null };
 }
 
@@ -8294,7 +8301,7 @@ function selectClipRow(clip) {
   // what `timingChanged` already puts back together.
   timingChanged();
   syncCropOutside();
-  if (clip.take !== null) loadMarks(clip.take.id).catch(showTimelineError);
+  if (timeline && clip.take !== null) loadMarks(clip.take.id).catch(showTimelineError);
   requestRepaint();
 }
 
@@ -9926,6 +9933,8 @@ async function withPresetSubset(ask, run) {
 ui.presetSave.addEventListener('click', () => withPresetSubset(
   { title: 'Save this look', verb: 'save', name: appliedPreset()?.name ?? 'look-1' },
   async (picked) => {
+    const target = EDITING ? selectedClipRow() : selectedClip;
+    const generation = documentGeneration;
     const body = presetFromCurrentLook(picked.names);
     const res = await fetch(`/presets/${encodeURIComponent(picked.name)}`, {
       method: 'PUT',
@@ -9934,11 +9943,15 @@ ui.presetSave.addEventListener('click', () => withPresetSubset(
     });
     const saved = await res.json();
     if (saved.error) throw new Error(saved.error);
-    if (wholeLookTag(body.values)) stampPreset({ name: saved.name, rev: saved.rev });
+    const whole = wholeLookTag(body.values);
+    const targetIsCurrent = generation === documentGeneration && target && clips.includes(target);
+    if (whole && targetIsCurrent) {
+      stampPreset(target, { name: saved.name, rev: saved.rev });
+      history.commit();
+    }
     await refreshPresets();
     say(`saved ${saved.name} · ${saved.rev.slice(7, 15)}`
-      + (wholeLookTag(body.values) ? '' : ` · ${picked.names.length} of ${params.names('look').length} values`));
-    history.commit();
+      + (whole ? '' : ` · ${picked.names.length} of ${params.names('look').length} values`));
   },
 ));
 
@@ -9965,11 +9978,9 @@ ui.presetFile.addEventListener('change', () => {
     try {
       const saved = await importPresetFile(file);
       await refreshPresets();
+      showPickerChoice(pickers.find((p) => p.trigger === ui.preset), appliedPreset()?.name ?? '');
       if (saved.applied) {
-        showPickerChoice(pickers.find((p) => p.trigger === ui.preset), saved.name);
         say(`imported ${saved.name} · ${saved.rev.slice(7, 15)}`);
-      } else {
-        showPickerChoice(pickers.find((p) => p.trigger === ui.preset), appliedPreset()?.name ?? '');
       }
     } catch (err) {
       showTimelineError(err);
@@ -10738,6 +10749,9 @@ async function openTake(id) {
   const opened = await openSource(id);
   adoptSource(selectedClip, opened);
   openedProjectName = null;
+  // This door opens one clip, so select it before the awaited mark load paints the ruler.
+  // Otherwise the marks exist before a clip owns gestures and the second load races the paint.
+  selectClipRow(selectedClip);
   await enterEditor();
   // Before the lists, because everything after this reads a clip the fit has finished writing.
   await fitCropToTake(id, params.get('near'), params.get('far'))
@@ -10745,12 +10759,6 @@ async function openTake(id) {
   const listed = await listLibrary();
   ensureActiveDeliverable();
   applyDeliverable(activeDeliverable);
-  // Opening a take builds a project of one clip of footage the person has just chosen, so that
-  // clip is what they are working on and there is nothing to choose between. Through
-  // `selectClipRow` and not by writing the selection: the retime binding, the ruler's mapping and
-  // the marks move with it, and a selection set by hand leaves the ruler drawing another clip's
-  // marks with nothing on screen saying so. It carries the `timingChanged` this used to make.
-  selectClipRow(selectedClip);
   // The stack starts from whatever the clip already is, so the first undo has
   // somewhere to land.
   history.begin();

@@ -60,7 +60,7 @@ export const TICK_STEPS = [
   1 / 30, 1 / 10, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600,
 ];
 
-const RULER_TICK_LIMIT = 512;
+const RULER_TICK_LIMIT = 500;
 
 /** A width-sized set of ruler ticks, including spans beyond the fixed sub-hour ladder. */
 export function rulerTickSeconds(startSec, endSec, wantedSec) {

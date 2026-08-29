@@ -151,6 +151,26 @@ const MUTATIONS = {
       + 'preset row reddens on the changed document and commit',
   },
 
+  'import-applies-to-response-time-selection': {
+    file: 'web/main.js',
+    edits: [[
+      '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body }, target);',
+      '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body });',
+    ]],
+    fails: 'an imported preset applying to the clip selected when its PUT finishes instead of the '
+      + 'clip that initiated the import. The import target row reddens alone',
+  },
+
+  'preset-save-stamps-response-time-selection': {
+    file: 'web/main.js',
+    edits: [[
+      '      stampPreset(target, { name: saved.name, rev: saved.rev });',
+      '      stampPreset(EDITING ? selectedClipRow() : selectedClip, { name: saved.name, rev: saved.rev });',
+    ]],
+    fails: 'a whole-look save stamping the clip selected when its PUT finishes instead of the '
+      + 'clip whose look was written. The save target row reddens alone',
+  },
+
   'ruler-stops-scaling-beyond-hour': {
     file: 'web/view-window.js',
     edits: [[
@@ -158,7 +178,7 @@ const MUTATIONS = {
       '    step = top;',
     ]],
     fails: 'the ruler falling back to one-hour ticks for an enormous finite program. The huge '
-      + 'project row reddens on a tick set capped at 512 instead of sized to the viewport',
+      + 'project row reddens on a capped tick set instead of one sized to the viewport',
   },
 
   // A mark is drawn through its clip's curve and not through where that clip sits.
@@ -453,12 +473,15 @@ const MUTATIONS = {
     edits: [
       ['  refusePresetBody(name, body);\n', ''],
       [
-        '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body });\n'
+        '  if (generation !== documentGeneration || (target && !clips.includes(target))) {\n'
+        + '    return { ...saved, applied: false };\n'
+        + '  }\n'
+        + '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body }, target);\n'
         + '  return { ...saved, applied: applied !== null };',
         '  for (const [k, v] of Object.entries(body.values ?? {})) {\n'
         + '    if (globalThis.__kinect?.uniforms?.[k]) globalThis.__kinect.uniforms[k].value = v;\n'
         + '  }\n'
-        + '  stampPreset({ name: saved.name, rev: saved.rev });\n'
+        + '  stampPreset(target, { name: saved.name, rev: saved.rev });\n'
         + '  return { ...saved, applied: true };',
       ],
     ],
@@ -473,12 +496,18 @@ const MUTATIONS = {
       [
         '  const saved = await res.json();\n'
         + '  if (saved.error) throw new Error(saved.error);\n'
-        + '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body });\n'
+        + '  if (generation !== documentGeneration || (target && !clips.includes(target))) {\n'
+        + '    return { ...saved, applied: false };\n'
+        + '  }\n'
+        + '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body }, target);\n'
         + '  return { ...saved, applied: applied !== null };',
         '  const saved = await res.json();\n'
         + '  if (saved.error) throw new Error(saved.error);\n'
         + '  refusePresetBody(name, body);\n'
-        + '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body });\n'
+        + '  if (generation !== documentGeneration || (target && !clips.includes(target))) {\n'
+        + '    return { ...saved, applied: false };\n'
+        + '  }\n'
+        + '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body }, target);\n'
         + '  return { ...saved, applied: applied !== null };',
       ],
     ],
@@ -6493,6 +6522,10 @@ try {
     await page.waitForFunction("document.getElementById('tPresetList').hidden === false",
       null, { timeout: 10000 });
     await page.click(`#tPresetList .pickeroption[data-name=${JSON.stringify(NAME_EDITED)}]`);
+    await page.waitForFunction(
+      "document.getElementById('tNote')?.textContent?.includes('pointSize')",
+      null, { timeout: 15000 },
+    );
     await settle();
     await page.unroute(`**/presets/${NAME_EDITED}`);
     const refusedNote = await text('#tNote');
@@ -9881,6 +9914,155 @@ try {
     check(/project/i.test(copy) && /every other clip/i.test(copy),
       'and the dialog that saves one says the same thing in words, on the surface a person reads',
       copy.replace(/\s+/g, ' ').slice(0, 160));
+
+    // A preset request does not own the selection while the server answers. Hold each write,
+    // move the visible row, and then let the real continuation finish.
+    const presetRaceNonce = `ec-target-${process.pid}-${Date.now().toString(36)}`;
+    const importTargetName = `${presetRaceNonce}-import`;
+    const saveTargetName = `${presetRaceNonce}-save`;
+    const importTargetPath = join(TMP, `${importTargetName}.braindance-preset.json`);
+    const panelBeforePresetRace = await page.evaluate(
+      'document.querySelector(".paneltab[aria-selected=true]")?.dataset.panelTab ?? null');
+    const initiatingClip = 'gz2';
+    const otherClip = two.clips.find((clip) => clip.id !== initiatingClip).id;
+    const clickClip = async (id) => {
+      const state = await read();
+      const at = state.clips.findIndex((clip) => clip.id === id);
+      if (at < 0) throw new Error(`the preset race could not find clip ${id}`);
+      const point = await boxAt(at);
+      await page.mouse.click(point.x, point.y);
+      await settle();
+    };
+    const waitForRequest = async (count, label) => {
+      const began = Date.now();
+      while (count() !== 1) {
+        if (Date.now() - began > 15000) throw new Error(`${label} never reached the server`);
+        await new Promise((resolve) => { setTimeout(resolve, 20); });
+      }
+    };
+    const removePreset = async (name) => {
+      const probe = await fetch(`${URL_BASE}/presets/${encodeURIComponent(name)}`);
+      if (!probe.ok) return;
+      const res = await fetch(`${URL_BASE}/presets/${encodeURIComponent(name)}`, {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      });
+      check(res.ok, `and the target-race fixture ${name} was removed again`, `DELETE answered ${res.status}`);
+    };
+    let releaseImport = () => {};
+    let releaseSave = () => {};
+    let importRequests = 0;
+    let saveRequests = 0;
+    const holdImport = async (route) => {
+      importRequests++;
+      await new Promise((resolve) => { releaseImport = resolve; });
+      await route.continue();
+    };
+    const holdSave = async (route) => {
+      saveRequests++;
+      await new Promise((resolve) => { releaseSave = resolve; });
+      await route.continue();
+    };
+    writeFileSync(importTargetPath, `${JSON.stringify({
+      version: PROJECT_VERSION,
+      values: { pointSize: 46.7 },
+    }, null, 2)}\n`);
+    await page.route(`**/presets/${importTargetName}`, holdImport);
+    await page.route(`**/presets/${saveTargetName}`, holdSave);
+    try {
+      await page.locator('.paneltab[data-panel-tab="look"]').click();
+      await settle();
+      await clickClip(initiatingClip);
+      const beforeImport = await page.evaluate(({ targetId, otherId }) => {
+        const body = __kinect.library.serialiseProjectBody();
+        const byId = (id) => body.clips.find((clip) => clip.id === id);
+        return {
+          targetPointSize: byId(targetId).params.pointSize,
+          otherPointSize: byId(otherId).params.pointSize,
+          otherStamp: byId(otherId).appliedPreset ?? null,
+        };
+      }, { targetId: initiatingClip, otherId: otherClip });
+      const [importChooser] = await Promise.all([
+        page.waitForEvent('filechooser'),
+        page.click('#tPresetImport'),
+      ]);
+      await importChooser.setFiles(importTargetPath);
+      await waitForRequest(() => importRequests, 'the held preset import');
+      await clickClip(otherClip);
+      releaseImport();
+      await page.waitForFunction((name) => !__kinect.library.presetGestureRunning()
+        && document.getElementById('tNote').textContent.startsWith(`imported ${name}`),
+      importTargetName, { timeout: 15000 });
+      await settle();
+      const afterImport = await page.evaluate(({ targetId, otherId }) => {
+        const body = __kinect.library.serialiseProjectBody();
+        const byId = (id) => body.clips.find((clip) => clip.id === id);
+        return {
+          selection: __kinect.editor.clipSelection(),
+          targetPointSize: byId(targetId).params.pointSize,
+          otherPointSize: byId(otherId).params.pointSize,
+          picker: document.getElementById('tPreset').value,
+          otherStamp: byId(otherId).appliedPreset ?? null,
+        };
+      }, { targetId: initiatingClip, otherId: otherClip });
+      check(afterImport.selection === otherClip && near(afterImport.targetPointSize, 46.7, 1e-9)
+        && afterImport.otherPointSize === beforeImport.otherPointSize,
+      'an imported clip value lands on the clip that started the request when another row is selected before the PUT answers',
+      `selection ${afterImport.selection}, target ${beforeImport.targetPointSize} -> ${afterImport.targetPointSize}, `
+        + `other ${beforeImport.otherPointSize} -> ${afterImport.otherPointSize}`);
+      check(afterImport.picker === (afterImport.otherStamp?.name ?? '')
+        && JSON.stringify(afterImport.otherStamp) === JSON.stringify(beforeImport.otherStamp),
+      'and the picker keeps naming the newly selected clip\'s provenance instead of claiming it wears the imported values',
+      `picker ${JSON.stringify(afterImport.picker)}, other stamp ${JSON.stringify(afterImport.otherStamp)}`);
+
+      await clickClip(initiatingClip);
+      const beforeSave = await page.evaluate(({ targetId, otherId }) => {
+        const body = __kinect.library.serialiseProjectBody();
+        const byId = (id) => body.clips.find((clip) => clip.id === id);
+        return {
+          targetStamp: byId(targetId).appliedPreset ?? null,
+          otherStamp: byId(otherId).appliedPreset ?? null,
+        };
+      }, { targetId: initiatingClip, otherId: otherClip });
+      await page.focus('#tPresetSave');
+      await page.click('#tPresetSave');
+      await page.waitForFunction("document.getElementById('presetPick').open === true", null, { timeout: 10000 });
+      await page.fill('#ppName', saveTargetName);
+      await page.click('#ppGo');
+      await waitForRequest(() => saveRequests, 'the held whole-look save');
+      await clickClip(otherClip);
+      releaseSave();
+      await page.waitForFunction((name) => !__kinect.library.presetGestureRunning()
+        && document.getElementById('tNote').textContent.startsWith(`saved ${name}`),
+      saveTargetName, { timeout: 15000 });
+      await settle();
+      const afterSave = await page.evaluate(({ targetId, otherId }) => {
+        const body = __kinect.library.serialiseProjectBody();
+        const byId = (id) => body.clips.find((clip) => clip.id === id);
+        return {
+          selection: __kinect.editor.clipSelection(),
+          targetStamp: byId(targetId).appliedPreset ?? null,
+          otherStamp: byId(otherId).appliedPreset ?? null,
+        };
+      }, { targetId: initiatingClip, otherId: otherClip });
+      check(afterSave.selection === otherClip && afterSave.targetStamp?.name === saveTargetName
+        && JSON.stringify(afterSave.otherStamp) === JSON.stringify(beforeSave.otherStamp),
+      'a whole-look save stamps the clip whose values were written when another row is selected before the PUT answers',
+      `selection ${afterSave.selection}, target stamp ${JSON.stringify(beforeSave.targetStamp)} -> `
+        + `${JSON.stringify(afterSave.targetStamp)}, other ${JSON.stringify(beforeSave.otherStamp)} -> `
+        + JSON.stringify(afterSave.otherStamp));
+    } finally {
+      releaseImport();
+      releaseSave();
+      await page.unroute(`**/presets/${importTargetName}`, holdImport);
+      await page.unroute(`**/presets/${saveTargetName}`, holdSave);
+      await page.waitForFunction('!__kinect.library.presetGestureRunning()', null, { timeout: 15000 }).catch(() => {});
+      await removePreset(importTargetName);
+      await removePreset(saveTargetName);
+      if (panelBeforePresetRace) {
+        await page.locator(`.paneltab[data-panel-tab="${panelBeforePresetRace}"]`).click();
+        await settle();
+      }
+    }
 
     // The other door, and the ruling's other half. Through `loadProject` rather than through
     // `restoreProject`: the restore door is what undo arrives by and it must keep the selection,
