@@ -238,6 +238,11 @@ export function createPointCloud(sourceCells, stateTexture, program) {
 
   const geometry = pixelGeometry();
   const cloud = new THREE.Points(geometry, material);
+  // The geometry is shared; set its range immediately before this cloud draws from its own look.
+  cloud.onBeforeRender = () => {
+    const shedding = uniforms.fadeTime.value > 0 || uniforms.wakeTime.value > 0;
+    geometry.setDrawRange(0, shedding ? POINTS * 2 : POINTS);
+  };
   // Two groups above the points, because the two rotations answer to different owners: the outer
   // one is where the clip is placed in the room, the inner one is levelling, and a single node
   // carrying both would make a clip's placement a function of how the mount was bolted.

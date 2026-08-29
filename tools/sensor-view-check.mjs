@@ -101,8 +101,8 @@ const MUTATIONS = {
   'no-repaint': {
     file: 'web/main.js',
     edits: [[
-      '  controls.update();\n  requestRepaint();',
-      '  controls.update();',
+      '  controls.update();\n  paintLens();\n  requestRepaint();',
+      '  controls.update();\n  paintLens();',
     ]],
   },
   'sensor-view-keys-camera': {

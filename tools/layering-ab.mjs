@@ -133,6 +133,7 @@ await page.waitForFunction(() => globalThis.__kinect.takeOpened(), null, { timeo
 // The stage is the viewport less the furniture, and the furniture is only there once the take has
 // opened - so it is measured after the transport exists and the viewport grown to suit. Twice,
 // because the lane stack is built after that and a strip read before its rows grows underneath.
+let stageLanded = false;
 for (let attempt = 0; attempt < 3; attempt++) {
   await page.evaluate('globalThis.__kinect.timeline.settled()').catch(() => {});
   const furniture = await page.evaluate(`(() => {
@@ -147,11 +148,16 @@ for (let attempt = 0; attempt < 3; attempt++) {
     width: STAGE.width,
     height: STAGE.height + furniture.strip + furniture.shell,
   });
-  const landed = await page.waitForFunction((want) => {
+  stageLanded = await page.waitForFunction((want) => {
     const gl = globalThis.__kinect?.renderer?.getContext?.();
     return !!gl && gl.drawingBufferWidth === want.w && gl.drawingBufferHeight === want.h;
   }, { w: STAGE.width, h: STAGE.height }, { timeout: 15000 }).then(() => true).catch(() => false);
-  if (landed) break;
+  if (stageLanded) break;
+}
+if (!stageLanded) {
+  console.log(`\n[layering] DID NOT RUN - the drawing buffer did not reach ${STAGE.width}x${STAGE.height} after 3 attempts.`);
+  await browser.close();
+  process.exit(2);
 }
 
 // A timed block has to be resident before it is timed, so the widest arm's clips have to fit one

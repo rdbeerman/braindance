@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "requires": [
     {
       "id": "ghost",
@@ -110,6 +110,9 @@
     "datamosh.splay": 0,
     "datamosh.line": 0.55,
     "datamosh.grain": 6,
+    "datamosh.drift": 0,
+    "datamosh.speed": 1,
+    "datamosh.cycleRefresh": false,
     "datamosh.refresh": 1.6
   }
 }

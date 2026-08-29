@@ -1348,6 +1348,10 @@ const SCRAMBLE = {
 // from a restore, with the reason each one cannot reach the pixels here. Anything else
 // landing in that bucket is a failure.
 const NO_PIXEL_EFFECT = {
+  bottom: 'the scrambled lower face is below this fixture - proven instead by the focused '
+    + 'bottom-face arm below',
+  snapDelta: 'the pinned frames do not straddle its threshold - proven instead by the planted '
+    + '300mm jump below',
   crop: 'its scrambled value is its default, because releasing the box would make the '
     + 'six faces it gates unobservable - proven instead by the section below',
   spin: 'auto-orbit only advances when the animation loop calls controls.update, '
@@ -1359,6 +1363,8 @@ const NO_PIXEL_EFFECT = {
     + 'rather than assumed - the run prints its own span two sections up. It reaches pixels in '
     + 'timeline-check section 7, where the arm is twelve seconds in and `--mutate '
     + 'mosh-never-refreshes` reddens two rows',
+  'datamosh.cycleRefresh': 'the run is shorter than the scrambled refresh period - proven '
+    + 'instead by the focused refresh-cycle arm below',
 };
 
 const PAGE_HELPERS = `
@@ -2231,6 +2237,7 @@ console.log('\n[registry] every parameter round-trips to where the renderer read
     const k = globalThis.__kinect;
     k.params.reset();
     k.params.apply(${JSON.stringify(values)});
+    k.renderer.render(k.scene, k.freeCamera);
     return { values: k.params.values(k.params.names()), landing: ${landingReader} };
   })()`);
 
@@ -2259,6 +2266,7 @@ console.log('\n[registry] the side effects that are not a uniform write');
     const k = globalThis.__kinect;
     k.params.reset();
     k.params.apply(${JSON.stringify(values)});
+    k.renderer.render(k.scene, k.freeCamera);
     return {
       drawRange: k.geometry.drawRange.count,
       bloom: k.bloom.enabled, trails: k.afterimage.enabled, grade: k.grade.enabled,
@@ -2660,12 +2668,21 @@ console.log('\n[registry] the crop switch, which the sweep above cannot see');
     right: defaults.right,
     bottom: defaults.bottom,
     top: defaults.top,
+    near: 1.5,
+    far: 2.5,
   };
   const depthBiting = await run(depthOnly);
   const depthReleased = await run({ ...depthOnly, crop: false });
   check(!eq(depthBiting, depthReleased),
     'and it reaches the depth pair, not only the four lateral faces',
     eq(depthBiting, depthReleased) ? 'identical with only near/far authored' : 'the box releases in depth too');
+
+  const bottomOnly = { ...defaults, crop: true, bottom: 0.5 };
+  const bottomBiting = await run(bottomOnly);
+  const bottomReleased = await run({ ...bottomOnly, crop: false });
+  check(!eq(bottomBiting, bottomReleased),
+    'and the lower face reaches the image when it crosses this fixture',
+    eq(bottomBiting, bottomReleased) ? 'identical with bottom at 0.5m' : 'the lower face cuts the cloud');
 
   const landing = await page.evaluate(`(() => {
     const k = globalThis.__kinect;
@@ -2679,6 +2696,15 @@ console.log('\n[registry] the crop switch, which the sweep above cannot see');
   check(eq(landing.off, landing.on) && eq(landing.on, [SCRAMBLE.near, SCRAMBLE.far]),
     'and it releases by not testing rather than by moving the planes, so the depth ramp is unchanged',
     `nearClip/farClip released ${JSON.stringify(landing.off)}, applied ${JSON.stringify(landing.on)}`);
+}
+
+console.log('\n[registry] the datamosh refresh switch crosses a cycle boundary');
+{
+  const cycling = await run({ ...SCRAMBLE, 'datamosh.refresh': 0.2, 'datamosh.cycleRefresh': true });
+  const continuous = await run({ ...SCRAMBLE, 'datamosh.refresh': 0.2, 'datamosh.cycleRefresh': false });
+  check(!eq(cycling, continuous),
+    'cycle refresh changes the image after the first refresh boundary',
+    eq(cycling, continuous) ? 'identical across a 0.2s boundary' : 'the histories diverge');
 }
 
 console.log('\n[registry] the streak goes where the angle points');
@@ -2932,11 +2958,12 @@ console.log('\n[registry] a pair planted with a known speed in it');
 
   // The previous frame is built from a rule rather than filled with a value, so one helper
   // plants both a uniform wall and a chequered one: a block size of 0 is the plane.
-  const shot = ({ prevMm, spanSec, motion, block = 0 }) => page.evaluate(`(async () => {
+  const shot = ({ prevMm, spanSec, motion, block = 0, snapDelta = 250 }) => page.evaluate(`(async () => {
     ${PAGE_HELPERS}
     k.params.reset();
     k.params.apply(${JSON.stringify(LOOK)});
     k.params.set('duotone.motion', ${motion});
+    k.params.set('snapDelta', ${snapDelta});
     k.drive.reset();
     pinCamera(k.freeCamera);
     const plane = (mm) => new Uint16Array(512 * 424).fill(mm);
@@ -2983,6 +3010,7 @@ console.log('\n[registry] a pair planted with a known speed in it');
     fast: await shot({ ...fast, motion: 1 }),
     brief: await shot({ ...brief, motion: 1 }),
     jumped: await shot({ ...jumped, motion: 1 }),
+    joined: await shot({ ...jumped, motion: 1, snapDelta: 410 }),
     chequer: await shot({ ...chequer, motion: 1 }),
   };
 
@@ -3015,6 +3043,11 @@ console.log('\n[registry] a pair planted with a known speed in it');
     'a jump past the snap threshold reads as a different surface, not as fast motion',
     on.jumped.hash === on.still.hash ? `both ${on.still.hash.slice(0, 12)} at a 300mm jump`
       : `${on.jumped.hash.slice(0, 12)} vs ${on.still.hash.slice(0, 12)} - the gate is off the speed`);
+
+  check(on.joined.hash !== on.still.hash && on.joined.hash !== on.jumped.hash,
+    'raising the snap threshold joins the same 300mm pair into a moving surface',
+    on.joined.hash === on.still.hash ? 'still treated as two surfaces at 410mm'
+      : `${on.joined.hash.slice(0, 12)} at 410mm vs ${on.jumped.hash.slice(0, 12)} at 250mm`);
 
   check(on.chequer.hash !== on.fast.hash && on.chequer.hash !== on.still.hash,
     'a chequered pair is neither of the uniform frames, so the speed is per point',

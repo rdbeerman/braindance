@@ -126,7 +126,7 @@ const MUTATIONS = {
   // which is that row working rather than a second catch.
   'add-clip-ignores-the-playhead': {
     file: 'web/main.js',
-    edits: [['  clip.start = timeline ? timeline.programSec : 0;', '  clip.start = 0;']],
+    edits: [['  const start = timeline ? timeline.programSec : 0;', '  const start = 0;']],
     fails: 'a clip landing at the head of the edit rather than under the playhead. Two rows: the '
       + 'placement, and the row that says the mark arm has a placement to be about at all',
   },
@@ -1060,11 +1060,8 @@ const MUTATIONS = {
   // whole of what makes a look a clip's own. Must redden 22b's "and on no other clip".
   'preset-writes-every-clip': {
     file: 'web/main.js',
-    edits: [
-      ['    params.apply({ ...resets, ...values });', '    forEachLook(() => params.apply({ ...resets, ...values }));'],
-      ['  } else {\n    params.apply(values);\n  }\n  if (stamped) stampPreset',
-        '  } else {\n    forEachLook(() => params.apply(values));\n  }\n  if (stamped) stampPreset'],
-    ],
+    edits: [['  if (target) withClip(target, () => params.apply(clipValues));',
+      '  if (target) forEachLook(() => params.apply(clipValues));']],
     fails: 'a preset\'s cloud half written to every clip rather than to the selected one, which '
       + 'is the whole of what makes a look a clip\'s own. Reddens 22b\'s "and on no other '
       + 'clip"',
@@ -1122,29 +1119,19 @@ const MUTATIONS = {
     ]],
   },
 
-  'rate-holds-cuts': {
+  'rate-rescales-cuts': {
     file: 'web/main.js',
     edits: [[
-      '  setClipInOut({ in: was.clipIn * k, out: was.clipOut === null ? null : was.clipOut * k });',
-      '  setClipInOut({ in: was.clipIn, out: was.clipOut });',
+      '  rescaleClipKeys(was.keys, k);',
+      '  rescaleClipKeys(was.keys, k);\n  setClipInOut({ in: clipIn * k, out: clipOut === null ? null : clipOut * k });',
     ]],
   },
 
   'rate-holds-keys': {
     file: 'web/main.js',
     edits: [[
-      '  for (const [key, t] of was.keys) key.t = t * k;',
-      '  for (const [key, t] of was.keys) key.t = t;',
-    ]],
-  },
-
-  'undo-skips-cuts': {
-    file: 'web/main.js',
-    edits: [[
-      '    if (retime.rate !== wasRate) {\n'
-      + '      reparameteriseProgramTime(wasRate / retime.rate, { clipIn: wasIn, clipOut: wasOut, keys: [] });\n'
-      + '    }',
-      '    // the cuts are left where the rate being undone put them',
+      '  rescaleClipKeys(was.keys, k);',
+      '  rescaleClipKeys(was.keys, 1);',
     ]],
   },
 
@@ -3593,12 +3580,15 @@ try {
       tOut: left('#tOut'),
       shadeIn: box('#tShadeIn'),
       shadeOut: box('#tShadeOut'),
-      keys: [...document.querySelectorAll('.tlane[data-owner=bloom] .tkey')].map((k) => k.style.left).join(' '),
+      clipKeys: [...document.querySelectorAll('.tlane[data-owner$="/pointSize"] .tkey')]
+        .map((k) => k.style.left).join(' '),
+      projectKeys: [...document.querySelectorAll('.tlane[data-owner=bloom] .tkey')]
+        .map((k) => k.style.left).join(' '),
       marks: [...document.querySelectorAll('#tMarks .tmk')].map((m) => m.style.left).join(' '),
-      keyTimes: (__kinect.keyframes.project().look.tracks.bloom ?? []).map((k) => k.t.toFixed(4)).join(' '),
-      // The camera track, read separately because it is serialised separately - under
-      // `composition` rather than `look.tracks` - and a rescale walking only the look tracks
-      // would pass every row above while sliding the whole camera move against the footage.
+      clipKeyTimes: (__kinect.keyframes.project().clips[0].tracks.pointSize ?? [])
+        .map((k) => k.t.toFixed(4)).join(' '),
+      projectKeyTimes: (__kinect.keyframes.project().look.tracks.bloom ?? [])
+        .map((k) => k.t.toFixed(4)).join(' '),
       cameraTimes: (__kinect.keyframes.project().composition.camera ?? []).map((k) => k.t.toFixed(4)).join(' '),
       clip: __kinect.editor.clipRange(),
       duration: __kinect.timeline.transport().duration,
@@ -3608,6 +3598,11 @@ try {
 
   await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
   await page.evaluate(`__kinect.keyframes.setTracks({ bloom: [ { t: 2, value: 0.2 }, { t: 6, value: 0.9 } ] })`);
+  await page.evaluate(`(() => {
+    const body = __kinect.library.serialiseProjectBody();
+    body.clips[0].tracks.pointSize = [ { t: 2, value: 4 }, { t: 6, value: 12 } ];
+    __kinect.library.restoreProject(body);
+  })()`);
   await page.evaluate(`(() => {
     __kinect.timeline.transport().pause();
     __kinect.setViewCamera(__kinect.viewCamera());
@@ -3637,27 +3632,33 @@ try {
     'the ruler really did rescale from 1.20x to 2.35x, or none of the rows below mean anything',
     `${at120.duration.toFixed(3)}s -> ${at235.duration.toFixed(3)}s`);
   for (const [term, label] of [
-    ['tIn', 'the in cut holds its place on the ruler'],
-    ['tOut', 'the out cut holds its place on the ruler'],
-    ['shadeIn', 'and the shading before it does'],
-    ['shadeOut', 'and the shading after it does'],
-    ['keys', 'every keyframe holds its place on the ruler'],
+    ['clipKeys', "the selected clip's keyframes hold their place on the ruler"],
     ['marks', "the take's marks hold theirs, without being rescaled to do it"],
   ]) {
     check(at120[term] === at235[term], `  ${label}`, `${at120[term]} -> ${at235[term]}`);
   }
   check(near(parseFloat(at235.playhead), parseFloat(at120.playhead), 0.05),
     '  and so does the playhead', `${at120.playhead} -> ${at235.playhead}`);
-  check(at120.keyTimes !== at235.keyTimes && at120.clip.in !== at235.clip.in,
-    '  by rescaling the times underneath, which is what proves it carried them',
-    `keys ${at120.keyTimes} -> ${at235.keyTimes}, in ${at120.clip.in.toFixed(4)} -> ${at235.clip.in.toFixed(4)}`);
-  check(at120.cameraTimes !== '' && at120.cameraTimes !== at235.cameraTimes,
-    '  including the camera track, which is serialised down a different branch',
+  check(at120.clipKeyTimes !== at235.clipKeyTimes,
+    '  by rescaling the clip-local times underneath, which is what proves it carried them',
+    `keys ${at120.clipKeyTimes} -> ${at235.clipKeyTimes}`);
+  check(at120.projectKeyTimes === at235.projectKeyTimes && at120.projectKeys !== at235.projectKeys,
+    'the project effect keys keep their authored program times and therefore move on the shorter ruler',
+    `times ${at120.projectKeyTimes} -> ${at235.projectKeyTimes}, positions ${at120.projectKeys} -> ${at235.projectKeys}`);
+  check(at120.cameraTimes !== '' && at120.cameraTimes === at235.cameraTimes,
+    'and the camera track keeps its authored program times, although it is serialised down a different branch',
     `camera ${at120.cameraTimes} -> ${at235.cameraTimes}`);
+  check(at120.clip.in === at235.clip.in && at120.clip.out === at235.clip.out
+      && at120.tIn !== at235.tIn && at120.tOut !== at235.tOut,
+    'the project cuts keep their authored times and move on the shorter ruler with the camera',
+    `range ${at120.clip.in.toFixed(4)}-${at120.clip.out.toFixed(4)} -> `
+      + `${at235.clip.in.toFixed(4)}-${at235.clip.out.toFixed(4)}, positions ${at120.tIn}/${at120.tOut} -> ${at235.tIn}/${at235.tOut}`);
   const k = 1.2 / 2.35;
-  check(near(at235.clip.in, at120.clip.in * k, 1e-6) && near(at235.clip.out, at120.clip.out * k, 1e-6),
-    '  by exactly the ratio of the two rates, which is what keeps the export on the same footage',
-    `in ${at120.clip.in.toFixed(4)} -> ${at235.clip.in.toFixed(4)}, wanted ${(at120.clip.in * k).toFixed(4)}`);
+  check(at235.clipKeyTimes.split(' ').every((t, i) => near(
+    Number(t), Number(at120.clipKeyTimes.split(' ')[i]) * k, 1e-4,
+  )),
+  'the selected clip keys move by exactly the ratio of the two rates',
+  `${at120.clipKeyTimes} -> ${at235.clipKeyTimes}, ratio ${k.toFixed(4)}`);
 
   await page.evaluate(`__kinect.keyframes.undo.pop()`);
   await settle();
@@ -3671,7 +3672,8 @@ try {
   check(undone.tIn === at120.tIn && undone.tOut === at120.tOut,
     '  and puts the cuts back with it, which the snapshot alone cannot do',
     `in ${at120.tIn} -> ${undone.tIn}, out ${at120.tOut} -> ${undone.tOut}`);
-  check(undone.keys === at120.keys, '  and the keys', `${at120.keys} -> ${undone.keys}`);
+  check(undone.clipKeys === at120.clipKeys && undone.clipKeyTimes === at120.clipKeyTimes,
+    "  and the selected clip's keys", `${at120.clipKeyTimes} -> ${undone.clipKeyTimes}`);
 
   // The detent at 1.00x, the one rate that has to be reachable exactly rather than approximately:
   // `slopeAt` reports it to the audio gate, and a take playing at 0.9995 reads as retimed.
@@ -3810,16 +3812,26 @@ try {
     depth: __kinect.keyframes.undo.depth(),
     lanes: JSON.stringify(__kinect.keyframes.lanes()),
     range: JSON.stringify(__kinect.editor.clipRange()),
-    keyTimes: (__kinect.keyframes.project().look.tracks.bloom ?? []).map((k) => k.t.toFixed(3)).join(' '),
+    keyTimes: (__kinect.keyframes.project().clips
+      .find((clip) => clip.id === __kinect.editor.clipSelection())?.tracks.pointSize ?? [])
+      .map((k) => k.t.toFixed(3)).join(' '),
   }))()`);
 
   const heldGesture = async ({ interrupt }) => {
     await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
-    await page.evaluate(`__kinect.keyframes.setTracks({ bloom: [{ t: 2, value: 0.2 }, { t: 6, value: 0.9 }] })`);
+    await page.evaluate(`(() => {
+      const body = __kinect.library.serialiseProjectBody();
+      const clip = body.clips.find((entry) => entry.id === __kinect.editor.clipSelection());
+      clip.tracks.pointSize = [{ t: 2, value: 4 }, { t: 6, value: 12 }];
+      __kinect.library.restoreProject(body);
+    })()`);
     await settle();
+    await page.evaluate('__kinect.editor.setClipRange(0, null)');
     await page.evaluate('__kinect.keyframes.undo.commit()');
     await driveRate(2);
     const committed = await page.evaluate('__kinect.timeline.retime.rate');
+    await page.evaluate('__kinect.timeline.transport().seek(2)');
+    await settle();
     await page.evaluate('__kinect.timeline.transport().play()');
     await new Promise((r) => setTimeout(r, 250));
     const wasPlaying = await page.evaluate('__kinect.timeline.transport().playing');
@@ -3899,6 +3911,12 @@ try {
   await page.evaluate('__kinect.timeline.transport().pause()');
   await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
   await page.evaluate('__kinect.keyframes.setTracks({})');
+  await page.evaluate(`(() => {
+    const body = __kinect.library.serialiseProjectBody();
+    const clip = body.clips.find((entry) => entry.id === __kinect.editor.clipSelection());
+    delete clip.tracks.pointSize;
+    __kinect.library.restoreProject(body);
+  })()`);
   await page.evaluate('__kinect.keyframes.undo.begin()');
   await page.evaluate('__kinect.timeline.transport().seek(0)');
   await settle();
@@ -4549,11 +4567,9 @@ try {
   })()`);
   await settle();
   const afterSwap = await page.evaluate('__kinect.editor.clipRange()');
-  const wantIn = 2 * (heldRate / 1.25);
-  const wantOut = 8 * (heldRate / 1.25);
-  check(near(afterSwap.in ?? -1, wantIn, 1e-3) && near(afterSwap.out ?? -1, wantOut, 1e-3),
-    '  and the gesture that continues rescales that trim rather than writing the old one back',
-    `${JSON.stringify(afterSwap)}, wanted in ${wantIn.toFixed(4)} out ${wantOut.toFixed(4)}`);
+  check(near(afterSwap.in ?? -1, 2, 1e-3) && near(afterSwap.out ?? -1, 8, 1e-3),
+    '  and the gesture that continues keeps that project trim at its authored times',
+    `${JSON.stringify(afterSwap)}, wanted in 2.0000 out 8.0000`);
 
   await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
   await settle();
@@ -9491,6 +9507,9 @@ try {
       clipControl: document.getElementById('pointSize').disabled,
       projectControl: document.getElementById('bloom').disabled,
       handles: __kinect.editor.gizmo().shown,
+      clipCommands: ['tAddClip', 'tDeleteClip', 'tMoveClip', 'tRotateClip', 'tKeyClip',
+        'tRate', 'tRateKey', 'tPreset', 'tPresetSave', 'tPresetExport', 'tPresetImport',
+        'tMark', 'camSensor', 'cropFit'].map((id) => [id, document.getElementById(id)?.disabled]),
     }))()`);
     console.log(`  a press ${emptyLane.gap.toFixed(0)}px left of the clip's box: `
       + `selection ${off.selection}, ${greyedBefore} greyed rows before it and ${off.greyed} after`);
@@ -9507,6 +9526,9 @@ try {
     check(off.handles === false,
       'and the handles go with it, because there is no clip for them to be on',
       `shown ${off.handles}`);
+    check(off.clipCommands.every(([, disabled]) => disabled === true),
+      'and every command that needs a clip is disabled until a row is selected',
+      off.clipCommands.map(([id, disabled]) => `${id}:${disabled}`).join(' '));
     await page.evaluate(`__kinect.editor.selectClipRow('gz2')`);
     await settle();
     check(await page.evaluate('__kinect.editor.scopeOff()') === 0,

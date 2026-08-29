@@ -250,8 +250,8 @@ const MUTATIONS = {
     fails: 'the retry budget cut to one attempt, which is how it shipped. One budget covers both '
       + 'of the worker\'s store readings - the installed effects and the library\'s takes - '
       + 'since a server that cannot be reached is one condition however many routes a job '
-      + 'needs from it. The read runs after the claim and before the first heartbeat, so one '
-      + 'connection reset there failed a claimed job through `/finish` into a terminal state '
+      + 'needs from it. The read runs after the claim while its heartbeat is active, but one '
+      + 'connection reset there still failed a claimed job through `/finish` into a terminal state '
       + '- and a worker and its server are two processes with a restart, a proxy or a moment '
       + 'of `EHOSTUNREACH` between them. Reddens **three** rows, measured: the blip arm\'s '
       + 'take-resolution row and its skew line, because the job now comes back naming a read '
@@ -298,8 +298,8 @@ const MUTATIONS = {
       + 'for',
   },
   'heartbeat-stops-on-first-error': { file: 'tools/render-worker.mjs', edits: [[
-    '      const beatOnce = () => { heartbeat().catch((err) => missedBeat(err.message)); };',
-    '      const beatOnce = () => { heartbeat().catch((err) => { stopBeating(); console.error(`[worker] ${job.id} heartbeat: ${err.message}`); }); };',
+    '    const beatOnce = () => { heartbeat().catch((err) => missedBeat(err.message)); };',
+    '    const beatOnce = () => { heartbeat().catch((err) => { stopBeating(); console.error(`[worker] ${job.id} heartbeat: ${err.message}`); }); };',
   ]] },
 };
 if (MUTATE && !MUTATIONS[MUTATE]) {

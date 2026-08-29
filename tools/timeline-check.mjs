@@ -600,6 +600,7 @@ const MOSH_LOOK = {
   'datamosh.splay': 1,
   'datamosh.line': 0.55,
   'datamosh.grain': 3,
+  'datamosh.cycleRefresh': true,
   'datamosh.refresh': 1.2,
 };
 
@@ -1868,8 +1869,9 @@ console.log('\n== 7. more than one clip: the composite, the cut, and what a clip
     { id: 'c4', targetSec: 6.3, fromSec: 4.9, why: 'no footage before its in-point' },
   ];
   for (const entry of ENTRIES) {
+    const isolated = [FIXTURE_CLIPS.find((clip) => clip.id === entry.id)];
     await page.evaluate(
-      `globalThis.__mc.load(${JSON.stringify(FIXTURE_CLIPS)}, ${JSON.stringify(SECOND_TAKE
+      `globalThis.__mc.load(${JSON.stringify(isolated)}, ${JSON.stringify(SECOND_TAKE
         ? { id: SECOND_TAKE.id, hash: SECOND_TAKE.hash } : null)}, ${JSON.stringify(MULTI_LOOK)})`,
     );
     const played = await page.evaluate(
@@ -2082,13 +2084,14 @@ console.log('\n== 8. the frame cache is sized by the clips asking for it ==');
     'the arms all computed the same pre-roll, so what differs between them is how many clips '
     + 'are asking for it and not how long it is',
     stacked.map(({ n, shot }) => `${n}:${shot.seek.plan.frames}`).join(' '));
+  const staggerFrames = Math.round(STACK_GAP_SEC * 30);
+  const unionFrames = one.shot.seek.bound.frames + (CLIP_CEILING - 1) * staggerFrames;
   check(most.shot.seek.bound.clips === CLIP_CEILING
-    && most.shot.seek.bound.frames >= one.shot.seek.bound.frames * CLIP_CEILING * 0.9,
-  `the widest arm really does put all ${CLIP_CEILING} clips on one take and ask it for about `
-    + `${CLIP_CEILING} times the window one clip asks for, which is what makes the row above a `
-    + 'claim about sharing rather than about a window that always fitted',
+    && most.shot.seek.bound.frames === unionFrames,
+  `the widest arm puts all ${CLIP_CEILING} clips on one take and counts overlapping frame `
+    + 'windows once',
   `${most.shot.seek.bound.clips} clips asking ${most.shot.seek.bound.frames} frames against `
-    + `${one.shot.seek.bound.frames} for one`);
+    + `${unionFrames} in their union`);
   check(most.shot.seek.bound.frames > CACHE.floor,
     'and it asks for more of one take than the floor a single clip is sized at, so the arm is '
     + 'outside what a constant cache could have held',
@@ -2108,11 +2111,10 @@ console.log('\n== 8. the frame cache is sized by the clips asking for it ==');
   check(stacked.every(({ shot }) => shot.clips[0].capacity <= CACHE.ceiling),
     'and no arm went past the ceiling the memory budget buys',
     stacked.map(({ n, shot }) => `${n}:${shot.clips[0].capacity}`).join(' '));
-  check(CACHE.span >= CLIP_CEILING * (one.shot.seek.bound.frames),
-    `the ceiling is generous by the measure it was chosen against: it covers all ${CLIP_CEILING} `
-    + `clips this build composites at ${(STACK_LOOK.fade + STACK_LOOK.wake) / 1000}s of `
-    + 'persistence each',
-    `a span of ${CACHE.span} against ${CLIP_CEILING} x ${one.shot.seek.bound.frames}`);
+  check(CACHE.span >= unionFrames,
+    `the ceiling covers the union of all ${CLIP_CEILING} clips this build composites at `
+    + `${(STACK_LOOK.fade + STACK_LOOK.wake) / 1000}s of persistence each`,
+    `a span of ${CACHE.span} against a union of ${unionFrames}`);
   check(Math.floor(CACHE.budgetBytes / CACHE.frameBytes) === CACHE.ceiling,
     'and it is a memory budget with the frame count derived from it, rather than a frame count '
     + 'with a memory figure written beside it',

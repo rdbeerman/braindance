@@ -196,6 +196,7 @@ export function createSurfaceMemory(textures) {
 export function disposeSurfaceMemory(memory) {
   memory.statePrev.dispose();
   memory.stateNext.dispose();
+  memory.quad.material.dispose();
   memory.quad.dispose();
 }
 

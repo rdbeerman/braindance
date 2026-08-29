@@ -1659,9 +1659,11 @@ if (lossless.ok && twice[0]?.ok) {
 
   const record = JSON.parse(readFileSync(`${lossless.done.output}.job.json`, 'utf8'));
   check(typeof record.renderer === 'string' && record.renderer.length > 0
-    && record.capture === index.hash && record.project !== null && typeof record.project === 'object',
-  'the job record names its renderer class, its capture by hash and its project',
-  `renderer ${JSON.stringify(record.renderer)}, capture ${String(record.capture).slice(0, 20)}…`);
+    && Array.isArray(record.captures) && record.captures.length === 1
+    && record.captures[0] === index.hash
+    && record.project !== null && typeof record.project === 'object',
+  'the job record names its renderer class, every clip capture by hash and its project',
+  `renderer ${JSON.stringify(record.renderer)}, captures ${JSON.stringify(record.captures)}`);
 }
 
 console.log('\n[7] a failed export leaves the previous file and its record exactly as they were');

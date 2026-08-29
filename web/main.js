@@ -26,6 +26,9 @@ import { pickDepth, sensorPoint } from './depth-pick.js';
 import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
 import {
+  RATE_MIN, RATE_MAX, frameLoadByTake, rescaleClipKeys, snapshotClipKeys, usableClipRate,
+} from './clip-plan.js';
+import {
   EFFECT_BIND_TRANSFORMS, EFFECT_GATED_TABLES, EFFECT_BOUNDED_TABLES, effectBindUniformType,
   tableFromPackages, withEffectGroups,
 } from './effect-manifests.js';
@@ -196,6 +199,8 @@ selectCloud(bootCloud);
 // a clip-scope value through both and would otherwise read them out of their own dead zone.
 const clips = [];
 let selectedClip = null;
+let documentGeneration = 0;
+let pendingClipAdds = 0;
 
 // The clip the strip has selected, and null once the operator has clicked away from every one of
 // them. Session state and deliberately not in the document. Declared here rather than beside the
@@ -494,20 +499,18 @@ function postEnabled() {
   return afterimage.enabled || mosh.enabled || bloom.enabled || grade.enabled;
 }
 
-// Two vertices per point while the surface memory is shedding, one otherwise.
-function updateDrawRange() {
-  const shedding = uniforms.fadeTime.value > 0 || uniforms.wakeTime.value > 0;
-  geometry.setDrawRange(0, shedding ? POINTS * 2 : POINTS);
-}
-
 // Which uniform table each binding writes into. A map rather than a ternary per site, so a
 // build that grows a fourth table adds one entry here instead of another branch at five sites -
 // and a table nothing resolves throws on the write rather than landing the value in undefined.
 // Built here rather than at the top of the file because every one of the three is a live
 // binding the boot sequence above has just assigned.
-const UNIFORM_TABLES = Object.freeze({
-  points: uniforms, grade: grade.uniforms, mosh: mosh.uniforms,
-});
+const UNIFORM_TABLE_NAMES = Object.freeze(['points', 'grade', 'mosh']);
+const uniformTable = (name) => {
+  if (name === 'points') return uniforms;
+  if (name === 'grade') return grade.uniforms;
+  if (name === 'mosh') return mosh.uniforms;
+  throw new Error(`no uniform table called ${JSON.stringify(name)}`);
+};
 
 /** The pass a gating term on each table holds open. */
 const PASS_OF_TABLE = Object.freeze({ grade, mosh });
@@ -522,7 +525,7 @@ const passGatesOf = (packages) => Object.fromEntries(EFFECT_GATED_TABLES.map((ta
 ]));
 
 function passNeeded(table) {
-  const held = UNIFORM_TABLES[table];
+  const held = uniformTable(table);
   return PASS_GATES[table].some((name) => held[name].value !== 0);
 }
 
@@ -569,7 +572,7 @@ let BYPASSED_SET = new Set(BYPASSED);
 const CROP_FIT_PAD = 0.15;
 
 /** Fits the four lateral faces to the take's own cloud. */
-async function fitCropToTake(id, near, far) {
+async function fitCropToTake(id, near, far, clip = selectedClip, generation = null) {
   const res = await fetch(`/capture/${encodeURIComponent(id)}/extent`
     + `?near=${encodeURIComponent(near)}&far=${encodeURIComponent(far)}`);
   if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
@@ -581,11 +584,16 @@ async function fitCropToTake(id, near, far) {
   };
   const [left, right] = padded(extent.x);
   const [bottom, top] = padded(extent.y);
+  if (generation !== null && (generation !== documentGeneration || !clips.includes(clip))) {
+    return { cancelled: true };
+  }
   // Through `params.set`, so the fit is a document edit like any other.
   const wrote = {};
-  for (const [name, value] of [['left', left], ['right', right], ['bottom', bottom], ['top', top]]) {
-    wrote[name] = params.set(name, value);
-  }
+  withClip(clip, () => {
+    for (const [name, value] of [['left', left], ['right', right], ['bottom', bottom], ['top', top]]) {
+      wrote[name] = params.set(name, value);
+    }
+  });
   return { ...wrote, frames: extent.frames, samples: extent.samples };
 }
 
@@ -662,7 +670,7 @@ let PANEL_GROUPS;
 
 /** The write one effect parameter's binding describes, as the closure the registry stores. */
 function effectApply(bind) {
-  const table = () => UNIFORM_TABLES[bind.on];
+  const table = () => uniformTable(bind.on);
   let write;
   if (bind.transform === 'axisDeg') {
     write = (v) => {
@@ -779,10 +787,10 @@ const buildParams = () => ({
   // Fade is the cross-fade, wake is how much longer a hard transition lingers on it.
   fade: { def: 120, min: 0, max: 1500, step: 10, kind: 'scalar', tag: 'look', scope: 'clip',
     group: 'motion', label: 'fade',
-    apply: (v) => { uniforms.fadeTime.value = v / 1000; updateDrawRange(); } },
+    apply: (v) => { uniforms.fadeTime.value = v / 1000; } },
   wake: { def: 0, min: 0, max: 4000, step: 10, kind: 'scalar', tag: 'look', scope: 'clip',
     group: 'motion', label: 'wake',
-    apply: (v) => { uniforms.wakeTime.value = v / 1000; updateDrawRange(); } },
+    apply: (v) => { uniforms.wakeTime.value = v / 1000; } },
 
   ...effectSlice('noise.amount', 'lattice.amount'),
   // In metres of the room, like every other displacement and unlike the screen-space terms.
@@ -1512,7 +1520,7 @@ const uniformCellFits = (cell, bind) => Boolean(cell)
 function seedUniformCells() {
   for (const name of Object.keys(EFFECT_PARAMS)) {
     const bind = EFFECT_PARAMS[name];
-    const table = UNIFORM_TABLES[bind.on];
+    const table = uniformTable(bind.on);
     if (uniformCellFits(table[bind.uniform], bind)) continue;
     table[bind.uniform] = {
       value: effectBindUniformType(bind.transform) === 'vec2' ? new THREE.Vector2() : 0,
@@ -1527,14 +1535,14 @@ const boundUniforms = (table) => new Map(Object.values(table ?? {})
 /** What each uniform table held before any parameter had ever been written into it. */
 const snapshotUniformValues = (table) => new Map(Object.entries(table)
   .map(([name, cell]) => [name, cell?.value instanceof THREE.Vector2 ? cell.value.clone() : cell?.value]));
-const PRISTINE_UNIFORMS = Object.fromEntries(Object.entries(UNIFORM_TABLES)
-  .map(([table, held]) => [table, snapshotUniformValues(held)]));
+const PRISTINE_UNIFORMS = Object.fromEntries(UNIFORM_TABLE_NAMES
+  .map((table) => [table, snapshotUniformValues(uniformTable(table))]));
 
 /** Every uniform a parameter used to write and none writes now, put back where it started. */
 function restoreDepartedUniforms(was, now) {
   for (const [key, bind] of was) {
     if (now.has(key)) continue;
-    const table = UNIFORM_TABLES[bind.on];
+    const table = uniformTable(bind.on);
     const cell = table[bind.uniform];
     if (!cell) continue;
     const pristine = PRISTINE_UNIFORMS[bind.on]?.get(bind.uniform);
@@ -1571,8 +1579,10 @@ function adoptEffectPackages(packages, programs, held = { project: {}, clips: []
   PARAMS = buildParams();
   READINGS = Object.keys(PARAMS).filter((n) => PARAMS[n].reading);
   refuseRegistryDisagreement();
-  seedUniformCells();
-  restoreDepartedUniforms(wasBound, boundUniforms(EFFECT_PARAMS));
+  forEachLook(() => {
+    seedUniformCells();
+    restoreDepartedUniforms(wasBound, boundUniforms(EFFECT_PARAMS));
+  });
 
   // Every clip's and the project's: a value whose parameter has left the registry is a value
   // nothing can read, and one left in a clip nobody is looking at would be written back out.
@@ -2793,10 +2803,10 @@ function checkProject(project) {
     if (!clip || typeof clip !== 'object' || Array.isArray(clip)) {
       throw new Error(`the clip at position ${at} is ${JSON.stringify(clip)}: a clip is an object`);
     }
-    if (typeof clip.id !== 'string' || clip.id.length === 0) {
+    if (typeof clip.id !== 'string' || !VALID_ID.test(clip.id)) {
       throw new Error(
         `the clip at position ${at} has an id of ${JSON.stringify(clip.id)}: a clip id is a `
-        + 'non-empty string, and it is what the lane owners, the selection and the panel name a '
+        + 'path-safe name, and it is what the lane owners, the selection and the panel name a '
         + 'clip by rather than its place in the array',
       );
     }
@@ -2878,8 +2888,8 @@ function checkProject(project) {
     if (clip.length !== null && (!Number.isFinite(clip.length) || clip.length < 0)) {
       throw new Error(`${what} is ${JSON.stringify(clip.length)} long: a length is a number of project seconds at or above zero, or null where the document states none`);
     }
-    if (!clip.retime || !Array.isArray(clip.retime.keys) || !Number.isFinite(clip.retime.rate) || clip.retime.rate <= 0) {
-      throw new Error(`${what} carries a retime with a positive rate and an array of keys`);
+    if (!clip.retime || !Array.isArray(clip.retime.keys) || !usableClipRate(clip.retime.rate)) {
+      throw new Error(`${what} carries a retime with an array of keys and a rate from ${RATE_MIN} to ${RATE_MAX}`);
     }
     const stampWhy = stampRefusal(what, clip.appliedPreset ?? null);
     if (stampWhy) throw new Error(stampWhy);
@@ -3007,6 +3017,7 @@ function fitClipCount(want) {
 }
 
 function applyProject(plan, sources = null) {
+  documentGeneration++;
   const project = plan.project;
   // Read before the refit, because the refit is what can take the selected clip away.
   const wasSelected = clipRow?.id ?? null;
@@ -3091,6 +3102,26 @@ function applyProject(plan, sources = null) {
   timingChanged();
 }
 
+/** Refuses a checked plan whose opened footage makes a clip end non-finite. */
+function refuseResolvedDurations(plan, sources) {
+  for (const [at, planned] of plan.clips.entries()) {
+    const source = sources.get(at)?.take ?? clips[at]?.source;
+    if (!source || source.streaming) continue;
+    const sourceDuration = source.duration ?? source.times?.[source.times.length - 1];
+    const curve = createRetime();
+    curve.rate = planned.retime.rate;
+    curve.keys = planned.retime.keys;
+    const length = planned.trim ?? curve.programDurationFor(sourceDuration);
+    const end = planned.start + length;
+    if (!Number.isFinite(length) || !Number.isFinite(end)) {
+      throw new Error(
+        `clip ${planned.id} ends at ${String(end)} after resolving ${sourceDuration}s of footage: `
+        + 'its start, trim and retime must produce a finite project duration',
+      );
+    }
+  }
+}
+
 /**
  * The synchronous door a document comes through when the footage is already open: the hotload
  * rollback, undo, and every proof tool that hands a document straight back. A clip naming
@@ -3120,6 +3151,7 @@ function restoreProject(project) {
       + 'through the project loader',
     );
   }
+  refuseResolvedDurations(plan, sources);
   applyProject(plan, sources);
 }
 
@@ -3199,18 +3231,12 @@ const history = {
     const gen = takeTransport();
     const resume = timeline ? timeline.playing : false;
     if (resume) timeline.pause();
-    const wasRate = retime.rate;
-    const wasIn = clipIn;
-    const wasOut = clipOut;
     this.restoring = true;
     try {
       restoreProject(JSON.parse(previous));
       this.baseline = previous;
     } finally {
       this.restoring = false;
-    }
-    if (retime.rate !== wasRate) {
-      reparameteriseProgramTime(wasRate / retime.rate, { clipIn: wasIn, clipOut: wasOut, keys: [] });
     }
     // The playhead deliberately does not move. Undo is about what the clip is.
     if (resume) {
@@ -3745,17 +3771,14 @@ const createRetime = () => ({
 // reaching through a clip. Assigned by `selectClip`, which runs before anything reads it.
 let retime = null;
 
-/** Every program time, rescaled by `k`, which is what changing the slope does to them. */
+/** Every selected-clip key time, rescaled by `k` when its slope changes. */
 function reparameteriseProgramTime(k, was) {
-  for (const [key, t] of was.keys) key.t = t * k;
-  setClipInOut({ in: was.clipIn * k, out: was.clipOut === null ? null : was.clipOut * k });
+  rescaleClipKeys(was.keys, k);
 }
 
 /** Where a later rescale reads its times from. Live objects, and the `t` they had. */
 const programTimeSnapshot = () => ({
-  clipIn,
-  clipOut,
-  keys: [...tracks.values()].flatMap((track) => track.keys.map((key) => [key, key.t])),
+  keys: snapshotClipKeys(lookOf().tracks.values()),
 });
 
 class LivePairSource {
@@ -4019,6 +4042,7 @@ function createClipCloud() {
   const instance = createCloudInstance(shaderPrograms.cloud);
   const was = selectedClip ? selectedClip.cloud : null;
   selectCloud(instance);
+  seedUniformCells();
   uniforms.pointCeiling.value = pointSizeCeiling;
   uniforms.bufferHeight.value = renderer.getDrawingBufferSize(new THREE.Vector2()).y;
   if (was) selectCloud(was);
@@ -4256,6 +4280,7 @@ function renderProgramFrame(t) {
       frameSink.hits++;
     }
   } finally {
+    if (selectedClip) selectCloud(selectedClip.cloud);
     evaluating = false;
   }
 }
@@ -4417,6 +4442,7 @@ class IndexedTake {
     // that is whose they are, and because re-pointing a clip at footage already open needs them.
     this.hello = null;
     this.pending = null;
+    this.generation = 0;
     // The windows callers have asked to have resident and not yet had. A trim keeps their union:
     // several clips share this cache, and a trim that kept only the run in front of it evicted
     // the frames an earlier clip of the same plan had just fetched.
@@ -4457,13 +4483,15 @@ class IndexedTake {
   /** Puts frames a..b in the cache. Serialised, so a prefetch racing a seek fetches once. */
   ensure(a, b) {
     const claim = [a, b];
+    const generation = this.generation;
     this.claims.add(claim);
-    const run = () => this.fetchSpan(a, b).finally(() => this.claims.delete(claim));
+    const run = () => this.fetchSpan(a, b, generation).finally(() => this.claims.delete(claim));
     this.pending = (this.pending ?? Promise.resolve()).then(run, run);
     return this.pending;
   }
 
-  async fetchSpan(a, b) {
+  async fetchSpan(a, b, generation) {
+    if (generation !== this.generation) return;
     const from = Math.max(0, a);
     const to = Math.min(this.count - 1, b);
     if (to - from + 1 > MAX_SPAN_FRAMES) {
@@ -4480,13 +4508,14 @@ class IndexedTake {
       else runs.push([k, k]);
     }
     for (const [lo, hi] of runs) {
-      await this.fetchRun(lo, hi);
+      await this.fetchRun(lo, hi, generation);
+      if (generation !== this.generation) return;
       this.trim();
     }
   }
 
   /** A run in one request where there is a run to have. */
-  async fetchRun(lo, hi) {
+  async fetchRun(lo, hi, generation) {
     counters.requests++;
     const single = lo === hi;
     const url = single
@@ -4499,7 +4528,7 @@ class IndexedTake {
     // A single frame is the payload alone; a run is the file's slice, framing and all.
     const decodes = [];
     if (single) {
-      decodes.push(this.take(lo, buffer, 0, buffer.byteLength));
+      decodes.push(this.take(lo, buffer, 0, buffer.byteLength, generation));
     } else {
       const view = new DataView(buffer);
       let off = 0;
@@ -4512,7 +4541,7 @@ class IndexedTake {
           throw new Error(`run ${lo}-${hi} desynced at frame ${k}: magic 0x${magic.toString(16)}`);
         }
         const len = view.getUint32(off + 8, true);
-        decodes.push(this.take(k, buffer, off + KNCT_HEADER, len));
+        decodes.push(this.take(k, buffer, off + KNCT_HEADER, len, generation));
         off += KNCT_HEADER + len;
       }
     }
@@ -4521,7 +4550,7 @@ class IndexedTake {
   }
 
   /** One payload into the cache. The depth block is copied out or it pins the run's buffer. */
-  async take(k, buffer, offset, length) {
+  async take(k, buffer, offset, length, generation) {
     const view = new DataView(buffer, offset, length);
     const depthBytes = view.getUint32(0, true);
     const colorBytes = view.getUint32(4, true);
@@ -4538,6 +4567,10 @@ class IndexedTake {
       } catch {
         /** a torn JPEG from a dropped USB packet: this frame renders depth only */
       }
+    }
+    if (generation !== this.generation) {
+      bitmap?.close();
+      return;
     }
     this.cache.set(k, { depth, bitmap });
   }
@@ -4790,11 +4823,7 @@ class TimelineTransport {
    * between them. Measuring that as a span refused windows the cache holds comfortably.
    */
   frameLoad(spans) {
-    const byTake = new Map();
-    for (const span of spans) {
-      byTake.set(span.take, (byTake.get(span.take) ?? 0) + (span.to - span.from + 1));
-    }
-    return byTake;
+    return frameLoadByTake(spans);
   }
 
   /**
@@ -5390,7 +5419,7 @@ async function exportClip(options = {}) {
       frames: to - from + 1,
       codec,
       project: serialiseProjectBody(suppressed.length ? { suppressed } : {}),
-      capture: timeline.clip.source.index.hash,
+      captures: clips.map((clip) => clip.source.index.hash),
       renderer: rendererClass(),
     });
     await sink.ready.promise;
@@ -6360,10 +6389,6 @@ addEventListener('keydown', (e) => {
   }
 });
 
-// The slider's own coordinate, not the rate: it is linear and program length goes as 1/rate.
-const RATE_MIN = 0.1;
-const RATE_MAX = 4;
-
 /** How wide the 1.00x detent is, in pixels of the control it lives on. */
 const DETENT_PX = 3;
 
@@ -7076,7 +7101,8 @@ function timingChanged({ moved = false } = {}) {
   // A curve of no keys is `programSec * rate` and one of a single key is `value + programSec *
   // rate`, so the slider still says what both of those do - `sourceSecAt` and `slopeAt` both read
   // one key as rate-driven, and this used to be the only one of the three that did not.
-  ui.rate.disabled = retime.keys.length > 1;
+  ui.rate.disabled = selectedClipRow() === null || retime.keys.length > 1;
+  if (ui.rateKey) ui.rateKey.disabled = selectedClipRow() === null;
   if (ui.fps) ui.fps.value = String(timeline.outputFps);
   buildRuler();
   paintMarks();
@@ -7087,6 +7113,7 @@ function timingChanged({ moved = false } = {}) {
 
 // The take's marks, fetched when it opens. They belong to the take, not to a project.
 let takeMarks = [];
+let markLoadGeneration = 0;
 /**
  * The open take's id and its content hash, read off the selected clip, which is what holds them.
  * Two readings rather than two variables: a clip's footage and the page's idea of it drifted
@@ -7218,15 +7245,23 @@ function paintMarks() {
 }
 
 async function loadMarks(id) {
+  const generation = ++markLoadGeneration;
   selectedMark = null;
-  try {
-    const res = await fetch(`/capture/${encodeURIComponent(id)}/marks`);
-    takeMarks = res.ok ? (await res.json()).marks : [];
-  } catch {
-    takeMarks = [];
-  }
+  takeMarks = [];
   paintMarks();
   paintMarkButton();
+  let marks;
+  try {
+    const res = await fetch(`/capture/${encodeURIComponent(id)}/marks`);
+    marks = res.ok ? (await res.json()).marks : [];
+  } catch {
+    marks = [];
+  }
+  if (generation !== markLoadGeneration || openTakeId() !== id) return false;
+  takeMarks = marks;
+  paintMarks();
+  paintMarkButton();
+  return true;
 }
 
 /** Flags the moment at the playhead, in source milliseconds: a mark describes the footage. */
@@ -7559,11 +7594,14 @@ function refusePresetBody(name, body) {
 }
 
 /** Applies a saved preset, stamping it only if the document said what the whole look is. */
-function applyStoredPreset(doc) {
+function applyStoredPreset(doc, target = EDITING ? selectedClipRow() : selectedClip) {
   refuseDuringEvaluation('a stored preset applied');
   refusePresetBody(doc.name, doc.body);
   const values = doc.body.values ?? {};
+  const clipNames = Object.keys(values).filter((name) => PARAMS[name].scope === 'clip');
+  if (clipNames.length && !target) throw new Error('select a clip before applying a preset to it');
   const stamped = wholeLookTag(values);
+  let applied = values;
   // A whole look says what all of it is, so effects it never mentions are at their defaults.
   if (stamped) {
     const named = new Set(effectIdsIn(Object.keys(values)));
@@ -7572,11 +7610,16 @@ function applyStoredPreset(doc) {
       if (named.has(id)) continue;
       for (const n of effectParamNames(id)) resets[n] = PARAMS[n].def;
     }
-    params.apply({ ...resets, ...values });
-  } else {
-    params.apply(values);
+    applied = { ...resets, ...values };
   }
-  if (stamped) stampPreset({ name: doc.name, rev: doc.rev });
+  const projectValues = {};
+  const clipValues = {};
+  for (const [name, value] of Object.entries(applied)) {
+    (PARAMS[name].scope === 'clip' ? clipValues : projectValues)[name] = value;
+  }
+  params.apply(projectValues);
+  if (target) withClip(target, () => params.apply(clipValues));
+  if (stamped && target) target.appliedPreset = { name: doc.name, rev: doc.rev };
   requestRepaint();
   history.commit();
   return {
@@ -7712,6 +7755,8 @@ function showPickerChoice(picker, name) {
 
 /** The operator chose this entry: show it, and on a picker that applies, apply it. */
 function choosePicker(picker, name, { close = false } = {}) {
+  const target = EDITING ? selectedClipRow() : selectedClip;
+  const generation = documentGeneration;
   showPickerChoice(picker, name);
   if (close) closePicker(picker, { restoreFocus: true });
   if (picker.autoApply) {
@@ -7719,7 +7764,8 @@ function choosePicker(picker, name, { close = false } = {}) {
       withPresetGesture(picker.note ?? ui.note, () => whileWriting(async () => {
         try {
           const doc = await (await fetch(`/presets/${encodeURIComponent(name)}`)).json();
-          const { stamped, written, shared } = applyStoredPreset(doc);
+          if (generation !== documentGeneration || (target && !clips.includes(target))) return;
+          const { stamped, written, shared } = applyStoredPreset(doc, target);
           // The shared half is named rather than left to be discovered: it lands on the project
           // and every other clip is seen through it.
           const grade = shared
@@ -7735,8 +7781,11 @@ function choosePicker(picker, name, { close = false } = {}) {
       }));
     } else {
       // "none" selected: reset every look parameter to its default, and clear the stamp.
-      stampPreset(null);
-      params.reset(params.names('look'));
+      if (!target) return;
+      target.appliedPreset = null;
+      const lookNames = params.names('look');
+      params.reset(lookNames.filter((name) => PARAMS[name].scope === 'project'));
+      withClip(target, () => params.reset(lookNames.filter((name) => PARAMS[name].scope === 'clip')));
       history.commit();
       say('reset to defaults');
     }
@@ -8159,12 +8208,15 @@ function selectClipRow(clip) {
   selection = null;
   clipRow = clip;
   selectClip(clip);
+  if (clip.take !== null) paintSelectedTake(clip);
   // Every clip-scope control, because the values did not move - the clip under them did.
   paintClipPanel();
   paintGizmo();
   // The retime binding, the ruler's mapping and the marks all move with the selection, which is
   // what `timingChanged` already puts back together.
   timingChanged();
+  syncCropOutside();
+  if (clip.take !== null) loadMarks(clip.take.id).catch(showTimelineError);
   requestRepaint();
 }
 
@@ -8175,17 +8227,28 @@ function deselectClipRow() {
   selection = null;
   paintPanelScope();
   paintGizmo();
+  paintClipCommands();
+  timingChanged();
+  syncCropOutside();
   lanesChanged();
 }
 
 /** How the two clip commands read: what the edit can still take, and what is selected. */
 function paintClipCommands() {
-  ui.addClip.disabled = clips.length >= CLIP_CEILING;
-  ui.deleteClip.disabled = selectedClipRow() === null || clips.length === 1;
+  const selected = !EDITING || selectedClipRow() !== null;
+  ui.addClip.disabled = !selected || clips.length + pendingClipAdds >= CLIP_CEILING;
+  ui.deleteClip.disabled = !selected || clips.length === 1;
   // The handles need a clip to be on, which is the same thing the delete needs.
-  ui.moveClip.disabled = selectedClipRow() === null;
-  ui.rotateClip.disabled = selectedClipRow() === null;
-  ui.keyClip.disabled = selectedClipRow() === null;
+  ui.moveClip.disabled = !selected;
+  ui.rotateClip.disabled = !selected;
+  ui.keyClip.disabled = !selected;
+  ui.rate.disabled = !selected || retime.keys.length > 1;
+  if (ui.rateKey) ui.rateKey.disabled = !selected;
+  ui.preset.disabled = !selected;
+  for (const button of [ui.presetSave, ui.presetExport, ui.presetImport]) button.disabled = !selected;
+  for (const button of [ui.mark, ui.camSensor, ui.camLevelReset, ui.cropBox, ui.cropFit, ui.cropReset]) {
+    button?.toggleAttribute('disabled', !selected);
+  }
   // Through the same painter the panel's own keyframe controls use, so the two cannot disagree
   // about whether there is a key at the playhead.
   paintKeyButton('transform', ui.keyClip);
@@ -8200,16 +8263,36 @@ function paintClipCommands() {
  */
 async function addClipFromTake(id) {
   if (refuseEdit('adding a clip')) return null;
+  const initiating = selectedClipRow();
+  if (!initiating) {
+    say('select the clip whose look the new clip should copy');
+    return null;
+  }
+  if (clips.length + pendingClipAdds >= CLIP_CEILING) {
+    say(`this build composites ${CLIP_CEILING} clips and this edit already holds ${clips.length}`);
+    return null;
+  }
+  const from = params.values(scopeNames('clip'));
+  const start = timeline ? timeline.programSec : 0;
+  const generation = documentGeneration;
+  pendingClipAdds++;
+  paintClipCommands();
+  let opened;
+  try {
+    opened = await openSource(id);
+  } finally {
+    pendingClipAdds--;
+    paintClipCommands();
+  }
+  if (generation !== documentGeneration || !clips.includes(initiating)) return null;
   if (clips.length >= CLIP_CEILING) {
     say(`this build composites ${CLIP_CEILING} clips and this edit already holds ${clips.length}`);
     return null;
   }
-  const opened = await openSource(id);
-  const from = params.values(scopeNames('clip'));
   const clip = new Clip(mintClipId(), livePairs, createClipCloud());
   clips.push(clip);
   adoptSource(clip, opened);
-  clip.start = timeline ? timeline.programSec : 0;
+  clip.start = start;
   withClip(clip, () => params.apply(from));
   orderClips();
   selectClipRow(clip);
@@ -8229,7 +8312,7 @@ async function addClipFromTake(id) {
 function headTrimTo(clip, wantStart, holdEnd) {
   const curve = clip.retime;
   const rate = curve.rate;
-  const held = curve.keys.length === 1 ? curve.keys[0].value : 0;
+  const held = curve.sourceSecAt(0);
   // Bounded by the footage at one end - the head of the take - and by a clip still wide enough
   // to grab at the other.
   const floor = clip.start - held / Math.max(1e-9, rate);
@@ -8280,8 +8363,12 @@ async function openClipPicker() {
   openDialog(ui.clipPick);
   let takes = [];
   try {
-    const body = await (await fetch('/library/takes')).json();
-    takes = Array.isArray(body.takes) ? body.takes : [];
+    const res = await fetch('/library/takes');
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !Array.isArray(body?.takes)) {
+      throw new Error(body?.error ?? `HTTP ${res.status}`);
+    }
+    takes = body.takes;
   } catch (err) {
     ui.clipPickNote.textContent = `the library could not be listed: ${err.message}`;
     return;
@@ -8474,7 +8561,7 @@ function paintKeyButton(name, btn) {
 }
 
 ui.rateKey?.addEventListener('click', () => {
-  if (!timeline) return;
+  if (!timeline || selectedClipRow() === null || refuseEdit('a retime key')) return;
   const t = playheadSec();
   const tol = keyTolerance();
   const existing = retime.keys.find((k) => Math.abs(k.t - programToLane('retime', t)) <= tol);
@@ -8612,10 +8699,21 @@ let chromeStale = false;
 // How faintly a cut point draws, and the one function allowed to write the uniform.
 const CROP_FAINT = 0.14;
 function syncCropOutside() {
-  uniforms.cropOutside.value = chromeOn && showCropBox ? CROP_FAINT : 0;
+  if (clips.length === 0) {
+    uniforms.cropOutside.value = chromeOn && showCropBox ? CROP_FAINT : 0;
+    return;
+  }
+  const target = !EDITING || selectedClipRow() === selectedClip ? selectedClip : null;
+  for (const clip of clips) {
+    withClip(clip, () => {
+      uniforms.cropOutside.value = clip === target && chromeOn && showCropBox ? CROP_FAINT : 0;
+    });
+  }
 }
 
 const scratchVec = new THREE.Vector3();
+const scratchQuat = new THREE.Quaternion();
+const scratchPosition = new THREE.Vector3();
 
 function stageSize() {
   const size = renderer.getSize(new THREE.Vector2());
@@ -8719,6 +8817,9 @@ function drawPlanCloud(rect) {
   const cx = uniforms.center.value.x;
   const cy = uniforms.center.value.y;
   const s = planScale(rect);
+  level.updateWorldMatrix(true, false);
+  level.getWorldQuaternion(scratchQuat);
+  level.getWorldPosition(scratchPosition);
   chromeCtx.fillStyle = 'rgba(232, 236, 241, 0.55)';
   for (let row = 0; row < DEPTH_H; row += PLAN_STRIDE) {
     for (let col = 0; col < DEPTH_W; col += PLAN_STRIDE) {
@@ -8728,7 +8829,7 @@ function drawPlanCloud(rect) {
       // All four lateral faces, so the plan does not draw points the renderer discards.
       if (croppedOut(planVec.x, planVec.y, z)) continue;
       // A canted room drawn about the sensor's axes is a slanted section labelled TOP-DOWN.
-      planVec.applyQuaternion(level.quaternion);
+      planVec.applyQuaternion(scratchQuat).add(scratchPosition);
       const px = rect.x + rect.w / 2 + (planVec.x - TOP_CENTRE.x) * s;
       const py = rect.y + rect.h / 2 + (planVec.z - TOP_CENTRE.z) * s;
       if (px < rect.x || px > rect.x + rect.w || py < rect.y || py > rect.y + rect.h) continue;
@@ -8789,22 +8890,25 @@ function cropBoxBounds() {
 /** The eight corners of the box, in the room's frame. The rotation is why this exists. */
 function cropBoxCorners() {
   const { lo, hi } = cropBoxBounds();
+  level.updateWorldMatrix(true, false);
   for (let i = 0; i < 8; i++) {
     cropCorners[i].set(
       (i & 1) ? hi[0] : lo[0],
       (i & 2) ? hi[1] : lo[1],
       (i & 4) ? hi[2] : lo[2],
-    ).applyQuaternion(level.quaternion);
+    ).applyMatrix4(level.matrixWorld);
   }
   return cropCorners;
 }
 
 /** A face's outward normal in the room's frame, written into `out`. */
 function cropFaceNormal(face, out) {
+  level.updateWorldMatrix(true, false);
+  level.getWorldQuaternion(scratchQuat);
   return out
     .set(face.axis === 0 ? 1 : 0, face.axis === 1 ? 1 : 0, face.axis === 2 ? 1 : 0)
     .multiplyScalar(face.side === 1 ? 1 : -1)
-    .applyQuaternion(level.quaternion);
+    .applyQuaternion(scratchQuat);
 }
 
 /** How a room-space point lands in the view, in stage pixels. One signature for both views. */
@@ -9144,8 +9248,8 @@ function drawChrome() {
     chromeCtx.fillText(`${Math.round(uniforms.bufferHeight.value)}p`, col2, y); y += lineH;
 
     // Geometry
-    const drawCount = geometry.drawRange.count;
-    const shedding = drawCount > POINTS;
+    const shedding = uniforms.fadeTime.value > 0 || uniforms.wakeTime.value > 0;
+    const drawCount = shedding ? POINTS * 2 : POINTS;
     chromeCtx.fillStyle = '#6d7683';
     chromeCtx.fillText('points', col1, y);
     chromeCtx.fillStyle = '#e8ecf1';
@@ -9484,13 +9588,16 @@ function sensorView() {
   const binding = aspect >= tanH / tanV ? 'vertical' : 'horizontal';
   const fovV = binding === 'vertical' ? 2 * Math.atan(tanV) : 2 * Math.atan(tanH / aspect);
   freeCamera.fov = THREE.MathUtils.radToDeg(fovV);
-  freeCamera.position.set(0, 0, 0);
+  level.updateWorldMatrix(true, false);
+  level.getWorldQuaternion(scratchQuat);
+  level.getWorldPosition(scratchPosition);
+  freeCamera.position.copy(scratchPosition);
   freeCamera.updateProjectionMatrix();
   params.set('spin', false);
-  // Posed in the sensor's frame, not the levelled one: the button means what the sensor shot.
-  setNavigationUp(new THREE.Vector3(0, 1, 0).applyQuaternion(level.quaternion));
-  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).applyQuaternion(level.quaternion);
+  setNavigationUp(new THREE.Vector3(0, 1, 0).applyQuaternion(scratchQuat));
+  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).applyQuaternion(scratchQuat).add(scratchPosition);
   controls.update();
+  paintLens();
   requestRepaint();
   return {
     fov: freeCamera.fov,
@@ -9527,10 +9634,16 @@ ui.cropReset.addEventListener('click', () => {
 
 if (ui.cropFit) {
   ui.cropFit.addEventListener('click', async () => {
-    if (!openTakeId()) return;
+    const clip = selectedClipRow();
+    if (!clip?.take) return;
+    const generation = documentGeneration;
+    const id = clip.take.id;
+    const near = withClip(clip, () => params.get('near'));
+    const far = withClip(clip, () => params.get('far'));
     ui.cropFit.disabled = true;
     try {
-      const fitted = await fitCropToTake(openTakeId(), params.get('near'), params.get('far'));
+      const fitted = await fitCropToTake(id, near, far, clip, generation);
+      if (fitted?.cancelled) return;
       if (!fitted) {
         say('nothing inside the near/far range to fit the box to');
         return;
@@ -9702,7 +9815,7 @@ async function whileWriting(run) {
   try {
     return await run();
   } finally {
-    for (const el of PRESET_WRITERS) el.disabled = false;
+    for (const el of PRESET_WRITERS) el.disabled = EDITING && selectedClipRow() === null;
     const stranded = document.activeElement === null || document.activeElement === document.body;
     if (stranded && PRESET_WRITERS.includes(held) && held.isConnected) held.focus();
   }
@@ -9710,6 +9823,10 @@ async function whileWriting(run) {
 
 /** Pick a subset, then do one thing with it, inside the one gesture the program allows. */
 async function withPresetSubset(ask, run) {
+  if (EDITING && selectedClipRow() === null) {
+    say('select a clip before saving or exporting its look');
+    return;
+  }
   await withPresetGesture(ui.note, async () => {
     try {
       const picked = await pickPresetSubset(ask);
@@ -10211,7 +10328,12 @@ async function sourcesFor(plan) {
     .filter(({ at, planned }) => planned.take !== null
       && planned.take.hash !== (clips[at]?.source?.index?.hash ?? null));
   if (!changing.length) return new Map();
-  const { takes = [] } = await (await fetch('/library/takes')).json();
+  const listed = await fetch('/library/takes');
+  const library = await listed.json().catch(() => null);
+  if (!listed.ok || !Array.isArray(library?.takes)) {
+    throw new Error(library?.error ?? `the take library could not be read: HTTP ${listed.status}`);
+  }
+  const { takes } = library;
   const opened = new Map();
   for (const { at, planned } of changing) {
     const match = takes.find((t) => t.hash === planned.take.hash);
@@ -10222,7 +10344,14 @@ async function sourcesFor(plan) {
         + 'footage, so the edit would render against material it was never authored against',
       );
     }
-    opened.set(at, await openSource(match.id));
+    const source = await openSource(match.id);
+    if (source.take.index.hash !== planned.take.hash) {
+      throw new Error(
+        `clip ${planned.id} asks for ${planned.take.hash.slice(0, 22)}… but ${match.id} opened as `
+        + `${source.take.index.hash.slice(0, 22)}…: the library changed while the project was opening`,
+      );
+    }
+    opened.set(at, source);
   }
   return opened;
 }
@@ -10239,6 +10368,7 @@ async function loadProjectNamed(name, offered = null) {
   // this page opens a take on its say-so.
   const plan = checkProject(doc.body);
   const sources = await sourcesFor(plan);
+  refuseResolvedDurations(plan, sources);
   const gen = takeTransport();
   const resume = timeline ? timeline.playing : false;
   if (resume) timeline.pause();
@@ -10361,6 +10491,7 @@ let takeOpened = false;
 // of one take share the entry, which is what makes one fetch cache rather than two - and what
 // stops the same JPEG being decoded twice for one frame.
 const openTakes = new Map();
+const openingTakes = new Map();
 
 /**
  * Drops the decoded frames of every take no clip is pointed at any more.
@@ -10373,6 +10504,7 @@ function releaseUnusedFrames() {
   const held = new Set(clips.map((clip) => clip.source.take ?? null));
   for (const take of openTakes.values()) {
     if (held.has(take)) continue;
+    take.generation++;
     for (const frame of take.cache.values()) frame.bitmap?.close();
     take.cache.clear();
     take.demand = 0;
@@ -10387,7 +10519,7 @@ function takeOpenedAs(hash) {
   return null;
 }
 
-async function openSource(id) {
+async function openSourceNow(id) {
   const take = openTakes.get(id) ?? await IndexedTake.open(id);
   const res = await fetch(`/capture/${encodeURIComponent(id)}/hello`);
   if (!res.ok) {
@@ -10419,6 +10551,19 @@ async function openSource(id) {
   return { id, take, hello };
 }
 
+async function openSource(id) {
+  const held = openTakes.get(id);
+  if (held?.hello) return { id, take: held, hello: held.hello };
+  if (openingTakes.has(id)) return openingTakes.get(id);
+  const opening = openSourceNow(id);
+  openingTakes.set(id, opening);
+  try {
+    return await opening;
+  } finally {
+    if (openingTakes.get(id) === opening) openingTakes.delete(id);
+  }
+}
+
 /**
  * Points one clip at opened footage: its frames, the take it is joined on and the intrinsics it
  * was shot with. The intrinsics go to `uniforms`, which is the selected clip's own table, so
@@ -10433,11 +10578,10 @@ function adoptSource(clip, opened) {
   // clips on different footage unproject through different numbers.
   const was = selectedClip ? selectedClip.cloud : null;
   selectCloud(clip.cloud);
+  uniforms.hasColor.value = 0;
   uniforms.focal.value.set(opened.hello.fx, opened.hello.fy);
   uniforms.center.value.set(opened.hello.cx, opened.hello.cy);
   if (was) selectCloud(was);
-  // The range this take was shot at, a property of the file rather than of the grabber.
-  paintPreviewRange(opened.hello.minDepth, opened.hello.maxDepth);
 }
 
 /**
@@ -10446,10 +10590,16 @@ function adoptSource(clip, opened) {
  * points opened the page, and answers with what the lists held.
  */
 /** What the page says about the footage the selected clip is on: its label, its window, its marks. */
-async function paintOpenTake() {
-  const clip = selectedClip;
+function paintSelectedTake(clip) {
   sensorLabel = `take ${clip.take.id} · ${clip.source.count} frames · ${clip.source.duration.toFixed(2)}s`;
   setStatus();
+  const hello = clip.source.take?.hello ?? null;
+  paintPreviewRange(hello?.minDepth, hello?.maxDepth);
+}
+
+async function paintOpenTake() {
+  const clip = selectedClip;
+  paintSelectedTake(clip);
   // A new take gets the whole clip. The window is deliberately not saved anywhere.
   view.fit();
   // Awaited, so the first paint of the ruler already has the ticks on it.

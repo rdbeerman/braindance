@@ -240,6 +240,34 @@ try {
     let beat = null;
     let leaseLost = false;
     const stopBeating = () => { if (beat) { clearInterval(beat); beat = null; } };
+    const BEAT_BUDGET = 7;
+    let missed = 0;
+    const heartbeat = async () => {
+      if (leaseLost) return;
+      const res = await post(`/jobs/${job.id}/heartbeat`, { lease: job.lease }, { timeoutMs: BEAT_MS });
+      if (res.status === 409) {
+        leaseLost = true;
+        stopBeating();
+        console.error(`[worker] ${job.id} heartbeat refused: ${res.body?.error ?? 'lease lost'}`);
+        page.goto('about:blank').catch(() => { /* the page may already be gone */ });
+        return;
+      }
+      if (res.status !== 200) throw new Error(`the queue answered ${res.status}`);
+      missed = 0;
+    };
+    const missedBeat = (message) => {
+      missed++;
+      console.error(`[worker] ${job.id} heartbeat failed (${missed}/${BEAT_BUDGET}): ${message}`);
+      if (missed < BEAT_BUDGET) return;
+      stopBeating();
+      console.error(`[worker] ${job.id} ${BEAT_BUDGET} heartbeats failed in a row - this claim now goes quiet while it renders, and a requeue would put a second worker on it`);
+    };
+    const beatOnce = () => { heartbeat().catch((err) => missedBeat(err.message)); };
+    const startBeating = () => {
+      beat = setInterval(beatOnce, BEAT_MS);
+      beat.unref?.();
+      beatOnce();
+    };
     try {
       // Inside the try, so a server that cannot be read is this job coming back `failed` naming the
       // read rather than the worker dying before its first claim.
@@ -254,6 +282,8 @@ try {
           + 'rendered on a guess about which field holds the footage',
         );
       }
+      // Opening every take can exceed the queue's stale window, so the lease starts speaking now.
+      startBeating();
       const { installed, versions } = await readInstalledEffects();
       const unresolved = cannotResolve(job, installed);
       if (unresolved.length) {
@@ -316,40 +346,6 @@ try {
       if (actualRenderer !== renderer) {
         throw new Error(`the rendering browser is ${actualRenderer} but the claim was made on ${renderer}`);
       }
-
-      // A render runs for minutes by design, so nothing can time a job out on duration - what the
-      // queue expires is silence, and this is the noise. The beat used to clear its interval on any
-      // rejection and never re-arm, so one `ECONNRESET` left a still-rendering job quiet for life
-      // while `JobStore.requeue` handed it to a second worker. Seven failures at the default 15s
-      // beat is 105s against the queue's 120s `STALE_MS`, deliberately inside it, and each beat
-      // carries a timeout or the arithmetic is a fiction.
-      const BEAT_BUDGET = 7;
-      let missed = 0;
-      const heartbeat = async () => {
-        if (leaseLost) return;
-        const res = await post(`/jobs/${job.id}/heartbeat`, { lease: job.lease }, { timeoutMs: BEAT_MS });
-        if (res.status === 409) {
-          // The lease is gone: the job was requeued or finished by something else.
-          leaseLost = true;
-          stopBeating();
-          console.error(`[worker] ${job.id} heartbeat refused: ${res.body?.error ?? 'lease lost'}`);
-          page.goto('about:blank').catch(() => { /* the page may already be gone */ });
-          return;
-        }
-        if (res.status !== 200) throw new Error(`the queue answered ${res.status}`);
-        missed = 0;
-      };
-      const missedBeat = (message) => {
-        missed++;
-        console.error(`[worker] ${job.id} heartbeat failed (${missed}/${BEAT_BUDGET}): ${message}`);
-        if (missed < BEAT_BUDGET) return;
-        stopBeating();
-        console.error(`[worker] ${job.id} ${BEAT_BUDGET} heartbeats failed in a row - this claim now goes quiet while it renders, and a requeue would put a second worker on it`);
-      };
-      const beatOnce = () => { heartbeat().catch((err) => missedBeat(err.message)); };
-      beat = setInterval(beatOnce, BEAT_MS);
-      beat.unref?.();
-      beatOnce();
 
       const result = await page.evaluate(async (j) => {
         // Through `applyDeliverable`, which is the door, rather than `setActiveDeliverable` past
