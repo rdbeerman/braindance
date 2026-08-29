@@ -41,6 +41,47 @@ const VIEWPORT = { width: 1512, height: 900 };
 // ------------------------------------------------------------------- mutations
 
 const MUTATIONS = {
+  // ---- section 22, the orbit pivot and the depth under the pointer ----
+  // Must redden: the on-axis row, which is the whole reason this can hang off a plain press.
+  'pick-moves-the-camera': {
+    file: 'web/main.js',
+    edits: [[
+      '  freeCamera.getWorldDirection(pivotForward);\n'
+      + '  controls.target.copy(freeCamera.position).addScaledVector(pivotForward, d);',
+      '  freeCamera.getWorldDirection(pivotForward);\n'
+      + '  controls.target.copy(freeCamera.position).addScaledVector(pivotForward, d);\n'
+      + '  controls.target.x += 0.35;',
+    ]],
+  },
+
+  // Must redden: the cropped-press row, alone. The pivot then lands on geometry the renderer
+  // threw away, which is a pivot on something nobody can see.
+  'pick-ignores-the-crop': {
+    file: 'web/depth-pick.js',
+    edits: [['      if (croppedOut(scratch.x, scratch.y, z)) continue;\n', '']],
+  },
+
+  // Must redden: the Reset row, alone. `saveState` re-homes Reset on the picked pivot, so the one
+  // control for getting un-lost stops going anywhere known.
+  'pick-rehomes-reset': {
+    file: 'web/main.js',
+    edits: [[
+      '  controls.target.copy(freeCamera.position).addScaledVector(pivotForward, d);\n  return d;',
+      '  controls.target.copy(freeCamera.position).addScaledVector(pivotForward, d);\n'
+      + '  controls.saveState();\n  return d;',
+    ]],
+  },
+
+  // Must redden: the empty-press row, alone. A pick that answers on a hole in the returns pivots
+  // on nothing, and the plan inset's own presses start moving the pivot too.
+  'pick-answers-on-nothing': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (!hit) return;\n  setPivotDistance(hit.distance);',
+      '  setPivotDistance(hit ? hit.distance : 2.2);',
+    ]],
+  },
+
   // ---- section 15b, the badge for an effect this build has not got ----
   // Must redden: the exact-sentence row of 15b, alone.
   'badge-counts-the-registry': {
@@ -8351,7 +8392,196 @@ try {
   }
 
 
-  console.log('\n[22] pinning the drive drops what the loop was going to serve');
+  console.log('\n[22] a press on the stage moves the orbit pivot to the depth under the pointer');
+
+  // Everything below plants a depth grid and dispatches the press in one task, because
+  // `depthCurr` is swapped on every bind and a frame arriving between the two would leave the
+  // sweep reading a different room from the one the row is about.
+  {
+    /**
+     * A press at the middle of the stage over a grid of one range, and what the camera and the
+     * pivot were either side of it.
+     *
+     * `mm` of 0 is a grid with no returns anywhere, which is the empty-space case.
+     */
+    const pressOn = (mm, opts = {}) => page.evaluate(`((mm, opts) => {
+      const k = __kinect;
+      const c = k.freeCamera;
+      const fwd = c.getWorldDirection(new (c.position.constructor)());
+      const before = {
+        p: c.position.toArray(), q: c.quaternion.toArray(),
+        target: k.controls.target.toArray(),
+        clears: k.timeline.counters.navigationHistoryClears,
+      };
+      k.drive.injectDepth(new Uint16Array(512 * 424).fill(mm));
+      const r = document.getElementById('stage').getBoundingClientRect();
+      const at = opts.inset
+        ? (() => { const i = k.keyframes.chrome.inset(); return { x: r.x + i.x + i.w / 2, y: r.y + i.y + i.h / 2 }; })()
+        : { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      document.getElementById(opts.on ?? 'stage').dispatchEvent(new PointerEvent('pointerdown', {
+        button: opts.button ?? 0, buttons: 1, clientX: at.x, clientY: at.y,
+        bubbles: true, cancelable: true, pointerId: 71,
+      }));
+      const t = k.controls.target;
+      const after = { target: t.toArray(), dist: t.distanceTo(c.position) };
+      // Where the pivot sits relative to the way the camera is pointing. 1 is dead on the axis,
+      // which is the property that makes the press cost nothing to look at.
+      after.onAxis = t.clone().sub(c.position).normalize().dot(fwd);
+      return { before, after };
+    })(${mm}, ${JSON.stringify(opts)})`);
+
+    /** How far apart two poses are, in metres and in quaternion components. */
+    const poseApart = (a, b) => Math.max(
+      ...a.p.map((v, i) => Math.abs(v - b.p[i])),
+      ...a.q.map((v, i) => Math.abs(v - b.q[i])),
+    );
+
+    await page.evaluate('__kinect.timeline.transport().pause()');
+    await page.evaluate('__kinect.timeline.transport().seek(4.0)');
+    await settle();
+    // Read before any press, which is the whole of what makes the Reset row below an assertion.
+    // Read after them it is `target0` against itself, and a build whose press calls `saveState()`
+    // passes it - which is exactly what happened, and was caught only by reading which rows fired
+    // rather than the run's verdict.
+    const home = await page.evaluate('__kinect.controls.target0.toArray()');
+    // From the sensor's own pose, so a range down the optical axis and a range from the camera
+    // are the same number and the row can name the metres it expects.
+    await page.evaluate('__kinect.sensorView()');
+    await settle();
+
+    const wall = await pressOn(3000);
+    check(Math.abs(wall.after.dist - 3.0) < 0.02,
+      'a press on a wall three metres out puts the pivot three metres out',
+      `${wall.after.dist.toFixed(4)} m, from a pivot at ${
+        Math.hypot(...wall.before.target.map((v, i) => v - wall.before.p[i])).toFixed(4)} m`);
+    check(Math.abs(wall.after.onAxis - 1) < 1e-9,
+      'and on the view axis, which is why the press changes nothing to look at',
+      `the pivot lies ${wall.after.onAxis.toFixed(12)} along the way the camera points`);
+
+    // The same press over a different room. Without this the row above passes on a build that
+    // writes a constant.
+    const near = await pressOn(1200);
+    check(Math.abs(near.after.dist - 1.2) < 0.02,
+      'and a press on a wall at 1.2 m puts it at 1.2 m, so the pivot reads the depth rather than a constant',
+      `${near.after.dist.toFixed(4)} m against the ${wall.after.dist.toFixed(4)} m of the same press on a 3 m wall`);
+
+    const held = await page.evaluate('__kinect.controls.target.toArray()');
+    const empty = await pressOn(0);
+    check(empty.after.target.every((v, i) => v === held[i]),
+      'a press with nothing under it leaves the pivot exactly where it was',
+      `${empty.after.target.map((v) => v.toFixed(6)).join(', ')} against ${held.map((v) => v.toFixed(6)).join(', ')}`);
+
+    // The far clip at 2 m with the box cutting, so a 3 m wall is geometry the renderer discards.
+    const cropBefore = await page.evaluate("__kinect.params.values(['crop', 'far'])");
+    await page.evaluate('__kinect.params.apply({ crop: true, far: 2.0 })');
+    await settle();
+    const cropped = await pressOn(3000);
+    check(cropped.after.target.every((v, i) => v === cropped.before.target[i]),
+      'and a press on geometry outside the crop box leaves it alone, rather than pivoting on what was discarded',
+      `${cropped.after.target.map((v) => v.toFixed(6)).join(', ')} against `
+      + `${cropped.before.target.map((v) => v.toFixed(6)).join(', ')} with the far clip at 2 m`);
+    await page.evaluate(`__kinect.params.apply(${JSON.stringify(cropBefore)})`);
+    await settle();
+
+    // What the press costs the screen-space history, measured against two controls in the same
+    // conditions rather than asserted. **The press is not free, and the plan this was built from
+    // said it would be.** `OrbitControls.update()` rebuilds `position` out of `target` on every
+    // frame, so any write to the pivot re-rounds the position by about an ulp, and
+    // `renderedCameraChanged` compares exactly. A right-drag pan has always paid the same price
+    // on every move; a press pays it once, and the drag it precedes clears on every frame anyway.
+    const clears = await page.evaluate(`(() => {
+      const k = __kinect;
+      const at = () => k.timeline.counters.navigationHistoryClears;
+      const step = () => { k.controls.update(0); k.drive.stepTo(4.0); };
+      step();
+      const a = at(); step(); const still = at() - a;
+      const b = at();
+      const t0 = k.controls.target.toArray();
+      k.controls.target.set(t0[0] + 0.01, t0[1], t0[2]);
+      step();
+      const panned = at() - b;
+      k.controls.target.fromArray(t0);
+      step();
+      const c = at();
+      k.drive.injectDepth(new Uint16Array(512 * 424).fill(2500));
+      const r = document.getElementById('stage').getBoundingClientRect();
+      document.getElementById('stage').dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0, buttons: 1, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2,
+        bubbles: true, cancelable: true, pointerId: 71,
+      }));
+      step();
+      return { still, panned, pressed: at() - c };
+    })()`);
+    note('what a press costs the screen-space history',
+      `${clears.pressed} clears, where a still camera costs ${clears.still} and one step of a pan costs ${clears.panned}`);
+    check(clears.still === 0,
+      'control: a still camera clears no screen-space history, so the counts below are about the writes',
+      `${clears.still} clears over one step`);
+    check(clears.panned === 1 && clears.pressed === 1,
+      'and a press costs exactly what one step of a right-drag pan costs, which this build has always paid',
+      `${clears.pressed} against ${clears.panned} for the pan`);
+
+    // The bit-identity the plan asked for is not reachable through `OrbitControls`, so what is
+    // asserted is the thing that was actually wanted: the picture does not move.
+    const moved = await page.evaluate(`(() => {
+      const k = __kinect, c = k.freeCamera;
+      const p0 = c.position.toArray(), q0 = c.quaternion.toArray();
+      k.drive.injectDepth(new Uint16Array(512 * 424).fill(3500));
+      const r = document.getElementById('stage').getBoundingClientRect();
+      document.getElementById('stage').dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0, buttons: 1, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2,
+        bubbles: true, cancelable: true, pointerId: 71,
+      }));
+      k.controls.update(0);
+      return { p: p0, q: q0, p1: c.position.toArray(), q1: c.quaternion.toArray() };
+    })()`);
+    const drift = poseApart({ p: moved.p, q: moved.q }, { p: moved.p1, q: moved.q1 });
+    check(drift < 1e-12,
+      'and the camera the press leaves behind is the camera it found, to well under a nanometre',
+      `worst component moved ${drift.toExponential(2)}`);
+
+    // A drag after the press turns about the new pivot, which is the whole feature.
+    const orbited = await page.evaluate(`(() => {
+      const k = __kinect, c = k.freeCamera;
+      const t = k.controls.target;
+      const held = t.distanceTo(c.position);
+      const from = c.position.toArray();
+      const offset = c.position.clone().sub(t).applyAxisAngle(c.up, 0.3);
+      c.position.copy(t).add(offset);
+      k.controls.update(0);
+      return { held, after: t.distanceTo(c.position), target: t.toArray(),
+        travelled: Math.hypot(...c.position.toArray().map((v, i) => v - from[i])) };
+    })()`);
+    check(orbited.travelled > 0.1 && Math.abs(orbited.after - orbited.held) < 1e-6,
+      'a drag after the press turns about the new pivot, keeping its range',
+      `the camera travelled ${orbited.travelled.toFixed(3)} m and stayed ${
+        orbited.after.toFixed(6)} m out, from ${orbited.held.toFixed(6)}`);
+
+    // Reset must still go to the home pose, not to wherever the last press landed.
+    await page.evaluate("document.getElementById('menuCameraReset').click()");
+    await settle();
+    const afterReset = await page.evaluate('__kinect.controls.target.toArray()');
+    check(afterReset.every((v, i) => Math.abs(v - home[i]) < 1e-9),
+      'and Reset still goes to the home pose rather than to the pivot the last press picked',
+      `${afterReset.map((v) => v.toFixed(4)).join(', ')} against a home of ${home.map((v) => v.toFixed(4)).join(', ')}`);
+
+    // The top-down inset is not the cloud, and a press in it is the plan view's own gesture.
+    await page.evaluate('__kinect.params.apply({ topview: true })').catch(() => {});
+    await settle();
+    const inset = await pressOn(3000, { inset: true });
+    check(inset.after.target.every((v, i) => v === inset.before.target[i]),
+      'a press inside the top-down inset leaves the pivot alone, because the inset is not the cloud',
+      `${inset.after.target.map((v) => v.toFixed(6)).join(', ')} against `
+      + `${inset.before.target.map((v) => v.toFixed(6)).join(', ')}`);
+
+    const right = await pressOn(3000, { button: 2 });
+    check(right.after.target.every((v, i) => v === right.before.target[i]),
+      'and a right press leaves it alone, so the pan keeps its own button',
+      `${right.after.target.map((v) => v.toFixed(6)).join(', ')} against `
+      + `${right.before.target.map((v) => v.toFixed(6)).join(', ')}`);
+  }
+
+  console.log('\n[23] pinning the drive drops what the loop was going to serve');
 
   // The third state that strands an armed position, and the only one `pumpParkedDraft` cannot
   // notice on its own: `drive.pin` calls `setAnimationLoop(null)`, so that function stops being
