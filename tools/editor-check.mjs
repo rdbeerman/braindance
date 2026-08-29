@@ -144,6 +144,16 @@ const MUTATIONS = {
       + 'clips of one take draw their marks on top of each other',
   },
 
+  // A completed write from the previous take replaces the marks loaded for the take selected
+  // while it was in flight. Must redden the response-order row of 22.
+  'mark-response-follows-selection': {
+    file: 'web/main.js',
+    edits: [['  if (openTakeId() !== id) return false;\n  takeMarks = marks;',
+             '  takeMarks = marks;']],
+    fails: 'a mark write started on one take replacing the mark list after another take was '
+      + 'selected. The response-order row of section 22 is the catch',
+  },
+
   // Selecting a row moves the strip's idea of the selection and not the page's.
   // Must redden 'the panel and the retime binding follow it' and the mark rows with it.
   'select-row-does-not-select-the-clip': {
@@ -9021,7 +9031,13 @@ try {
       + picked.clips.map((c) => `${c.id}:${c.selected}`).join(' '));
 
     // Marks, mapped through the selected clip's placement.
+    const selectedMarksLoaded = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET'
+        && url.pathname === `/capture/${encodeURIComponent(pickId)}/marks`;
+    });
     await page.mouse.click((await boxAt(1)).x, (await boxAt(1)).y);
+    await selectedMarksLoaded;
     await settle();
     const MARK_SOURCE_MS = 1500;
     await page.evaluate(
@@ -9058,6 +9074,72 @@ try {
     check(marked.ticks.length === 1 && near(marked.ticks[0].left, wantLeft, 0.5),
       'and the tick is drawn where that says, rather than where the curve alone would put it',
       `${marked.ticks[0]?.left.toFixed(2)}% against ${wantLeft.toFixed(2)}%`);
+
+    if (other) {
+      const pattern = '**/capture/*/marks';
+      let heldPost = null;
+      let sawPost;
+      const postSeen = new Promise((resolve) => { sawPost = resolve; });
+      const currentMarks = [{ id: 'current-take', sourceMs: 250, label: 'current take' }];
+      const staleMarks = [{ id: 'stale-take', sourceMs: 750, label: 'stale take' }];
+      const holdMarkWrite = async (route) => {
+        if (route.request().method() === 'POST') {
+          heldPost = route;
+          sawPost();
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ marks: currentMarks }),
+        });
+      };
+      await page.route(pattern, holdMarkWrite);
+      let pendingWrite = null;
+      try {
+        pendingWrite = page.evaluate('__kinect.library.markHere()');
+        await Promise.race([
+          postSeen,
+          new Promise((_, reject) => { setTimeout(() => reject(new Error('mark POST did not start')), 10000); }),
+        ]);
+        await page.evaluate(`__kinect.editor.selectClipRow(${JSON.stringify(two.clips[0].id)})`);
+        await page.waitForFunction(
+          `(id) => __kinect.library.takeId() === id
+            && __kinect.library.marks()[0]?.id === 'current-take'`,
+          two.clips[0].take,
+          { timeout: 10000 },
+        );
+        await heldPost.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ marks: staleMarks }),
+        });
+        const adopted = await pendingWrite;
+        pendingWrite = null;
+        const afterResponse = await page.evaluate(`({
+          take: __kinect.library.takeId(),
+          marks: __kinect.library.marks(),
+        })`);
+        check(adopted === false && afterResponse.take === two.clips[0].take
+          && afterResponse.marks.length === 1 && afterResponse.marks[0].id === 'current-take',
+        'a mark response from the take selected before the request cannot replace the marks of '
+          + 'the take selected while that request was in flight',
+        `adopted ${adopted}, on ${afterResponse.take}, marks ${afterResponse.marks.map((m) => m.id).join(', ')}`);
+      } finally {
+        if (heldPost && pendingWrite) {
+          await heldPost.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ marks: staleMarks }),
+          }).catch(() => {});
+          await pendingWrite.catch(() => {});
+        }
+        await page.unroute(pattern, holdMarkWrite);
+      }
+    } else {
+      note('[22] the mark response-order arm is not run',
+        'it needs a second take so the selected take can change while the first take writes');
+    }
 
 
     // The head, which moves the clip's in-point and must not move its footage.

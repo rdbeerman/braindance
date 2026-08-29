@@ -71,6 +71,18 @@ const MUTATIONS = {
       + 'four-clip pre-roll at 41 of the 60 frames it computed and an eight-clip one at 20. '
       + 'Section 8\'s first two rows are the catch, and it fires seven in all',
   },
+  // A take outside the current plan keeps the demand and decoded frames of the last plan that
+  // named it. Must redden section 8a's two release rows.
+  'cache-keeps-absent-demand': { file: 'web/main.js', edits: [[
+    `    for (const take of openTakes.values()) {
+      if (load.has(take)) continue;
+      take.setDemand(0);
+    }`,
+    '    /* mutation: absent takes keep the previous plan\'s demand */',
+  ]],
+    fails: 'a take outside the current plan keeping the demand and decoded frames of the last '
+      + 'plan that named it. Section 8a\'s two release rows are the catch',
+  },
   // The pre-roll stops being a function of anything.
   'preroll-constant': { file: 'web/main.js', edits: [[
     'const frames = Math.max(surface, trails, back3.frames);',
@@ -1592,6 +1604,7 @@ const FIXTURE_CLIPS = [
 const MULTI_LOOK = { ...BLACKWALL_LOOK, fade: 300, wake: 700, trails: 0, additive: false };
 
 const { takes: LIBRARY_TAKES = [] } = await (await fetch(`${URL_BASE}/library/takes`)).json();
+const PRIMARY_TAKE = LIBRARY_TAKES.find((t) => t.id === TAKE) ?? null;
 const SECOND_TAKE = LIBRARY_TAKES.find((t) => t.id !== TAKE && t.openable) ?? null;
 
 const MULTI = `(() => {
@@ -1624,7 +1637,7 @@ const MULTI = `(() => {
         id: c.id,
         start: c.start,
         length: c.length,
-        take: c.second && second ? { ...second } : one.take,
+        take: c.take ? { ...c.take } : (c.second && second ? { ...second } : one.take),
         retime: this.retimeFor(c.keys),
         // This clip's own look, written into the document rather than applied afterwards - the
         // loader is the door a per-clip look actually comes through.
@@ -2029,6 +2042,13 @@ const STACK_GAP_SEC = 1;
 const STACK_LENGTH_SEC = 6;
 const STACK_ARMS = [1, 2, 4, CLIP_CEILING];
 
+const RELEASED_DEMAND_CLIPS = [
+  { id: 'cached', start: 40, length: 8, keys: [[0, 0], [8, 32]], second: false,
+    look: { fade: 2000, wake: 5000 } },
+  { id: 'current', start: 0, length: 6, keys: [[0, 0], [6, 6]], second: true,
+    look: { fade: 100, wake: 0 } },
+];
+
 /** N clips of one take, all live at the target, each cut a second further into the footage. */
 const stackOf = (n) => Array.from({ length: n }, (_, i) => ({
   id: `s${i}`,
@@ -2119,6 +2139,55 @@ console.log('\n== 8. the frame cache is sized by the clips asking for it ==');
     'and it is a memory budget with the frame count derived from it, rather than a frame count '
     + 'with a memory figure written beside it',
     `${(CACHE.budgetBytes / (1024 * 1024)).toFixed(0)} MB / ${CACHE.frameBytes} B = ${CACHE.ceiling}`);
+}
+
+console.log('\n== 8a. a take outside the current plan releases the previous plan\'s cache ==');
+if (SECOND_TAKE) {
+  const releaseClips = RELEASED_DEMAND_CLIPS.map((clip) => ({
+    ...clip,
+    take: clip.id === 'cached'
+      ? { id: PRIMARY_TAKE.id, hash: PRIMARY_TAKE.hash }
+      : { id: SECOND_TAKE.id, hash: SECOND_TAKE.hash },
+  }));
+  const stagedRelease = await page.evaluate(
+    `globalThis.__mc.load(${JSON.stringify(releaseClips)}, null, ${JSON.stringify(STACK_LOOK)})`,
+  );
+  const held = await page.evaluate("globalThis.__mc.arm('seek', 47, 0, 'demandHeld', null)");
+  const releasePlan = await page.evaluate(`(() => {
+    const plan = __kinect.timeline.transport().planSeek(1);
+    return plan.spans.map((span) => ({ clip: span.clip.id, take: span.take.id,
+      from: span.from, to: span.to }));
+  })()`);
+  const released = await page.evaluate("globalThis.__mc.arm('seek', 1, 0, 'demandReleased', null)");
+  await page.evaluate('new Promise((resolve) => { setTimeout(resolve, 250); })');
+  released.clips = await page.evaluate('__kinect.timeline.clips()');
+  const takeCaches = await page.evaluate('__kinect.timeline.takeCaches()');
+  const before = held.clips.find((clip) => clip.id === 'cached');
+  const after = released.clips.find((clip) => clip.id === 'cached');
+  const current = released.clips.find((clip) => clip.id === 'current');
+  console.log(`  ${TAKE}: demand ${before.demand}, capacity ${before.capacity}, cached ${before.cached}; `
+    + `after the plan moves to ${SECOND_TAKE.id}: demand ${after.demand}, capacity `
+    + `${after.capacity}, cached ${after.cached}`);
+  console.log(`  release plan: ${releasePlan.map((span) => `${span.clip}/${span.take} ${span.from}-${span.to}`).join(', ')}`);
+  console.log(`  staged slots: ${stagedRelease.map((clip) => `${clip.id}/${clip.take.id}:${clip.takeSlot}`).join(', ')}`);
+  console.log(`  open takes: ${takeCaches.map((take) => `${take.id} d${take.demand} c${take.cached}`).join(', ')}`);
+  check(releasePlan.length === 1 && releasePlan[0].clip === 'current'
+    && releasePlan[0].take === SECOND_TAKE.id,
+  'the release plan names only the current clip on the other take',
+  releasePlan.map((span) => `${span.clip}/${span.take}`).join(', '));
+  check(before.demand > CACHE.floor && before.cached > CACHE.floor,
+    'the first plan made the parked take hold more than the cache floor, so the release below '
+      + 'has memory to release rather than only a demand number to change',
+    `demand ${before.demand}, cached ${before.cached}, floor ${CACHE.floor}`);
+  check(current.demand > 0 && after.demand === 0,
+    'when the current plan names only the other take, the parked take has no retained demand',
+    `current demand ${current.demand}, parked demand ${after.demand}`);
+  check(after.capacity === CACHE.floor && after.cached <= CACHE.floor,
+    'and it trims the parked take back to the cache floor immediately',
+    `capacity ${after.capacity}, cached ${after.cached}, floor ${CACHE.floor}`);
+} else {
+  console.log('  NOT RUN: the library holds no second take, so one take cannot leave the plan '
+    + 'while remaining open in the document');
 }
 
 

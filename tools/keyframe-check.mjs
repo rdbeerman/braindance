@@ -229,13 +229,16 @@ const MUTATIONS = {
       }
       await this.fetch(planned.spans);
       planned = this.planSeek(programSec, options.frames);
+      this.askFor(planned.spans);
     }
 `, ''],
     [`    let planned = this.planSeek(programSec, options.frames);
+    this.askFor(planned.spans);
     for (let attempt = 0; !this.resident(planned.spans); attempt++) {
       if (attempt >= SEEK_REPLANS) {
 `,
     `    const planned = this.planSeek(programSec, options.frames);
+    this.askFor(planned.spans);
     await this.fetch(planned.spans);
 `],
   ] },

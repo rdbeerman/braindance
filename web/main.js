@@ -4341,6 +4341,7 @@ const CACHE_BUDGET_BYTES = 768 * 1024 * 1024;
 const CACHE_CEILING_FRAMES = Math.floor(CACHE_BUDGET_BYTES / FRAME_BYTES);
 // The slack a cache keeps above what was asked for, so a fetch lands without evicting itself.
 const CACHE_HEADROOM = 16;
+const DEMAND_TRIM_BATCH = 16;
 // The most frames one call may ask to have resident at once, kept below the ceiling.
 const MAX_SPAN_FRAMES = CACHE_CEILING_FRAMES - CACHE_HEADROOM;
 // How many frames one range request covers. The response is buffered whole, so it is capped.
@@ -4451,6 +4452,7 @@ class IndexedTake {
     // transport when it plans. A constant here capped a four-clip pre-roll at a quarter of what
     // it had computed, because four clips of one take ask this one cache for four windows.
     this.demand = 0;
+    this.demandTrim = null;
   }
 
   get count() { return this.times.length; }
@@ -4470,6 +4472,24 @@ class IndexedTake {
     );
   }
 
+  /** Sets the current plan's demand, deferring a release until the render task has finished. */
+  setDemand(frames) {
+    this.demand = frames;
+    if (frames > 0) {
+      if (this.demandTrim !== null) clearTimeout(this.demandTrim);
+      this.demandTrim = null;
+      return;
+    }
+    if (this.demandTrim !== null) return;
+    this.demandTrim = setTimeout(() => {
+      this.demandTrim = null;
+      if (this.demand !== 0) return;
+      if (this.claims.size > 0) return;
+      this.trim(DEMAND_TRIM_BATCH);
+      if (this.cache.size > this.capacity) this.setDemand(0);
+    }, 0);
+  }
+
   /** One decoded frame, or undefined where the cache does not hold it. */
   frame(k) { return this.cache.get(k); }
 
@@ -4485,7 +4505,10 @@ class IndexedTake {
     const claim = [a, b];
     const generation = this.generation;
     this.claims.add(claim);
-    const run = () => this.fetchSpan(a, b, generation).finally(() => this.claims.delete(claim));
+    const run = () => this.fetchSpan(a, b, generation).finally(() => {
+      this.claims.delete(claim);
+      if (this.demand === 0) this.setDemand(0);
+    });
     this.pending = (this.pending ?? Promise.resolve()).then(run, run);
     return this.pending;
   }
@@ -4576,14 +4599,15 @@ class IndexedTake {
   }
 
   /** Drops the oldest frames nothing has claimed, skipping every bound bitmap. */
-  trim() {
+  trim(maxDrops = Infinity) {
     const capacity = this.capacity;
     if (this.cache.size <= capacity) return;
     // Every clip's pair and not the selected one's: two clips of one take share this cache, so a
     // trim reading only the bindings in front of it would close a bitmap another clip is drawing.
     const bound = boundBitmaps();
+    let dropped = 0;
     for (const k of this.cache.keys()) {
-      if (this.cache.size <= capacity) break;
+      if (this.cache.size <= capacity || dropped >= maxDrops) break;
       let claimed = false;
       for (const [a, b] of this.claims) claimed = claimed || (k >= a && k <= b);
       if (claimed) continue;
@@ -4591,6 +4615,7 @@ class IndexedTake {
       if (frame.bitmap && bound.includes(frame.bitmap)) continue;
       frame.bitmap?.close();
       this.cache.delete(k);
+      dropped++;
     }
   }
 
@@ -4827,14 +4852,20 @@ class TimelineTransport {
   }
 
   /**
-   * Tells every take in a plan how many frames the clips on it are asking for.
+   * Tells every open take how many frames the current plan asks it to hold.
    *
    * The cache is the take's and the demand is the plan's, so a take cannot work this out for
    * itself: it does not know which clips are cut on it, let alone how far back each one's
-   * persistence reaches. Written before the fetch, because a trim runs inside one.
+   * persistence reaches. Written before the fetch, because a trim runs inside one. A take absent
+   * from the plan returns to the floor immediately rather than carrying the last plan's demand.
    */
   askFor(spans) {
-    for (const [take, frames] of this.frameLoad(spans)) take.demand = frames;
+    const load = this.frameLoad(spans);
+    for (const [take, frames] of load) take.setDemand(frames);
+    for (const take of openTakes.values()) {
+      if (load.has(take)) continue;
+      take.setDemand(0);
+    }
   }
 
   /** Whether every take a plan names already holds the frames the plan walks. */
@@ -4920,6 +4951,7 @@ class TimelineTransport {
   async seekNow(programSec, options = {}) {
     // Planned, fetched, then planned again: the retime curve can move under the await.
     let planned = this.planSeek(programSec, options.frames);
+    this.askFor(planned.spans);
     for (let attempt = 0; !this.resident(planned.spans); attempt++) {
       if (attempt >= SEEK_REPLANS) {
         // Overtaken, not broken: the hand that moved the curve has already queued a repaint.
@@ -4936,6 +4968,7 @@ class TimelineTransport {
       }
       await this.fetch(planned.spans);
       planned = this.planSeek(programSec, options.frames);
+      this.askFor(planned.spans);
     }
     const { target, t, plan, asked, spans, bound } = planned;
     const { length, start } = planned;
@@ -4982,6 +5015,7 @@ class TimelineTransport {
     let target = this.frameAt(programSec);
     let t = target / this.outputFps;
     let spans = this.spansOver(target, target);
+    this.askFor(spans);
     for (let attempt = 0; !this.resident(spans); attempt++) {
       if (attempt >= SEEK_REPLANS) {
         throw new Error(`the retime curve moved under ${SEEK_REPLANS} plans of a draft at ${programSec}s`);
@@ -4990,6 +5024,7 @@ class TimelineTransport {
       target = this.frameAt(programSec);
       t = target / this.outputFps;
       spans = this.spansOver(target, target);
+      this.askFor(spans);
     }
     const standing = target === this.frame && this.standingAt(t);
 
@@ -7258,7 +7293,27 @@ async function loadMarks(id) {
     marks = [];
   }
   if (generation !== markLoadGeneration || openTakeId() !== id) return false;
+  return adoptMarks(id, Array.isArray(marks) ? marks : []);
+}
+
+/** Writes mark records and returns the complete sidecar the server accepted. */
+async function writeMarks(id, records) {
+  const res = await fetch(`/capture/${encodeURIComponent(id)}/marks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ marks: records }),
+  });
+  if (!res.ok) throw new Error(`mark write failed (${res.status})`);
+  const body = await res.json();
+  if (!Array.isArray(body?.marks)) throw new Error('mark write returned no mark list');
+  return body.marks;
+}
+
+/** Adopts a mark response only while its take is still selected. */
+function adoptMarks(id, marks, updateSelection = null) {
+  if (openTakeId() !== id) return false;
   takeMarks = marks;
+  updateSelection?.();
   paintMarks();
   paintMarkButton();
   return true;
@@ -7266,51 +7321,37 @@ async function loadMarks(id) {
 
 /** Flags the moment at the playhead, in source milliseconds: a mark describes the footage. */
 async function markHere() {
-  if (!openTakeId() || !timeline) return;
+  const id = openTakeId();
+  if (!id || !timeline) return false;
   const sourceMs = Math.round(sourceSecOfProgram(timeline.programSec) * 1000);
   const rec = { id: `m${Date.now().toString(36)}`, sourceMs, label: `mark ${takeMarks.length + 1}`, at: Date.now() };
-  const res = await fetch(`/capture/${encodeURIComponent(openTakeId())}/marks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ marks: [rec] }),
-  });
-  takeMarks = (await res.json()).marks;
-  paintMarks();
-  paintMarkButton();
+  const marks = await writeMarks(id, [rec]);
+  return adoptMarks(id, marks);
 }
 
 /** Deletes the given mark by writing a tombstone. */
 async function deleteMark(mark) {
-  if (!openTakeId() || !mark) return;
+  const id = openTakeId();
+  if (!id || !mark) return false;
   const rec = { id: mark.id, deleted: true, at: Date.now() };
-  const res = await fetch(`/capture/${encodeURIComponent(openTakeId())}/marks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ marks: [rec] }),
+  const marks = await writeMarks(id, [rec]);
+  return adoptMarks(id, marks, () => {
+    if (selectedMark?.id === mark.id) selectedMark = null;
   });
-  takeMarks = (await res.json()).marks;
-  if (selectedMark?.id === mark.id) selectedMark = null;
-  paintMarks();
-  paintMarkButton();
 }
 
 /** Moves a mark to a new source position. */
 async function moveMark(mark, newSourceMs) {
-  if (!openTakeId() || !mark) return;
-  if (mark.sourceMs === newSourceMs) { paintMarks(); return; }
+  const id = openTakeId();
+  if (!id || !mark) return false;
+  if (mark.sourceMs === newSourceMs) { paintMarks(); return true; }
   const rec = { ...mark, sourceMs: newSourceMs, at: Date.now() };
-  const res = await fetch(`/capture/${encodeURIComponent(openTakeId())}/marks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ marks: [rec] }),
+  const marks = await writeMarks(id, [rec]);
+  return adoptMarks(id, marks, () => {
+    if (selectedMark?.id === mark.id) {
+      selectedMark = takeMarks.find((m) => m.id === mark.id) ?? null;
+    }
   });
-  if (!res.ok) { paintMarks(); return; }
-  takeMarks = (await res.json()).marks;
-  if (selectedMark?.id === mark.id) {
-    selectedMark = takeMarks.find((m) => m.id === mark.id) ?? null;
-  }
-  paintMarks();
-  paintMarkButton();
 }
 
 /**
@@ -11105,6 +11146,10 @@ globalThis.__kinect = {
     },
     /** How many takes are open, which is what says two clips of one take share its cache. */
     takes: () => openTakes.size,
+    /** Each open take's cache state, including entries retained for undo. */
+    takeCaches: () => [...openTakes].map(([id, take]) => ({
+      id, demand: take.demand, capacity: take.capacity, cached: take.cache.size,
+    })),
     /** What a take's cache is sized against: the budget, what it buys, and the floor under it. */
     cache: () => ({
       floor: CACHE_FRAMES,
