@@ -58,16 +58,22 @@ then the median of the three, because the 1-clip arm itself moves 0.3 ms between
 taken across runs would carry that. The three agree arm by arm to within 6%, which is what this
 rig reproduces to on a working machine.
 
-**A clip costs about 1.5 ms at four, the second clip costs about half that, and the warming clip's
-cost is under what this rig resolves.** Three extra clouds add 4.667 ms, so 1.56 each, while the
-second alone adds 0.723 - the marginal cost is not flat, and a number quoted for one clip is
-really a number for the fourth. The warming arm is the one this harness exists to price, and its
-difference from the 4-clip arm is -0.190, +0.060 and +0.120 ms across the three runs: the sign
-flips, and every one of those sits inside the arm's own interquartile spread. So the warm binds
-its textures and steps its surface memory for a cost this rig cannot separate from zero, which
-carries the claim that mattered - warming a clip through a cut is free next to showing it - on a
-reading rather than on a difference of two medians. Against a 33.3 ms budget at 30fps, four
-overlapping clips is 30% and four plus a warming one is 30%.
+**The third and fourth clips cost about 1.93 ms each and the second costs 0.75, so there is no one
+number for "a clip".** Per run the second clip adds 0.723, 0.707 and 0.816, while the third and
+fourth add 1.972, 2.035 and 1.784 each. Three extra clouds add 4.667 ms between them, which
+averages 1.54, and that average is the trap: it is dragged down by a cheap second clip, so it
+describes neither the second nor the fourth and understates the fourth by a fifth. Four clips is
+1.86x one, and against a 33.3 ms budget at 30fps four overlapping clips is 30%.
+
+**The warming clip's cost is under this rig's floor rather than measured at some small number, and
+the floor is the caveat.** Its difference from the 4-clip arm is -0.190, +0.060 and +0.120 ms
+across the three runs, a mean of -0.003 over a 0.310 ms span: the sign flips, and every one of
+those sits inside the arm's own interquartile spread. But those spreads are 0.367, 0.680 and 0.620
+ms, four to seven times the 0.093 ms of the run this page once called healthy, so all three pass
+the drift gate on a machine that was carrying other work. The bound is about +/-0.2 ms and a quiet
+rig might yet resolve a warming clip below it. What holds without the hedge is the shape: the
+layering bound is the draw, 1.93 ms and 1.86x are large against these spreads, and warming a clip
+through a cut is not what to look at first.
 
 **The earlier run of this table is withdrawn rather than corrected, because the harness that took
 it could not tell whether its arms had happened.** It read 5.330 / 6.807 / 10.393 / 10.317, and
@@ -77,8 +83,10 @@ read by nothing, so a block whose fifth clip idled all the way through would hav
 as though it had warmed. The counters were collected and discarded rather than missing, so what
 closed this was reading them rather than adding them. A look whose warm window cannot cover the
 block is caught, but upstream by the render gate, which is not the reading the warming arm needs.
-The three runs above are the first ones taken with the new gate armed, and none of them tripped
-it. `docs/instruments.md` carries why a guard on the configuration is not a check on the run.
+The three runs above are the first ones taken with the new gate armed. None of them tripped it,
+and each reports the warming clip warming 15 of its block's 15 frames - which is the number the
+old page required and never read. `docs/instruments.md` carries why a guard on the configuration
+is not a check on the run.
 
 **Sizing the cache by demand did not move the draw in any direction this rig can resolve.** Two
 runs taken either side of that change read 5.330 / 6.807 / 10.393 / 10.317 before and 5.597 /
