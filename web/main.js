@@ -23,7 +23,7 @@ import {
   INSET, TOP_CENTRE, PLAN_STRIDE, FRUSTUM_LEN, planScale, planPoint, planWorld, projectThrough,
 } from './plan-geometry.js';
 import { pickDepth, sensorPoint } from './depth-pick.js';
-import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
+import { ZOOM_PER_NOTCH, rulerTickSeconds, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
 import {
   RATE_MIN, RATE_MAX, frameLoadByTake, rescaleClipKeys, snapshotClipKeys, usableClipRate,
@@ -5912,11 +5912,9 @@ function buildRuler() {
   const span = Math.max(1e-6, view.spanSec);
   const width = Math.max(1, ui.bed.clientWidth);
   const wanted = span / Math.max(2, width / 90);
-  const step = TICK_STEPS.find((s) => s >= wanted) ?? TICK_STEPS[TICK_STEPS.length - 1];
+  const { step, seconds } = rulerTickSeconds(view.startSec, view.endSec, wanted);
   const ticks = [];
-  // Only the ticks the window holds are built, so window width sets the cost, not take length.
-  const first = Math.ceil(view.startSec / step - 1e-9) * step;
-  for (let s = first; s <= view.endSec + 1e-9; s += step) {
+  for (const s of seconds) {
     const tick = document.createElement('div');
     tick.className = 'ttick';
     tick.style.left = `${view.pct(s)}%`;
@@ -7669,6 +7667,7 @@ function refusePresetBody(name, body) {
 
 /** Applies a saved preset, stamping it only if the document said what the whole look is. */
 function applyStoredPreset(doc, target = EDITING ? selectedClipRow() : selectedClip) {
+  if (refuseEdit('applying a stored preset')) return null;
   refuseDuringEvaluation('a stored preset applied');
   refusePresetBody(doc.name, doc.body);
   const values = doc.body.values ?? {};
@@ -7839,7 +7838,12 @@ function choosePicker(picker, name, { close = false } = {}) {
         try {
           const doc = await (await fetch(`/presets/${encodeURIComponent(name)}`)).json();
           if (generation !== documentGeneration || (target && !clips.includes(target))) return;
-          const { stamped, written, shared } = applyStoredPreset(doc, target);
+          const result = applyStoredPreset(doc, target);
+          if (result === null) {
+            showPickerChoice(picker, appliedPreset()?.name ?? '');
+            return;
+          }
+          const { stamped, written, shared } = result;
           // The shared half is named rather than left to be discovered: it lands on the project
           // and every other clip is seen through it.
           const grade = shared
@@ -8010,8 +8014,8 @@ async function importPresetFile(file) {
   });
   const saved = await res.json();
   if (saved.error) throw new Error(saved.error);
-  applyStoredPreset({ name: saved.name, rev: saved.rev, body });
-  return saved;
+  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body });
+  return { ...saved, applied: applied !== null };
 }
 
 /**
@@ -8362,6 +8366,7 @@ async function addClipFromTake(id) {
     paintClipCommands();
   }
   if (generation !== documentGeneration || !clips.includes(initiating)) return null;
+  if (refuseEdit('adding a clip')) return null;
   if (clips.length >= CLIP_CEILING) {
     say(`this build composites ${CLIP_CEILING} clips and this edit already holds ${clips.length}`);
     return null;
@@ -9960,8 +9965,12 @@ ui.presetFile.addEventListener('change', () => {
     try {
       const saved = await importPresetFile(file);
       await refreshPresets();
-      showPickerChoice(pickers.find((p) => p.trigger === ui.preset), saved.name);
-      say(`imported ${saved.name} · ${saved.rev.slice(7, 15)}`);
+      if (saved.applied) {
+        showPickerChoice(pickers.find((p) => p.trigger === ui.preset), saved.name);
+        say(`imported ${saved.name} · ${saved.rev.slice(7, 15)}`);
+      } else {
+        showPickerChoice(pickers.find((p) => p.trigger === ui.preset), appliedPreset()?.name ?? '');
+      }
     } catch (err) {
       showTimelineError(err);
     }

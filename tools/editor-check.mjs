@@ -131,6 +131,36 @@ const MUTATIONS = {
       + 'placement, and the row that says the mark arm has a placement to be about at all',
   },
 
+  'add-clip-skips-post-open-export-guard': {
+    file: 'web/main.js',
+    edits: [[
+      "  if (generation !== documentGeneration || !clips.includes(initiating)) return null;\n  if (refuseEdit('adding a clip')) return null;\n  if (clips.length >= CLIP_CEILING) {",
+      "  if (generation !== documentGeneration || !clips.includes(initiating)) return null;\n  if (clips.length >= CLIP_CEILING) {",
+    ]],
+    fails: 'an Add Clip request completing after export took the document. The export-race clip '
+      + 'row reddens when the continuation appends the take and commits it mid-render',
+  },
+
+  'preset-apply-skips-post-fetch-export-guard': {
+    file: 'web/main.js',
+    edits: [[
+      "  if (refuseEdit('applying a stored preset')) return null;\n  refuseDuringEvaluation('a stored preset applied');",
+      "  refuseDuringEvaluation('a stored preset applied');",
+    ]],
+    fails: 'a fetched preset applying and stamping after export took the document. The export-race '
+      + 'preset row reddens on the changed document and commit',
+  },
+
+  'ruler-stops-scaling-beyond-hour': {
+    file: 'web/view-window.js',
+    edits: [[
+      '    step = Number.isFinite(scaled) ? scaled : wantedSec;',
+      '    step = top;',
+    ]],
+    fails: 'the ruler falling back to one-hour ticks for an enormous finite program. The huge '
+      + 'project row reddens on a tick set capped at 512 instead of sized to the viewport',
+  },
+
   // A mark is drawn through its clip's curve and not through where that clip sits.
   // Must redden both mark rows of 22 and nothing else there.
   'marks-ignore-the-placement': {
@@ -344,7 +374,10 @@ const MUTATIONS = {
   // itself is unchanged.
   'picker-keeps-a-refused-look': {
     file: 'web/main.js',
-    edits: [["          showPickerChoice(picker, appliedPreset()?.name ?? '');\n", '']],
+    edits: [[
+      "        } catch (err) {\n          showPickerChoice(picker, appliedPreset()?.name ?? '');\n          showTimelineError(err);",
+      "        } catch (err) {\n          showTimelineError(err);",
+    ]],
     fails: 'and the picker left naming a look the apply refused, which the deliverable menu '
       + 'forty lines away already reverts. The refusal itself is unchanged, so only the '
       + 'revert row reddens',
@@ -420,11 +453,13 @@ const MUTATIONS = {
     edits: [
       ['  refusePresetBody(name, body);\n', ''],
       [
-        '  applyStoredPreset({ name: saved.name, rev: saved.rev, body });',
+        '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body });\n'
+        + '  return { ...saved, applied: applied !== null };',
         '  for (const [k, v] of Object.entries(body.values ?? {})) {\n'
         + '    if (globalThis.__kinect?.uniforms?.[k]) globalThis.__kinect.uniforms[k].value = v;\n'
         + '  }\n'
-        + '  appliedPreset = { name: saved.name, rev: saved.rev };',
+        + '  stampPreset({ name: saved.name, rev: saved.rev });\n'
+        + '  return { ...saved, applied: true };',
       ],
     ],
   },
@@ -438,11 +473,13 @@ const MUTATIONS = {
       [
         '  const saved = await res.json();\n'
         + '  if (saved.error) throw new Error(saved.error);\n'
-        + '  applyStoredPreset({ name: saved.name, rev: saved.rev, body });',
+        + '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body });\n'
+        + '  return { ...saved, applied: applied !== null };',
         '  const saved = await res.json();\n'
         + '  if (saved.error) throw new Error(saved.error);\n'
         + '  refusePresetBody(name, body);\n'
-        + '  applyStoredPreset({ name: saved.name, rev: saved.rev, body });',
+        + '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body });\n'
+        + '  return { ...saved, applied: applied !== null };',
       ],
     ],
   },
@@ -7206,6 +7243,38 @@ try {
       '  and the document this section handed over is put back, carrying neither track it planted',
       cleaned.threw ? `the restore threw "${cleaned.threw}"` : `tracks: ${cleaned.tracks.join(', ') || 'none'}`);
 
+    const enormous = await page.evaluate(`(() => {
+      const original = JSON.parse(${JSON.stringify(original)});
+      const body = JSON.parse(${JSON.stringify(original)});
+      body.clips[0].start = 1e20;
+      body.clips[0].length = 0;
+      const began = performance.now();
+      let result;
+      try {
+        __kinect.library.restoreProject(body);
+        const ticks = [...document.querySelectorAll('#tRuler .ttick')]
+          .map((tick) => Number.parseFloat(tick.style.left));
+        result = {
+          accepted: true,
+          elapsed: performance.now() - began,
+          duration: __kinect.timeline.read().duration,
+          ticks,
+        };
+      } catch (err) {
+        result = { accepted: false, elapsed: performance.now() - began, error: String(err?.message ?? err) };
+      }
+      __kinect.library.restoreProject(original);
+      __kinect.keyframes.undo.begin();
+      return result;
+    })()`);
+    check(enormous.accepted && enormous.duration === 1e20
+      && enormous.ticks.length > 1 && enormous.ticks.length < 20
+      && enormous.ticks.every((left, index) => index === 0 || left > enormous.ticks[index - 1]),
+    'a finite project far beyond the one-hour tick ladder builds a width-sized increasing ruler',
+    enormous.accepted
+      ? `${enormous.ticks.length} ticks in ${enormous.elapsed.toFixed(1)}ms over ${enormous.duration}s`
+      : `refused after ${enormous.elapsed.toFixed(1)}ms: ${enormous.error}`);
+
     // ---- the handle a file arrives with, checked the way the drag that makes one is
     // The invariants lived in the drag handler and nowhere in the loader: `restoreKey` asked
     // whether a handle was an array of finite pairs inside the count ceiling, and nothing about
@@ -9006,7 +9075,7 @@ try {
       };
     })()`);
 
-    const one = await read();
+    let one = await read();
     console.log(`  the stack: ${one.rows.join(', ')}`);
     check(one.rows[0] === 'clips' && one.rows.includes('clip:c1'),
       'the lane stack opens with a clip bar and a row for the clip that is open',
@@ -9031,6 +9100,123 @@ try {
         + 'weaker thing about the picker');
     }
     const pickId = other ? other.id : TAKE;
+    const raceTake = (library.takes ?? []).find((take) => take.id !== TAKE
+      && take.id !== pickId && take.openable !== false) ?? null;
+
+    check(raceTake !== null,
+      'the export race has an uncached third take, so Add Clip must cross its await after export starts',
+      raceTake ? raceTake.id : `only ${(library.takes ?? []).map((take) => take.id).join(', ')} were listed`);
+    if (raceTake) {
+      const panelBeforeRace = await page.evaluate(
+        'document.querySelector(".paneltab[aria-selected=true]")?.dataset.panelTab ?? null');
+      await page.locator('.paneltab[data-panel-tab="look"]').click();
+      await settle();
+      await page.evaluate(`(() => {
+        __kinect.params.set('pointSize', 17.25);
+        __kinect.keyframes.undo.commit();
+        __kinect.keyframes.undo.begin();
+      })()`);
+      const beforeRace = await page.evaluate(`(() => {
+        const project = __kinect.library.serialiseProjectBody();
+        const selection = __kinect.editor.clipSelection();
+        const target = project.clips.find((clip) => clip.id === selection);
+        return {
+          project,
+          clips: __kinect.timeline.clips().map((clip) => clip.id),
+          selection,
+          pointSize: target?.params?.pointSize,
+          stamp: target?.appliedPreset ?? null,
+          edits: __kinect.export.editsDuringExport(),
+        };
+      })()`);
+      let releasePreset = () => {};
+      let releaseSource = () => {};
+      let presetRequests = 0;
+      let sourceRequests = 0;
+      const holdPreset = async (route) => {
+        presetRequests++;
+        await new Promise((resolve) => { releasePreset = resolve; });
+        await route.continue();
+      };
+      const holdSource = async (route) => {
+        sourceRequests++;
+        await new Promise((resolve) => { releaseSource = resolve; });
+        await route.continue();
+      };
+      await page.route('**/presets/blackwall', holdPreset);
+      await page.route(`**/capture/${raceTake.id}/index`, holdSource);
+      try {
+        await page.locator('#tPreset').click();
+        await page.locator('#tPresetList .pickeroption[data-name="blackwall"]').click();
+        await page.locator('#tAddClip').click();
+        await page.locator(`.cpoption[data-take="${raceTake.id}"]`).click();
+        const began = Date.now();
+        while (presetRequests !== 1 || sourceRequests !== 1) {
+          if (Date.now() - began > 15000) throw new Error(
+            `the export-race requests did not both arrive: preset ${presetRequests}, source ${sourceRequests}`,
+          );
+          await new Promise((resolve) => { setTimeout(resolve, 20); });
+        }
+        await page.evaluate(`(() => {
+          globalThis.__editorGuardExport = __kinect.export.run({
+            from: 0, to: 600, width: 64, height: 36, name: 'editor-check-export-guard',
+          }).then((done) => ({ ok: true, done }), (error) => ({ ok: false, error: String(error?.message ?? error) }));
+        })()`);
+        await page.waitForFunction('__kinect.export.running()', null, { timeout: 15000 });
+        const runningAtRelease = await page.evaluate('__kinect.export.running()');
+        releasePreset();
+        releaseSource();
+        await page.waitForFunction(`!__kinect.library.presetGestureRunning()
+          && !document.getElementById('tAddClip').disabled`, null, { timeout: 15000 });
+        await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        const afterRace = await page.evaluate((targetId) => {
+          const project = __kinect.library.serialiseProjectBody();
+          const target = project.clips.find((clip) => clip.id === targetId);
+          return {
+            clips: __kinect.timeline.clips().map((clip) => clip.id),
+            pointSize: target?.params?.pointSize,
+            stamp: target?.appliedPreset ?? null,
+            edits: __kinect.export.editsDuringExport(),
+            running: __kinect.export.running(),
+          };
+        }, beforeRace.selection);
+        const exportResult = await page.evaluate(`globalThis.__editorGuardExport.then((result) => ({
+          ok: result.ok,
+          error: result.error ?? null,
+          bytes: result.done?.bytes ?? null,
+          frames: result.done?.frames ?? null,
+        }))`);
+        check(runningAtRelease && afterRace.running && exportResult.ok,
+          'the held preset and clip requests resume while a real export still owns the document',
+          `running at release ${runningAtRelease}, after continuations ${afterRace.running}, export ${JSON.stringify(exportResult)}`);
+        check(afterRace.pointSize === beforeRace.pointSize
+          && JSON.stringify(afterRace.stamp) === JSON.stringify(beforeRace.stamp),
+        'a fetched preset cannot apply values, stamp the clip or commit after export starts',
+        `pointSize ${beforeRace.pointSize} -> ${afterRace.pointSize}, stamp `
+          + `${JSON.stringify(beforeRace.stamp)} -> ${JSON.stringify(afterRace.stamp)}, `
+          + `edits ${beforeRace.edits} -> ${afterRace.edits}`);
+        check(JSON.stringify(afterRace.clips) === JSON.stringify(beforeRace.clips),
+        'an opened take cannot append a clip or commit after export starts',
+        `clips ${beforeRace.clips.join(',')} -> ${afterRace.clips.join(',')}, `
+          + `edits ${beforeRace.edits} -> ${afterRace.edits}`);
+      } finally {
+        releasePreset();
+        releaseSource();
+        await page.unroute('**/presets/blackwall', holdPreset);
+        await page.unroute(`**/capture/${raceTake.id}/index`, holdSource);
+        await page.evaluate(({ project, selection }) => {
+          __kinect.library.restoreProject(project);
+          const selected = __kinect.timeline.clips().find((clip) => clip.id === selection);
+          if (selected) __kinect.editor.selectClipRow(selected.id);
+          __kinect.keyframes.undo.begin();
+        }, { project: beforeRace.project, selection: beforeRace.selection });
+        if (panelBeforeRace) {
+          await page.locator(`.paneltab[data-panel-tab="${panelBeforeRace}"]`).click();
+        }
+        await settle();
+      }
+    }
+    one = await read();
 
     // The add, pressed rather than called: the picker is the one entry point and this is it.
     await page.evaluate(`(async () => {
