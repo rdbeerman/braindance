@@ -63,18 +63,18 @@ const MUTATIONS = {
   // The picture levels and the box in the corner does not, which is the state this feature was
   // built to end. Nothing outside section 3 can see it.
   'plan-ignores-tilt': { file: 'web/main.js', edits: [[
-    '      planVec.set(wx, wy, -z).applyQuaternion(worldTilt);',
-    '      planVec.set(wx, wy, -z);',
+    '      planVec.applyQuaternion(worldTilt);',
+    '      planVec.setX(planVec.x);',
   ]] },
   // The plan culls on x alone, which is what it did while a top-down had no y to care about;
   // levelling turns sensor y into the plan's own x and z, so discarded points reappear inside the
   // footprint. Spelled out at the call site rather than by editing `croppedOut`, so two mutations
   // do not redden the same rows.
   'plan-skips-vertical-crop': { file: 'web/main.js', edits: [[
-    '      if (croppedOut(wx, wy, z)) continue;',
+    '      if (croppedOut(planVec.x, planVec.y, z)) continue;',
     '      if (uniforms.cropOn.value === 1\n'
     + '        && (z < uniforms.nearClip.value || z > uniforms.farClip.value\n'
-    + '          || wx < uniforms.cropL.value || wx > uniforms.cropR.value)) continue;',
+    + '          || planVec.x < uniforms.cropL.value || planVec.x > uniforms.cropR.value)) continue;',
   ]] },
   // The sensor view keeps navigation's own pole and axis, so on a levelled take the one button
   // meaning "exactly what the sensor shot" shows a rolled picture. `sensor-view-check`'s fov rows
@@ -117,9 +117,13 @@ const MUTATIONS = {
   // The sign is fixed in the shader and the top-down keeps the old one, so the picture shows the
   // room the right way round and the plan beside it is a reflection. One says the sign matters, the
   // other says which readers were told.
-  'plan-x-not-mirrored': { file: 'web/main.js', edits: [[
-    '      const wx = (-(col + 0.5 - cx) / fx) * z;',
-    '      const wx = ((col + 0.5 - cx) / fx) * z;',
+  // Aimed at `web/depth-pick.js` and not at the plan's own loop, because the unprojection moved
+  // there when the pivot's pick came to need it and the plan now calls it. That widens the
+  // mutation - it turns the pivot's sweep over too - which is the point: one spelling means one
+  // control, rather than a second copy in `main.js` this file would have gone on testing alone.
+  'plan-x-not-mirrored': { file: 'web/depth-pick.js', edits: [[
+    '  out.set((-(col + 0.5 - cx) / fx) * z, -((row + 0.5 - cy) / fy) * z, -z);',
+    '  out.set(((col + 0.5 - cx) / fx) * z, -((row + 0.5 - cy) / fy) * z, -z);',
   ]] },
 };
 if (MUTATE && !MUTATIONS[MUTATE]) {
