@@ -6848,9 +6848,7 @@ function drawPlanCloud(rect) {
   chromeCtx.fillStyle = 'rgba(232, 236, 241, 0.55)';
   for (let row = 0; row < DEPTH_H; row += PLAN_STRIDE) {
     for (let col = 0; col < DEPTH_W; col += PLAN_STRIDE) {
-      // The same forward map the pivot's pick sweeps with and the vertex shader unprojects
-      // with, called rather than spelled again: two spellings are two places for the next
-      // correction to be forgotten.
+      // Reuse the depth picker's forward map so the plan and pivot cannot drift apart.
       const z = sensorPoint(planVec, depth[row * DEPTH_W + col], col, row, fx, fy, cx, cy);
       if (z === 0) continue;
       // All four lateral faces, so the plan does not draw points the renderer discards.
@@ -7481,29 +7479,12 @@ for (const type of ['pointerup', 'pointercancel']) {
   });
 }
 
-// How far down the view axis the pivot may be put. Below the low bound an orbit is
-// hypersensitive - a degree of drag swings the camera through the subject - and past the far clip
-// there is nothing drawn to turn around.
+// Avoid hypersensitive near pivots and pivots beyond the drawn range.
 const PIVOT_MIN_M = 0.15;
 
 const pivotForward = new THREE.Vector3();
 
-/**
- * Moves the orbit pivot along the view axis to a range, leaving the picture alone.
- *
- * **On the axis, and built from the forward vector the camera already holds.** `controls.update()`
- * ends in `camera.lookAt(this.target)`, so a target written off-axis re-aims the camera on the
- * frame after the press and the view jumps before the drag has started.
- *
- * It is still not free, and no arrangement of this function makes it so: `update()` also rebuilds
- * `position` out of `target`, so any write here re-rounds the position by about an ulp, and
- * `renderedCameraChanged` compares exactly. The press therefore clears the afterimage once - the
- * price one move of a right-drag pan has always paid, and the drag this press precedes pays on
- * every frame. The mosh history is not involved; only `resetAccumulators` clears that.
- * `docs/performance.md` carries the measurement and the fixed point that does not exist.
- *
- * No `saveState()`: Reset must still go to the home pose `scene.js` takes such care over.
- */
+/** Moves the pivot along the view axis without changing the saved Reset pose. */
 function setPivotDistance(distance) {
   const d = Math.min(Math.max(distance, PIVOT_MIN_M), uniforms.farClip.value);
   freeCamera.getWorldDirection(pivotForward);
@@ -7511,21 +7492,15 @@ function setPivotDistance(distance) {
   return d;
 }
 
-// Captured on the window and not the canvas, because OrbitControls listens on the canvas and
-// reads `target` when the press arrives - a listener on the canvas would write it too late. And
-// guarded on the two drags rather than silenced with `stopPropagation`, which does not reach
-// siblings registered on the same node.
-//
-// No render and no `requestRepaint()`: the image does not change, and a render in answer to a
-// pointer event is the loop `CLAUDE.md` names.
+// Capture before OrbitControls reads the target; a canvas listener would write it too late.
 addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || e.target !== renderer.domElement) return;
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey
+    || e.target !== renderer.domElement) return;
   if (nodeDrag || cropDrag) return;
   if (viewCamera !== freeCamera || !controls.enabled) return;
   const view = viewUnder(e.clientX, e.clientY);
   if (!view || view.plan) return;
-  // Before the sweep, because a camera mid-damping gives a forward axis it is about to leave and
-  // the pivot would land off it.
+  // Settle damping so the pick uses the axis the camera will keep.
   finishOrbitDrift();
   const hit = pickDepth({
     depth: depthCurr.image.data,

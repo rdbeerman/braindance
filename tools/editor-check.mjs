@@ -82,6 +82,25 @@ const MUTATIONS = {
     ]],
   },
 
+  // Must redden: the singleton row, alone. One isolated return is sensor noise, not a surface.
+  'pick-accepts-a-singleton': {
+    file: 'web/depth-pick.js',
+    edits: [[
+      '  if (cluster === null) return null;',
+      '  if (cluster === null) cluster = [0, 0];',
+    ]],
+  },
+
+  // Must redden: the modified-left row, alone. OrbitControls assigns this press to pan.
+  'pick-rehomes-modified-pan': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey\n'
+      + '    || e.target !== renderer.domElement) return;',
+      '  if (e.button !== 0 || e.target !== renderer.domElement) return;',
+    ]],
+  },
+
   // ---- section 15b, the badge for an effect this build has not got ----
   // Must redden: the exact-sentence row of 15b, alone.
   'badge-counts-the-registry': {
@@ -8413,13 +8432,30 @@ try {
         target: k.controls.target.toArray(),
         clears: k.timeline.counters.navigationHistoryClears,
       };
-      k.drive.injectDepth(new Uint16Array(512 * 424).fill(mm));
+      const depth = new Uint16Array(512 * 424);
+      if (opts.singleton) depth[212 * 512 + 256] = mm;
+      else depth.fill(mm);
+      k.drive.injectDepth(depth);
       const r = document.getElementById('stage').getBoundingClientRect();
-      const at = opts.inset
+      const at = opts.singleton
+        ? (() => {
+          const z = mm * 0.001;
+          const focal = k.uniforms.focal.value;
+          const center = k.uniforms.center.value;
+          const point = new (c.position.constructor)(
+            (-(256.5 - center.x) / focal.x) * z,
+            -((212.5 - center.y) / focal.y) * z,
+            -z,
+          ).applyQuaternion(new (c.quaternion.constructor)().fromArray(k.worldTilt())).project(c);
+          return { x: r.x + ((point.x + 1) / 2) * r.width, y: r.y + ((1 - point.y) / 2) * r.height };
+        })()
+        : opts.inset
         ? (() => { const i = k.keyframes.chrome.inset(); return { x: r.x + i.x + i.w / 2, y: r.y + i.y + i.h / 2 }; })()
         : { x: r.x + r.width / 2, y: r.y + r.height / 2 };
       document.getElementById(opts.on ?? 'stage').dispatchEvent(new PointerEvent('pointerdown', {
         button: opts.button ?? 0, buttons: 1, clientX: at.x, clientY: at.y,
+        ctrlKey: opts.ctrlKey ?? false, metaKey: opts.metaKey ?? false,
+        shiftKey: opts.shiftKey ?? false,
         bubbles: true, cancelable: true, pointerId: 71,
       }));
       const t = k.controls.target;
@@ -8470,6 +8506,12 @@ try {
     check(empty.after.target.every((v, i) => v === held[i]),
       'a press with nothing under it leaves the pivot exactly where it was',
       `${empty.after.target.map((v) => v.toFixed(6)).join(', ')} against ${held.map((v) => v.toFixed(6)).join(', ')}`);
+
+    const singleton = await pressOn(300, { singleton: true });
+    check(singleton.after.target.every((v, i) => v === singleton.before.target[i]),
+      'a lone depth sample in otherwise empty space leaves the pivot alone',
+      `${singleton.after.target.map((v) => v.toFixed(6)).join(', ')} against `
+      + `${singleton.before.target.map((v) => v.toFixed(6)).join(', ')}`);
 
     // The far clip at 2 m with the box cutting, so a 3 m wall is geometry the renderer discards.
     const cropBefore = await page.evaluate("__kinect.params.values(['crop', 'far'])");
@@ -8579,6 +8621,12 @@ try {
       'and a right press leaves it alone, so the pan keeps its own button',
       `${right.after.target.map((v) => v.toFixed(6)).join(', ')} against `
       + `${right.before.target.map((v) => v.toFixed(6)).join(', ')}`);
+
+    const modified = await pressOn(3000, { shiftKey: true });
+    check(modified.after.target.every((v, i) => v === modified.before.target[i]),
+      'and a modified left press leaves it alone, because OrbitControls uses that press to pan',
+      `${modified.after.target.map((v) => v.toFixed(6)).join(', ')} against `
+      + `${modified.before.target.map((v) => v.toFixed(6)).join(', ')}`);
   }
 
   console.log('\n[23] pinning the drive drops what the loop was going to serve');

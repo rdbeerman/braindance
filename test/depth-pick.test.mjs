@@ -131,6 +131,14 @@ test('a press over a hole in the returns finds nothing and says so', () => {
   assert.equal(pick(scene(), at), null);
 });
 
+test('a lone sample over a hole is not enough to pick a surface', () => {
+  const depth = new Uint16Array(DEPTH_W * DEPTH_H);
+  const col = 256;
+  const row = 212;
+  depth[row * DEPTH_W + col] = 300;
+  assert.equal(pick(depth, stageOf(col, row, 0.3)), null);
+});
+
 test('a press over geometry the crop predicate rejects finds nothing', () => {
   const at = stageOf((BOX.col0 + BOX.col1) / 2, (BOX.row0 + BOX.row1) / 2, 1.0);
   const depth = scene();
