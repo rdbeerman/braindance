@@ -3091,7 +3091,7 @@ function applyProject(plan, sources = null) {
       for (const [name, keys] of planned.look.tracks) trackFor(name).keys = keys;
     });
     clip.look.parked = planned.look.parked;
-    // Only the clips whose footage changed are repointed, and the id they come back holding is
+    // Only clips whose footage or route label changed are repointed, and the id they come back holding is
     // the one the hash resolved to: a document names its take by hash and carries the id as a
     // label, so adopting the document's copy would put a name the take has been renamed out of
     // in front of every route that asks for it by id.
@@ -8563,6 +8563,10 @@ function deleteSelectedClip() {
     say('this is the only clip in the edit, and a project carries at least one');
     return false;
   }
+  const gen = takeTransport();
+  const wasPlaying = timeline.playing || timeline.pendingPlay;
+  const held = timeline.programSec;
+  timeline.pause();
   const at = clips.indexOf(clip);
   clips.splice(at, 1);
   clipLanesShut.delete(clip.id);
@@ -8577,6 +8581,9 @@ function deleteSelectedClip() {
   timingChanged();
   requestRepaint();
   history.commit();
+  timeline.seek(Math.min(held, timeline.duration))
+    .then(() => { if (wasPlaying && gen === transportGen) return timeline.play(); })
+    .catch(showTimelineError);
   return true;
 }
 
@@ -10557,7 +10564,8 @@ async function sourcesFor(plan) {
   const changing = plan.clips
     .map((planned, at) => ({ at, planned }))
     .filter(({ at, planned }) => planned.take !== null
-      && planned.take.hash !== (clips[at]?.source?.index?.hash ?? null));
+      && (planned.take.hash !== (clips[at]?.source?.index?.hash ?? null)
+        || planned.take.id !== (clips[at]?.take?.id ?? null)));
   if (!changing.length) return new Map();
   const listed = await fetch('/library/takes');
   const library = await listed.json().catch(() => null);

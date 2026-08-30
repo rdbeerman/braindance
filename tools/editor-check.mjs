@@ -658,6 +658,17 @@ const MUTATIONS = {
     ]],
   },
 
+  'project-load-keeps-renamed-take-id': {
+    file: 'web/main.js',
+    edits: [[
+      '      && (planned.take.hash !== (clips[at]?.source?.index?.hash ?? null)\n'
+      + '        || planned.take.id !== (clips[at]?.take?.id ?? null)));',
+      '      && planned.take.hash !== (clips[at]?.source?.index?.hash ?? null));',
+    ]],
+    fails: 'the renamed-take project row in section 22: the document loads against the right '
+      + 'bytes but leaves the clip fetching and marking through the name that no longer exists',
+  },
+
   // Must redden only the row that reads the store after the press.
   'resume-races-the-autosave': { file: 'web/main.js', edits: [[
     'const kept = await writeWorking(accepted);',
@@ -1232,6 +1243,27 @@ const MUTATIONS = {
       + 'over an edit that still has clips to edit. Reddens section 22\'s "puts the strip on '
       + 'whatever took its place"',
   },
+  'live-delete-skips-reseek': {
+    file: 'web/main.js',
+    edits: [
+      [
+        '  const gen = takeTransport();\n'
+        + '  const wasPlaying = timeline.playing || timeline.pendingPlay;\n'
+        + '  const held = timeline.programSec;\n'
+        + '  timeline.pause();\n'
+        + '  const at = clips.indexOf(clip);',
+        '  const at = clips.indexOf(clip);',
+      ],
+      [
+        '  timeline.seek(Math.min(held, timeline.duration))\n'
+        + '    .then(() => { if (wasPlaying && gen === transportGen) return timeline.play(); })\n'
+        + '    .catch(showTimelineError);\n',
+        '',
+      ],
+    ],
+    fails: 'the live-delete row in section 22: deleting a clip during playback does not reseek '
+      + 'the surviving composite before it resumes',
+  },
   // The project loader choosing the clip the page happened to be on, which is a guess wearing
   // the shape of an answer. Must redden exactly 22b's "loading a project selects no clip" - the
   // take half is a different door and is untouched by this.
@@ -1439,10 +1471,12 @@ const MUTATIONS = {
         '  const wasPlaying = timeline.playing || timeline.pendingPlay;',
         '  const held = timeline.programSec;',
         '  timeline.pause();',
+        '  const clip = new Clip(mintClipId(), livePairs, createClipCloud());',
       ].join('\n'), [
         '  const gen = transportGen;',
         '  const wasPlaying = timeline.playing;',
         '  const held = timeline.programSec;',
+        '  const clip = new Clip(mintClipId(), livePairs, createClipCloud());',
       ].join('\n')],
       [[
         '  history.commit();',
@@ -9399,6 +9433,70 @@ try {
     const movingAddTake = movingAddChoices.find((take) => take.id === 'sample')
       ?? movingAddChoices[0] ?? null;
 
+    const currentTake = (library.takes ?? []).find((take) => take.id === TAKE) ?? null;
+    check(currentTake !== null,
+      'the take open in the editor is still in the library, so a renamed listing can resolve its hash',
+      currentTake ? `${currentTake.id} at ${currentTake.hash.slice(0, 22)}…` : `no ${TAKE}`);
+    if (currentTake) {
+      const renameRestore = await page.evaluate(`(() => ({
+        project: __kinect.library.serialiseProjectBody(),
+        selection: __kinect.editor.clipSelection(),
+      }))()`);
+      const renamedId = 'editor-renamed-take';
+      const renamedLibrary = structuredClone(library);
+      renamedLibrary.takes.find((take) => take.hash === currentTake.hash).id = renamedId;
+      const renamedRequests = [];
+      const errorsBeforeRename = errors.length;
+      const serveRenamedLibrary = (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(renamedLibrary),
+      });
+      const serveRenamedTake = (route) => {
+        const url = new URL(route.request().url());
+        renamedRequests.push(url.pathname);
+        url.pathname = url.pathname.replace(`/capture/${renamedId}/`, `/capture/${TAKE}/`);
+        return route.continue({ url: url.href });
+      };
+      await page.route('**/library/takes', serveRenamedLibrary);
+      await page.route(`**/capture/${renamedId}/**`, serveRenamedTake);
+      try {
+        const offered = structuredClone(renameRestore.project);
+        offered.clips[0].take.id = renamedId;
+        await page.evaluate(({ name, body }) => __kinect.library.loadProject(name, body), {
+          name: 'editor-check-renamed-take', body: offered,
+        });
+        await settle();
+        const renamed = await page.evaluate(`(() => {
+          const clip = __kinect.timeline.clips()[0];
+          return {
+            id: clip.take?.id ?? null,
+            hash: clip.take?.hash ?? null,
+            openIds: __kinect.timeline.takeCaches().map((take) => take.id),
+          };
+        })()`);
+        check(renamed.hash === currentTake.hash && renamed.id === renamedId
+          && renamed.openIds.includes(renamedId),
+        'loading a project after its take was renamed rebinds the clip to the current route even when the hash is unchanged',
+        `clip ${renamed.id}, open ${renamed.openIds.join(', ')}, hash ${String(renamed.hash).slice(0, 22)}…`);
+        check(renamedRequests.some((path) => path.endsWith('/index'))
+          && renamedRequests.some((path) => /\/frames\//.test(path))
+          && errors.length === errorsBeforeRename,
+        'and the reopened index and rendered frames use the renamed route without a page error',
+        `${renamedRequests.join(', ') || 'no renamed requests'}; errors `
+          + `${errors.slice(errorsBeforeRename).join(' | ') || 'none'}`);
+      } finally {
+        await page.unroute('**/library/takes', serveRenamedLibrary);
+        await page.unroute(`**/capture/${renamedId}/**`, serveRenamedTake);
+        await page.evaluate(async ({ project, selection }) => {
+          await __kinect.library.loadProject('editor-check-rename-restore', project);
+          if (selection) __kinect.editor.selectClipRow(selection);
+          __kinect.keyframes.undo.begin();
+        }, renameRestore);
+        await settle();
+      }
+    }
+
     check(raceTake !== null,
       'the export race has an uncached third take, so Add Clip must cross its await after export starts',
       raceTake ? raceTake.id : `only ${(library.takes ?? []).map((take) => take.id).join(', ')} were listed`);
@@ -10162,7 +10260,42 @@ try {
 
     // The delete, and the undo of it.
     const before = await read();
+    const deletingLive = await page.evaluate(`(async () => {
+      const k = __kinect;
+      const transport = k.timeline.transport();
+      transport.pause();
+      const clip = k.timeline.clips().find((candidate) => candidate.id === k.editor.clipSelection());
+      const at = Math.min(clip.end - 1 / transport.outputFps, clip.start + 0.5);
+      await transport.seek(at);
+      await k.timeline.settled();
+      await transport.play();
+      return {
+        program: transport.programSec,
+        seeks: k.timeline.counters.seeks,
+        playing: transport.playing,
+      };
+    })()`);
     await page.locator('#tDeleteClip').click();
+    for (let i = 0; i < 250; i++) {
+      const ready = await page.evaluate((seeks) => __kinect.timeline.counters.seeks > seeks
+        && __kinect.timeline.transport().playing, deletingLive.seeks);
+      if (ready) break;
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
+    }
+    const afterLiveDelete = await page.evaluate(`({
+      program: __kinect.timeline.transport().programSec,
+      duration: __kinect.timeline.transport().duration,
+      seeks: __kinect.timeline.counters.seeks,
+      playing: __kinect.timeline.transport().playing,
+    })`);
+    check(deletingLive.playing && afterLiveDelete.seeks > deletingLive.seeks,
+      'deleting a live clip pauses and reseeks the surviving composite instead of carrying its surface history forward',
+      `playing before ${deletingLive.playing}, seeks ${deletingLive.seeks} -> ${afterLiveDelete.seeks}`);
+    check(afterLiveDelete.playing
+      && afterLiveDelete.program >= Math.min(deletingLive.program, afterLiveDelete.duration) - 1 / 30,
+    'and restores playback at the held program position after that seek',
+    `playing ${afterLiveDelete.playing}, program ${deletingLive.program.toFixed(3)}s -> ${afterLiveDelete.program.toFixed(3)}s`);
+    await page.evaluate('__kinect.timeline.transport().pause()');
     await settle();
     const gone = await read();
     check(gone.clips.length === 1 && gone.clips[0].id !== added.id,
