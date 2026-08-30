@@ -1817,6 +1817,20 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [['      name: options.name ?? exportBaseName(),', '      name: options.name ?? timeline.clip.source.id,']],
   },
+
+  'project-load-skips-export-recheck': {
+    file: 'web/main.js',
+    edits: [[
+      '  const sources = await sourcesFor(plan);\n'
+        + '  if (refuseEdit(`opening ${name}`)) return null;\n'
+        + '  refuseResolvedDurations(plan, sources);',
+      '  const sources = await sourcesFor(plan);\n'
+        + '  refuseResolvedDurations(plan, sources);',
+    ]],
+    fails: 'two rows: removing the ownership check after footage resolution lets the delayed '
+      + 'continuation replace the document, and that replacement also makes the active real '
+      + 'export miss the frame its original document owned',
+  },
 };
 
 /** The mutated source, refused loudly when an anchor no longer matches exactly once. */
@@ -9256,10 +9270,11 @@ try {
         'document.querySelector(".paneltab[aria-selected=true]")?.dataset.panelTab ?? null');
       await page.locator('.paneltab[data-panel-tab="look"]').click();
       await settle();
-      await page.locator('#tPreset').click();
-      await page.locator('#tPresetList .pickeroption[data-name="blackwall"]').click();
-      await page.waitForFunction(`!__kinect.library.presetGestureRunning()
-        && document.getElementById('tPreset').value === 'blackwall'`, null, { timeout: 15000 });
+      await page.evaluate((clipId) => __kinect.editor.selectClipRow(clipId), one.selection);
+      await page.evaluate(`fetch('/presets/blackwall').then((response) => response.json())
+        .then((doc) => __kinect.library.applyStoredPreset(doc))`);
+      await page.waitForFunction(`__kinect.library.appliedPreset()?.name === 'blackwall'`,
+        null, { timeout: 15000 });
       await page.evaluate(`(() => {
         __kinect.params.set('pointSize', 17.25);
         __kinect.keyframes.undo.commit();
@@ -9278,10 +9293,16 @@ try {
           edits: __kinect.export.editsDuringExport(),
         };
       })()`);
+      const projectOffer = structuredClone(beforeRace.project);
+      const projectTarget = projectOffer.clips.find((clip) => clip.id === beforeRace.selection);
+      const pickTake = (library.takes ?? []).find((take) => take.id === pickId);
+      projectTarget.take = { id: pickTake.id, hash: pickTake.hash };
       let releasePreset = () => {};
       let releaseSource = () => {};
+      let releaseProjectSources = () => {};
       let presetRequests = 0;
       let sourceRequests = 0;
+      let projectSourceRequests = 0;
       const holdPreset = async (route) => {
         presetRequests++;
         await new Promise((resolve) => { releasePreset = resolve; });
@@ -9292,17 +9313,38 @@ try {
         await new Promise((resolve) => { releaseSource = resolve; });
         await route.continue();
       };
+      const holdProjectSources = async (route) => {
+        projectSourceRequests++;
+        await new Promise((resolve) => { releaseProjectSources = resolve; });
+        await route.continue();
+      };
       await page.route('**/presets/blackwall', holdPreset);
       await page.route(`**/capture/${raceTake.id}/index`, holdSource);
       try {
-        await page.locator('#tPreset').click();
-        await page.locator('#tPresetList .pickeroption[data-name="blackwall"]').click();
+        await page.evaluate(`(() => {
+          globalThis.__editorGuardPreset = fetch('/presets/blackwall')
+            .then((response) => response.json())
+            .then((doc) => __kinect.library.applyStoredPreset(doc));
+        })()`);
         await page.locator('#tAddClip').click();
         await page.locator(`.cpoption[data-take="${raceTake.id}"]`).click();
         const began = Date.now();
         while (presetRequests !== 1 || sourceRequests !== 1) {
           if (Date.now() - began > 15000) throw new Error(
             `the export-race requests did not both arrive: preset ${presetRequests}, source ${sourceRequests}`,
+          );
+          await new Promise((resolve) => { setTimeout(resolve, 20); });
+        }
+        await page.route('**/library/takes', holdProjectSources);
+        await page.evaluate(({ name, body }) => {
+          globalThis.__editorGuardProject = __kinect.library.loadProject(name, body)
+            .then((value) => ({ ok: true, value }),
+              (error) => ({ ok: false, error: String(error?.message ?? error) }));
+        }, { name: 'editor-check-export-race', body: projectOffer });
+        const projectBegan = Date.now();
+        while (projectSourceRequests !== 1) {
+          if (Date.now() - projectBegan > 15000) throw new Error(
+            `the project load did not pause while resolving its footage: ${projectSourceRequests} requests`,
           );
           await new Promise((resolve) => { setTimeout(resolve, 20); });
         }
@@ -9372,6 +9414,15 @@ try {
           running: __kinect.export.running(),
         })`);
         await page.locator('#projectClose').click();
+        releaseProjectSources();
+        const projectLoadResult = await page.evaluate(`globalThis.__editorGuardProject.then((result) => ({
+          ok: result.ok,
+          refused: result.value === null,
+          error: result.error ?? null,
+          note: document.getElementById('tNote').textContent,
+          running: __kinect.export.running(),
+        }))`);
+        const afterProject = await page.evaluate('__kinect.library.serialiseProjectBody()');
         const exportResult = await page.evaluate(`globalThis.__editorGuardExport.then((result) => ({
           ok: result.ok,
           error: result.error ?? null,
@@ -9394,6 +9445,12 @@ try {
         'an opened take cannot append a clip or commit after export starts',
         `clips ${beforeRace.clips.join(',')} -> ${afterRace.clips.join(',')}, `
           + `edits ${beforeRace.edits} -> ${afterRace.edits}`);
+        check(projectLoadResult.ok && projectLoadResult.refused && projectLoadResult.running
+          && /declined/.test(projectLoadResult.note) && /export/.test(projectLoadResult.note)
+          && JSON.stringify(afterProject) === JSON.stringify(beforeRace.project),
+        'a project whose footage resolves after export starts cannot replace the document and says why',
+        `load ${JSON.stringify(projectLoadResult)}, document unchanged `
+          + `${JSON.stringify(afterProject) === JSON.stringify(beforeRace.project)}`);
         check(beforeNone.stamp?.name === 'blackwall',
           'the selected clip is stamped before preset none is pressed during export, so the refusal below has document state to protect',
           `stamp ${JSON.stringify(beforeNone.stamp)}`);
@@ -9416,8 +9473,10 @@ try {
       } finally {
         releasePreset();
         releaseSource();
+        releaseProjectSources();
         await page.unroute('**/presets/blackwall', holdPreset);
         await page.unroute(`**/capture/${raceTake.id}/index`, holdSource);
+        await page.unroute('**/library/takes', holdProjectSources);
         await page.evaluate(({ project, selection }) => {
           __kinect.library.restoreProject(project);
           const selected = __kinect.timeline.clips().find((clip) => clip.id === selection);

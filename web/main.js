@@ -10510,6 +10510,7 @@ async function loadProjectNamed(name, offered = null) {
   // this page opens a take on its say-so.
   const plan = checkProject(doc.body);
   const sources = await sourcesFor(plan);
+  if (refuseEdit(`opening ${name}`)) return null;
   refuseResolvedDurations(plan, sources);
   const gen = takeTransport();
   const resume = timeline ? timeline.playing : false;
