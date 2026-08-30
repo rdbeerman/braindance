@@ -121,7 +121,8 @@ A clip carries a position and a rotation in the room and nothing else — no sca
 `pointSize` is measured in screen pixels and would not scale with the geometry, and the fog is
 world-space. While the handles have the pointer the orbit stands down and comes back on release.
 The handles draw over the finished picture, so effects change what is behind them and never the
-handles themselves.
+handles themselves. An export detaches their hit target as well as hiding them, then restores it
+afterwards, so dragging where an invisible handle was cannot move the clip under a running export.
 
 **`key` beside them keyframes that placement at the playhead**, and presses again to take the key
 away. It is there because a placement is edited in the world and so has no panel row and no
@@ -895,9 +896,11 @@ packages, Ghost, Contour and Blackwall, with all nine of their parameters. A shi
 therefore names at least 36 values. `blackwall.json` claims five more effects whose fourteen
 parameters bring it to 50. Applying a whole look resets every effect the document does not
 claim back to that effect's own defaults, which is what makes leaving an ordinary effect out
-and writing it in at its defaults describe the same look. Framing — levelling, the clip planes
+and writing it in at its defaults describe the same look. Core framing — levelling, the clip planes
 and the crop box — is the shot rather than the look, so no preset document can name it and
-neither a look nor `none` reframes what you framed. `library-check` holds the rule against the
+neither a look nor `none` reframes what you framed. An effect parameter remains a look value if
+its manifest places its control in the Framing panel; panel placement is layout, not file meaning.
+`library-check` holds the rule against the
 registry: a new core value fails all twelve until each names it, and a new parameter added to an
 effect fails only the documents whose `requires` already claims that effect — an effect
 nothing has reached yet fails nothing, because nothing claims it.

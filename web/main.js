@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, VALID_ID, effectIdsIn, effectOf, snapScalar,
+  DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, VALID_ID, effectIdsIn, effectOf, presetCarriesLookName,
+  snapScalar,
   versionRefusal, captureFormatRefusal, requiresEntryRefusal, requiresListRefusal,
 } from './format.js';
 import { pollRecordState } from './record-poll.js';
@@ -26,7 +27,8 @@ import { pickDepth, sensorPoint } from './depth-pick.js';
 import { ZOOM_PER_NOTCH, rulerTickSeconds, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
 import {
-  RATE_MIN, RATE_MAX, frameLoadByTake, rescaleClipKeys, snapshotClipKeys, usableClipRate,
+  RATE_MIN, RATE_MAX, frameLoadByTake, integerMidpoint, rescaleClipKeys, snapshotClipKeys,
+  usableClipRate,
 } from './clip-plan.js';
 import {
   EFFECT_BIND_TRANSFORMS, EFFECT_GATED_TABLES, EFFECT_BOUNDED_TABLES, effectBindUniformType,
@@ -4385,7 +4387,7 @@ class StampedPairSource {
     let lo = 0;
     let hi = this.count - 2;
     while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
+      const mid = integerMidpoint(lo, hi, true);
       if (this.times[mid] <= sourceSec) lo = mid;
       else hi = mid - 1;
     }
@@ -4950,7 +4952,7 @@ class TimelineTransport {
       let lo = start;
       let hi = target;
       while (lo < hi) {
-        const mid = (lo + hi) >> 1;
+        const mid = integerMidpoint(lo, hi);
         if (fits(mid)) hi = mid;
         else lo = mid + 1;
       }
@@ -5428,6 +5430,7 @@ async function exportClip(options = {}) {
   };
 
   exporting = true;
+  paintGizmo();
   pauseTransport();
   try {
     // The rate first, because every position below is named on the output rate's grid.
@@ -5495,6 +5498,7 @@ async function exportClip(options = {}) {
     timeline.outputFps = restore.outputFps;
     timeline.frame = timeline.frameAt(restore.programSec);
     timingChanged();
+    paintGizmo();
     requestRepaint();
   }
 }
@@ -5668,7 +5672,7 @@ function renderGizmo() {
 /** Where the handles are, what they do, and whether they are drawn at all. */
 function paintGizmo() {
   if (!gizmo) return;
-  const on = gizmoMode !== null && clipRow !== null;
+  const on = gizmoMode !== null && clipRow !== null && !exporting;
   if (on) {
     gizmo.mode = gizmoMode;
     if (gizmoClip !== clipRow) {
@@ -7420,7 +7424,7 @@ const stampPreset = (clip, stamp) => { clip.appliedPreset = stamp; };
 
 /** The look values a preset may carry. Framing belongs to the shot. */
 function presetValueNames() {
-  return params.names('look').filter((name) => PARAMS[name].group !== 'framing');
+  return params.names('look').filter((name) => presetCarriesLookName(name, PARAMS[name].group));
 }
 
 /** A preset is look values, and that is the whole of it. */

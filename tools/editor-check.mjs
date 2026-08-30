@@ -1266,10 +1266,19 @@ const MUTATIONS = {
     fails: 'the clip handles drawn into the scene before the post chain rather than over its '
       + 'finished picture. Reddens 22b\'s neutral-versus-Blackwall axis-pixel row',
   },
+  'gizmo-stays-enabled-during-export': {
+    file: 'web/main.js',
+    edits: [[
+      '  const on = gizmoMode !== null && clipRow !== null && !exporting;',
+      '  const on = gizmoMode !== null && clipRow !== null;',
+    ]],
+    fails: 'the export-ownership row reading the transform picker itself: the helper is hidden '
+      + 'but its invisible hit target stays enabled for the export',
+  },
   'preset-includes-framing': {
     file: 'web/main.js',
     edits: [[
-      "function presetValueNames() {\n  return params.names('look').filter((name) => PARAMS[name].group !== 'framing');\n}",
+      "function presetValueNames() {\n  return params.names('look').filter((name) => presetCarriesLookName(name, PARAMS[name].group));\n}",
       "function presetValueNames() {\n  return params.names('look');\n}",
     ]],
     fails: 'framing admitted into the preset contract. The export-ownership arm loses its '
@@ -9273,8 +9282,6 @@ try {
       await page.evaluate((clipId) => __kinect.editor.selectClipRow(clipId), one.selection);
       await page.evaluate(`fetch('/presets/blackwall').then((response) => response.json())
         .then((doc) => __kinect.library.applyStoredPreset(doc))`);
-      await page.waitForFunction(`__kinect.library.appliedPreset()?.name === 'blackwall'`,
-        null, { timeout: 15000 });
       await page.evaluate(`(() => {
         __kinect.params.set('pointSize', 17.25);
         __kinect.keyframes.undo.commit();
@@ -9348,12 +9355,17 @@ try {
           );
           await new Promise((resolve) => { setTimeout(resolve, 20); });
         }
+        const gizmoBeforeExport = await page.evaluate(`(() => {
+          __kinect.editor.setGizmoMode('translate');
+          return __kinect.editor.gizmo();
+        })()`);
         await page.evaluate(`(() => {
           globalThis.__editorGuardExport = __kinect.export.run({
             from: 0, to: 600, width: 64, height: 36, name: 'editor-check-export-guard',
           }).then((done) => ({ ok: true, done }), (error) => ({ ok: false, error: String(error?.message ?? error) }));
         })()`);
         await page.waitForFunction('__kinect.export.running()', null, { timeout: 15000 });
+        const gizmoDuringExport = await page.evaluate('__kinect.editor.gizmo()');
         const runningAtRelease = await page.evaluate('__kinect.export.running()');
         releasePreset();
         releaseSource();
@@ -9429,12 +9441,20 @@ try {
           bytes: result.done?.bytes ?? null,
           frames: result.done?.frames ?? null,
         }))`);
+        const gizmoAfterExport = await page.evaluate('__kinect.editor.gizmo()');
         check(runningAtRelease && afterRace.running,
           'the held preset and clip requests resume while a real export still owns the document',
           `running at release ${runningAtRelease}, after continuations ${afterRace.running}`);
         check(exportResult.ok && exportResult.frames === 601,
           'the real export completes all 601 frames after every refused edit leaves its document untouched',
           JSON.stringify(exportResult));
+        check(gizmoBeforeExport.enabled && gizmoBeforeExport.shown
+          && !gizmoDuringExport.enabled && !gizmoDuringExport.shown
+          && gizmoAfterExport.enabled && gizmoAfterExport.shown,
+        'an armed transform control stops hit-testing for the whole export and returns afterwards',
+        `before enabled/shown ${gizmoBeforeExport.enabled}/${gizmoBeforeExport.shown}, during `
+          + `${gizmoDuringExport.enabled}/${gizmoDuringExport.shown}, after `
+          + `${gizmoAfterExport.enabled}/${gizmoAfterExport.shown}`);
         check(afterRace.pointSize === beforeRace.pointSize
           && JSON.stringify(afterRace.stamp) === JSON.stringify(beforeRace.stamp),
         'a fetched preset cannot apply values, stamp the clip or commit after export starts',
@@ -9474,6 +9494,7 @@ try {
         releasePreset();
         releaseSource();
         releaseProjectSources();
+        await page.evaluate('__kinect.editor.setGizmoMode(null)').catch(() => {});
         await page.unroute('**/presets/blackwall', holdPreset);
         await page.unroute(`**/capture/${raceTake.id}/index`, holdSource);
         await page.unroute('**/library/takes', holdProjectSources);

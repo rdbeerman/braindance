@@ -5,6 +5,11 @@ export function usableClipRate(value) {
   return Number.isFinite(value) && value >= RATE_MIN && value <= RATE_MAX;
 }
 
+/** The lower or upper integer midpoint of an inclusive safe-integer interval. */
+export function integerMidpoint(lo, hi, upper = false) {
+  return lo + Math.floor((hi - lo + (upper ? 1 : 0)) / 2);
+}
+
 /** Counts the union of inclusive frame ranges requested from each take. */
 export function frameLoadByTake(spans) {
   const ranges = new Map();

@@ -91,6 +91,9 @@ export const effectOf = (name) => {
 /** The effect ids a set of look names touches, in first-appearance order. */
 export const effectIdsIn = (names) => [...new Set(names.map(effectOf).filter(Boolean))];
 
+/** Whether a look name belongs in a preset when its panel group is known. */
+export const presetCarriesLookName = (name, group) => group !== 'framing' || effectOf(name) !== null;
+
 /** The id shape a `requires` entry names, which a package directory and a namespace share. */
 const REQUIRES_ID = /^[a-z][a-z0-9]*$/;
 

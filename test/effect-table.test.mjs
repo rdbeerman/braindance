@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { tableFromPackages } from '../web/effect-manifests.js';
+import { presetCarriesLookName } from '../web/format.js';
 
 const param = (label, uniform) => ({
   def: 0, min: 0, max: 1, step: 0.01, kind: 'scalar', label,
@@ -67,4 +68,11 @@ test('reading and dependent-row semantics cross the package boundary with local 
   const table = tableFromPackages([reading], ['spectral.amount', 'spectral.bias']);
   assert.equal(table['spectral.amount'].reading, true);
   assert.equal(table['spectral.bias'].under, 'spectral.amount');
+});
+
+test('the Framing panel excludes core framing from presets without excluding an effect placed there', () => {
+  assert.equal(presetCarriesLookName('tilt', 'framing'), false);
+  assert.equal(presetCarriesLookName('ripple.amount', 'framing'), true);
+  assert.equal(presetCarriesLookName('pointSize', 'points'), true);
+  assert.equal(presetCarriesLookName('ripple.amount', 'style'), true);
 });
