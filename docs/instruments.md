@@ -327,6 +327,70 @@ the text was never in the string being searched, so its absence proved nothing a
 could not be seen. The fix is `Object.values(programs)`: the page already answers with every
 program it compiled, and reading them all means a fourth spine is asked by existing rather than
 by somebody remembering to add it here.
+### A viewport sized to a strip that had not finished growing
+
+Four tools open the editor, measure the timeline strip, and grow the viewport by it so the stage
+comes out at the size their figures are written for. All four measured it as soon as
+`timeline.transport()` existed, which is before the lane stack is built - so the strip grew
+afterwards and the stage came out smaller than asked. It stayed invisible for as long as a fresh
+take had no lanes at all: with no keys and no retime keys the stack was empty, the strip never
+moved, and the race had nothing to expose it. Giving the stack a row per clip made every take
+open with lanes, and the same race then reddened four different things - `keyframe-check` and
+`timeline-check` threw on the stage size, and `export-check`'s section 4 quietly reported **0 of 9
+exported frames byte-identical to the editor's**, because the editor was reading a 638x359 buffer
+while the export rendered 640x360. The last of those reads exactly like a rendering regression and
+is a measurement taken at the wrong size.
+
+`setOutputSize` does not pin the buffer against a later resize - measured, on one page: 640x360
+with the stack empty, 576x324 with one keyed track, 638x359 with the track removed again. So the
+fix is to settle before measuring and to read the buffer back after the wait, looping until the
+size the tool asked for is the size it still has. **A wait that says "the buffer reached this
+size" is not the same claim as "the buffer is this size", and the gap between them is whatever the
+page does next.**
+
+**The loop is not enough on its own, and the second round of this proved it.** `timeline-check`
+threw `the stage came out 548x308` against a change that moved no layout, and the same tree
+produced both outcomes on consecutive runs: the loop breaks the moment the buffer matches, and a
+strip measured before the lane stack exists can match by luck - 170px of strip, no lanes, resize,
+640x360, break - and then the lanes appear and the stage moves under the guard that reads it
+next. Driven both ways through a served revert, the pre-change build landed at 548x308 and the
+post-change build at 640x360, which is the opposite of the run that reported the finding. The fix
+is one line before the loop: wait for `takeOpened()`, which is the last thing the open does and
+therefore the point after which the stack has its rows. **A retry loop cannot recover from
+landing on a transient, because landing is what ends it** - so the wait belongs before the loop
+rather than inside it.
+
+### A fixture that writes into a read-only snapshot stages nothing
+
+`editor-check` section 22's two-undo sequence needs one edit made on top of a delete, so the undo
+of the delete is not the top of the stack. It made it with
+`k.timeline.clips()[0].start = 0.75`, and `timeline.clips()` builds a fresh array of fresh objects
+on every call - the write landed on an object nothing reads again, `serialiseProjectBody()` did
+not move, and the `commit()` under it pushed nothing. The two rows below then asserted against a
+stack one entry shorter than the sequence they describe, and whether they passed came down to
+whatever unrelated difference the settle happened to leave behind.
+
+It was driven both ways to be sure the finding was the fixture and not the change that surfaced
+it: on the current build and on one with `deleteSelectedClip` reverted to its pre-clip-row shape,
+`undo.commit()` returned false either way. The fixture goes through the document now -
+`serialiseProjectBody`, move the clip, `restoreProject` - and the row's own prose is what says it
+should have.
+
+**A handle named for what it reads is not a handle for writing through**, and a snapshot is the
+normal shape of one: `clips()`, `read()`, `parkedLook()` and `markTicks()` all copy on the way
+out, deliberately, so that a reader cannot accidentally hold a live object. The tell is that the
+staging step and the assertion never meet - nothing between them reads the field that was written
+- so the row's premise is never checked by the row.
+
+### A row that reads the value under test on both sides of its own comparison
+
+`editor-check` section 22 asserts a mark ticks where the selected clip's placement and curve put
+it. The first version read the drawn tick's position and compared it against
+`markProgramSec(source)` - the very reading the row exists to check - so `marks-ignore-the-placement`
+moved both sides together and the row passed on the defect. Recomputing the expectation from the
+clip's `start` and the mark's source second, which the row already has, makes the mutation fire
+both mark rows instead of one. **An expectation derived from the thing under test is not an
+expectation.**
 
 ## Mutation-test the instrument, don't just reason about it
 
@@ -360,6 +424,67 @@ The general shape: **whenever a suite has a standing failure, its own catch verd
 positive generator, and a baseline run is the only thing that separates the two populations.**
 Run the tool once unmutated first and note which rows are red, then read every mutation run
 against that list rather than against zero.
+### A generator reports what it meant to do, and only an oracle reports what it did
+
+Moving the invocation list's prose into the tools' `MUTATIONS` tables was three scripted passes,
+and all three reported success while changing nothing or changing the wrong thing. The first
+located an entry's end by counting `{` and `}`, which reads the braces inside an edit's source
+strings as structure — the lexer trap this file already carries four rounds of. The second
+dropped the comma after `]]` when it split an inline literal, so six tables stopped importing
+while every file still parsed and still looked plausible to a reader. The third built its
+replacement against a body cut one character short of the newline it matched on, so
+`String.replace` found nothing, returned the original, and the script counted twenty successes.
+
+**A migration is believed from the artefact and never from the run log.** What caught all three
+was re-importing every table from both trees and requiring them equal but for the added field,
+and then reading one migrated value back out of the imported table — not any count the scripts
+printed about themselves.
+
+**And the fourth instance was in the oracle**, which is the half worth keeping. The check that
+says the moved prose is the page's prose is a containment test, and its first version asked
+whether the page contained the text in front of a field that already had one. For a field nobody
+had touched that head is the empty string, `includes('')` is true of every string, and
+thirty-four fields passed a branch that could not fail. **An oracle with a branch that cannot
+fail reports nothing while looking like it reports everything** — rule 1 arriving inside the
+instrument written to make a deletion provable. Ask of an oracle what you ask of the thing under
+test: what would a broken version have to do to still pass. What found this one was counting the
+populations separately — moved, merged, untouched — rather than reading the predicate, because
+three numbers that have to sum to the total cannot all be silently empty.
+
+### A stale claim has no token to search for, and a busy tree has no honest reading
+
+Two more from the same refactor as the entry above, and it is worth saying that all three arrived
+together: each one is an instrument measuring something other than what its reader thought.
+
+**A claim goes stale without leaving anything to grep for.** The census sentence lived twice — in
+`docs/proof-tools.md`'s invocation-list heading and in the paragraph forty lines above it — and
+the prune corrected the heading and left the paragraph promising "every `--mutate` control it must
+FAIL under" about a page that by then listed almost none. It stood through two commits. The same
+round's `serialiseProject` rename is the shape from the other direction: a count of call sites
+taken before the edit missed an export list entry, a property table entry, and a refusal message
+inside a string in `server/jobs.js` naming a function that would no longer exist. **A name is a
+token you can search for; a claim is a sentence somebody has to read.** What catches the first is
+the grep for the old name run *after* the edit and required to come back empty — a check whose
+passing state is nothing rather than a number anybody has to agree with. What catches the second
+is asking, at the moment of the deletion, which sentences on this page are now false. That is a
+question and not a search, and no walker will ever ask it for you.
+
+**And a check run across a tree somebody else is writing reports about nothing.** `syntax-check`
+came back `625 checked ... 1 not matching exactly once` on an anchor into `web/main.js` while
+another agent was editing that file and its tool together. Counting the anchor text by hand a
+minute later found it present, and a second run was clean. The tell generalises past the busy
+tree: **a reading that disagrees with a direct measurement of the same bytes is a reading about a
+file that changed between the two.** Noticing that the tree is busy only works if you happen to
+look; noticing that two measurements of one file disagree is a property of the readings. A
+mutation control makes this worse rather than better, because it writes to the tree and reverts
+it — so it must never be run against files an agent holds, and a run that was is void rather than
+interesting. The rule is about a reading rather than about a file: the instance that produced it
+here was a *directory listing*, counted at six entries while it held thirty-three, and bytes are
+only the commonest shape it takes. **And check that an explanation accounts for the quantity that
+was actually read** — a preserved-timestamp theory was offered for that listing and it explains
+modification times, which nobody had measured, while a count of twenty-seven missing files it
+cannot explain at all; an explanation that survives its own scrutiny because it was never asked
+the right question is more comfortable than being wrong, and therefore harder to catch.
 
 ### A source row that reads the staged tree cannot be falsified by a page mutation
 
@@ -482,6 +607,191 @@ what made its version of the fault a loud crash to be chased; `keyframe-check` h
 fault for its whole life and spent it measuring in the wrong units under a green-looking header
 that printed the wrong stage size on line two. The header was not lying and nobody was reading
 it, which is the difference between a number a tool prints and a number a tool enforces.
+
+### A control that used to fire more rows, because the product got more robust
+
+`timeline-check`'s `no-reset` removes the clear inside `resetAccumulators`. It used to redden more
+rows than it does now; it reddens **2**, and the reason is worth writing down because a shrinking
+catch reads as a weakening instrument to the next person and is not one here.
+
+Surface memory became per cloud, and a clip now clears its own on the frame it enters. So a build
+with the project-wide reset removed still gets a correct surface path, and what leaks is the
+afterimage alone - which is conductor-level, one screen-space buffer over the composite, and still
+the reset's job. Section 1b catches both halves directly by reading `stateStats()` with no render
+in between, which is the strongest form of catch there is: it observes the state rather than
+inferring it from a picture. **The claim the control protects is still enforced. What got smaller
+is the claim, not the enforcement.** The project-wide reset has not become dead code either - the
+2 rows that survive are exactly the afterimage half that only it can clear.
+
+### A build that skips the work entirely is self-consistent, so the equality row cannot see it
+
+`timeline-check`'s section 7 asks whether a clip entered under playback is the clip a seek lands
+on. Every entry row went **byte-identical**, which was the result wanted - and then the
+`warm-skipped` mutation, which makes `clipShowingAt` never answer `'warming'`, was **caught by
+nothing but the two counter rows**. The image rows stayed green under a build with the feature
+removed.
+
+The reason is the shape rule 1 names. Both arms lose the warm together: the seek's pre-roll walks
+the same frames playback does, so with the warm gone both paths enter cold and **agree with each
+other while both being wrong**. An equality between two paths is a claim about the paths, never
+about the thing they are both doing, and a feature that either path could drop and stay equal is
+outside what the equality can see.
+
+What closed it is a reading of the state the warm exists to build, taken through
+`__kinect.stateStats()` with the clip selected. **The first version of that reading was two
+positions of one clip and it was wrong**: it compared a clip 0.1s past its cut against the same
+clip two seconds in, which is two different pieces of footage, so the ratio it measured was the
+take's own motion rather than the warm - 1.57% against 9.32% on a build with nothing wrong with
+it, against a threshold of 0.6 that no correct build could have met.
+
+The fixture already held the arm the reading needed. `c1` and `c5` are cut on one take at
+placements offset so that they stand on the same source frame at every program position they
+share, so at 2.1s they are the same footage, the same look and the same frame - and the only thing
+that differs is that `c1` has been playing since the head of the edit while `c5` entered a tenth
+of a second ago behind a 30-frame warm. They read **1.57% and 1.57%**. Under `warm-skipped` the
+entering one collapses to **0.29%** and the row fires. **When an A/B is an equality between two
+paths, ask what both paths would do if the feature were deleted, put a probe on the quantity
+rather than on the agreement - and then check the two arms differ in the one thing you mean and
+not in the footage as well.**
+
+### The clip that was not warming during the block that measured warming clips
+
+`layering-ab.mjs`'s fourth arm is four visible clips plus one warming, and it first read **+0.05
+ms** over four clips alone - a suspiciously round nothing. The tool was printing the reading that
+explained it and nobody had asked for it: the warming clip warmed a median of **0 clip-frames per
+block**. Its window is `fade + wake` in output frames, the harness had not set a look at all, and
+the registry's default fade of 120ms with no wake gives 4 frames - so the clip was idle for 16 of
+the block's 20 frames and warming for the last few. The arm was measuring four clips twice.
+
+Two things fell out of fixing it. The default look also puts the geometry on **one vertex per
+point instead of two**, because `updateDrawRange` halves the draw when nothing is shedding, so
+every number in the run was of the cheap draw rather than the one an edit uses. And the placement
+has to be derived rather than guessed: the warming clip starts one output frame past the end of
+the block, and the tool now **refuses to run** when the look's warm window is shorter than the
+block, naming the arithmetic. With that, the arm warms 15 of 15 frames and the warming clip costs
+**+0.02 ms** - the same answer as the accident, arrived at by a run that was measuring it.
+
+**That repair was a precondition and the enforcement arrived later, which this entry read as
+though it had closed the case.** `WARM_FRAMES < BLOCK + 1` refuses a look whose warm window
+*could not* cover the block; nothing checked that a block *did* warm, and "the arm warms 15 of 15
+frames" above is an observation from the run that verified the fix, sitting where a reader takes
+it for a property of the tool. The block's own counters were being taken and thrown away -
+`clipsDrawn` and `clipsWarmed` are differenced per block and the acceptance test read neither, so
+a recurrence would have been averaged in exactly as the first one was. The harness now discards
+any block whose drawn and warmed counts are not its arm's declared clips on every frame, which is
+what makes the sentence above a reading rather than a hope. **A guard on the configuration and a
+check on the run are different instruments, and a page that records the first while stating the
+second's conclusion invites the next reader to trust a number nothing was watching.**
+
+**And the tool's exit answered whether the run broke rather than whether it measured.** Closing
+the two readings above cost a third, because a discard is only as good as what notices it: with
+the warming arm's every block discarded and the other three surviving, the harness printed their
+rows, printed `4 clips 10.86 ms/frame = 33% of it, inside`, and exited 0. The one comparison the
+tool exists to make was absent and every row that did print was correct, which is the worst shape
+a green run can have. A run where any arm has no accepted block now names that arm and exits
+non-zero. **An instrument's exit code is a claim about the question it was asked and not about
+whether it crashed** - all three gaps found here in one sitting were that same substitution, which
+is the tool-side face of this page's rule about counting assertions rather than exit codes.
+
+**The `+0.02 ms` above is withdrawn.** Three runs with all three readings armed put the warming
+clip's difference from the four-clip arm at -0.190, +0.060 and +0.120 ms: the sign flips, and each
+of them sits inside the arm's own interquartile spread. The figure was never resolvable at the
+precision it was published to, and it agreeing with the accident it replaced was luck rather than
+corroboration. `docs/performance.md` carries the bound and the noise it was read against.
+
+### A trim that keeps the run in front of it evicts the run behind it
+
+Splitting the fetch cache per take and the walk per clip meant several clips fetch into one cache
+in one plan, serialised behind each other. `IndexedTake.trim` kept `[from, to]` of the run it had
+just fetched and evicted everything else outside it, which was correct while one clip fetched at a
+time and is a **use-after-evict** the moment two do: the third clip's trim dropped the frames the
+first clip's fetch had put there a moment earlier, `resident()` came back false, and the seek stood
+down twice and returned null. It arrives as `seek()` answering null rather than as a wrong image,
+which reads like a transport fault and is a cache fault.
+
+The fix is that a trim keeps the union of every window a caller has asked for and not yet had -
+`ensure` claims its span and drops the claim when its fetch settles. The lesson generalises past
+this cache: **a resource shared by several readers cannot be reclaimed against the request in
+front of it**, and the tell is that the failure only appears at more than one reader.
+
+### A mutation aimed at a call site the rest of the design already covers
+
+`warm-without-reset` was first written to delete the `clearFeedback` inside `enterClip` alone, and
+it caught **nothing**. Every path this build can reach clears that same pair a moment earlier:
+`resetAccumulators` clears every clip's targets and marks every clip idle, and a clip only enters
+from idle. Measured rather than argued - a `clipReEntries` counter counts entries where the clip
+had drawn since the last reset, and a walk over the whole multi-clip fixture reports **0** - which
+says the clip state machine really is monotone within one walk: off, warming, live, off, with
+every move that breaks that order going through a reset first.
+
+So the entry clear is a second clear of something already clear on every reachable path, and it is
+kept anyway because it is what makes "a clip holds nothing on the frame it enters" true of the
+clip rather than true of the caller. The mutation had to be widened to remove both clears to be a
+mutation at all, and it then fires nine rows. **A mutation of one call site is a mutation of the
+program only when that call site is the only one that does the work** - and the way to find out is
+a counter, not a reading of the code.
+
+### A control that was unfalsifiable for one step, and what made it falsifiable
+
+Section 7 asserts the draw order is depth-writing clips first and additive ones after, with ties
+on the clip id. For one step the tie-break half was provable and the split half was not, because
+`additive` was one look value broadcast to every clip and no document the build could hold put
+clips on both sides of it. The rows said so rather than implying coverage, and this entry recorded
+what they did not cover.
+
+**Making a clip's look its own closed it in the step after the one that wrote it down.** The
+fixture gives one clip `additive: true` in its own block and leaves four writing depth, so the
+split has an arm: the highest render order among the depth clips is asserted below the lowest
+among the additive ones, and a row beside it asserts the fixture really does put clips on both
+sides - without that, the claim would be a description of one group. `look-broadcast` reddens it
+by flattening the fixture to five depth-writing clips, which is the shape the row exists to
+refuse. **The lesson is about the writing down rather than about the fix**: the gap was recorded
+as a gap, so the step that could close it knew there was something to close.
+
+A second thing came out of the same section. The first version of the fixture ran on Blackwall,
+which is additive, and `draw-order-by-array` moved **1.6% of pixels at a maximum of 1/255** -
+because additive blending is commutative, so the order it was mutating barely reached the picture.
+On a depth-writing look the same mutation moves **69.97% at 22/255**. An order claim measured
+under a blend that does not care about order is a claim about nothing.
+
+### A sweep that cannot see a name reached through a spread
+
+Not this file's tool, but the same class as the entry above it. `module-check`'s read sweep
+matches `(?<![.\w$])name`, and a spread call - `held.push(...boundColorImages(x))` - puts a `.`
+immediately before the name, so the lookbehind rejects it and the import reads as dead. It cost a
+false `no module imports a name it does not use` on a line that plainly reads it. Worked around in
+`web/main.js` rather than in the tool, because a change to that regex needs its own mutation pass;
+recorded here so the next person to meet it knows it is the sweep and not the import.
+
+### A fourth intermittent in `timeline-check`, unresolved, and a dead end recorded with it
+
+**About 1 run in 3 dies mid-evaluate with `page.evaluate: Resulting promise was garbage
+collected`, printing zero failed assertions on a non-zero exit.** Measured at **3 of 6** and then
+**2 of 6** on the same tree at a load average around 4.5, with the section-7 fixture in the tool.
+It reads as a crash at section 1b because that is where the pending evaluate is when the process
+goes, but the stdout tail is lost on the abrupt exit, so the row count and the last header printed
+are not where it happened - **a run that ends this way tells you nothing about where**.
+
+What is known. No page error, no renderer crash and no navigation: `page.on('crash')`,
+`page.on('close')` and `page.on('framenavigated')` were all wired and only the close fired, after
+the fact. **Registering `process.on('uncaughtException')` and `process.on('unhandledRejection')`
+makes it stop**, which says node is exiting on an unhandled rejection and taking the browser with
+it - and neither handler ever printed a reason, which says the reason is being lost the same way
+the stdout tail is.
+
+**The dead end, recorded so nobody spends the afternoon again.** `page.route('**/favicon.ico', …)`
+called `route.fulfill()` without holding the promise, and a `fulfill` that loses its race rejects
+with nobody handling it - a textbook unhandled rejection in exactly the right place. Guarded with
+`.catch(() => {})` it ran **6 of 6 clean**, which looked decisive and was not: at a rate around a
+third, six clean runs happen 12% of the time, and the very next six on the real tool aborted
+twice. The guard is kept, because a floating rejection in a proof tool is a latent fault whatever
+else is going on, but **it is not the cause and must not be recorded as one**. This is rule 2 read
+the other way round: before believing a fix was the fix, count how often the failure happens
+without it.
+
+Practical reading, until it is found: **a `timeline-check` run that ends in `Resulting promise was
+garbage collected` did not run.** It is not a catch, it is not a finding, and its assertion count
+is not a baseline. Re-run it.
 
 ### A third intermittent in the same tool, and this one may not be the instrument at all
 
@@ -1182,6 +1492,60 @@ leaves the listing identical, and moves only the monotonic write count. It now f
 row and leaves the contents row passing, which is what makes the count load-bearing rather
 than a second way of saying the same thing.
 
+### A tool whose fixture never existed here had never been exercised here
+
+`index-check` ran green in this worktree all session and proved less than that read. Its fixture
+list wants three captures and the third, `fixture-large.knct`, was never built here, so the tool
+came back "did not run" and nobody looked further. Two things were true underneath that. The
+absence arrived as a crash rather than a refusal — ENOENT when the file was missing, and
+`walk.frames[-1]` reading as undefined when the file was merely *too small*, both with **zero
+failed assertions and a non-zero exit**, which is the shape rule 3 says to read as a crash to
+investigate. And the tool had **no `--mutate` controls at all**, so the row it exists for — a
+frame served from an offset past 2 GiB, the hazard `server/capture.js` opens by naming — had
+never been shown to fail against a build that could not serve it. It had only ever been read.
+
+**A green run of a tool that cannot run is indistinguishable from a green run of one that did**,
+unless the tool refuses. It now exits 2 naming the path or the byte count, the way
+`timeline-check` and its neighbours do on a short take, and it carries two controls: one that
+takes the frame read back to reading the file whole, and one that wraps the read offset at 32
+bits. The second is the sharp one and the reason is worth keeping — it serves the wrong bytes
+**with a 200**, so the row can only redden through its own comparison, where a mutation that made
+the server error would have proved no more than that the check reads status codes.
+
+Two smaller things fell out of building it, both of the same family. The check's `getBytes` threw
+on any non-200, so the broad mutation would have ended the run instead of reddening the rows it
+reddens — hardened in the frame section only, since the four rows there are the ones a mutation
+aims at. And the run still ends early, in the victim section where a whole-file read meets a
+deleted file: that is fine and is reported as `caught, and the count is a floor`, which is the
+line between this and `capacity-ignores-demand` further down — that one fired *nothing* before it
+died, and was removed rather than kept.
+
+### A needle that also matches the refusal next door is invisible to every green run
+
+The rule above is about a row that reddened for somebody else's reason. This is the same
+mistake with the sign flipped, and it is worse again, because there is no red row to inspect:
+the row goes on passing under the mutation and nothing anywhere says so.
+
+`jobs-check` asserts refusals by a substring of what the queue said, and its take-id row asked
+for `'content hash'`. When `job.capture` became `job.captures`, `enqueue` grew a second refusal
+beside the first - the shape check on the caller's own list, and the derivation that refuses a
+document whose clips name no content hash to be cut on. `enqueue-accepts-any-capture` removes
+only the first. The document then reaches the second, which answers 400 with *"a job's project
+has 1 clip(s) naming no content hash to be cut on"* - a different rule, about a different half
+of the job, and it contains the words `content hash`. The row passed the mutation. Tightened to
+`'names its captures by content hash'` it fires, and the mutated run reports exactly one row.
+
+**A needle has to name the sentence, not a phrase the sentence happens to share with its
+neighbours.** The trap is not carelessness about wording: the words overlap *because* the two
+refusals are about the same subject, so the closer a new refusal sits to an existing one, the
+likelier it is to answer for it. What makes this class its own entry is that neither a green
+suite nor a caught mutation can show it - the row is green on the unmutated build for the right
+reason and green on the mutated build for the wrong one, and the two look identical. The only
+thing that finds it is running the control and reading *which* sentence came back, which is the
+same instrument as the rule above and has to be pointed at the passing rows too. **Adding a
+refusal beside an existing one is a reason to re-run the existing one's control**, and the run
+after the change is where that happens rather than the review.
+
 ### A discriminator that both implementations satisfy, worked out on paper and never evaluated
 
 The same design document specified the harder half of the same family and got it wrong in a
@@ -1670,6 +2034,19 @@ count the page reports would be the mutation editing its way past the check. The
 was measured separately and by hand: it refuses to boot with `emitted 53 rows for 54
 parameters` and never publishes `__kinect`.
 
+### A mutation that cannot be told apart from the one beside it
+
+Sizing a take's cache by demand has two numbers in it: what a plan may ask one take for, and what
+that take's cache then holds. `cache-is-a-constant` takes both back to the old constant and fires
+nine rows. A second control, `capacity-ignores-demand`, was written to take only the cache back -
+and it does not redden anything, because it hangs the page instead: a cache smaller than the span
+a fetch is allowed to request evicts the frames that fetch has just put in it, `resident()` never
+comes true, and the run dies in an unrelated section with **zero failed assertions and a non-zero
+exit**, which rule 3 says to read as a crash. It was removed rather than kept as a catch. **Two
+numbers that cannot be moved apart in the product cannot be mutated apart in the instrument**, and
+the invariant that says so - capacity is never below the span a plan may ask for - is worth a
+comment where it is enforced rather than a control that cannot exist.
+
 ## Where a probe stands
 
 ### A cumulative table hides which term is wrong
@@ -1718,6 +2095,14 @@ with every row green. Fourteen lanes stack 443px, the ceiling binds, and the sam
 drags the stage to 31.9% and reddens that one row. This is the dead-zone rule with the two
 terms in a `min` rather than in a sum, and the tell was in the row's own detail line - it
 printed a strip height that was neither the ceiling nor anywhere near it.
+
+**The content clamp has since gone, and the lesson is what tells you where to probe now.**
+`applyLaneHeight` writes `max(0, min(asked, ceiling))`, so the ceiling is the only bound left,
+and the fourteen-lane arm cannot tell a build that clamps to the content from one that does not
+- both answer with the ceiling there. So section 11 clears the tracks at the end and drags the
+splitter open again, which is the arrangement where the stack is shorter than the ceiling and
+the two builds disagree. `splitter-unclamped` deletes the ceiling clamp instead, because that is
+the clamp there is left to delete.
 
 ### Place a probe where its answer would be different, not where it is convenient
 
@@ -2678,9 +3063,12 @@ Two things the fix needed that the shape did not make obvious. The guard belongs
 **handlers** and not inside `applyStoredPreset`, because that function and `restoreProject`
 beside it are exposed raw for the proof tools to drive, and a guard pushed down there
 starts silently dropping calls that are not gestures. And each door keeps **its own
-`catch`**: the recorder's apply writes `ui.recLookNote` deliberately, since
+`catch`**: the recorder's apply wrote `ui.recLookNote` deliberately, since
 `showTimelineError` targets a strip that surface does not show, so a shared catch in the
-wrapper would move that sentence somewhere nobody can see it.
+wrapper would have moved that sentence somewhere nobody can see it. Past tense on that one
+door: the record view gained tabs on 2026-08-05 and the recorder's apply went with them,
+taking its note. The guard, `applyStoredPreset` and the editor's doors onto `appliedPreset`
+are all still here, so the argument holds and one of the doors it was made about does not.
 
 **The same guard stranded the caret its comment said it preserved**, which is the smaller
 half and the one a row can hold. `pickPresetSubset` hands focus to the control that opened
@@ -2755,7 +3143,7 @@ the half worth carrying to the next tool. That section drives the real divisor c
 page that has published `__kinect` and not yet connected takes the drag, sends nothing, and
 the ÷4 arm becomes a second ÷1 arm read under a ÷4 label, which is the misattribution the
 whole negotiation exists to prevent. A wait on the handle alone is green for that. What it
-waits for instead is a depth texel that is no longer zero: `buildTextures` in
+waits for instead is a depth texel that is no longer zero: `createTextures` in
 `web/gpu-textures.js` builds both depth textures zero-filled deliberately, so that every
 point leaves at the empty-sample test until a real frame binds — which means that on a page
 nobody has injected into, the only thing that can write a non-zero texel is a frame off that
@@ -3697,6 +4085,20 @@ and both of its ways out are pressed — and then to run `plant-unswept-control`
 `tPlantedControl`, which is the row doing its job; a widening that swallowed the planted
 control would have read green at 488 assertions.
 
+## A loop ordered by whether a parent exists collapses every level below the first
+
+`editor-check` section 17e presses all 104 resets, and a tuning row declared `under` a master is
+hidden while that master reads zero, so the section drives tuning rows before their masters. It
+ordered them on `Boolean(p.under)`, which sorts a hierarchy into two buckets and leaves every
+level below the first sharing one: `datamosh.refresh` is under `cycleRefresh`, which is itself
+under `amount`, so pressing the middle row's reset put it back to `false` and hid the bottom row
+before its own drag reached it. **An ordering rule over a hierarchy is denominated in the depth of
+the data, not in a boolean about whether a parent exists** — the sort runs on the length of the
+`under` chain now, so a chain three deep is ordered by existing rather than by somebody
+remembering. The press waits on `!disabled && checkVisibility`, so the row nothing reached times
+out and is reported as never offered, and the two rows after it name a real parameter holding 1.25
+against a default of 1.2: three reds about the panel, for a fault that was the drive order.
+
 ## A hook renamed under a tool that deliberately boots two builds
 
 `registry-check` renders this tree against a `web/main.js` pulled out of history with `git
@@ -4476,3 +4878,30 @@ that only asserted refusal would have carried all three. When a refusal is added
 others, re-read what the existing probes now trip on rather than only what the new one does,
 and make the new refusal's message name which rule fired, so the next person reads the
 attribution instead of running both arms to work it out.
+
+## An exclusion with a reason attached is the one nobody looks at twice
+
+`keyframe-check` asked whose clock a clip's keys are on, and it asked about exactly one
+parameter. Section 6f proved a clip's placement travels with a dragged clip, and beside it
+`docs/architecture.md` wrote the exclusion out in full: "a clip's *look* keys are still
+absolute, so dragging a clip leaves its keyed grade behind". Both halves were accurate. The
+suite ran green for the whole life of the split, and the object nobody had a probe on was
+the larger of the two - every clip-scope parameter except the one that had a section.
+
+**A stated exclusion reads as a decision that was made rather than as a hole that is open**,
+which is the trap rule 5 names, and it is worse in prose than in source: the sentence argues
+for itself, so a reader who arrives asking "is the look covered" gets an answer and stops. The
+same sentence with the word *yet* in it, or with a line saying which row would go red if it
+stopped being true, is a hole somebody eventually closes.
+
+Section 6g is what closing it costs, and the shape is worth copying because two of its rows
+would have been green on the build it was written against. The one that reads a keyed grade
+after the clip has been dragged cannot see the fault on its own: with the keys clamped at their
+ends, a build reading the track at program time answers with the last key at both positions and
+agrees with itself, which is the equality this page already records twice. What discriminates is
+a probe on the *program second the grade used to sit at*, asserting it no longer holds it - the
+negative half of "travels with the clip", which nothing else in the section states. The other
+half is the write: `keyPlayhead` stamps a key from the panel, and only a section holding a clip
+that does not start at zero can tell a key stamped on the clip's clock from one stamped on the
+edit's. 6e keys `bloom` at the head of the edit, where the two clocks are the same number, so it
+was green under every version of this rule and always will be.

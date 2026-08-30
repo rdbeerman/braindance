@@ -82,6 +82,9 @@ const MUTATIONS = {
       '  const tanV = (DEPTH_H / 2) / fy;',
       '  const tanV = (DEPTH_H / 2) / fx;',
     ]],
+    fails: 'the vertical half-angle taken off `fx` rather than `fy`, which is the one '
+      + 'substitution a square sensor would hide. Bit-identical on every take and on arm B, '
+      + 'so it is the control saying arm C is load-bearing',
   },
   // It must redden the recorder rows and leave the editor's alone, or it cannot say which broke.
   'keyframes-on-every-surface': {
@@ -90,14 +93,16 @@ const MUTATIONS = {
       '      const keyButton = EDITING ? makeKeyButton(name) : null;',
       '      const keyButton = makeKeyButton(name);',
     ]],
+    fails: 'the key button built whether or not the surface is the editor. It must redden the '
+      + 'recorder rows and leave the editor\'s alone, or it cannot say which of the two broke',
   },
   // Anchored on the `controls.update()` pair, since two mutations sharing one text
   // go stale together.
   'no-repaint': {
     file: 'web/main.js',
     edits: [[
-      '  controls.update();\n  requestRepaint();',
-      '  controls.update();',
+      '  controls.update();\n  paintLens();\n  requestRepaint();',
+      '  controls.update();\n  paintLens();',
     ]],
   },
   'sensor-view-keys-camera': {
@@ -119,6 +124,8 @@ const MUTATIONS = {
   history.commit();
 });`,
     ]],
+    fails: 'the sensor-view button writing a camera key as well as moving the view, so a look at '
+      + 'the intrinsics becomes an edit to the clip',
   },
 };
 
@@ -1237,6 +1244,7 @@ if (untested) {
   process.exit(2);
 }
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[sensor-view] it should redden: ${MUTATIONS[MUTATE].fails}`);
   // The exit code alone cannot tell a caught mutation from a tool that fell over before asserting.
   if (failures === 0) {
     console.log('[sensor-view] NOT CAUGHT - the check passed a build it should have rejected');

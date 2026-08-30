@@ -47,9 +47,10 @@ down, and a copy reclaimed on the node after the local one is re-hashed. Warning
 (truncated, no sensor hello, no whole frame, still recording) are badges over the poster
 with their sentence in the ⋯ menu, because the node's panel has no hover.
 
-**Renaming moves a label and never a reference.** A project records its take as
-`{id, hash}` and the loader compares only the hash, so a rename carries the capture, its
-marks and its index to a new name and every project still opens. Two renames aimed at one
+**Renaming moves a label and never a reference.** Each of a project's clips records its take
+as `{id, hash}` and the loader resolves the hash against the library listing, so a rename
+carries the capture, its marks and its index to a new name and every project still opens —
+the id it comes back holding is the one the take is under now. Two renames aimed at one
 name are refused by the kernel rather than by a stale reading, so the loser keeps its
 footage.
 
@@ -346,16 +347,17 @@ deliverable's sidecar records what was skipped rather than rewriting the clip.
 Source time is a position inside the capture; program time a position inside the output.
 They advance together at normal speed and diverge under a ramp, a hold or a reverse, so
 every keyframe has to be stamped in one of them. Every track here, including the retime
-curve, is in program time, and rendering is forward-only: `programTime = k / outputFps`,
+curve, is in program seconds - which second they are counted from is a separate question,
+answered under a clip's look below - and rendering is forward-only: `programTime = k / outputFps`,
 evaluate the tracks, `sourceMs = retime(programTime)`, binary-search the index.
 
 - **Export needs no inverse.** Keying in source time would force export to invert the retime
   curve, which requires it to stay monotonic, so a hold or a reverse breaks it outright.
 - **The camera keeps its own pace when the footage slows**, which is the creative point: a
-  photographer's movement is independent of what they are filming. This is about the retime
-  *curve*, where a ramp leaves the program length alone so a camera key at program 10s stays
-  there. The speed control is different: it changes the clip's output length, so every
-  program time is reparameterised together, camera track included.
+  photographer's movement is independent of what they are filming. A ramp leaves the program
+  length alone, so a camera key at program 10s stays there. The speed control changes the selected
+  clip's output length and rescales that clip's local look and placement keys around the curve's
+  rate pivot. Project tracks, camera keys and output cuts keep their authored program seconds.
 - **`fade` and `wake` stay in source time**, because they drive surface memory, which
   advances per source frame. Dividing by the local retime slope would divide by zero at a
   hold, snapping every trail off exactly where a freeze should hold it.
@@ -380,6 +382,177 @@ perfectly and render the wrong file, which is what a version gate is for.
 
 Frame index was rejected as a coordinate because capture frames are not evenly spaced in
 time, so constant motion through index space is visibly variable motion through real time.
+
+## Clips, and what a cut costs
+
+A clip owns a source, a cloud, a retime curve, a `start` and a `length`. It covers
+`[start, start + length)` - half-open, so two clips abutting at a cut do not both draw on the
+frame the cut lands on, with the one exception that the instant an edit ends on belongs to
+whatever ended there rather than to nothing. `length` is the document's own field and it is read
+back as the answer: a trim is where the edit stops using the take, which is a different fact from
+how much take there is rather than a second spelling of it, and null means "everything the curve
+affords". A gap between clips renders an empty composite.
+
+**Each clip draws through `Group(transform) -> Group(level) -> Points`.** The outer group is where
+the clip sits in the room; the inner one carries the levelling quaternion, which is a clip-scope
+value now, so the readers that ask which way is up are asking about the selected clip. The outer
+group is written by a registry parameter like any other: `transform` is a `placement`, which is a
+pose minus the field of view - validated the same way, slerped by the same `poseAt` - and it is
+composition rather than look, so the panel draws no row for it and no preset carries one.
+Position and rotation only. A scale would fight two things that are not in the geometry:
+`pointSize` is screen-space and would not scale with it, and the fog is world-space. An idle
+clip sets `transform.visible = false` and costs no draw at all. Draw order is written onto the
+points explicitly - depth-writing clips first, additive ones after, ties broken on the clip's id -
+because "any order" is true of the picture and false of the bytes, and an export that reordered
+two clips between runs would write different files from one document.
+
+**The pipeline splits per take and per clip, which is the part editors get wrong.** The capture
+bytes, the frame index and the fetch cache belong to the take: `IndexedTake` holds them and every
+clip cut on that take shares one, so two clips of it fetch and JPEG-decode a frame once between
+them. Everything from `createImageBitmap` on is the clip's: `IndexedPairSource` is a walk of its
+own over that take, and the bound bitmap, the four texture cells, the surface memory and the
+uniform table are per cloud. Two clips of one take at different local times therefore hold
+different frames in front of different shaders. Two consequences follow and both had to be fixed
+rather than reasoned about: a trim must skip the bitmaps *every* clip has bound, not the ones in
+front of the selected cloud, and it must keep the frames every outstanding fetch has claimed, not
+just the run it was called after.
+
+**A clip is reset, then warmed, then shown.** Its ping-pong pair holds whatever it last drew, so
+a clip appearing mid-playback would show no fade and no wake on the frame after the cut while the
+same instant reached by seeking looks right. For its own surface span before its in-point the clip
+binds its textures and steps its memory with `visible = false`, and the prefetch looks across the
+clip boundary so those frames are resident when the warm starts. The window is bounded by what
+the clip's head affords: the curve extrapolates outside its domain, so the walk stops where source
+time would run before the take began - and it stops where source time stops *moving*, because a
+clip entering mid-hold reaches the frame already bound however far back it is walked. A clip whose
+footage starts at source 0 and one entering mid-hold both enter deterministically cold, and so
+does a seek to that instant, which is why the invariant holds rather than being violated.
+
+Pre-roll splits along the same seam. The surface half is per clip, because surface memory is per
+cloud and one clip's curve can need three times another's to cover the same span of persistence,
+so the project's is the longest of them. The trails half is one screen-space buffer over the
+composite and is asked once. There is one stall policy and not two: a render waits for every clip
+it touches, drawn or warming, and playback's catch-up budget bounds how far behind the playhead
+may fall rather than what a rendered frame may contain. With more than one clip the difference
+between those two policies is which clips are in the frame, which is a different image rather than
+a later one.
+
+`CLIP_CEILING` is 8 and it is a document gate rather than a cost bound: a clip costs a cloud
+whether it is on screen or not, and what a frame costs is set by how many are live at once.
+`docs/performance.md` carries what four overlapping clips measure at.
+
+**A take's cache is sized by the clips asking for it.** A seek plans per clip and the cache is per
+take, so a constant one capped the pre-roll of every clip after the first: four clips of one take
+rendered 42 of the 60 frames they had computed. The transport publishes what each take is being
+asked for when it plans, and the take's capacity is that plus a fetch's worth of slack, floored at
+the 192 frames a single clip always had and bounded by a ceiling derived from a memory budget
+rather than written as a frame count - because what a resident frame costs is the thing that
+varies, and it is measured rather than estimated. The demand is per clip and not per project:
+`spansOver` asks each clip where it is in its take, and whether a clip is drawn, warming or idle
+at a position is worked out from *that clip's own* fade and wake. Two clips placed at the same
+instant, one with a long persistence and one with a short one, are a warming clip and an idle one,
+and only the first is counted. The floor is what keeps a one-clip project
+exactly as expensive as it was. The ceiling and the span a plan may ask for are one number in two
+forms and cannot be moved apart: a cache smaller than the span a fetch may request evicts what
+that fetch has just put in it.
+
+**A head trim is written into the curve, because that is where an in-point lives.** A clip has no
+source-offset field: with no keys its curve reads `programSec * rate` and states an in-point of
+zero, and with one key at the origin it reads `value + programSec * rate`. So dragging a clip's
+head writes that single key and moves `start` and the trim together, which holds the out-point and
+the footage under the body still. Three places ask whether a curve is still a rate and two of them
+already answered "fewer than two keys" — `sourceSecAt` and `slopeAt`; the speed slider's disable
+was the third and said "any keys at all", so it went quiet on a curve it could still drive. The
+three agree now. A curve of more than one key states far more than an in-point and shifting its
+domain is a different edit, so the head edge refuses it with the reason rather than being an edge
+that silently works on some clips and not others.
+
+**Which clip is selected is session state and never in the document**, beside `suppressedEffects`
+rather than in the project. It decides where a look write lands, which curve the retime lane
+draws, and which clip the take's marks are drawn against - but which clip somebody is looking at
+is not part of the edit, and a document recording it would make two people's saves of the same
+work differ over nothing. A reopened project selects nothing.
+
+**Adding and removing a clip is an ordinary undo step**, because clips live in the body
+`history.snapshot()` stringifies. Removing one is the one case that needed more than a
+`history.commit()`: `restoreProject` is synchronous and refuses a document whose clip names
+footage this page is not already holding, and the undo of a delete hands it a clip array with a
+slot the page no longer has. Footage that is *open* is not a fetch, so that slot is re-pointed
+from the take rather than refused - and a take a clip stops using loses its decoded frames and
+keeps its index, which is what makes it still open to be re-pointed from.
+
+**The stack does not outlive the page, and that is what makes the paragraph above true rather
+than usually true.** The argument rests on a precondition: every take any entry in the stack
+names is currently open. A session holds that by construction, because every entry was a
+snapshot of a document the page was holding at the time, and `openTakes` only ever grows. A
+saved stack discards it - a load opens the footage the *body* names while the stack reaches
+below the body, so an entry can name a take the reloaded page never fetched. That shipped:
+add a clip on a second take, delete it, save, reload, and undo walks down into a snapshot the
+synchronous door then refuses, permanently, because the poison is in the file and every fresh
+load re-arms it. So undo is session state and the document is the file's: nothing writes a
+stack out and nothing reads one in, a load always starts a fresh one, and the door's refusal
+becomes an invariant nothing should ever be able to trip rather than a case a document can
+reach. A file written before this still parses - `checkProject` reads the fields it names and
+ignores the rest - and its stack is simply not read.
+
+**The selection is re-found by the id it named, not by the object holding it.** `fitClipCount`
+only grows and shrinks at the tail, so restoring a document that had a middle clip appends an
+object and re-labels every clip past the deletion point; an identity test survives that rewrite,
+and the selection silently becomes whichever clip inherited the slot while the highlight never
+moves.
+
+**The parked pool is per clip too**, because a value belongs to the block it arrived in and two
+clips are allowed to park different values for one missing effect. `requires` stays project-level:
+it names which effects a document was authored against, which is a fact about the document.
+
+**A clip's look is its own.** Its clip-scope values, its placement, the tracks that move them and
+the pool of values it arrived carrying that this build cannot read all live on the clip; the post
+chain's terms, the view state and the camera live on the project, one of each however many clips
+draw into it. The scope on a parameter is what says which block it is written to and read back
+from, and it is not a property of the look tag: a look value carries one always, a composition
+value carries one where it is stored per clip, and view state carries none because it is stored
+nowhere. A preset is applied through the same door, so its cloud values land on the selected clip
+and its post values land on the project - which is to say applying a preset to one clip moves the
+grade every other clip in the edit is seen through, and the editor says so rather than leaving it
+to be discovered. Framing stays outside that door: levelling, clip planes and the crop box belong
+to the shot and no preset, including `none`, can write them. There is no union: `checkProject`
+reads each clip's block into that clip, and two clips
+of one document are allowed to disagree about every value in them.
+
+**Which clip is selected is decided at the door the editor was opened through.** Opening a take
+selects its clip - a take is one clip of footage somebody has just chosen, so there is nothing to
+choose between, and a greyed panel there is a regression rather than a design. Loading a project
+selects nothing, because a document does not record which clip was being worked on and two
+people's saves of one edit would otherwise differ over it. `applyProject` chooses neither: it
+drops a selection whose clip the document no longer has, because a strip left holding a clip that
+is not in the array is one `deleteSelectedClip` would splice by an index of -1.
+
+**Everything inside a clip is on the clip's own clock.** A clip-scope track - its placement, its
+grade, its crop, every parameter the panel's clip half holds - is read and written at program time
+less the clip's in-point, and the project's own tracks, which are the post chain and the camera,
+are read at program time. `trackEpoch` is the one place that answers, and what it asks is the
+parameter's scope. The reason is what dragging a clip means: a clip is a thing with a look and a
+place, both were authored against the clip and both have to arrive with it, where a key at an
+absolute program second would stay where the clip used to be. The boundary being scope rather than
+a list of parameters is what stops this drifting - a term added to the clip block next year is on
+the clip's clock by existing, and nobody has to remember it. The stored `t` on a clip's key is
+clip-local too, so a saved edit survives being re-cut, and `keyframe-check` section 6g holds the
+rule at both ends: a keyed grade read back after a real drag of the clip box, and a key planted
+from the panel over a clip that does not start at zero.
+
+**What a placement does not reach is `room`.** `vec3 room = mat3(modelMatrix) * p0` drops the
+fourth column, so the lattice's cell grid, the glyph field's character identity and the rain's
+phase are computed as though every clip were at the origin - a placed clip carries its character
+field with it rather than moving through the room's. The transpose identity those shaders rest on
+survives, because it is the 3x3 that matters and a translation is not in it.
+
+Where a look write lands is an explicit indirection - the clip under evaluation, else the selected
+clip - and not a binding repointed for the walk. The selection is the operator's: the panel, the
+lanes and the retime curve are all views of it, so a render that moved it would be mutating what
+somebody is looking at in order to draw a frame. `withClip` is the one door that changes the
+answer, and it moves two things together because neither is enough on its own: the tables decide
+where the value is stored, and the render core's selection decides which uniform table, material
+and levelling group the registry's `apply` reaches.
 
 ## Surface memory
 

@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MIN_VIEW_SEC, ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow,
+  MIN_VIEW_SEC, ZOOM_PER_NOTCH, TICK_STEPS, rulerTickSeconds, tickLabel, makeViewWindow,
 } from '../web/view-window.js';
 
 /** A window over a program of `sec` seconds, on a bed 1000px wide starting at x=100. The
@@ -37,6 +37,15 @@ test('a tick reads as a clock over a minute and as seconds under one', () => {
   assert.equal(tickLabel(90, 30), '1:30');
   assert.equal(tickLabel(90.5, 0.5), '1:30.5');
   assert.equal(tickLabel(3600, 600), '60:00');
+});
+
+test('a ruler over an enormous finite program still builds a width-sized increasing set', () => {
+  const { step, seconds } = rulerTickSeconds(0, 1e20, 1e19);
+  assert.ok(step >= 1e19, `${step} does not cover the wanted spacing`);
+  assert.ok(seconds.length > 1 && seconds.length < 20, `${seconds.length} ticks`);
+  assert.ok(seconds.every((sec, index) => index === 0 || sec > seconds[index - 1]),
+    seconds.join(', '));
+  assert.ok(seconds.at(-1) <= 1e20, `${seconds.at(-1)} exceeds the program`);
 });
 
 test('a wheel notch is about eight to a factor of ten, which is what the constant claims', () => {

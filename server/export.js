@@ -191,7 +191,7 @@ export function handleExportSocket(ws, { outDir, log = console.log }) {
     job = {
       width, height, fps, frames, codec, frameBytes, output, outputDir, temp, scratchArtifact, href, name: msg.name, began: Date.now(),
       project: msg.project ?? null,
-      capture: msg.capture ?? null,
+      captures: Array.isArray(msg.captures) ? msg.captures.slice() : null,
       renderer: msg.renderer ?? null,
     };
 
@@ -277,7 +277,7 @@ export function handleExportSocket(ws, { outDir, log = console.log }) {
     // once old jobs exist.
     const record = {
       project: job.project ?? null,
-      capture: job.capture ?? null,
+      captures: job.captures ?? null,
       renderer: job.renderer ?? null,
       output: job.output,
       width: job.width,

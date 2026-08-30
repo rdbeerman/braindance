@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { DEPTH_H, DEPTH_W } from './format.js';
 
 /**
- * Which two sensor frames the GPU is holding, and the one door a new one replaces
- * them through.
+ * Which two sensor frames a cloud is holding, and the one door a new one replaces them
+ * through.
  *
  * There are two of each kind rather than one because the vertex stage interpolates
  * between the last two arrivals - that is what makes an 8-15fps stream look fluid on
@@ -15,19 +15,19 @@ import { DEPTH_H, DEPTH_W } from './format.js';
  * came from.
  *
  * **Nothing is allocated while this module evaluates.** The four textures are built by
- * `buildTextures`, which `web/main.js` calls in the order it writes out, because an ES
- * module runs its whole body before its importer's first statement - so anything built
+ * `createTextures`, which `web/cloud-instance.js` calls in the order it writes out, because an
+ * ES module runs its whole body before its importer's first statement - so anything built
  * up here would make the boot order a property of how the imports happen to be sorted,
  * which an import-sorting reflex or a merge can change without anybody reading a line
  * of it.
  *
- * `buildTextures` hands back the five uniform cells the cloud's shader reads its source
+ * `createTextures` hands back the five uniform cells the cloud's shader reads its source
  * frames through, and `web/point-cloud.js` composes those same cells into its material by
  * reference rather than copying their values. That is what lets the door below reach the
  * shader without importing the material it feeds: a uniform is a cell the GPU reads, and
  * a second copy of one is a second answer to which texture is current. The cells go by way
- * of `web/main.js`, which holds what this returns and hands it to `buildPointCloud` - so
- * the wiring is one line of the boot rather than an import each way.
+ * of `web/cloud-instance.js`, which holds what this returns and hands it to `createPointCloud`
+ * - so the wiring is one line of the boot rather than an import each way.
  */
 
 // Depth arrives as raw millimetres. An integer texture keeps it exact, and two
@@ -54,45 +54,72 @@ const makeColorTexture = () => {
   return tex;
 };
 
-// The older half of the depth pair is private because nothing outside this file has a
-// question it answers: the shader is told about it through the cell below, and the one
-// reader of the CPU-side array - the top-down view, which draws the cloud from the
-// texture rather than reading the GPU back - wants the frame that just arrived.
-let depthPrev = null;
+// The selected cloud's three current textures, as views rather than as state of their own.
+// The older half of the depth pair has no view because nothing outside this file has a question
+// it answers: the shader is told about it through the cell below, and the one reader of the
+// CPU-side array - the top-down view, which draws the cloud from the texture rather than reading
+// the GPU back - wants the frame that just arrived.
 export let depthCurr = null;
 export let colorPrev = null;
 export let colorCurr = null;
 
-// The shader's view of the pair. Kept here rather than in the point cloud's own uniform
-// table because these five are the ones the swap below writes, and a cell written from
-// the module that does not own the swap is the drift the single door exists to stop.
-const cells = {
-  depthPrev: { value: null },
-  depthCurr: { value: null },
-  colorPrev: { value: null },
-  colorCurr: { value: null },
-  hasColor: { value: 0 },
+// The selected cloud's four textures, and the shader's view of the pair. The cells are kept
+// beside the swap rather than in the point cloud's own uniform table because these five are the
+// ones the doors below write, and a cell written from the module that does not own the swap is
+// the drift the single door exists to stop.
+let selected = null;
+
+// Repoints the views above at the selected cloud - after a select, and after either swap, since
+// a swap is exactly a change in which texture is current.
+const pointViews = () => {
+  depthCurr = selected.depthCurr;
+  colorPrev = selected.colorPrev;
+  colorCurr = selected.colorCurr;
 };
 
 /**
- * Builds the four textures and points the cells at them, and hands the cells back for
- * the cloud's material to compose.
+ * Builds one cloud's four textures and the five cells its material composes.
  *
  * Both depth textures start zero-filled, and that is load-bearing rather than incidental:
  * a zero sample reads as "no return" everywhere downstream, so every point leaves at the
  * empty-sample test until the first real frame binds, and nothing renders a room made of
  * whatever memory happened to hold.
  */
-export function buildTextures() {
-  depthPrev = makeDepthTexture();
-  depthCurr = makeDepthTexture();
-  colorPrev = makeColorTexture();
-  colorCurr = makeColorTexture();
-  cells.depthPrev.value = depthPrev;
-  cells.depthCurr.value = depthCurr;
-  cells.colorPrev.value = colorPrev;
-  cells.colorCurr.value = colorCurr;
-  return cells;
+export function createTextures() {
+  const textures = {
+    depthPrev: makeDepthTexture(),
+    depthCurr: makeDepthTexture(),
+    colorPrev: makeColorTexture(),
+    colorCurr: makeColorTexture(),
+    colorPairReady: false,
+    cells: {
+      depthPrev: { value: null },
+      depthCurr: { value: null },
+      colorPrev: { value: null },
+      colorCurr: { value: null },
+      hasColor: { value: 0 },
+    },
+  };
+  textures.cells.depthPrev.value = textures.depthPrev;
+  textures.cells.depthCurr.value = textures.depthCurr;
+  textures.cells.colorPrev.value = textures.colorPrev;
+  textures.cells.colorCurr.value = textures.colorCurr;
+  return textures;
+}
+
+/**
+ * The two colour bitmaps one cloud has bound, which nothing may close while they are.
+ *
+ * Asked of a named cloud rather than of the selected one, because the caller is a cache shared
+ * by every clip cut on one take: a trim reading only the bindings in front of it would close a
+ * bitmap another clip is still drawing.
+ */
+export const boundColorImages = (textures) => [textures.colorPrev.image, textures.colorCurr.image];
+
+/** Points the doors below, and the three views above, at one cloud's textures. */
+export function selectTextures(textures) {
+  selected = textures;
+  pointViews();
 }
 
 // Every grid a depth block can arrive on, keyed by its own sample count. The
@@ -154,38 +181,61 @@ function expandDepth(src, dst) {
 }
 
 // The two doors every acquisition path goes through to put a capture frame in
-// front of the shader. There is one of each rather than one per source, because
-// the swap is the part that has to be identical: a socket arrival, a pinned run
-// and an indexed pull all have to leave the textures in the same relationship or
-// the renderer would produce a different image depending on where the bytes came
-// from - which is the drift this whole design is arranged to prevent.
+// front of the shader. They write the selected cloud, and there is one of each
+// rather than one per source, because the swap is the part that has to be
+// identical: a socket arrival, a pinned run and an indexed pull all have to
+// leave the textures in the same relationship or the renderer would produce a
+// different image depending on where the bytes came from - which is the drift
+// this whole design is arranged to prevent. A second cloud gets a second set of
+// textures and the same two doors, so the swap stays identical by being one
+// implementation run against another instance rather than a second one.
 //
 // The expansion is inside the door for the same reason. A monitor was the only
 // caller handing over a decimated grid, so fixing it where the socket unpacks its
 // bytes would have left the next caller that decimates - the editor over a slow
 // link, which the design already asks for - to find the same hole again.
 export function bindDepth(data) {
-  const swap = depthPrev;
-  depthPrev = depthCurr;
-  depthCurr = swap;
-  expandDepth(data, depthCurr.image.data);
-  depthCurr.needsUpdate = true;
-  cells.depthPrev.value = depthPrev;
-  cells.depthCurr.value = depthCurr;
+  const swap = selected.depthPrev;
+  selected.depthPrev = selected.depthCurr;
+  selected.depthCurr = swap;
+  expandDepth(data, selected.depthCurr.image.data);
+  selected.depthCurr.needsUpdate = true;
+  selected.cells.depthPrev.value = selected.depthPrev;
+  selected.cells.depthCurr.value = selected.depthCurr;
+  pointViews();
 }
 
 // Ownership of the bitmap stays with the caller. Live closes its own two swaps
 // later, once it is certainly unbound; the indexed cache holds its own until the
 // frame is evicted. Closing one here would free a bitmap the other still needs.
 export function bindColor(bitmap) {
-  const swap = colorPrev;
-  colorPrev = colorCurr;
-  colorCurr = swap;
-  colorCurr.image = bitmap;
-  colorCurr.needsUpdate = true;
-  cells.colorPrev.value = colorPrev;
-  cells.colorCurr.value = colorCurr;
-  cells.hasColor.value = 1;
+  if (!selected.colorPairReady) {
+    selected.colorPrev.image = bitmap;
+    selected.colorPrev.needsUpdate = true;
+    selected.colorCurr.image = bitmap;
+    selected.colorCurr.needsUpdate = true;
+    selected.cells.colorPrev.value = selected.colorPrev;
+    selected.cells.colorCurr.value = selected.colorCurr;
+    selected.cells.hasColor.value = 1;
+    selected.colorPairReady = true;
+    pointViews();
+    return;
+  }
+  const swap = selected.colorPrev;
+  selected.colorPrev = selected.colorCurr;
+  selected.colorCurr = swap;
+  selected.colorCurr.image = bitmap;
+  selected.colorCurr.needsUpdate = true;
+  selected.cells.colorPrev.value = selected.colorPrev;
+  selected.cells.colorCurr.value = selected.colorCurr;
+  selected.cells.hasColor.value = 1;
+  pointViews();
+}
+
+/** Makes the next colour arrival seed both samplers, without taking bitmap ownership. */
+export function resetColorSource() {
+  selected.colorPairReady = false;
+  selected.cells.hasColor.value = 0;
 }
 
 /**
@@ -208,9 +258,11 @@ export function plantColor(rgba, width, height) {
   tex.magFilter = THREE.LinearFilter;
   tex.generateMipmaps = false;
   tex.needsUpdate = true;
-  colorPrev = tex;
-  colorCurr = tex;
-  cells.colorPrev.value = tex;
-  cells.colorCurr.value = tex;
-  cells.hasColor.value = 1;
+  selected.colorPrev = tex;
+  selected.colorCurr = tex;
+  selected.cells.colorPrev.value = tex;
+  selected.cells.colorCurr.value = tex;
+  selected.cells.hasColor.value = 1;
+  selected.colorPairReady = true;
+  pointViews();
 }

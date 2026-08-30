@@ -99,8 +99,8 @@ const MUTATIONS = {
     'const whole = (v, max) => (typeof v === \'number\' ? v : null);',
   ]] },
   'bind-ignores-grid': { file: 'web/gpu-textures.js', edits: [[
-    '  expandDepth(data, depthCurr.image.data);',
-    '  depthCurr.image.data.set(data);',
+    '  expandDepth(data, selected.depthCurr.image.data);',
+    '  selected.depthCurr.image.data.set(data);',
   ]] },
   'expand-shifts-by-a-block': { file: 'web/gpu-textures.js', edits: [[
     'for (let col = 0; col < DEPTH_W; col++) dst[to + col] = src[from + ((col / grid.k) | 0)];',
@@ -1024,6 +1024,7 @@ if (untested) {
   process.exit(2);
 }
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[monitor] it should redden: ${MUTATIONS[MUTATE].fails}`);
   // Exit code alone cannot tell "the mutation was caught" from "the tool crashed before asserting
   // anything", and this repo has been bitten by exactly that twice.
   if (failed === 0) { console.log('[monitor] NOT CAUGHT - the check passed a server it should have rejected'); process.exit(1); }

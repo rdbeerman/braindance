@@ -35,8 +35,8 @@ const MUTATIONS = {
   // control for section 1 rather than for any comparison, because every comparison below is
   // satisfied by a build that draws the same picture twice.
   'tilt-ignored': { file: 'web/main.js', edits: [[
-    '  cloud.quaternion.copy(worldTilt);',
-    '  cloud.quaternion.identity();',
+    '  tiltQuaternion(levelAngles.tilt, levelAngles.roll, level.quaternion);',
+    '  level.quaternion.identity();',
   ]] },
   // The crop moves to the far side of the levelling, so the six faces stop being a place in the
   // room. Section 2's identity sees it: the surviving set changes, and no camera move can put a
@@ -50,7 +50,7 @@ const MUTATIONS = {
   // room's - what the top-down's old rectangle did for as long as levelling existed, with
   // no control at all.
   'plan-box-ignores-tilt': { file: 'web/main.js', edits: [[
-    '    ).applyQuaternion(worldTilt);',
+    '    ).applyMatrix4(level.matrixWorld);',
     '    );',
   ]] },
   // The switch reaches the shader and stops there, so the top-down goes on culling the cloud the
@@ -63,8 +63,8 @@ const MUTATIONS = {
   // The picture levels and the box in the corner does not, which is the state this feature was
   // built to end. Nothing outside section 3 can see it.
   'plan-ignores-tilt': { file: 'web/main.js', edits: [[
-    '      planVec.applyQuaternion(worldTilt);',
-    '      planVec.setX(planVec.x);',
+    '      planVec.applyQuaternion(scratchQuat).add(scratchPosition);',
+    '      planVec.add(scratchPosition);',
   ]] },
   // The plan culls on x alone, which is what it did while a top-down had no y to care about;
   // levelling turns sensor y into the plan's own x and z, so discarded points reappear inside the
@@ -80,9 +80,9 @@ const MUTATIONS = {
   // meaning "exactly what the sensor shot" shows a rolled picture. `sensor-view-check`'s fov rows
   // cannot see this.
   'sensor-view-ignores-tilt': { file: 'web/main.js', edits: [[
-    '  setNavigationUp(new THREE.Vector3(0, 1, 0).applyQuaternion(worldTilt));\n'
-    + '  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).applyQuaternion(worldTilt);',
-    '  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE);',
+    '  setNavigationUp(new THREE.Vector3(0, 1, 0).applyQuaternion(scratchQuat));\n'
+    + '  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).applyQuaternion(scratchQuat).add(scratchPosition);',
+    '  controls.target.set(0, 0, -SENSOR_VIEW_DISTANCE).add(scratchPosition);',
   ]] },
   // The button takes tilt back to neutral and leaves roll behind. Reading both parameters and both
   // sliders through the real control catches the half-reset.
@@ -804,6 +804,7 @@ if (untested) {
   process.exit(2);
 }
 if (MUTATE) {
+if (MUTATIONS[MUTATE]?.fails) console.log(`[level] it should redden: ${MUTATIONS[MUTATE].fails}`);
   // Exit code alone cannot tell a caught mutation from a tool that crashed before asserting
   // anything, and this repo has been bitten by exactly that twice.
   if (failed === 0) { console.log('[level] NOT CAUGHT - the check passed a build it should have rejected'); process.exit(1); }

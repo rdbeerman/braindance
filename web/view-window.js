@@ -10,20 +10,12 @@
 // one step further out: there is one mapping from a program second to a position on the
 // strip, and it is imported rather than found.
 //
-// **The window is held as fractions of the program duration, and that is load-bearing
-// rather than a unit preference.** A speed change rescales the duration and every program
-// time in the document by the same factor - see `reparameteriseProgramTime` in `main.js` -
-// so a window in *seconds* would be a twelfth quantity somebody had to remember to scale,
-// and forgetting it would move the visible footage on a gesture whose whole point is that
-// nothing moves. In fractions there is nothing to remember: the ruler and the window
-// rescale together and the same footage stays on screen because the arithmetic cannot
-// express anything else.
-//
-// The one place that reads oddly is the consequence of the same choice, and it is worth
-// stating so it is not filed as this bug returning: a *retime key* changes the program
-// duration non-uniformly, so dragging one shifts the visible window on release. That is a
-// different situation from the speed slider - there the map is uniform and nothing moves
-// at all - and it is accepted rather than overlooked.
+// **The window is held as fractions of the program duration.** This keeps the same footage
+// visible when one clip fills the program and a speed change scales that clip uniformly.
+// A clip inside a larger edit changes the duration non-uniformly; `main.js` then rebases these
+// fractions from the program-second bounds captured at the start of the speed gesture.
+// Dragging one retime key remains different: it changes the map non-uniformly without a speed
+// gesture, so the window keeps its fractions and shifts in program seconds on release.
 //
 // **Two readings arrive at construction rather than being reached for, and that is what
 // makes the arithmetic testable without a browser.** How long the program currently is,
@@ -36,8 +28,8 @@
 // **What deliberately stayed in `main.js`, against the plan this split was written to.**
 // `clipFractionAt` was to come here and did not: it chooses between the overview and the
 // ruler by comparing two elements, measures whichever it chose, and its whole comment is
-// about why those two surfaces answer the same question differently. `buildRuler` picks a
-// rung off `TICK_STEPS` and then builds the elements. Both read this object through the
+// about why those two surfaces answer the same question differently. `buildRuler` asks this
+// file for a width-sized tick set and then builds the elements. Both read this object through the
 // same public fields every other caller does - `a`, `b`, `spanSec` - so moving them would
 // be moving a DOM function into an arithmetic module on the grounds that it also reads two
 // numbers, and it would tear each comment off the elements it is about.
@@ -59,6 +51,28 @@ export const ZOOM_PER_NOTCH = 1.33;
 export const TICK_STEPS = [
   1 / 30, 1 / 10, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600,
 ];
+
+const RULER_TICK_LIMIT = 500;
+
+/** A width-sized set of ruler ticks, including spans beyond the fixed sub-hour ladder. */
+export function rulerTickSeconds(startSec, endSec, wantedSec) {
+  const top = TICK_STEPS[TICK_STEPS.length - 1];
+  let step = TICK_STEPS.find((candidate) => candidate >= wantedSec);
+  if (step === undefined) {
+    const ratio = wantedSec / top;
+    const magnitude = 10 ** Math.floor(Math.log10(ratio));
+    const multiple = [1, 2, 5, 10].find((candidate) => candidate * magnitude >= ratio) ?? 10;
+    const scaled = top * multiple * magnitude;
+    step = Number.isFinite(scaled) ? scaled : wantedSec;
+  }
+  const first = Math.ceil(startSec / step - 1e-9) * step;
+  const available = Math.max(0, Math.floor((endSec - first) / step + 1e-9) + 1);
+  const count = Math.min(RULER_TICK_LIMIT, available);
+  return {
+    step,
+    seconds: Array.from({ length: count }, (_, index) => first + index * step),
+  };
+}
 
 /** A tick's label. Bare seconds under a minute, `m:ss` over it, so it reads as a clock. */
 export function tickLabel(sec, step) {

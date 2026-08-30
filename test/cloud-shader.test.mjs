@@ -20,7 +20,7 @@ const BUILTIN = join(ROOT, 'effects-builtin');
 // The indents in `key` are the tables' positions in their own files, not a formatting
 // preference: the cloud's literal sits one scope in and the grade's at the top level.
 const TABLES = {
-  cloud: { file: 'point-cloud.js', open: '\n  uniforms = {\n', close: '\n  };\n', key: /^ {4}([A-Za-z_]\w*):/gm, floor: 60 },
+  cloud: { file: 'point-cloud.js', open: '\n  const uniforms = {\n', close: '\n  };\n', key: /^ {4}([A-Za-z_]\w*):/gm, floor: 60 },
   grade: { file: 'post-chain.js', open: '\nconst GRADE_UNIFORMS = {\n', close: '\n};\n', key: /^ {2}([A-Za-z_]\w*):/gm, floor: 8 },
   mosh: { file: 'post-chain.js', open: '\nconst MOSH_UNIFORMS = {\n', close: '\n};\n', key: /^ {2}([A-Za-z_]\w*):/gm, floor: 4 },
 };

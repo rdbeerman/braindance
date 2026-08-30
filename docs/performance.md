@@ -30,6 +30,141 @@ it is expensive is not the one that sentence implies** - it is the pass count an
 resolution, so the "runs at half resolution" half of it buys nothing. See
 [what each effect costs](#what-each-effect-costs) below.
 
+## What a second, third and fourth overlapping clip cost
+
+`node tools/layering-ab.mjs --url … --take fixture-1g` is the harness, and it interleaves the
+arms round-robin rather than running them in sequence. Method: 16 rounds after 4 discarded, one
+15-output-frame block per arm per round, `fixture-1g` at a 1280x720 drawing buffer on an M2 Max
+through ANGLE's Metal backend, a look of fade 300ms plus wake 300ms with no trails and depth
+writing on, so the geometry draws two vertices per point - 434,176 - which is the shedding draw
+and not the cheap one. Every block's bytes are resident before the clock starts.
+
+**Three readings decide whether a block is believable**, and a block failing any of them is
+discarded rather than timed: it rendered every frame it was asked for and fetched nothing inside
+the block, it drew and warmed the clips its arm declares on every one of those frames, and the
+page reported no error. The health number is the one-clip arm's median over the first half of the
+rounds against the second, held against that arm's own interquartile spread.
+
+| arm | run 1 | run 2 | run 3 | against one clip |
+| --- | --- | --- | --- | --- |
+| 1 clip | 5.500 | 5.200 | 5.337 | — |
+| 2 clips | 6.223 | 5.907 | 6.153 | +0.723, 1.14x |
+| 4 clips | 10.167 | 9.977 | 9.720 | +4.667, 1.85x |
+| 4 live + 1 warming | 9.977 | 10.037 | 9.840 | +4.503, 1.84x |
+
+Health on the three runs in order: 0.053 ms of movement against a 0.367 ms spread, 0.430 against
+0.680, and 0.433 against 0.620. Each arm's last column is its delta taken inside its own run and
+then the median of the three, because the 1-clip arm itself moves 0.3 ms between runs and a delta
+taken across runs would carry that. The three agree arm by arm to within 6%, which is what this
+rig reproduces to on a working machine.
+
+**The third and fourth clips cost about 1.93 ms each and the second costs 0.75, so there is no one
+number for "a clip".** Per run the second clip adds 0.723, 0.707 and 0.816, while the third and
+fourth add 1.972, 2.035 and 1.784 each. Three extra clouds add 4.667 ms between them, which
+averages 1.54, and that average is the trap: it is dragged down by a cheap second clip, so it
+describes neither the second nor the fourth and understates the fourth by a fifth. Four clips is
+1.85x one, and against a 33.3 ms budget at 30fps four overlapping clips is 30%.
+
+**The warming clip's cost is under this rig's floor rather than measured at some small number, and
+the floor is the caveat.** Its difference from the 4-clip arm is -0.190, +0.060 and +0.120 ms
+across the three runs, a mean of -0.003 over a 0.310 ms span: the sign flips, and every one of
+those sits inside the arm's own interquartile spread. But those spreads are 0.367, 0.680 and 0.620
+ms, four to seven times the 0.093 ms of the run this page once called healthy, so all three pass
+the drift gate on a machine that was carrying other work. The bound is about +/-0.2 ms and a quiet
+rig might yet resolve a warming clip below it. What holds without the hedge is the shape: the
+layering bound is the draw, 1.93 ms and 1.85x are large against these spreads, and warming a clip
+through a cut is not what to look at first.
+
+**The earlier run of this table is withdrawn rather than corrected, because the harness that took
+it could not tell whether its arms had happened.** It read 5.330 / 6.807 / 10.393 / 10.317, and
+the -0.076 ms between its last two rows is what this page published as a warming clip costing
+0.02. The block's counters for clips drawn and clips warmed were being differenced per block and
+read by nothing, so a block whose fifth clip idled all the way through would have been averaged in
+as though it had warmed. The counters were collected and discarded rather than missing, so what
+closed this was reading them rather than adding them. A look whose warm window cannot cover the
+block is caught, but upstream by the render gate, which is not the reading the warming arm needs.
+The three runs above are the first ones taken with the new gate armed. None of them tripped it,
+and each reports the warming clip warming 15 of its block's 15 frames - which is the number the
+old page required and never read. `docs/instruments.md` carries why a guard on the configuration
+is not a check on the run.
+
+**Sizing the cache by demand did not move the draw in any direction this rig can resolve.** Two
+runs taken either side of that change read 5.330 / 6.807 / 10.393 / 10.317 before and 5.597 /
+6.573 / 10.050 / 9.950 after, which is +5.0%, -3.4%, -3.3% and -3.6%: straddling zero rather than
+pointing one way, and inside the 6% the gated runs above reproduce to. It was measured on a
+machine carrying other agent sessions at a load average of 7 to 9, and both sides of it were
+ungated in the sense above, so the null result is what survives and a signed figure was never
+available.
+
+**The harness reads its arms' blend back before it times them, and that guard was earned.** A look
+applied through the registry lands on the selected clip alone once a clip's look is its own, so an
+arm that applied one afterwards would time one clip at the look asked for and the rest at the
+registry's defaults - which puts the geometry on one vertex per point instead of two for most of
+the clips in the frame. The look goes into each clip's own block in the document now, and a run
+whose clips do not agree about their blend refuses rather than averaging two draws.
+
+Fetch and JPEG decode are measured on the pass that makes a block resident, cold, and come to
+**2.34 ms per source frame** over two range requests for 61 frames. That is a cost per source
+frame rather than per clip: two clips wanting one frame pay it once, two at different offsets pay
+it twice, and the prefetch runs it ahead of the playhead rather than inside a rendered frame.
+
+**The budget held on the draw and did not hold on the cache, and the cache is now sized by
+demand.** `CACHE_FRAMES` was 192 decoded frames per take while the plan a seek makes is per clip,
+so four clips of one take asked that one cache for four windows. At fade 500ms plus wake 1500ms -
+two seconds of persistence, an ordinary look - a seek at four clips rendered 42 of the 60 pre-roll
+frames it computed and reported itself capped 18 short; at four plus a warming clip it rendered 33
+of 60. One and two clips were unaffected, and so were four clips on four *different* takes,
+because each take gets its own cache. The failure was reported rather than silent, but a capped
+pre-roll is an image that has not converged.
+
+A take's cache now holds what the clips cut on it are asking for between them. The transport
+publishes that demand when it plans - `askFor`, from both the seek path and the prefetch - and
+`IndexedTake.capacity` is `demand + 16` frames, floored at the 192 a single clip always had and
+bounded by a ceiling derived from a memory budget. **A one-clip project caches exactly what it
+did.** At the same look the four-clip seek now renders 60 of 60, and so does one at eight clips,
+the `CLIP_CEILING`, which asks one take for 496 frames.
+
+**A resident frame costs 1.29 MB, not the 1.7 MB this page carried as an estimate.** By
+construction it is a 512x424 depth block at two bytes a cell - 434,176 bytes exactly - plus the
+same grid as an RGBA bitmap at 868,352, which is 1,302,528 bytes or 1,272 KiB. Measured: the
+resident-set size of every process of the bundled Chromium, before and after filling one take's
+cache from a fresh browser per point, with a full GC forced through CDP's
+`HeapProfiler.collectGarbage` on both sides. Fresh browser per point is the instrument rather
+than a precaution - freed pages are not returned to the OS, so an arm that cleared the cache read
+the high-water mark of the arm before it and the interleaved design measured nothing. Baselines
+across five fresh browsers agreed to 0.6%: 88 frames cost 157,296 and 154,416 KiB, 176 frames cost
+263,248, 273,376 and 267,008, and the null arm - a fresh browser that fetched nothing - moved 560
+and 640 KiB. The slope through the two loaded points is **1,263 KiB per frame**, 0.7% under the
+1,272 the arithmetic gives; the ~46 MB intercept is the fetch machinery's own high-water.
+
+The ceiling is that figure turned into a frame count: a budget of **768 MB buys 618 frames**, and a
+plan may ask one take for 602 of them. It is generous by the measure it was chosen against - eight
+clips at two and a half seconds of persistence each - and **what still caps is eight clips of one
+take each pre-rolling more than about 2.5 seconds**, or a retime curve slow enough that one clip's
+window alone runs past 602 source frames. A cap reports the arithmetic that produced it:
+`lastSeek.bound` names the take, how many clips are on it, what they asked for and what the
+ceiling is, and the strip says it once per distinct cap.
+
+The ceiling and the span a fetch may request cannot be moved apart. A cache smaller than the span
+a plan is allowed to ask for evicts the frames that fetch has just put in it, `resident()` never
+comes true, and the seek stands down for ever rather than reporting anything - which is why
+`timeline-check` has one control over both numbers and not one each.
+
+## What a gizmo drag costs, and what it used to
+
+A pointer move through the clip handles arms a redraw and never starts one, which is the rule
+`renderProgramFrame` is under: it runs `advanceNavigation`, so a handler that renders on an input
+event has asked for the next one. Measured with `editor-check`'s section 22b, which delivers 30
+pointer moves' worth of `objectChange` and counts `laneRebuilds` and `renders` across them:
+**0 lane rebuilds while the pointer is down, and 1 over the whole gesture** - the one the release
+does. The historical failure this is measured against is the pointer-move-renders shape that
+shipped once and cost 34 rebuilds for a single move.
+
+`--mutate gizmo-renders-from-the-pointer` puts that shape back in one edit, and it reads
+30 rebuilds for 30 moves. The number to watch is the rebuild count rather than the render count:
+a look write asks for its repaint through a microtask that coalesces, so a build writing from the
+event still renders about as often and only the lane stack gives it away.
+
 ## What each effect costs
 
 Taken after testers reported the effects making performance "fluctuate wildly". The

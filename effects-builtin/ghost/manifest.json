@@ -25,7 +25,7 @@
     "rim": {
       "def": 0.7,
       "min": 0.2,
-      "max": 3,
+      "max": 1.5,
       "step": 0.01,
       "kind": "scalar",
       "label": "rim",

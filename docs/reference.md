@@ -69,12 +69,100 @@ on the smear the eye is aimed at.
 The ruler shows a *window* of the clip, because a fifteen-minute take across one screen puts
 a keyframe against gradations forty times coarser than the thing being placed. Scroll to
 zoom about the pointer, `+`/`-` about the playhead, `,`/`.` to pan, `F` to fit the clip, `Z`
-to frame the trim. The overview underneath is always the whole clip: drag its box to pan, an
-edge to zoom, click to go there.
+to frame the trim. The overview underneath is always the whole clip: drag its box to pan, click
+to go there.
 
 Press `I` and `O` to set the trim at the playhead. Choose **Output > Whole clip**, or press
 Option-X, to restore `{ in: 0, out: null }`. The null end means the range continues to the end
 if the program later grows; writing the current duration would freeze it there instead.
+
+**Loop**, at the right of the transport row, plays that trimmed range round instead of stopping
+at its end: reaching the out-point seeks back to the in-point and playback carries on. It is off
+whenever the editor opens, because the transport is built fresh each time and a loop you set on
+one take is not a fact about the next one.
+
+**Clips are the rows at the head of the lane stack**, one box each from where a clip starts to
+where it ends, above the curves that animate them. `+ add clip` opens the library's takes and the
+one you choose lands at the playhead on a row of its own; `delete clip` removes the selected one,
+and so does `Delete` — there is a button as well as a key because the Pi's touchscreen has
+neither a Delete key nor a drag affordance to discover. Click a box to select that clip, drag it
+along the strip to move it, and drag either edge to trim it. The edit refuses to delete its last
+clip, because a project carries at least one.
+
+**The two edges do different things.** The right edge moves where the edit stops using the take,
+which is the clip's own `length`. The left edge is a head trim: the clip starts later in the take,
+its out-point stays where it is, and the footage under what is left does not move — the same
+project second stands on the same source frame afterwards. That in-point is written as the clip's
+retime curve, one key at the origin, because a clip states where it starts in the take through its
+curve rather than through a field of its own; trimming back to the head of the take removes the
+key again. A curve of one key is still a rate, so the speed slider goes on working through a head
+trim and only goes quiet once a clip carries a curve that says more than an in-point. **On such a
+clip the head edge refuses and says so** — moving a keyed curve's domain is a different edit and
+this build does not do it from the edge.
+
+**Which clip is selected is the session's and not the document's.** It decides what the panel
+writes to, which curve the retime lane draws, and which clip the ruler's marks are drawn against
+— and it is deliberately not saved, because which clip you are looking at is not part of the edit
+and a document recording it would make two people's saves of the same work differ. Opening a take
+selects its clip, because a take builds a project of one clip of footage you have just chosen and
+there is nothing there to choose between; loading a project selects nothing, because a document
+does not record which clip was being worked on and picking one would be a guess. Pressing on the
+empty part of the lane stack takes the selection off every clip.
+
+**With no clip selected the panel keeps its clip half on screen and greys it out.** That is where
+a loaded project of several clips lands you, which is the case worth showing the split in. The rows
+below `points`, `framing`, `colour` and the rest write one clip's cloud; `post`, `motion`'s
+trails and the rest of the grade write the project. Hiding the clip half would make the split
+something you have to remember, so it is dimmed and inert instead, and selecting any clip brings
+it back showing that clip's values. Selecting a different clip repaints every one of them.
+
+**A clip's own keyed parameters nest under its row and fold with it.** The chevron in the rail
+appears once a clip has something keyed; at four clips with a keyed look each a flat stack is one
+pile of lanes belonging to nobody. The project's own curves — the camera, and the post chain
+every clip is seen through — stay at the foot of the stack, outside every clip.
+
+**`move` and `rotate` put handles on the selected clip in the viewport**, and `G` cycles the two.
+A clip carries a position and a rotation in the room and nothing else — no scale, because
+`pointSize` is measured in screen pixels and would not scale with the geometry, and the fog is
+world-space. While the handles have the pointer the orbit stands down and comes back on release.
+The handles draw over the finished picture, so effects change what is behind them and never the
+handles themselves. An export detaches their hit target as well as hiding them, then restores it
+afterwards, so dragging where an invisible handle was cannot move the clip under a running export.
+
+**`key` beside them keyframes that placement at the playhead**, and presses again to take the key
+away. It is there because a placement is edited in the world and so has no panel row and no
+keyframe control beside one, and without it the first key on a placement track could not be
+planted at all. It reads the three states a panel row's diamond reads: filled where a key is under
+the playhead, outlined where the track carries keys elsewhere, plain where there are none. Once a
+track has keys a handle drag writes one at the playhead, the same as moving a slider does. Those
+keys are measured from the clip's own in-point rather than from the head of the edit, so dragging
+the clip along the strip carries the move it was given with it.
+
+**Marks stay keyed by the take and are drawn against the selected clip.** A mark is a fact about
+footage, so two clips of one take share them; where a mark ticks on the ruler is that source
+second put through the selected clip's curve *and* its placement, which is why the same mark sits
+somewhere else when you select the other clip of the same take.
+
+**mark** plants one at the playhead and presses again to take that one away, and `M` does the
+same from the keyboard. "Already at the playhead" means within half an output frame either side,
+so a press never has two marks to choose between.
+
+**The `lens` row on the *Camera* tab says what the camera's `fov` says, in the millimetres a
+lens is sold under.** It is a 35mm equivalent against the full-frame gate — 36x24mm, so a
+43.27mm diagonal — and the shape it measures against is the *project's* aspect rather than the
+window's, which is why resizing the browser or pulling `render %` leaves the number where it
+was. The camera opens on a 22.7mm lens at 16:9, which is the 50-degree vertical field both
+cameras boot at, and **sensor view** lands near 18mm because that is what the Kinect's own
+intrinsics work out to across its 424 rows. Moving the row writes the camera you are composing
+through, which is the one **add key** reads, so a lens reaches the shot when you key it and not
+before. Under **set viewport to camera** the row reads the shot instead and goes inert, for the
+reason the orbit does the same there: the program camera's lens is what its keys say, so it
+follows the playhead through a keyed move rather than taking a new value. The row offers 8mm to
+300mm and says which way it ran out past either end — the angle
+itself is never clamped, because the sensor's intrinsics have to be free to imply anything.
+`verticalFovForFocalLength` and `focalLengthForVerticalFov` in
+[`web/lens.js`](../web/lens.js) are the conversion, and it is the same arithmetic either way
+round.
 
 **Easing a move.** Select a key and the `key options` row shapes the segments either side of
 it: `lin`, `in`, `out`, `smooth`, `glide` and `hold`, or drag the handles in the lane for
@@ -371,6 +459,10 @@ middle out. `line` is where that split sits, as a fraction of frame height from 
 of separate needles, and at 16 it comes apart in ribbons. Ragged rather than a clean stretch is
 the whole difference between this and a vertical zoom.
 
+`drift` blends the fixed column pattern into the animated one, so its full range is exactly 0 to
+1. The shader clamps that blend at both ends; exposing values above 1 would add dead slider travel.
+`speed` sets the animated pattern's clock and does nothing while drift is zero.
+
 `refresh s` is the one control that is not only a look: it is how long the pass is allowed to
 remember, and every that many seconds of program time the picture snaps back to the frame it was
 handed. That snap is the pulse the look wants and it is also what makes the timeline work — a seek
@@ -465,12 +557,31 @@ the job with a reason naming it** rather than rendering, unless the job was queu
 `suppressEffects` covering it. A version the worker has and the job did not ask for is logged
 and rendered, which is the same call the editor's notice makes.
 
+**A job names one capture per clip**, by content hash, in project order. That list is derived
+the same way and for the same reason: it comes off the clips rather than from the caller, so a
+job disagreeing with its own document about the footage it renders is refused at enqueue naming
+both lists. Repeats are kept and the order is the document's — two clips of one take is an edit
+the list has to be able to spell, and two clips whose footage is swapped is a different edit
+that has to read differently. The worker resolves every hash against its own library **before it
+opens a browser**, and a hash it has not got fails the job naming *the take*. Then it loads the
+project, which opens each clip's footage by hash, and **attests what the page actually opened
+against what the job asked for, clip by clip and in order** — a set comparison would call a
+render with two clips' footage swapped the one that was asked for. A worker also refuses a job
+envelope from a version it does not read, naming the version: version 2 carries the list of
+captures where version 1 carried a single string, and this repo ships no conversion.
+
+The editor has no entry that comes up on no footage — `/edit` with neither a take nor a project
+redirects to the gallery — so the worker brings the page up on the first clip's take and lets
+the project open the rest. That bootstrap is the one thing here still resolving a hash to an id.
+
 **A queue call that did not work is never read as a store with nothing in it.** The worker asks
-its own server what is installed once per job, and a failed answer — a dropped connection, a 500,
-a proxy reporting its own failure with a 200 — is retried a few times seconds apart before the
-job is failed at all. If it still cannot read, the job comes back naming *the read*, never
-naming a package the machine has not got: those two sentences send whoever is looking at the
-queue to two different machines, and only one of them is about the job.
+its own server what is installed once per job, and what footage it holds once per job, and a
+failed answer — a dropped connection, a 500, a proxy reporting its own failure with a 200 — is
+retried a few times seconds apart before the job is failed at all. Both readings go through one
+retry, so a server that cannot be reached says so in one voice however many routes a job needs.
+If it still cannot read, the job comes back naming *the read*, never naming a package or a take
+the machine has not got: those sentences send whoever is looking at the queue to different
+machines, and only one of them is about the job.
 
 ### Installing an effect, and taking one away
 
@@ -702,8 +813,9 @@ a raster can rotate under the playhead. `pitch` is the line frequency, promoted 
 and defaulting to it — and **the settings worth having are below that default, not above it**,
 because the wave is sized against 1080p and 1.3 is already about 220 cycles across the frame.
 That is a television scanline; the wide bands the reference frames cut a picture into want
-something under 0.6, and 0.1 is bands you can read across the room. The slider runs to 4 rather
-than further because a line thinner than the pixel drawing it is aliasing rather than a raster.
+something under 0.6, and 0.1 is bands you can read across the room. The slider ends at 1.5 because
+the settings above it only make a line thinner than the pixel drawing it, which is aliasing rather
+than a raster.
 `hardness` squares the wave into a grille with dark gaps between the
 lines, and it is the one that makes the other two worth having: an angle over a sine only ever
 buys rotated softness, where the references are hard line grilles.
@@ -755,14 +867,29 @@ and label, and the row, bounds, readout and keyframe control are built from that
 effect cannot get a control the registry does not own. Package-effect rows are hidden until
 the effect is added with **+ add effect** or any of its values or tracks carries work.
 Rows declared `under` another parameter are hidden while that master is at its absent value.
-Removing one resets every value and deletes every track in one confirmed, undoable edit.
+Removing one resets every value and deletes every track in one undoable edit, and it asks
+nothing first: **remove** in the picker and the cross that appears on a group's own header when
+you hover it are the same edit, and undo is what takes either of them back.
 The local rack preference is panel state, not project state. The generator refuses to boot
 if the rows it emitted are not the parameters that were declared.
+
+The bounds are authoring travel, not mathematical limits. Mixes, angles and positions keep their
+full semantic range. Amplifiers end where the live picture stops producing a useful new setting,
+so a small pointer move remains a small change and the slider has no dead or destructive tail.
+Every shipped preset sits on those same grids.
 
 ## Presets
 
 Selecting Blackwall used to apply twelve post-chain values with it. They are separate now: a
-preset is look values and nothing else, so applying one never moves your camera.
+preset is look values and nothing else. Framing is the shot rather than the look, so applying one
+never moves your camera, a clip, its crop, its clip planes or its levelling.
+
+**Applying one is not all on one clip.** A preset's cloud values — point size, the readings and
+every effect that binds the cloud — land on the selected clip. Its post-chain values —
+bloom, trails, crush, the rest of the grade — are the project's, so they land once and every
+other clip in the edit is seen through them. That is a real consequence rather than a footnote:
+applying a graded look to one clip of four regrades the other three. The editor says how many of
+the values it just wrote were the shared half, and the save dialog says the same thing in words.
 
 A preset is `{ version, values }`, plus a `requires` list when the look touches any effect,
 and the keys it names in `values` are its scope. A parameter's key is dotted by the effect it
@@ -790,24 +917,24 @@ packages, Ghost, Contour and Blackwall, with all nine of their parameters. A shi
 therefore names at least 36 values. `blackwall.json` claims five more effects whose fourteen
 parameters bring it to 50. Applying a whole look resets every effect the document does not
 claim back to that effect's own defaults, which is what makes leaving an ordinary effect out
-and writing it in at its defaults describe the same look. Framing — levelling, the clip planes,
-the crop box — is the shot rather
-than the look, so no shipped document names it and picking one never reframes what you
-framed. `none` is the one entry that does reach the framing, because it is the way back to
-the defaults rather than a thirteenth look. `library-check` holds the rule against the
+and writing it in at its defaults describe the same look. Core framing — levelling, the clip planes
+and the crop box — is the shot rather than the look, so no preset document can name it and
+neither a look nor `none` reframes what you framed. An effect parameter remains a look value if
+its manifest places its control in the Framing panel; panel placement is layout, not file meaning.
+`library-check` holds the rule against the
 registry: a new core value fails all twelve until each names it, and a new parameter added to an
 effect fails only the documents whose `requires` already claims that effect — an effect
 nothing has reached yet fails nothing, because nothing claims it.
 
-Saving and exporting both ask which values go in, every box ticked by default, so a sparse
+Saving and exporting both ask which preset values go in, every box ticked by default, so a sparse
 preset takes deliberate effort. A whole-look save still sheds what it can: an ordinary effect
 sitting wholly at its own defaults leaves no trace in the saved file, because the whole-look
 apply above restores that same effect to those same defaults whenever the document does not
 claim it. The three reading packages stay whole even at their defaults, because a document
 naming `readRgb` and `readDepth` must also carry the other three reading weights. A subset save
 sheds nothing, because a picked value at its default is still a value somebody chose. The
-boxes derive from the registry, so a parameter added later appears under its own heading by
-existing.
+boxes derive from the preset boundary in the registry, so a look parameter added later appears
+under its own heading by existing and a framing parameter never appears there.
 
 **The five reading weights tick and untick together.** A file naming any reading has to name
 all five, because the ones it omits stay at whatever the clip was already wearing, and two
@@ -818,8 +945,8 @@ between.
 **A partial preset does not stamp the clip**, because the stamp answers "what look is this
 clip wearing" and a document short even one of the values its own core and effects call for
 did not answer it. The two surfaces that report an apply say which of the two happened, and a
-document naming the whole look stamps whether it also names the framing or not — the framing
-is not part of the answer.
+document naming the whole look stamps it. Framing is not part of that answer and a document that
+tries to name it is refused before any value is written.
 
 **Saving over a shipped name forks it**: the write lands in your library and shadows the
 built-in, and deleting the fork brings the shipped look back.
@@ -837,8 +964,9 @@ validates, so `editor-check` section 12 drives the round trip in a browser, with
 
 Documents from before the readings are version 3 and will not open, and there is nothing to
 run: the one-shot conversion this repo used to ship was deleted once every document it could
-act on had already been converted. This build reads version 6 alone — a version 5 document
-still spelled its parameters bare (`glyphTone` rather than `glyph.tone`) and carried no
-`requires` list, so it is refused the same way a version 3 or 4 one is, and there is no
-conversion for it either: every document this project holds was re-authored at 6. A file from
+act on had already been converted. This build reads version 7 alone — a version 6 document
+carried one take at the top and one undivided look under it rather than a `clips` array, and a
+version 5 document still spelled its parameters bare (`glyphTone` rather than `glyph.tone`) and
+carried no `requires` list, so both are refused the same way a version 3 or 4 one is, and there
+is no conversion for either: every document this project holds was re-authored at 7. A file from
 any older version is refused, naming its own version, and stays refused.

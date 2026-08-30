@@ -210,14 +210,14 @@ carrying the whole project document, so nothing overwrites and every render is r
 **save a copy…** puts the file anywhere through the browser's file picker.
 
 **The batch path has no button anywhere in the browser.** `POST /jobs` takes the project
-document, the capture's content hash and the output's name, size and rate, all of them
+document, one capture content hash per clip and the output's name, size and rate, all of them
 required and all validated at enqueue so the queue refuses work it already knows cannot run.
 A render you have already done carries them all in its sidecar, so the shortest correct
 request is that file with a new name over it:
 
 ```bash
 jq -s 'max_by(.created) |
-       {project, capture, output: "take2-again", width: 960, height: 540, fps: 30}' \
+       {project, captures, output: "take2-again", width: 960, height: 540, fps: 30}' \
    exports/*/take2.mp4.job.json |
   curl -sX POST http://localhost:8080/jobs -H 'content-type: application/json' -d @-
 node tools/render-worker.mjs --url http://localhost:8080 --drain

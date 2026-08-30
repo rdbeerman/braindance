@@ -25,7 +25,7 @@
     "radius": {
       "def": 22,
       "min": 2,
-      "max": 90,
+      "max": 60,
       "step": 1,
       "kind": "scalar",
       "label": "halation radius",

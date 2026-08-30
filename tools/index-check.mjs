@@ -5,19 +5,85 @@
 // checked by an independent positioned read at offsets the parser produced.
 
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { createReadStream, cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, statSync } from 'node:fs';
 import { open, stat, unlink, copyFile, utimes } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { MessageParser, HEADER_BYTES, TYPE_FRAME } from '../server/protocol.js';
 import { buildIndex, loadIndex, indexPathFor, captureIdFor } from '../server/capture.js';
 
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const flag = (name, fallback = null) => {
   const i = argv.indexOf(name);
   return i >= 0 && i + 1 < argv.length ? argv[i + 1] : fallback;
 };
+const has = (name) => argv.includes(name);
 
-const URL_BASE = flag('--url', 'http://localhost:8080');
+const MUTATE = flag('--mutate');
+// A mutation edits the server's copy of `server/capture.js`, so a mutated run needs a server of
+// its own. `--stage` spawns one without mutating, which is the only way to re-run the baseline in
+// the conditions a mutated run failed in rather than in the conditions the baseline happened in.
+const STAGE = has('--stage') || MUTATE !== null;
+const STAGE_PORT = Number(flag('--stage-port', '8251'));
+const WORK = join(REPO, '.index-check');
+
+/**
+ * Each names source text in the *server's* copy and must match exactly once. The check's own
+ * imports come from the repo tree and are never mutated, so the oracle every row compares against
+ * stays honest - a comparison whose two sides move together proves nothing.
+ */
+const MUTATIONS = {
+  // The hazard `server/capture.js` opens by naming: a whole-file read cannot reach past 2 GiB at
+  // all. `readAt` only, because `createFrameRunStream` is a second method and one property at a
+  // time is what makes a fired row attributable.
+  'frame-read-is-a-whole-file-read': { file: 'server/capture.js', edits: [[
+    '    const buf = Buffer.allocUnsafe(bytes);\n'
+    + '    let got = 0;\n'
+    + '    // Nothing promises a positioned read returns everything asked for, and a short read here\n'
+    + '    // would ship a frame with a tail of whatever was in memory.\n'
+    + '    while (got < bytes) {\n'
+    + '      const { bytesRead } = await this.handle.read(buf, got, bytes - got, position + got);\n'
+    + '      if (bytesRead === 0) throw new Error(`short read at ${position + got} in ${this.path}`);\n'
+    + '      got += bytesRead;\n'
+    + '    }\n'
+    + '    return buf;',
+    '    return (await readFile(this.path)).subarray(position, position + bytes);',
+  ]],
+    fails: '`Capture.readAt` reading the file whole and slicing, which is the hazard '
+      + '`server/capture.js` opens by naming. Implies --stage, and only the *server\'s* copy '
+      + 'is edited - this tool\'s own imports stay unmutated, so the oracle every row '
+      + 'compares against cannot move with the thing under test. Reddens **four** rows, '
+      + 'measured: every frame at every offset, because a whole-file read of a 2.5 GB take '
+      + 'fails wherever you aim it. Then the run ends early in the victim section, where the '
+      + 'same read meets a deleted file - `caught, and the count is a floor`, which is a '
+      + 'different animal from a control that fires nothing before it dies',
+  },
+  // The same hazard as a regression rather than a rewrite: an offset that wrapped at 32 bits.
+  // It serves the frame at `offset % 2**31` with a 200, so the row can only redden through its own
+  // byte comparison - and every offset below the mark is its own answer, which leaves the three
+  // sub-boundary frames green as the positive twin.
+  'frame-offsets-truncated-to-32-bits': { file: 'server/capture.js', edits: [[
+    '      const { bytesRead } = await this.handle.read(buf, got, bytes - got, position + got);',
+    '      const { bytesRead } = await this.handle.read(buf, got, bytes - got, (position + got) % 2 ** 31);',
+  ]],
+    fails: 'the same hazard as a regression rather than a rewrite: a positioned read whose '
+      + 'offset wrapped at 32 bits. This is the sharp one. It serves the frame at `offset % '
+      + '2**31` **with a 200**, so the row can only redden through its own byte comparison '
+      + 'rather than through a status - a mutation that 500s would prove only that the check '
+      + 'reads status codes. Reddens **two** rows, measured: the two picks past the mark, at '
+      + '2147533537 and 2502006469. The two below it stay green and are the positive twin, '
+      + 'because `x % 2**31 === x` under the line',
+  },
+};
+if (MUTATE && !MUTATIONS[MUTATE]) {
+  console.error(`unknown mutation ${MUTATE} - have ${Object.keys(MUTATIONS).join(', ')}`);
+  process.exit(2);
+}
+
+const URL_BASE = STAGE ? `http://127.0.0.1:${STAGE_PORT}` : flag('--url', 'http://localhost:8080');
 const SCRATCH = flag('--scratch', '/tmp');
 const RUNS = Number(flag('--runs', '4'));
 const SAMPLES = Number(flag('--samples', '64'));
@@ -34,10 +100,57 @@ const ms = (x) => `${x.toFixed(2)} ms`;
 const gb = (x) => `${(x / 1e9).toFixed(2)} GB`;
 
 let failures = 0;
+// Kept as well as counted: a mutation is caught only if the rows that reddened are its own.
+const fired = [];
 const check = (ok, label) => {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}`);
-  if (!ok) failures++;
+  if (!ok) {
+    failures++;
+    fired.push(label.trim());
+  }
 };
+
+/**
+ * The count decides, and it decides before the crash does: a mutation here damages the server the
+ * rows below go on to drive, so a run that reddened rows and then died would otherwise be reported
+ * as having found nothing. A mutated run with failures is caught however it ended, and says it
+ * ended early because the count is a floor; with no failures, crashed means `DID NOT RUN`.
+ *
+ * Installed as a handler rather than wrapped around the body, because the body is a top-level
+ * script and indenting it would bury the change this exists to make legible.
+ */
+let verdictGiven = false;
+function verdict(crashed) {
+  if (verdictGiven) return;
+  verdictGiven = true;
+  if (crashed) console.log(`\n  FAIL  the run did not finish: ${crashed.message ?? crashed}`);
+  stopStagedServer();
+  // The victim section writes a take into the checkout's own `captures/` and tidies it at the end,
+  // which a run that died in the middle of that section never reaches. Named by pid, so this
+  // sweeps only what this process wrote.
+  for (const ext of ['knct', 'idx']) {
+    rmSync(`captures/index-check-victim-${process.pid}.${ext}`, { force: true });
+  }
+  if (MUTATE && failures > 0) {
+    console.log(`\n[index] caught, as required (${failures} assertion${failures === 1 ? '' : 's'} fired)`);
+    if (crashed) console.log(`[index] and the run ended early: ${crashed.message ?? crashed} - the count is a floor`);
+    console.log(`[index] rows that fired: ${fired.join(' | ')}`);
+    process.exit(1);
+  }
+  if (crashed) {
+    console.log(`\n[index] DID NOT RUN - ${crashed.message ?? crashed}. Nothing here is a finding: re-run it.`);
+    process.exit(2);
+  }
+  if (MUTATE) {
+  if (MUTATIONS[MUTATE]?.fails) console.log(`[index] it should redden: ${MUTATIONS[MUTATE].fails}`);
+    console.log('\n[index] NOT CAUGHT - the check passed a build it should have rejected');
+    process.exit(1);
+  }
+  console.log(`\n${failures === 0 ? 'PASS' : `FAIL (${failures})`}`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+process.on('uncaughtException', verdict);
+process.on('unhandledRejection', verdict);
 
 // A second walk of the same bytes, framed by the parser the live server uses.
 async function parserWalk(path) {
@@ -93,6 +206,96 @@ async function timedGet(url) {
   return { dt: performance.now() - t0, bytes: buf.length };
 }
 
+
+/**
+ * The fixtures this check needs, refused at the door with their sizes named.
+ *
+ * The last one has to be past 2 GiB, because the row this tool exists for reads a frame at an
+ * offset a whole-file read cannot reach. Without this, a fixture that was absent crashed on
+ * ENOENT and one that was merely too small crashed on `walk.frames[-1]` - both with zero failed
+ * assertions and a non-zero exit, which is the shape that reads as a crash rather than a finding.
+ * A worktree ran a whole session on a two-fixture set that could not cross the mark and nothing
+ * said so.
+ */
+const TWO_GIB = 2 ** 31;
+{
+  const missing = FIXTURES.filter((p) => !existsSync(p));
+  if (missing.length) {
+    console.error(`index-check needs ${missing.join(', ')}, which ${missing.length === 1 ? 'is' : 'are'} not here.`);
+    console.error('`npm run fixtures` builds the first two; the last is');
+    console.error('  node tools/make-fixture.js captures/sample.knct captures/fixture-large.knct --loops 18');
+    process.exit(2);
+  }
+  const big = FIXTURES[FIXTURES.length - 1];
+  const bigBytes = statSync(big).size;
+  if (bigBytes <= TWO_GIB) {
+    console.error(
+      `index-check's largest fixture is ${big} at ${bigBytes} bytes, which is under the ${TWO_GIB}-byte `
+      + 'mark. Every row here would pass and the one that matters would be testing nothing: it reads a '
+      + 'frame at an offset a whole-file read cannot reach, and this file has no such offset in it.',
+    );
+    // The default path rather than `big`, because `big` may be a fixture that is the right size
+    // for its own slot and merely in the last one - and the hint would then say to overwrite it.
+    console.error('  node tools/make-fixture.js captures/sample.knct captures/fixture-large.knct --loops 18');
+    process.exit(2);
+  }
+}
+
+// A server of this check's own, from a staged tree, so a mutation edits the copy that runs rather
+// than a file nothing is serving from. Only the server is staged: the imports above come from the
+// repo tree, so what every row compares against is unmutated by construction.
+let staged = null;
+function stopStagedServer() {
+  if (staged) { staged.kill('SIGKILL'); staged = null; }
+  rmSync(WORK, { recursive: true, force: true });
+}
+if (STAGE) {
+  const held = await fetch(`${URL_BASE}/library/takes`).then(() => true).catch(() => false);
+  if (held) {
+    console.error(`something is already listening on ${STAGE_PORT}: a staged run answered by a stranger asserts against whatever fixture that process staged, which is a green run proving nothing`);
+    process.exit(2);
+  }
+  rmSync(WORK, { recursive: true, force: true });
+  const root = join(WORK, 'root');
+  mkdirSync(root, { recursive: true });
+  for (const name of ['server', 'web', 'effects-builtin', 'presets-builtin']) {
+    cpSync(join(REPO, name), join(root, name), { recursive: true });
+  }
+  for (const name of ['node_modules', 'vendor']) {
+    if (existsSync(join(REPO, name))) symlinkSync(join(REPO, name), join(root, name));
+  }
+  if (MUTATE) {
+    const spec = MUTATIONS[MUTATE];
+    const path = join(root, spec.file);
+    let source = readFileSync(path, 'utf8');
+    for (const [from, to] of spec.edits) {
+      const hits = source.split(from).length - 1;
+      if (hits !== 1) {
+        console.error(`mutation ${MUTATE} matched ${hits} times in ${spec.file}, expected exactly 1 - refusing to run an unmutated server`);
+        process.exit(2);
+      }
+      source = source.replace(from, to);
+    }
+    writeFileSync(path, source);
+  }
+  // The real captures directory, because the fixtures are gigabytes and the victim section writes
+  // a take into it by the same relative path this process uses.
+  staged = spawn(process.execPath, [join(root, 'server/index.js'),
+    '--port', String(STAGE_PORT), '--captures', join(REPO, 'captures'),
+    '--projects', join(WORK, 'projects'), '--presets', join(WORK, 'presets'),
+    '--deliverables', join(WORK, 'deliverables'), '--jobs', join(WORK, 'jobs')],
+  { stdio: ['ignore', 'pipe', 'pipe'] });
+  const log = [];
+  staged.stdout.on('data', (c) => log.push(c.toString()));
+  staged.stderr.on('data', (c) => log.push(c.toString()));
+  let up = false;
+  for (let i = 0; i < 200 && !up; i++) {
+    await new Promise((done) => { setTimeout(done, 100); });
+    up = await fetch(`${URL_BASE}/library/takes`).then((r) => r.ok).catch(() => false);
+  }
+  if (!up) throw new Error(`the staged server never came up on ${STAGE_PORT}:\n${log.join('')}`);
+  console.log(`[index] staged server on ${STAGE_PORT}${MUTATE ? ` with ${MUTATE} applied to ${MUTATIONS[MUTATE].file}` : ' unmutated'}`);
+}
 
 console.log(`index-check  node ${process.version}  url ${URL_BASE}\n`);
 
@@ -243,17 +446,25 @@ const BIG = FIXTURES[FIXTURES.length - 1];
 
   // One deliberately past the 2 GiB mark, which is the offset a whole-file read could
   // not reach at all.
-  const past2Gib = walk.frames.findIndex((f) => f.offset > 2 ** 31);
-  const picks = [0, Math.floor(Math.random() * (n - 2)) + 1, past2Gib, n - 1];
+  const past2Gib = walk.frames.findIndex((f) => f.offset > TWO_GIB);
+  // A backstop under the door's fixture rule, because -1 out of `findIndex` used to go into
+  // `picks` and read as an undefined frame three lines later.
+  check(past2Gib >= 0, `${id} carries a frame past ${TWO_GIB}, so the row below is about an offset a whole-file read cannot reach`);
+  const picks = [0, Math.floor(Math.random() * (n - 2)) + 1, past2Gib, n - 1].filter((k) => k >= 0);
   for (const k of picks) {
     // Offsets come from the parser walk, so a wrong index cannot make a frame agree with itself.
     const w = walk.frames[k];
     const onDisk = Buffer.alloc(w.length);
     await fh.read(onDisk, 0, w.length, w.offset);
-    const overHttp = await getBytes(`${URL_BASE}/capture/${id}/frame/${k}`);
+    // Reported rather than thrown: a build that cannot reach this offset answers 500, and a
+    // throw here would end the run with zero failed assertions - which is a crash to investigate
+    // rather than the catch it actually is.
+    const overHttp = await getBytes(`${URL_BASE}/capture/${id}/frame/${k}`)
+      .catch((err) => ({ failed: String(err.message ?? err) }));
     check(
-      overHttp.length === onDisk.length && overHttp.equals(onDisk),
-      `frame ${k} of ${n} (${w.length} bytes at ${w.offset}) is byte-identical over HTTP`,
+      !overHttp.failed && overHttp.length === onDisk.length && overHttp.equals(onDisk),
+      `frame ${k} of ${n} (${w.length} bytes at ${w.offset}) is byte-identical over HTTP`
+      + (overHttp.failed ? ` - ${overHttp.failed}` : ''),
     );
   }
 
@@ -379,5 +590,4 @@ console.log('\n== per-frame fetch latency over loopback ==');
   console.log(`  ${RUN} frames, one range request  p50 ${ms(pct(asRun.slice(4), 50))}   p90 ${ms(pct(asRun.slice(4), 90))}`);
 }
 
-console.log(`\n${failures === 0 ? 'PASS' : `FAIL (${failures})`}`);
-process.exit(failures === 0 ? 0 : 1);
+verdict(null);

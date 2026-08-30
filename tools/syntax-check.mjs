@@ -59,21 +59,66 @@ const MUTATIONS = {
       "  'pointsize-absolute': { file: 'effects-builtin/glyph/size.vert.glsl', edits: [[",
       "  'pointsize-absolute': { file: 'web/cloud-shader.js', edits: [[",
     ]],
+    fails: 'and a shader anchor that matches its file exactly once while sitting in a slot\'s '
+      + 'fallback, which is a second copy of the shipped text that nothing compiles',
   },
 
   'anchor-duplicated-into-a-second-chunk': {
     file: 'effects-builtin/glitch/tear.vert.glsl',
     edits: [['  vGlitch = 0.0;', '  vGlitch = 0.0;\n  if (lattice > 0.0) {']],
+    fails: 'and the other half of the same row: one anchor over two sites in the assembled text, '
+      + 'where the edit reaches one and the count reads whole',
   },
 
   'anchor-duplicated-into-a-second-program': {
     file: 'effects-builtin/thermal/heat.frag.glsl',
     edits: [['  if (thermal > 0.0) {', '  if (thermal > 0.0) {\n      if (streak > 0.0) {']],
+    fails: 'and the same duplicate placed in the *other* program, which is the arm that says the '
+      + 'count sums over every assembled string rather than asking each one on its own',
   },
 
   'citation-outside-the-prose': {
     file: 'native/grabber.cpp',
     edits: [['Node reads `web/format.js` by path', 'Node reads `web/capture-format.js` by path']],
+  },
+
+  // One per branch of the mutate/ row, because a branch no control can reach is a branch nobody
+  // proved: a name nothing declares, a name declared somewhere else than where it is listed, and
+  // the bullet form, which the first two cannot see.
+  //
+  // The first two anchor on `effect-conformance-check`'s `leaks-at-zero` line, which is the only
+  // `--mutate` invocation left on the page. Their previous anchor was deleted with the entry it
+  // sat on and both controls stopped being able to run, so the reason that entry stays is written
+  // beside it in `docs/proof-tools.md` as well as here.
+  'doc-invokes-an-undeclared-mutation': {
+    file: 'docs/proof-tools.md',
+    edits: [['--mutate leaks-at-zero', '--mutate leaks-at-nothing']],
+    fails: 'and a `--mutate` this prose offers that no tool\'s table declares, which is a run '
+      + 'nobody can make listed as one anybody can',
+  },
+
+  'doc-lists-a-mutation-under-the-wrong-tool': {
+    file: 'docs/proof-tools.md',
+    edits: [[
+      'node tools/effect-conformance-check.mjs --mutate leaks-at-zero',
+      'node tools/registry-check.mjs --mutate leaks-at-zero',
+    ]],
+    fails: 'and one listed under a tool that does not declare it, which the row above cannot see '
+      + 'because the name resolves somewhere',
+  },
+
+  'doc-bullets-an-undeclared-mutation': {
+    file: 'docs/proof-tools.md',
+    edits: [['- **`reveal-ignores-tracks`**', '- **`reveal-ignores-nothing`**']],
+    fails: 'and the other form the reference offers a control in, a bullet naming one nothing '
+      + 'declares',
+  },
+
+  'doc-line-ends-in-whitespace': {
+    file: 'docs/proof-tools.md',
+    edits: [['Counted rather than recalled:', 'Counted rather than recalled: ']],
+    fails: 'and a prose line ending in a space, which is invisible on the page and invisible to '
+      + 'a clean `git diff --check`',
   },
 };
 
@@ -463,6 +508,10 @@ const withoutStringBodies = (src) => {
   }
 }
 
+// Filled by the block below and read by the one after it, so the prose is asked against the
+// tables themselves rather than against a second list of names kept beside them.
+const declaredMutations = new Map();
+
 // Every mutation's anchor text still has to exist in the tree, exactly once - a duplicate is as
 // stale as a miss, and a stale anchor fails in the direction that reads as success. The target
 // file comes from each entry's shape, and a shape nobody handles fails naming its tool.
@@ -610,6 +659,7 @@ const withoutStringBodies = (src) => {
       }
     }
     if (!table) continue;
+    declaredMutations.set(name, Object.keys(table));
 
     let carriesAnchors = false;
     for (const [mutation, spec] of Object.entries(table)) {
@@ -703,6 +753,100 @@ const withoutStringBodies = (src) => {
   }
 }
 
+// Every mutation the prose *offers* has to be one a tool declares, asked of the tables above so
+// there is no second list of names here to drift from them. Two forms, because they are the two
+// ways a page offers a control rather than remembers one: an invocation, and the control bullets
+// `docs/proof-tools.md` writes its per-control descriptions as. `docs/instruments.md` names
+// withdrawn and rejected controls on purpose - what it says about one is history, and history is
+// not an offer - so a sweep over bare prose names would fire on the case file doing its job.
+{
+  const declaredBy = new Map();
+  for (const [tool, names] of declaredMutations) {
+    for (const n of names) {
+      if (!declaredBy.has(n)) declaredBy.set(n, new Set());
+      declaredBy.get(n).add(tool);
+    }
+  }
+  const lineOf = (text, index) => text.slice(0, index).split('\n').length;
+  // Hyphenated only, and every declared name is: an unhyphenated capture is the English word
+  // after a backticked `--mutate`. A mutation named in one word would go unasked here, which is
+  // said rather than left to be assumed.
+  const INVOKED = /--mutate[\s`]+([a-z0-9]+(?:-[a-z0-9]+)+)/g;
+  const BULLET = /^[ \t]*- \*\*`([a-z0-9]+(?:-[a-z0-9]+)+)`\*\*/gm;
+  // The tool a *command* names, so a control listed under the wrong one is caught as well as one
+  // nothing declares at all. Anchored at the start of the line on purpose: a tool named anywhere
+  // earlier on the line is as often the subject of the sentence as the thing being run, and the
+  // looser form read `tools/fake-grabber.mjs` out of a clause about where a mutation plants.
+  const UNDER = /^[ \t]*(?:\$ )?node tools\/([a-z-]+\.mjs)/;
+
+  let invocations = 0;
+  let bullets = 0;
+  const wrong = [];
+  for (const page of readdirSync(join(ROOT, 'docs')).filter((f) => f.endsWith('.md')).sort()) {
+    const rel = `docs/${page}`;
+    const text = sourceWithMutation(rel);
+    if (text === null) continue;
+    for (const m of text.matchAll(INVOKED)) {
+      invocations++;
+      const at = `${rel}:${lineOf(text, m.index)}`;
+      const owners = declaredBy.get(m[1]);
+      if (!owners) {
+        wrong.push(`${at} invokes --mutate ${m[1]}, which no tool declares`
+          + ' - a control the prose offers and no table implements is a run nobody can make');
+        continue;
+      }
+      const named = UNDER.exec(text.slice(text.lastIndexOf('\n', m.index) + 1, m.index));
+      if (named && !owners.has(named[1])) {
+        wrong.push(`${at} invokes --mutate ${m[1]} through ${named[1]}, which does not declare it`
+          + ` - ${[...owners].join(', ')} does, so the line as written exits naming no such mutation`);
+      }
+    }
+    if (rel !== 'docs/proof-tools.md') continue;
+    for (const m of text.matchAll(BULLET)) {
+      bullets++;
+      if (!declaredBy.has(m[1])) {
+        wrong.push(`${rel}:${lineOf(text, m.index)} offers \`${m[1]}\` as a control of its own`
+          + ' - no table declares it, so the description stands for a run nobody can make');
+      }
+    }
+  }
+
+  if (invocations === 0 || bullets === 0) {
+    fail(`the prose offers ${invocations} invocations and ${bullets} control bullets - one of those is zero, `
+      + 'so that half passed on nothing and this scan is looking in the wrong place');
+  } else if (wrong.length) {
+    for (const line of wrong) fail(line);
+  } else {
+    console.log(`  mutate/ all ${invocations} invocations and ${bullets} control bullets name a declared mutation, `
+      + `of ${declaredBy.size} declared across ${declaredMutations.size} tables`);
+  }
+}
+
+// No prose line ends in whitespace. `git diff --check` says the same thing and cannot be relied
+// on to: it compares the working tree against the index, so on a clean checkout it reads every
+// page as unchanged and reports nothing at all.
+{
+  let lines = 0;
+  const trailing = [];
+  for (const page of readdirSync(join(ROOT, 'docs')).filter((f) => f.endsWith('.md')).sort()) {
+    const rel = `docs/${page}`;
+    const text = sourceWithMutation(rel);
+    if (text === null) continue;
+    text.split('\n').forEach((line, i) => {
+      lines++;
+      if (/[ \t]+$/.test(line)) trailing.push(`${rel}:${i + 1}`);
+    });
+  }
+  if (lines === 0) {
+    fail('no prose line was read at all, so the trailing-whitespace row passed on nothing');
+  } else if (trailing.length) {
+    fail(`${trailing.join(', ')} ends in whitespace - invisible in the page and in `
+      + 'a clean `git diff --check`, so it survives until something reads the bytes');
+  } else {
+    console.log(`  prose/  no trailing whitespace, over ${lines} lines`);
+  }
+}
+
 // Every id the application shell drives has to exist on the page that draws it, and every
 // `shell.` key the code reads has to be declared by the table. `web/main.js` dereferences that
 // table unguarded, so a half-applied rename fails at whichever consumer touches it first.
@@ -765,4 +909,5 @@ console.log(`\n${total} JavaScript files, ${failed} failed`);
 // row imports the two spines and calls `assembleShaders`. Everything else is `node --check`.
 
 console.log('syntax only - no proof tool ran here; see CLAUDE.md "Proof tools" for the suite and what each of them needs');
+if (mutation && MUTATIONS[mutation]?.fails) console.log(`it should redden: ${MUTATIONS[mutation].fails}`);
 process.exit(failed ? 1 : 0);

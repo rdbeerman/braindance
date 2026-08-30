@@ -1,7 +1,8 @@
-// The render queue: jobs on disk, claimed by workers, one at a time. A job is a project body, a
-// capture named by content hash and output settings, so it is self-contained. It is pinned to the
-// renderer class that ran it, because bit-exactness does not survive a different GPU and a project
-// names its capture by hash so that a re-render reproduces the original.
+// The render queue: jobs on disk, claimed by workers, one at a time. A job is a project body, the
+// captures its clips are cut on named by content hash, and output settings, so it is
+// self-contained. It is pinned to the renderer class that ran it, because bit-exactness does not
+// survive a different GPU and a project names its footage by hash so that a re-render reproduces
+// the original.
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -9,9 +10,14 @@ import { validateExport } from './export.js';
 import { listJsonNames } from './library.js';
 import { effectIdsIn, requiresEntryRefusal, requiresListRefusal } from '../web/format.js';
 
-export const JOB_VERSION = 1;
+// 2 since a job carries one hash per clip where it used to carry a single capture. The worker
+// refuses an envelope from another version rather than reading a field that is not there.
+export const JOB_VERSION = 2;
 
 const VALID_JOB_ID = /^job-[0-9a-f]{16}$/;
+
+/** What a capture may be named by. An id is a filename; only the hash names the bytes. */
+const CONTENT_HASH = /^sha256:[0-9a-f]{64}$/;
 
 export const STATES = ['queued', 'running', 'done', 'failed'];
 
@@ -85,7 +91,7 @@ export class JobStore {
   }
 
   /** Enqueue a render. A capture named by anything but content hash is refused. */
-  async enqueue({ project, deliverable = null, capture, renderer = null, output, width, height, fps, codec = 'h264', suppressEffects = [] }) {
+  async enqueue({ project, deliverable = null, captures, renderer = null, output, width, height, fps, codec = 'h264', suppressEffects = [] }) {
     // The document *body*, never the store's `{ name, rev, body }` envelope.
     if (!project || typeof project !== 'object' || Array.isArray(project)) {
       throw new Error('a job needs a project document body');
@@ -93,11 +99,14 @@ export class JobStore {
     if (project.version === undefined) {
       throw new Error(
         'a job\'s project has no version, so it is the store envelope rather than the document body: '
-        + 'pass what serialiseProject() returns, not { name, rev, body }',
+        + 'pass what serialiseProjectBody() returns, not { name, rev, body }',
       );
     }
-    if (typeof capture !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(capture)) {
-      throw new Error(`a job names its capture by content hash, got ${JSON.stringify(capture)}`);
+    if (!Array.isArray(captures) || captures.length === 0
+      || !captures.every((h) => typeof h === 'string' && CONTENT_HASH.test(h))) {
+      throw new Error(
+        `a job names its captures by content hash, one per clip, got ${JSON.stringify(captures)}`,
+      );
     }
     if (renderer !== null && renderer !== undefined && !validRenderer(renderer)) {
       throw new Error(
@@ -105,13 +114,43 @@ export class JobStore {
         + `got ${JSON.stringify(renderer)} - and a pin nothing can equal is a job nothing can claim`,
       );
     }
+    const clipList = Array.isArray(project.clips) ? project.clips : [];
+    // Derived from the clips rather than copied from the caller, for the reason `requires` is:
+    // the caller's list is a claim about the document rather than the document, and a claim that
+    // disagrees with it is answered here by name rather than a browser and a minute of GPU later.
+    // One entry per clip and in project order, repeats kept: two clips of one take is an edit this
+    // list has to be able to spell, and two clips whose footage is swapped is a different edit that
+    // has to read differently.
+    const cut = clipList.map((clip) => (clip && typeof clip === 'object' && !Array.isArray(clip)
+      ? clip.take?.hash : undefined));
+    const takeless = cut
+      .map((hash, at) => (typeof hash === 'string' && CONTENT_HASH.test(hash) ? null : at))
+      .filter((at) => at !== null);
+    if (clipList.length === 0 || takeless.length) {
+      throw new Error(clipList.length === 0
+        ? 'a job\'s project holds no clips, so there is no footage for this render to be against'
+        : `a job's project has ${takeless.length} clip(s) naming no content hash to be cut on, at `
+          + `position ${takeless.join(', ')}: a clip with nothing to draw is one the page refuses `
+          + 'once the browser is already open, and the queue can say it before that costs anything');
+    }
+    const short = (hash) => `${String(hash).slice(0, 22)}…`;
+    if (captures.length !== cut.length || captures.some((hash, at) => hash !== cut[at])) {
+      throw new Error(
+        'a job disagrees with its own project about the footage it renders, so the queue cannot say '
+        + `what this render is against: the job names ${captures.map(short).join(', ')} and its `
+        + `clips are cut on ${cut.map(short).join(', ')} - the list is one entry per clip in project `
+        + 'order, so a different length or a different order is a hand edit to finish before the '
+        + 'job is queued',
+      );
+    }
     // Derived from the look's own namespaces rather than copied from `project.requires`, which is
     // caller data - an empty list used to be recorded as one, and the refusal then arrived from
     // `restoreProject` a browser and a minute of GPU later.
-    const look = project.look && typeof project.look === 'object' && !Array.isArray(project.look)
-      ? project.look : {};
     const shape = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.keys(o) : []);
-    const used = effectIdsIn([...shape(look.params), ...shape(look.tracks)]);
+    // Both blocks, because an effect binding the cloud is a clip's and one binding the grade is
+    // the project's: reading `look` alone would call every point effect unclaimed.
+    const blocks = [project.look, ...clipList];
+    const used = effectIdsIn(blocks.flatMap((b) => [...shape(b?.params), ...shape(b?.tracks)]));
     if (project.requires !== undefined) {
       const listShape = requiresListRefusal('a job\'s project', project.requires);
       if (listShape) throw new Error(listShape);
@@ -171,7 +210,7 @@ export class JobStore {
         deliverable,
         requires,
         suppressEffects: [...suppressEffects],
-        capture,
+        captures: [...cut],
         renderer: renderer ?? null,
         output: String(output),
         artifactPath: null,

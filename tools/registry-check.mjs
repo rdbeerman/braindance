@@ -41,6 +41,22 @@ function revBeforeMarker(marker) {
   return `${introduced}^`;
 }
 const MUTATIONS = {
+  // The levelling pair goes back to being one pair the program shares rather than one per clip,
+  // by pinning the binding to whichever cloud was selected first. Every clip's `tilt` and `roll`
+  // then write the same two numbers, so a clip's tilt composes with another clip's roll - which
+  // is what shipped. Only the two-clip section can see it.
+  'levelling-shares-one-pair': {
+    file: 'web/point-cloud.js',
+    edits: [[
+      '  levelAngles = points.levelAngles;',
+      '  levelAngles = levelAngles ?? points.levelAngles;',
+    ]],
+    fails: 'the two levelling angles held as one pair the program shares rather than one pair '
+      + 'per clip, so a clip\'s tilt composes with another clip\'s roll. Reddens exactly 1: the '
+      + 'drawn-rotation row for the clip written last. Both clips go on serialising the right two '
+      + 'angles and the clip written first is never rewritten, which is why the other two rows of '
+      + 'that section stay green',
+  },
   'rgb-contributes-no-alpha': {
     file: 'web/cloud-shader.js',
     edits: [[
@@ -350,7 +366,9 @@ const MUTATIONS = {
       ['  if (glyph > 0.0) {', '  if (false) {'],
       ['  if (glyphMix > 0.0) {', '  if (false) {', 'effects-builtin/glyph/index.frag.glsl'],
     ],
-    fails: 'twenty-two rows in total, on a tree that is otherwise green, counted out '
+    fails: 'the mark the room is drawn out of, switched off at both of the stages it gates - one '
+      + 'anchor leaves the characters still being drawn at the old sprite size. '
+      + 'Twenty-two rows in total, on a tree that is otherwise green, counted out '
       + 'because a list that undercounts sends the next reader hunting a defect that is not '
       + 'there. **Two carry the claim**: the drop-one sweep, '
       + 'naming glyph.amount, glyph.tone, glyph.hash and glyph.rain unexplained, and the count beneath '
@@ -391,7 +409,10 @@ const MUTATIONS = {
       '    vCellSeed = hash(dot(wc, vec3(127.1, 311.7, 74.7)));',
       '    vCellSeed = hash(dot(vec3(position.xy, 0.0), vec3(127.1, 311.7, 74.7)));',
     ]],
-    fails: 'three rows. The claim is the thinning equality, at 1b30eba90301 against '
+    fails: 'a character keyed on the point rather than on the cell it fell in, which draws '
+      + 'characters either way and is the difference between a room made of code and a fog of '
+      + 'it. '
+      + 'Three rows. The claim is the thinning equality, at 1b30eba90301 against '
       + 'bc9087ff1fc0. With it go both of the turbulence section\'s claims - the noise one at '
       + '0.042/255 against a clean 11.565 and the ripple one at 0.000 against a clean 1.370 - '
       + 'and those are the mutation rather than two more defects: four hundred per-point '
@@ -406,7 +427,10 @@ const MUTATIONS = {
       '    vec3 room = mat3(modelMatrix) * (p0 + (noise + regionNoise * rw) '
         + '* vnoise3(p0 * noiseScale + time * noiseSpeed * vec3(0.7, 1.13, 0.31)));',
     ]],
-    fails: 'the row that says a character travels with its point through the turbulence, '
+    fails: 'and read after the turbulence moved the point, which is the defect the probe this '
+      + 'came out of shipped and which is bit-identical to the fix wherever nothing is '
+      + 'displacing. '
+      + 'The row that says a character travels with its point through the turbulence, '
       + 'alone, and it collapses rather than drifting: 0.000/255 against a clean 11.537, with '
       + 'the control beside it still green at exactly 0. Nothing else moves - with the noise '
       + 'at zero, which is where every other arm in this file leaves it, this mutation is the '
@@ -421,7 +445,11 @@ const MUTATIONS = {
         + '+ sin((length(p0 - regionCentre) * rippleFreq '
         + '- floor(time * rippleSpeed * 8.0) * 0.125) * 6.2831853) * ripple * rw) : vec3(0.0)));',
     ]],
-    fails: 'the ripple half of the turbulence section, alone: the row that says a character '
+    fails: 'and read after the other two displacements, which run before the turbulence and sat '
+      + 'at zero in every arm - so the one above cannot see it. Both are inlined together, '
+      + 'because the pair share a radial direction and a build hashing after them hashes the '
+      + 'drawn position exactly. '
+      + 'The ripple half of the turbulence section, alone: the row that says a character '
       + 'was hashed before the ripple and the push. Its control beside it stays green at '
       + 'exactly 0, so the two phases still hold every point inside its own cell and this is '
       + 'the characters going still rather than the geometry moving. The noise rows above it '
@@ -446,7 +474,10 @@ const MUTATIONS = {
       '    float f = (glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep) '
         + '/ max(1e-4, glyphTone + glyphHash + glyphRain);',
     ]],
-    fails: 'two rows: the one that says doubling two keys renders a different frame, and the '
+    fails: 'the three keys mixed rather than summed, caught on scale rather than on the '
+      + 'character - the document\'s own discriminator is the same number under both '
+      + 'compositions. '
+      + 'Two rows: the one that says doubling two keys renders a different frame, and the '
       + 'fitted index row beneath it, where a normalising mix with the other two keys down '
       + 'draws one character at every tone and the painted count sits at 20104px across the '
       + 'whole sweep. The guard and the solo-key control stay green, because a mix still draws '
@@ -471,7 +502,9 @@ const MUTATIONS = {
       '    float f = fract(glyphTone * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
       '    float f = fract(0.0 * cellTone * (63.0 / 64.0) + glyphHash * vCellSeed + glyphRain * rainStep);',
     ]],
-    fails: 'four rows: glyph.tone unexplained in the drop-one sweep, the count beneath it one '
+    fails: 'the tonal key, and the ink ordering under it that no comparison of two pictures can '
+      + 'see. '
+      + 'Four rows: glyph.tone unexplained in the drop-one sweep, the count beneath it one '
       + 'lower than the clean run\'s, the ink ramp\'s strict row at 1.55% to 1.55%, and the '
       + 'fitted index row, where every arm of the sweep draws index 0 and paints the same '
       + '2852px. The count is quoted as a delta rather than as a figure because the clean run '
@@ -504,7 +537,9 @@ const MUTATIONS = {
       '  float rainLift = 1.0 - smoothstep(0.0, rainTrail / rainSpan, fract(vRain));',
       '  float rainLift = 1.0 - smoothstep(0.0, rainTrail / rainSpan, 1.0 - fract(vRain));',
     ]],
-    fails: 'the row that says the afterglow is above the head, alone, and it reads as the '
+    fails: 'and which side of the head its afterglow sits on, without which the wave reads as '
+      + 'rising. '
+      + 'The row that says the afterglow is above the head, alone, and it reads as the '
       + 'exact mirror of the clean run rather than as a collapse: 0.0000 above the head and '
       + '0.5282 below, against 0.5363 above and 0.0000 below. The guard above it stays green, '
       + 'so the column still carries a drop and this is a direction rather than an absence',
@@ -516,7 +551,9 @@ const MUTATIONS = {
       '    vRain = (rainPhase * rainSpeed + room.y) / (rainSpan * spanSec * 30.0) '
         + '+ hash(dot(wc.xz, vec2(269.5, 183.3)));',
     ]],
-    fails: 'five rows. The claim is the link-speed equality, 8d8414c35504 at 33ms against '
+    fails: 'its head gap in metres of room rather than in frames of whatever the link is doing, '
+      + 'which only two link speeds see. '
+      + 'Five rows. The claim is the link-speed equality, 8d8414c35504 at 33ms against '
       + '074d7390ee19 at 111ms. The other four are the whole trail section, which is fixture '
       + 'rather than finding: it renders at the default quarter-second span, so the mutated '
       + 'divisor multiplies its head gap by seven and a half, no head is left inside the '
@@ -530,7 +567,9 @@ const MUTATIONS = {
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);',
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vSize);',
     ]],
-    fails: 'four rows, on a tree that is otherwise green. **Two carry the claim** and they '
+    fails: 'the legibility band counted in reference pixels alone, which is the unit every other '
+      + 'glyph arm agrees with and so the one none of them can refuse. '
+      + 'Four rows, on a tree that is otherwise green. **Two carry the claim** and they '
       + 'are the two halves of it: the in-band '
       + 'cell coming back a hard bit at one colour, and the cut-away pair parting company - '
       + 'vSize is the un-halved reference size and carries no crop state at all, so a cut-away '
@@ -554,7 +593,9 @@ const MUTATIONS = {
       '  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize / max(k, 1.0);',
       '  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize;',
     ]],
-    fails: 'the claim row of the above-1080 section, alone: the two key settings parting '
+    fails: 'and the same band counted in the buffer\'s pixels alone, which no arm below 1080 can '
+      + 'refuse and which lets a view parameter move the graded look. '
+      + 'The claim row of the above-1080 section, alone: the two key settings parting '
       + 'company at a cell the look asked to draw as a splat. Its guard row stays green - the '
       + 'buffer, the scale and the two readings are geometry and this mutation moves none of '
       + 'them - and so does the control beside it, because a cell above the band on both '
@@ -568,7 +609,9 @@ const MUTATIONS = {
       '  vLegiblePx = outsideCrop ? 0.0 : gl_PointSize / max(k, 1.0);',
       '  vLegiblePx = gl_PointSize / max(k, 1.0);',
     ]],
-    fails: 'the cut-away row of the unit section, alone: the three keys parting company on a '
+    fails: 'the same reading with the crop taken out of it, so a cut-away point keeps a sprite '
+      + 'above the legibility band and draws a smaller character where dust is promised. '
+      + 'The cut-away row of the unit section, alone: the three keys parting company on a '
       + 'frame every point of which the crop has cut away. Its guard stays green, because the '
       + 'cut-away wall still paints, and so does the uncropped control beside it - that arm is '
       + 'inside no crop, so this mutation is the shipped expression there',
@@ -579,7 +622,9 @@ const MUTATIONS = {
       '    float rainStep = floor(vRain) * 0.6180339887498949;',
       '    float rainStep = floor(vRain);',
     ]],
-    fails: 'three rows, and it has two catchers because the scrambled set was moved onto this '
+    fails: 'the drop counter handed to the index raw, which is inert at exactly the weight the '
+      + 'key should be loudest at. '
+      + 'Three rows, and it has two catchers because the scrambled set was moved onto this '
       + 'weight for it. The row that names it is the rain-key row of the index section - the '
       + 'key at exactly 1 drawing the picture it draws with the key at 0. Its nonblank guard '
       + 'stays green, because the frame is still full of characters; what has gone is the '
@@ -595,7 +640,10 @@ const MUTATIONS = {
       '    vRain = (rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
       '    vRain = (-rainPhase * rainSpeed + room.y) / rainSpan + hash(dot(wc.xz, vec2(269.5, 183.3)));',
     ]],
-    fails: 'the descent row of the trail section, alone. Its guard above it stays green - the '
+    fails: 'and which way the whole pattern travels, which is a different claim from that one '
+      + 'and which no single frame holds - the trail is still above a head going the wrong '
+      + 'way. '
+      + 'The descent row of the trail section, alone. Its guard above it stays green - the '
       + 'head is still found at all four phases and still clear of both ends of the column - '
       + 'and so does the afterglow row, which is the whole point of the pair: the trail is '
       + 'still on the upper side of the head in a wave that is going the wrong way',
@@ -607,7 +655,11 @@ const MUTATIONS = {
         + '  fragColor = vec4(col * exposure, alpha * falloff);',
       '  fragColor = vec4(col * exposure, alpha * falloff);',
     ]],
-    fails: 'eight rows. **Two carry the claim**, one from each two-surface section: the '
+    fails: 'a fragment at exactly zero alpha writing depth, which is invisible geometry per '
+      + 'point on the hard-edged path. Its two sections are the only ones here standing two '
+      + 'surfaces up: every other plants one wall coincident with itself, where nothing is '
+      + 'behind anything to be hidden. '
+      + 'Eight rows. **Two carry the claim**, one from each two-surface section: the '
       + 'character section\'s is the far surface moving under pixels the near marks never drew '
       + 'on; the newborn section\'s is the frame with an invisible cloud in it no longer being '
       + 'the frame without it. Every guard beside them stays green, because both fixtures '
@@ -631,7 +683,9 @@ const MUTATIONS = {
       '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;',
       '  if (softEdge == 0 && glyphMix > 0.0 && alpha * falloff <= 0.0) discard;',
     ]],
-    fails: 'seven rows. **The claim is the newborn section\'s**, at 365 of 184184 pixels moved '
+    fails: 'the same discard narrowed back to characters, which is the state one commit of this '
+      + 'history was in and the wrong fix the character section cannot refuse. '
+      + 'Seven rows. **The claim is the newborn section\'s**, at 365 of 184184 pixels moved '
       + 'with all 365 behind a newborn sprite. Both guards beside it stay green - the plant is '
       + 'geometry and a condition does not move it - and so does every row of the character '
       + 'section next door, which is the whole point of this control: that section holds the '
@@ -653,7 +707,9 @@ const MUTATIONS = {
       '  if (softEdge == 0 && alpha * falloff <= 0.0) discard;',
       '  if (softEdge == 0 && (glyphMix > 0.0 || falloff <= 0.0) && alpha * falloff <= 0.0) discard;',
     ]],
-    fails: 'seven rows. The claim is the newborn section\'s, at the same 365 of 184184 - the '
+    fails: 'and narrowed the other way, to the disc\'s rim and not the point that has not faded '
+      + 'in yet. '
+      + 'Seven rows. The claim is the newborn section\'s, at the same 365 of 184184 - the '
       + 'two narrowings are indistinguishable on that fixture and that is correct rather than a '
       + 'gap, because on it every zero-alpha fragment is a birth. It is a separate control '
       + 'because it is a separate reachable mistake: this one is what a reader repairing the '
@@ -673,7 +729,9 @@ const MUTATIONS = {
       '  if (softEdge == 1) alpha *= min(116.64 / (vSize * vSize), 1.0) * vCellNorm;',
       '  if (softEdge == 1) alpha *= clamp(116.64 / (vSize * vSize), 0.05, 1.0) * vCellNorm;',
     ]],
-    fails: 'the energy-invariance row of the sprite-size section, alone, at a spread of '
+    fails: 'the pile-up fix, planted because no shipped look reaches the band - a sprite grown '
+      + 'to a cell moves the floor from 19cm out to where a person stands. '
+      + 'The energy-invariance row of the sprite-size section, alone, at a spread of '
       + '4.055 against a clean 1.046 and a band of 1.15 - the two arms past the floor carry '
       + '6391 and 13041 where every arm should carry about 3200. The guards either side stay '
       + 'green, so the sprites still render and still grow',
@@ -684,7 +742,11 @@ const MUTATIONS = {
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx);',
       '  float glyphMix = glyph * smoothstep(8.0, 16.0, vLegiblePx) + 0.02;',
     ]],
-    fails: 'eight rows, and they are one fact arriving in three places. The row that names it '
+    fails: 'and the master exactly absent at 0, which is what eleven of the twelve shipped looks '
+      + 'rest on - cascade is the exception and the only one that draws a character at all. '
+      + 'The ten-of- twelve population next door is a different set: that one is the '
+      + 'lattice-zero looks the compensation has to leave alone. '
+      + 'Eight rows, and they are one fact arriving in three places. The row that names it '
       + 'is the glyph-of-0-is-inert equality in the defaults section. **Six are '
       + 'section 1b** - all five readings at 6 of 6 frames, plus the raster\'s cross-build row - '
       + 'because 1b renders at parameter defaults against a build that predates the glyph '
@@ -720,7 +782,8 @@ const MUTATIONS = {
       '  vCellNorm = max((1.0 - lattice) * (1.0 - lattice), min(1.0, spriteCells * spriteCells));',
       '  vCellNorm = max((1.0 - lattice) * (1.0 - lattice), spriteCells * spriteCells);',
     ]],
-    fails: 'the cell-size-at-lattice-zero row of the defaults section, alone, at c4c44f0faac5 '
+    fails: 'and the energy correction, which rides no master at all and so is excused by neither. '
+      + 'The cell-size-at-lattice-zero row of the defaults section, alone, at c4c44f0faac5 '
       + 'against 68f63ae52440. The control beside it stays green, so the two cell sizes still '
       + 'reach the picture with the lattice raised and this is the compensation failing to be '
       + 'one rather than a parameter going dark',
@@ -1003,6 +1066,9 @@ const LANDING = {
   'datamosh.splay': 'k.mosh.uniforms.moshSplay.value',
   'datamosh.line': 'k.mosh.uniforms.moshLine.value',
   'datamosh.grain': 'k.mosh.uniforms.moshGrain.value',
+  'datamosh.drift': 'k.mosh.uniforms.moshDrift.value',
+  'datamosh.speed': 'k.mosh.uniforms.moshSpeed.value',
+  'datamosh.cycleRefresh': 'k.mosh.uniforms.moshCycleRefresh.value',
   'datamosh.refresh': 'k.mosh.uniforms.moshRefresh.value',
   denoise: 'k.uniforms.denoise.value',
   edgeTol: 'k.uniforms.edgeTol.value',
@@ -1010,6 +1076,9 @@ const LANDING = {
   tilt: 'k.worldTilt().map((v) => Number(v.toFixed(9)))',
   roll: 'k.worldTilt().map((v) => Number(v.toFixed(9)))',
   camera: '[...k.programCamera.position.toArray(), ...k.programCamera.quaternion.toArray(), k.programCamera.fov]',
+  // The selected clip's own placement group, which is the node the registry's write moves.
+  transform: '((c) => [...c.placement.position, ...c.placement.quaternion])'
+    + '(k.timeline.clips().find((clip) => clip.selected))',
 };
 
 /**
@@ -1142,6 +1211,9 @@ const EXPECT = {
   'datamosh.splay': (v) => v,
   'datamosh.line': (v) => v,
   'datamosh.grain': (v) => v,
+  'datamosh.drift': (v) => v,
+  'datamosh.speed': (v) => v,
+  'datamosh.cycleRefresh': (v) => v,
   'datamosh.refresh': (v) => v,
   denoise: (v) => (v ? 1 : 0),
   edgeTol: (v) => v,
@@ -1151,6 +1223,7 @@ const EXPECT = {
   tilt: (v, all) => levellingQuaternion(v, all.roll),
   roll: (v, all) => levellingQuaternion(all.tilt, v),
   camera: (v) => [...v.position, ...v.quaternion, v.fov],
+  transform: (v) => [...v.position, ...v.quaternion],
 };
 
 // A scrambled but valid set: every value off its default and on its own step grid,
@@ -1161,9 +1234,9 @@ const SCRAMBLE = {
   exposure: 2.05,
   additive: true,
   'glyph.amount': 0.5,
-  'glyph.tone': 0.61,
-  'glyph.hash': 0.37,
-  'glyph.rain': 1,
+  'glyph.tone': 0.8,
+  'glyph.hash': 0.9,
+  'glyph.rain': 0.73,
   tilt: 13.5,
   roll: -21.5,
   near: 0.35,
@@ -1184,8 +1257,8 @@ const SCRAMBLE = {
   cell: 0.11,
   'glitch.amount': 0.31,
   'glitch.density': 0.62,
-  'glitch.shove': 1.23,
-  'glitch.tint': 4.35,
+  'glitch.shove': 1,
+  'glitch.tint': 3,
   'glitch.bands': 27,
   'glitch.axis': 0.78,
   'glitch.rate': 13.5,
@@ -1198,7 +1271,7 @@ const SCRAMBLE = {
   regionRound: 0.9,
   regionSoft: 0.6,
   'push.amount': 0.35,
-  'noise.region': 0.5,
+  'noise.region': 0.25,
   'mask.amount': 0.4,
   'ripple.amount': 0.14,
   'ripple.freq': 6.3,
@@ -1211,7 +1284,7 @@ const SCRAMBLE = {
   'ghost.fill': 0.7,
   'contour.amount': 0.15,
   'contour.bands': 27,
-  'contour.width': 0.27,
+  'contour.width': 0.2,
   'blackwall.amount': 0.6,
   'blackwall.sweep': 0.9,
   'blackwall.scan': 0.72,
@@ -1231,7 +1304,7 @@ const SCRAMBLE = {
   'rain.speed': 1.35,
   'rain.span': 0.73,
   'rain.trail': 0.28,
-  bloom: 1.35,
+  bloom: 1,
   trails: 0.44,
   'rgbsplit.amount': 2.3,
   'raster.amount': 0.61,
@@ -1257,18 +1330,28 @@ const SCRAMBLE = {
   'datamosh.splay': 0.34,
   'datamosh.line': 0.38,
   'datamosh.grain': 7,
+  'datamosh.drift': 1,
+  'datamosh.speed': 4,
+  'datamosh.cycleRefresh': true,
   'datamosh.refresh': 1.85,
   denoise: false,
   edgeTol: 340,
   renderScale: 85,
   // A unit quaternion, 30 degrees about Y, so the read-back is exact.
   camera: { position: [0.4, 0.9, 1.1], quaternion: [0, 0.25881904510252074, 0, 0.9659258262890683], fov: 42 },
+  // Small on purpose: a placement that carried the cloud out of frame would make every other
+  // row here a comparison of two black pictures. 10 degrees about Y, so the read-back is exact.
+  transform: { position: [0.06, -0.03, 0.04], quaternion: [0, 0.08715574274765817, 0, 0.9961946980917455] },
 };
 
 // The closed list of parameters allowed to leave the image untouched when they are dropped
 // from a restore, with the reason each one cannot reach the pixels here. Anything else
 // landing in that bucket is a failure.
 const NO_PIXEL_EFFECT = {
+  bottom: 'the scrambled lower face is below this fixture - proven instead by the focused '
+    + 'bottom-face arm below',
+  snapDelta: 'the pinned frames do not straddle its threshold - proven instead by the planted '
+    + '300mm jump below',
   crop: 'its scrambled value is its default, because releasing the box would make the '
     + 'six faces it gates unobservable - proven instead by the section below',
   spin: 'auto-orbit only advances when the animation loop calls controls.update, '
@@ -1280,6 +1363,8 @@ const NO_PIXEL_EFFECT = {
     + 'rather than assumed - the run prints its own span two sections up. It reaches pixels in '
     + 'timeline-check section 7, where the arm is twelve seconds in and `--mutate '
     + 'mosh-never-refreshes` reddens two rows',
+  'datamosh.cycleRefresh': 'the run is shorter than the scrambled refresh period - proven '
+    + 'instead by the focused refresh-cycle arm below',
 };
 
 const PAGE_HELPERS = `
@@ -1612,6 +1697,13 @@ const GOLDEN_ABSENT = new Set([
   'tPresetFile',
   'datamosh.amount', 'datamosh.reach', 'datamosh.decay', 'datamosh.splay',
   'datamosh.line', 'datamosh.grain', 'datamosh.refresh',
+  // The three added after the pass first shipped and missed here, which stopped the golden boot
+  // comparison and took every assertion after it down with it: main ran 13 of 155. Checked
+  // against the manifest rather than found one run at a time - all ten of its params are named
+  // here now, so the next one added is a row that reddens rather than a tool that stops.
+  'datamosh.drift', 'datamosh.speed', 'datamosh.cycleRefresh',
+  'camLens',
+  'transform',
 ]);
 const absentBefore = (name, before) => GOLDEN_ABSENT.has(name) && before === undefined;
 
@@ -1947,7 +2039,9 @@ console.log('\n[registry] the declaration');
     `every declared parameter has a landing site here (${names.length})`,
     show(names.filter((n) => !(n in LANDING))));
 
-  const kinds = { scalar: [], step: [], pose: [] };
+  // Every kind this build interpolates, and an unknown one is a failure by existing: a kind the
+  // evaluators have no branch for would be read down the scalar path and stored as NaN.
+  const kinds = { scalar: [], step: [], pose: [], placement: [] };
   const tags = { look: [], composition: [], view: [] };
   let bad = [];
   for (const [name, spec] of Object.entries(declared)) {
@@ -1965,9 +2059,21 @@ console.log('\n[registry] the declaration');
     }
   }
   check(bad.length === 0, 'every parameter carries a usable kind, tag and range', bad.join('; '));
-  check(kinds.scalar.length > 0 && kinds.step.length > 0 && kinds.pose.length > 0,
-    'all three interpolation kinds are in use',
-    `scalar ${kinds.scalar.length}, step ${kinds.step.length} (${kinds.step.join(',')}), pose ${kinds.pose.join(',')}`);
+  check(Object.values(kinds).every((names) => names.length > 0),
+    'all four interpolation kinds are in use',
+    `scalar ${kinds.scalar.length}, step ${kinds.step.length} (${kinds.step.join(',')}), `
+      + `pose ${kinds.pose.join(',')}, placement ${kinds.placement.join(',')}`);
+  // A placement is a pose without a lens, and the pair of them is what the panel draws no row
+  // for. Read off the registry rather than named here, so a third one added later is asked.
+  const world = [...kinds.pose, ...kinds.placement];
+  check(world.every((n) => declared[n].tag === 'composition'),
+    'and every position-and-rotation value is composition rather than look, so no preset carries one',
+    world.map((n) => `${n} ${declared[n].tag}`).join(', '));
+  // The scope is what says which block of the document a value comes back out of, and a
+  // placement without one would be stored nowhere and reload at the origin.
+  check(kinds.placement.every((n) => declared[n].scope === 'clip'),
+    'and a placement is scoped to the clip it places',
+    kinds.placement.map((n) => `${n} scope=${declared[n].scope ?? 'none'}`).join(', '));
   console.log(`        look ${tags.look.length}: ${tags.look.join(' ')}`);
   console.log(`        composition ${tags.composition.length}: ${tags.composition.join(' ')}`);
   console.log(`        view ${tags.view.length}: ${tags.view.join(' ')}`);
@@ -2010,7 +2116,7 @@ console.log('\n[registry] bad values are refused rather than coerced');
   ];
   const ACCEPT = [
     ['camera', JSON.stringify(SCRAMBLE.camera)],
-    ['bloom', '1.5'],
+    ['bloom', '0.75'],
     ['additive', 'true'],
   ];
   const asCases = (rows) => rows
@@ -2131,6 +2237,7 @@ console.log('\n[registry] every parameter round-trips to where the renderer read
     const k = globalThis.__kinect;
     k.params.reset();
     k.params.apply(${JSON.stringify(values)});
+    k.renderer.render(k.scene, k.freeCamera);
     return { values: k.params.values(k.params.names()), landing: ${landingReader} };
   })()`);
 
@@ -2159,6 +2266,7 @@ console.log('\n[registry] the side effects that are not a uniform write');
     const k = globalThis.__kinect;
     k.params.reset();
     k.params.apply(${JSON.stringify(values)});
+    k.renderer.render(k.scene, k.freeCamera);
     return {
       drawRange: k.geometry.drawRange.count,
       bloom: k.bloom.enabled, trails: k.afterimage.enabled, grade: k.grade.enabled,
@@ -2192,7 +2300,7 @@ console.log('\n[registry] the side effects that are not a uniform write');
     [{ 'streak.angle': 90 }, { bloom: false, trails: false, grade: false }],
     [{ 'halation.amount': 0.02 }, { bloom: false, trails: false, grade: true }],
     [{ 'stock.amount': 0.02 }, { bloom: false, trails: false, grade: true }],
-    [{ 'halation.radius': 80 }, { bloom: false, trails: false, grade: false }],
+    [{ 'halation.radius': 60 }, { bloom: false, trails: false, grade: false }],
     [{ 'halation.threshold': 0.9 }, { bloom: false, trails: false, grade: false }],
     [{ 'halation.tint': 1 }, { bloom: false, trails: false, grade: false }],
     [{ 'stock.balance': -1 }, { bloom: false, trails: false, grade: false }],
@@ -2560,12 +2668,21 @@ console.log('\n[registry] the crop switch, which the sweep above cannot see');
     right: defaults.right,
     bottom: defaults.bottom,
     top: defaults.top,
+    near: 1.5,
+    far: 2.5,
   };
   const depthBiting = await run(depthOnly);
   const depthReleased = await run({ ...depthOnly, crop: false });
   check(!eq(depthBiting, depthReleased),
     'and it reaches the depth pair, not only the four lateral faces',
     eq(depthBiting, depthReleased) ? 'identical with only near/far authored' : 'the box releases in depth too');
+
+  const bottomOnly = { ...defaults, crop: true, bottom: 0.5 };
+  const bottomBiting = await run(bottomOnly);
+  const bottomReleased = await run({ ...bottomOnly, crop: false });
+  check(!eq(bottomBiting, bottomReleased),
+    'and the lower face reaches the image when it crosses this fixture',
+    eq(bottomBiting, bottomReleased) ? 'identical with bottom at 0.5m' : 'the lower face cuts the cloud');
 
   const landing = await page.evaluate(`(() => {
     const k = globalThis.__kinect;
@@ -2579,6 +2696,15 @@ console.log('\n[registry] the crop switch, which the sweep above cannot see');
   check(eq(landing.off, landing.on) && eq(landing.on, [SCRAMBLE.near, SCRAMBLE.far]),
     'and it releases by not testing rather than by moving the planes, so the depth ramp is unchanged',
     `nearClip/farClip released ${JSON.stringify(landing.off)}, applied ${JSON.stringify(landing.on)}`);
+}
+
+console.log('\n[registry] the datamosh refresh switch crosses a cycle boundary');
+{
+  const cycling = await run({ ...SCRAMBLE, 'datamosh.refresh': 0.2, 'datamosh.cycleRefresh': true });
+  const continuous = await run({ ...SCRAMBLE, 'datamosh.refresh': 0.2, 'datamosh.cycleRefresh': false });
+  check(!eq(cycling, continuous),
+    'cycle refresh changes the image after the first refresh boundary',
+    eq(cycling, continuous) ? 'identical across a 0.2s boundary' : 'the histories diverge');
 }
 
 console.log('\n[registry] the streak goes where the angle points');
@@ -2678,6 +2804,81 @@ console.log('\n[registry] the streak goes where the angle points');
   }
 }
 
+console.log('\n[registry] a clip-scope write lands on the clip it was made on and on no other');
+{
+  // Levelling, because it is the one clip-scope value composed out of two parameters: `tilt` and
+  // `roll` each write one member of a pair and then compose both, so a pair the program shares
+  // rather than a pair per clip makes one clip's tilt compose with another clip's roll. Every
+  // other clip value writes one uniform cell and cannot be caught this way.
+  const TILT = 30;
+  const ROLL = 45;
+  const staged = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    const one = doc.clips[0];
+    // Two clips of the one take this page holds, which is an edit the document can spell. Both
+    // levelled at nothing in the document rather than wherever the sections above left them, so
+    // the two angles each clip ends up holding are the two written below and nothing else.
+    const flat = { ...one.params, tilt: 0, roll: 0 };
+    doc.clips = [
+      { ...one, id: 'c1', start: 0, params: flat },
+      { ...one, id: 'c2', start: 0, params: flat },
+    ];
+    k.library.restoreProject(doc);
+    await k.timeline.settled();
+    // The order that separates a pair per clip from a pair per program: one clip is given a
+    // roll, and then the other is given only a tilt. A shared pair still holds the roll.
+    k.timeline.select('c2');
+    k.params.set('roll', ${ROLL});
+    k.timeline.select('c1');
+    k.params.set('tilt', ${TILT});
+    // Off every clip's own group rather than through the selection: the worldTilt handle answers
+    // for the selected clip alone, so a leak into an unselected clip is invisible to it, and
+    // selecting each clip in turn to read it would pass a build that reloaded on selection.
+    const drawn = Object.fromEntries(k.timeline.clips()
+      .map((c) => [c.id, c.level.map((v) => Number(v.toFixed(9)))]));
+    const body = k.library.serialiseProjectBody();
+    const held = Object.fromEntries(body.clips
+      .map((c) => [c.id, { tilt: c.params.tilt, roll: c.params.roll }]));
+    return { drawn, held, ids: body.clips.map((c) => c.id) };
+  })()`);
+
+  const wantC1 = levellingQuaternion(TILT, 0);
+  const wantC2 = levellingQuaternion(0, ROLL);
+  console.log(`  c1 holds tilt ${staged.held.c1?.tilt} roll ${staged.held.c1?.roll} and draws `
+    + `${show(staged.drawn.c1)}; c2 holds tilt ${staged.held.c2?.tilt} roll ${staged.held.c2?.roll} `
+    + `and draws ${show(staged.drawn.c2)}`);
+
+  check(eq(staged.ids, ['c1', 'c2']),
+    'the edit holds two clips, which is the only fixture where the rows below can be false',
+    show(staged.ids));
+  check(!eq(wantC1, wantC2),
+    'and the two rotations they should be drawing are different, so the two rows below are not '
+    + 'one row asked twice',
+    `${show(wantC1)} against ${show(wantC2)}`);
+  check(eq(staged.held.c1, { tilt: TILT, roll: 0 }) && eq(staged.held.c2, { tilt: 0, roll: ROLL }),
+    'each clip serialises the two angles it was written with and not the other clip\'s',
+    `c1 ${show(staged.held.c1)}, c2 ${show(staged.held.c2)}`);
+  check(eq(staged.drawn.c1, wantC1),
+    'and the clip written last draws the rotation its own two angles compose to, so a write made '
+    + 'on it did not pick up the roll standing on another clip',
+    `${show(staged.drawn.c1)} against ${show(wantC1)}`);
+  check(eq(staged.drawn.c2, wantC2),
+    'and the clip written first still draws its own, so the later write on another clip did not '
+    + 'reach back into it',
+    `${show(staged.drawn.c2)} against ${show(wantC2)}`);
+
+  // Back to one clip, because every section after this one is written against a single-clip
+  // edit and a second clip left standing would draw into all of them.
+  await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips = [{ ...doc.clips[0], id: 'c1', start: 0 }];
+    k.library.restoreProject(doc);
+    await k.timeline.settled();
+  })()`);
+}
+
 console.log('\n[registry] the ripple opens the region by itself');
 {
   const alone = { ...SCRAMBLE, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0 };
@@ -2690,7 +2891,7 @@ console.log('\n[registry] the ripple opens the region by itself');
       : `${still.filter((h, i) => h !== moving[i]).length} of ${still.length} frames differ`);
 }
 
-console.log('\n[registry] the cloud carries a rotation and nothing else');
+console.log('\n[registry] the cloud carries a rotation and a placement and nothing else');
 {
   const m = await page.evaluate(`(() => {
     const k = globalThis.__kinect;
@@ -2709,9 +2910,18 @@ console.log('\n[registry] the cloud carries a rotation and nothing else');
     };
   })()`);
   check(m.found, 'the point cloud is reachable from the scene, so the row below is about it');
-  check(m.found && eq(m.position, [0, 0, 0]) && eq(m.scale, [1, 1, 1]),
-    'and its world matrix is a pure rotation, so the lattice\'s transpose is its inverse',
-    m.found ? `position ${JSON.stringify(m.position)} scale ${JSON.stringify(m.scale)}` : '');
+  // The scale term alone is what the shaders rest on: `mat3(modelMatrix)` drops the fourth
+  // column, so a translation cannot break the transpose and a scale or a shear can. The origin
+  // used to be asserted with it and no longer can be - a clip carries a placement now - so the
+  // translation is asked against what the registry holds for it rather than dropped.
+  check(m.found && eq(m.scale, [1, 1, 1]),
+    'and its world matrix carries no scale, so the lattice\'s transpose is its inverse',
+    m.found ? `scale ${JSON.stringify(m.scale)}` : '');
+  const placed = await page.evaluate(
+    "globalThis.__kinect.params.get('transform').position.map((v) => Number(v.toFixed(9)))");
+  check(m.found && eq(m.position, placed),
+    'and the translation in it is the placement the registry holds for this clip and nothing else',
+    `group ${JSON.stringify(m.position)} against registry ${JSON.stringify(placed)}`);
 }
 
 console.log('\n[registry] the ripple advances in steps, not smoothly');
@@ -2748,11 +2958,12 @@ console.log('\n[registry] a pair planted with a known speed in it');
 
   // The previous frame is built from a rule rather than filled with a value, so one helper
   // plants both a uniform wall and a chequered one: a block size of 0 is the plane.
-  const shot = ({ prevMm, spanSec, motion, block = 0 }) => page.evaluate(`(async () => {
+  const shot = ({ prevMm, spanSec, motion, block = 0, snapDelta = 250 }) => page.evaluate(`(async () => {
     ${PAGE_HELPERS}
     k.params.reset();
     k.params.apply(${JSON.stringify(LOOK)});
     k.params.set('duotone.motion', ${motion});
+    k.params.set('snapDelta', ${snapDelta});
     k.drive.reset();
     pinCamera(k.freeCamera);
     const plane = (mm) => new Uint16Array(512 * 424).fill(mm);
@@ -2799,6 +3010,7 @@ console.log('\n[registry] a pair planted with a known speed in it');
     fast: await shot({ ...fast, motion: 1 }),
     brief: await shot({ ...brief, motion: 1 }),
     jumped: await shot({ ...jumped, motion: 1 }),
+    joined: await shot({ ...jumped, motion: 1, snapDelta: 410 }),
     chequer: await shot({ ...chequer, motion: 1 }),
   };
 
@@ -2831,6 +3043,11 @@ console.log('\n[registry] a pair planted with a known speed in it');
     'a jump past the snap threshold reads as a different surface, not as fast motion',
     on.jumped.hash === on.still.hash ? `both ${on.still.hash.slice(0, 12)} at a 300mm jump`
       : `${on.jumped.hash.slice(0, 12)} vs ${on.still.hash.slice(0, 12)} - the gate is off the speed`);
+
+  check(on.joined.hash !== on.still.hash && on.joined.hash !== on.jumped.hash,
+    'raising the snap threshold joins the same 300mm pair into a moving surface',
+    on.joined.hash === on.still.hash ? 'still treated as two surfaces at 410mm'
+      : `${on.joined.hash.slice(0, 12)} at 410mm vs ${on.jumped.hash.slice(0, 12)} at 250mm`);
 
   check(on.chequer.hash !== on.fast.hash && on.chequer.hash !== on.still.hash,
     'a chequered pair is neither of the uniform frames, so the speed is per point',

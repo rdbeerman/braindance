@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { DEPTH_H, DEPTH_W } from './format.js';
 import { renderer } from './scene.js';
-import { depthCurr } from './gpu-textures.js';
 
 /**
  * How the ghost a ray leaves behind when it lands on a different surface accumulates,
@@ -23,8 +22,8 @@ import { depthCurr } from './gpu-textures.js';
  *   .a  depth at the previous arrival, mm - the swap detector itself
  *
  * **Nothing is allocated and no GL is touched while this module evaluates.** The two
- * targets, the uniforms and the quad are built by `buildSurfaceMemory`, which
- * `web/main.js` calls in the order it writes out - because a module body runs before
+ * targets, the uniforms and the quad are built by `createSurfaceMemory`, which
+ * `web/cloud-instance.js` calls in the order it writes out - because a module body runs before
  * its importer's first statement, so anything built up here would put the boot order
  * at the mercy of how the import list happens to be sorted.
  *
@@ -77,18 +76,25 @@ const makeStateTarget = (type) => new THREE.WebGLRenderTarget(DEPTH_W, DEPTH_H, 
   generateMipmaps: false,
 });
 
-// Read by `web/point-cloud.js`, whose `stateTex` is seeded with the current one, and by
-// the reset that clears both. They are live bindings rather than a pair anybody may
-// assign, because the only legitimate way for them to change places is the step below
-// having rendered into the far one first.
+// The selected cloud's two targets, as views rather than as state of their own. Read by
+// `web/main.js`, which seeds the cloud's `stateTex` from the current one and clears both on a
+// reset. They are views rather than a pair anybody may assign, because the only legitimate way
+// for them to change places is the step below having rendered into the far one first.
 export let statePrev = null;
 export let stateNext = null;
 
-// Written only by the step below, which is why they are private: a caller able to set
-// `dt` or the snap threshold without rendering would leave the two targets describing
-// a gap that never happened.
-let stateUniforms = null;
-let stateQuad = null;
+// The selected cloud's memory: its two targets, the source textures it ages, and the uniforms
+// and quad the step renders with. Those last two have no reader outside this file, because a
+// caller able to set `dt` or the snap threshold without rendering would leave the two targets
+// describing a gap that never happened.
+let selected = null;
+
+// Repoints the views above at the selected cloud - after a select, and after every step, since
+// the step ends by swapping which target is current.
+const pointViews = () => {
+  statePrev = selected.statePrev;
+  stateNext = selected.stateNext;
+};
 
 const stateVertexShader = /* glsl */ `
     in vec3 position;
@@ -145,12 +151,14 @@ const stateFragmentShader = /* glsl */ `
   `;
 
 /**
- * Builds the two targets, the uniforms and the quad that renders one step.
+ * Builds one cloud's two targets, the uniforms and the quad that renders one step.
  *
- * Called after the source textures exist, because the pass reads the current depth
- * frame and a uniform seeded with null would leave the first step sampling nothing.
+ * The textures it will age are handed over rather than read off whichever cloud is selected, so
+ * a memory ages the frames its own cloud bound. Called after those textures exist, because the
+ * pass reads the current depth frame and a uniform seeded with null would leave the first step
+ * sampling nothing.
  */
-export function buildSurfaceMemory() {
+export function createSurfaceMemory(textures) {
   // Float where the context can render to it, half-float where it cannot. Asked of the
   // live context rather than assumed, because the difference is in what the .g channel
   // can still resolve after several seconds of 33ms steps.
@@ -158,23 +166,44 @@ export function buildSurfaceMemory() {
     ? THREE.FloatType
     : THREE.HalfFloatType;
 
-  statePrev = makeStateTarget(stateType);
-  stateNext = makeStateTarget(stateType);
+  const memory = {
+    textures,
+    statePrev: makeStateTarget(stateType),
+    stateNext: makeStateTarget(stateType),
+    uniforms: null,
+    quad: null,
+  };
 
-  stateUniforms = {
-    depthCurr: { value: depthCurr },
-    statePrev: { value: statePrev.texture },
+  memory.uniforms = {
+    depthCurr: { value: textures.depthCurr },
+    statePrev: { value: memory.statePrev.texture },
     resolution: { value: new THREE.Vector2(DEPTH_W, DEPTH_H) },
     dt: { value: 1 / 30 },
     snapDelta: { value: 250 },
   };
 
-  stateQuad = new FullScreenQuad(new THREE.RawShaderMaterial({
+  memory.quad = new FullScreenQuad(new THREE.RawShaderMaterial({
     glslVersion: THREE.GLSL3,
-    uniforms: stateUniforms,
+    uniforms: memory.uniforms,
     vertexShader: stateVertexShader,
     fragmentShader: stateFragmentShader,
   }));
+
+  return memory;
+}
+
+/** Releases one cloud's two targets and the quad that renders into them. */
+export function disposeSurfaceMemory(memory) {
+  memory.statePrev.dispose();
+  memory.stateNext.dispose();
+  memory.quad.material.dispose();
+  memory.quad.dispose();
+}
+
+/** Points the step below, and the two views above, at one cloud's memory. */
+export function selectSurfaceMemory(memory) {
+  selected = memory;
+  pointViews();
 }
 
 /**
@@ -190,16 +219,17 @@ export function buildSurfaceMemory() {
  * this step produced.
  */
 export function stepSurfaceMemory(dtSec, snapDelta) {
-  stateUniforms.depthCurr.value = depthCurr;
-  stateUniforms.statePrev.value = statePrev.texture;
-  stateUniforms.dt.value = dtSec;
-  stateUniforms.snapDelta.value = snapDelta;
+  selected.uniforms.depthCurr.value = selected.textures.depthCurr;
+  selected.uniforms.statePrev.value = selected.statePrev.texture;
+  selected.uniforms.dt.value = dtSec;
+  selected.uniforms.snapDelta.value = snapDelta;
 
-  renderer.setRenderTarget(stateNext);
-  stateQuad.render(renderer);
+  renderer.setRenderTarget(selected.stateNext);
+  selected.quad.render(renderer);
   renderer.setRenderTarget(null);
 
-  const swap = statePrev;
-  statePrev = stateNext;
-  stateNext = swap;
+  const swap = selected.statePrev;
+  selected.statePrev = selected.stateNext;
+  selected.stateNext = swap;
+  pointViews();
 }

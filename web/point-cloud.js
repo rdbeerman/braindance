@@ -4,13 +4,12 @@
 // crop predicate at the foot is here because it reads the table's own faces.
 //
 // Nothing is allocated and no GL is touched while this module evaluates - the four source cells
-// come back from `buildTextures` and `stateTex` reads a target `buildSurfaceMemory` has not
+// come back from `createTextures` and `stateTex` reads a target `createSurfaceMemory` has not
 // made yet, so a table built up here would hold nulls for both.
 
 import * as THREE from 'three';
 import { DEPTH_H, DEPTH_W, POINTS } from './format.js';
 import { scene } from './scene.js';
-import { statePrev } from './surface-memory.js';
 
 // The depth pair's defaults, named once because three things have to agree about them: the two
 // uniforms in the table below, the registry entries that overwrite them at boot, and
@@ -19,28 +18,34 @@ import { statePrev } from './surface-memory.js';
 export const CLIP_NEAR_DEFAULT = 0.05;
 export const CLIP_FAR_DEFAULT = 6;
 
-// The cloud as four live bindings, assigned once by the build below and read from
-// `web/main.js` for the rest of the program's life. Only the table has an entry in
-// `tools/module-check.mjs`: a uniform cell is the interface three.js publishes, and the other
-// three are reached through their own methods rather than written into.
+// The selected cloud as seven live bindings, read from `web/main.js` for the rest of the
+// program's life and repointed by the select below. Two have an entry in
+// `tools/module-check.mjs` - the uniform table and the levelling pair, both of them written
+// into from outside - and the other five are reached through their own methods.
 export let geometry = null;
 export let uniforms = null;
 export let material = null;
 export let cloud = null;
+// The group the levelling rotation rides, which is the selected clip's rather than the program's.
+export let level = null;
+// The two angles that rotation is composed from, in degrees, and this clip's own pair. Held
+// rather than read back off the group: a quaternion does not say which of the two angles made
+// it, and each of the two sliders writes one of them and then recomposes both.
+export let levelAngles = null;
+// The group the clip's placement rides, above levelling. Where the clip sits in the room.
+export let transform = null;
 
-/**
- * Builds the geometry, the uniform table, the material and the cloud, and puts it in the scene.
- *
- * `sourceCells` and `program` are passed in rather than imported, so the one place they are
- * wired together is the boot `web/main.js` writes out - which is what lets this module compile
- * a shader without ever knowing there is a server. Called after the surface memory as well as
- * after the textures, because `stateTex` is seeded with the ghost target and the first frame
- * samples that seed.
- */
-export function buildPointCloud(sourceCells, program) {
+// The pixel coordinates every cloud draws, built at most once. The two attributes are a function
+// of the depth grid alone, so a second cloud reading a second copy of the same 434,176 vertices
+// would be seven megabytes saying what this one already says. Built on demand rather than up
+// here, so this module still allocates nothing while it evaluates.
+let sharedGeometry = null;
+
+function pixelGeometry() {
+  if (sharedGeometry) return sharedGeometry;
   // Two vertices per depth pixel: one for the live point, one for the ghost it leaves behind.
   // The ghost half is left out of the draw range entirely when nothing can be shed.
-  geometry = new THREE.BufferGeometry();
+  sharedGeometry = new THREE.BufferGeometry();
   const pixelCoords = new Float32Array(POINTS * 2 * 3);
   const slotAttr = new Float32Array(POINTS * 2);
   for (let slot = 0; slot < 2; slot++) {
@@ -54,13 +59,24 @@ export function buildPointCloud(sourceCells, program) {
       }
     }
   }
-  geometry.setAttribute('position', new THREE.BufferAttribute(pixelCoords, 3));
-  geometry.setAttribute('aSlot', new THREE.BufferAttribute(slotAttr, 1));
-  geometry.setDrawRange(0, POINTS);
-  geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -3), 12);
+  sharedGeometry.setAttribute('position', new THREE.BufferAttribute(pixelCoords, 3));
+  sharedGeometry.setAttribute('aSlot', new THREE.BufferAttribute(slotAttr, 1));
+  sharedGeometry.setDrawRange(0, POINTS);
+  sharedGeometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -3), 12);
+  return sharedGeometry;
+}
 
-
-  uniforms = {
+/**
+ * Builds one cloud's uniform table, material and points, and puts it in the scene.
+ *
+ * `sourceCells`, `stateTexture` and `program` are passed in rather than imported, so the one
+ * place they are wired together is `web/cloud-instance.js` - which is what lets this module
+ * compile a shader without ever knowing there is a server. Called after the surface memory as
+ * well as after the textures, because `stateTex` is seeded with the ghost target and the first
+ * frame samples that seed.
+ */
+export function createPointCloud(sourceCells, stateTexture, program) {
+  const uniforms = {
     // The four source textures, referenced rather than restated, so what the shader samples and
     // what the door last bound cannot come apart. A fresh `{ value: … }` would hold frame one.
     depthPrev: sourceCells.depthPrev,
@@ -200,7 +216,7 @@ export function buildPointCloud(sourceCells, program) {
     // renders what it rendered before the span existed.
     duotoneSpan: { value: CLIP_FAR_DEFAULT - CLIP_NEAR_DEFAULT },
     duotoneMotion: { value: 0 },
-    stateTex: { value: statePrev.texture },
+    stateTex: { value: stateTexture },
     fadeTime: { value: 0.12 },
     wakeTime: { value: 0 },
     sinceFrameSec: { value: 0 },
@@ -211,7 +227,7 @@ export function buildPointCloud(sourceCells, program) {
   // nothing checks it in either direction, and a uniform with no key reads a silent zero -
   // `test/cloud-shader.test.mjs` asks it of the assembled program rather than of any file.
   const { vertexShader, fragmentShader } = program;
-  material = new THREE.ShaderMaterial({
+  const material = new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
     uniforms,
     vertexShader,
@@ -220,8 +236,55 @@ export function buildPointCloud(sourceCells, program) {
     depthWrite: true,
   });
 
-  cloud = new THREE.Points(geometry, material);
-  scene.add(cloud);
+  const geometry = pixelGeometry();
+  const cloud = new THREE.Points(geometry, material);
+  // The geometry is shared; set its range immediately before this cloud draws from its own look.
+  cloud.onBeforeRender = () => {
+    const shedding = uniforms.fadeTime.value > 0 || uniforms.wakeTime.value > 0;
+    geometry.setDrawRange(0, shedding ? POINTS * 2 : POINTS);
+  };
+  // Two groups above the points, because the two rotations answer to different owners: the outer
+  // one is where the clip is placed in the room, the inner one is levelling, and a single node
+  // carrying both would make a clip's placement a function of how the mount was bolted.
+  const level = new THREE.Group();
+  const transform = new THREE.Group();
+  level.add(cloud);
+  transform.add(level);
+  scene.add(transform);
+  return { geometry, uniforms, material, cloud, level, levelAngles: { tilt: 0, roll: 0 }, transform };
+}
+
+/**
+ * Points the seven bindings above, and everything below that reads them, at one cloud.
+ *
+ * The levelling rotation is in that list, and so are the two angles it is composed from: they
+ * ride a group and a pair of their own per clip, so the readers that ask what "up" is are asking
+ * about the selected clip rather than about the program. One shared pair is what let a clip's
+ * tilt compose with another clip's roll. The placement above it is there for the same reason -
+ * the registry's `transform` writes it, and a write reaches whichever clip the selection or a
+ * `withClip` walk has the core pointed at.
+ */
+export function selectPointCloud(points) {
+  geometry = points.geometry;
+  uniforms = points.uniforms;
+  material = points.material;
+  cloud = points.cloud;
+  level = points.level;
+  levelAngles = points.levelAngles;
+  transform = points.transform;
+}
+
+/**
+ * Releases one cloud: its node out of the scene, then the material's compiled programs.
+ *
+ * The geometry is left alone on purpose - it is shared, so disposing it here would take the
+ * vertices out from under every other cloud.
+ */
+export function disposePointCloud(points) {
+  points.transform.removeFromParent();
+  points.level.remove(points.cloud);
+  points.transform.remove(points.level);
+  points.material.dispose();
 }
 
 /**

@@ -46,6 +46,30 @@ const halfStep = (spec) => spec.step / 2 + 1e-9;
 // A mutation whose text is not found exactly once is refused: a replacement matching nothing would
 // run the unmutated page and be recorded as a miss.
 const MUTATIONS = {
+  // The two below plant the speed gesture's anchor as it shipped, when an edit was one clip
+  // starting at zero and clip time and project time were the same number. Section 6h is the only
+  // thing in the suite that can see either, because every other arm here parks a clip at zero.
+  //
+  // The gesture anchors on the source second at the playhead, read out of a clip-local curve
+  // with a project second: on a clip starting at 10s it anchors ten seconds of source too late.
+  'rate-anchor-skips-clip-start': { file: 'web/main.js', edits: [[
+    '    source: sourceSecOfProgram(timeline.programSec),',
+    '    source: retime.sourceSecAt(timeline.programSec),',
+  ]],
+    fails: 'the speed gesture anchoring on the source second read out of a clip-local curve with '
+      + 'a project second. Reddens 1 in 6h: on a clip starting at 10s the anchor is ten '
+      + 'seconds of source too late, so the playhead lands at 16s where it should land at 11s',
+  },
+  // And the landing runs back the same way, so the playhead is put at a clip second read as a
+  // project one and leaves the clip being edited.
+  'rate-landing-skips-clip-start': { file: 'web/main.js', edits: [[
+    '  return Math.max(0, Math.min(programSecOfSource(rateGesture.source), timeline.duration));',
+    '  return Math.max(0, Math.min(retime.programSecAt(rateGesture.source), timeline.duration));',
+  ]],
+    fails: 'and the same conversion run back the other way, so the landing is a clip second read '
+      + 'as a project one. Reddens 2 in 6h, and the second is the shape of the bug: the '
+      + 'playhead ends up at 1s, before the head of the clip being edited',
+  },
   // Ease handles stop bending the timing, so every scalar segment is a straight lerp.
   'ease-ignored': { file: 'web/curve.js', edits: [[
     `function easeAt(a, b, x) {
@@ -81,17 +105,22 @@ const MUTATIONS = {
   'pose-ignores-ease': { file: 'web/main.js', edits: [[
     '  const u = easeAt(a.easeOut, b.easeIn, (t - a.t) / span);',
     '  const u = (t - a.t) / span;',
-  ]] },
+  ]],
+    fails: 'the camera\'s handles, which shape when it arrives and never where it goes. '
+      + 'Separable from `pose-linear` on purpose and the counts are how you tell: 4 rows here '
+      + 'against that one\'s 6, and every route row stays green, because a camera ignoring '
+      + 'its handles still travels the same curve at the wrong times',
+  },
   // The pre-roll reads the slope at the target instead of asking how far back the curve
   // covers the span, so a hold answers "no frames needed".
   'preroll-slope-at-target': { file: 'web/main.js', edits: [[
-    '    const back = retime.framesBackFor(programSec, surfaceSec, this.outputFps, this.lastFrame);',
+    '      const back = clip.surfaceFramesBack(programSec, surfaceSec, this.outputFps, this.lastFrame);',
     `    // Step 4's two lines restored verbatim, zero-slope branch and all: the slope
     // at a point times a frame count, and a hold answering "no frames needed" for
     // the case that needs the most. The window query goes unused, which is the
     // shape of the finding - a tangent has no window to ask about.
-    const sourcePerFrame = Math.abs(retime.slopeAt(programSec)) / this.outputFps;
-    const back = { frames: sourcePerFrame > 0 ? Math.ceil(surfaceSec / sourcePerFrame) : 0, covered: true };`,
+      const sourcePerFrame = Math.abs(clip.retime.slopeAt(programSec - clip.start)) / this.outputFps;
+      const back = { frames: sourcePerFrame > 0 ? Math.ceil(surfaceSec / sourcePerFrame) : 0, covered: true };`,
   ]] },
   // The retime stops being a curve and goes back to a constant slope.
   'retime-ignores-keys': { file: 'web/main.js', edits: [[
@@ -100,25 +129,86 @@ const MUTATIONS = {
     '    return programSec * this.rate;',
   ]] },
   // The evaluator announces its writes, so every evaluated frame schedules a seek.
+  // Everything a clip owns read and written at program time rather than on the clip's own clock,
+  // which is the whole of what "clip-local" comes to. Reddens 6f's placement rows and 6g's, and
+  // not 6e's: that section keys a clip sitting at the head of the edit, where an in-point of zero
+  // makes the two clocks the same number.
+  'clip-keys-on-the-program-clock': { file: 'web/main.js', edits: [[
+    "const trackEpoch = (name, clip) => (specOf(name).scope === 'clip' && clip ? clip.start : 0);",
+    'const trackEpoch = () => 0;',
+  ]],
+    fails: 'everything a clip owns read and written at program time rather than on the clip\'s '
+      + 'own clock, which is the whole of what clip-local comes to. Reddens 9: two rows of 6f '
+      + 'and seven of 6g - the placement, the keyed look either side of a real drag, the lane '
+      + 'its diamonds draw in, and the key a hand plants from the panel. The lane row reads '
+      + '10.63% off, which is where the edit\'s clock puts those two keys exactly. 6e stays '
+      + 'green because the clip it keys sits at the head of the edit, where an in-point of '
+      + 'zero makes the two clocks the same number. The equality rows cannot catch it - both '
+      + 'arms read past the last key and agree - which is why the rows that discriminate are '
+      + 'written out separately',
+  },
+  // The boundary from the other side: every track on its clip's clock, scope unasked. Evaluation
+  // is unmoved, because the project's tracks are written at a hard zero rather than through here -
+  // what breaks is `keyPlayhead`, which stamps a project key at the selected clip's in-point.
+  'every-key-on-the-clip-clock': { file: 'web/main.js', edits: [[
+    "const trackEpoch = (name, clip) => (specOf(name).scope === 'clip' && clip ? clip.start : 0);",
+    'const trackEpoch = (name, clip) => (clip ? clip.start : 0);',
+  ]],
+    fails: 'the same boundary from the other side: every track on its clip\'s clock, scope '
+      + 'unasked. Reddens exactly 1, in 6g: the project key stamped at the selected clip\'s '
+      + 'in-point. Evaluation is untouched, because the project\'s tracks are written at a '
+      + 'hard zero rather than through `trackEpoch`, so the panel\'s own write is the only '
+      + 'arm in the suite that can see it',
+  },
+  // The rotation between two keys lerped and normalised rather than slerped. It reaches every
+  // rotation this build interpolates, because a placement and a camera pose share `poseAt` -
+  // which is the claim 6f's quarter-turn row is about.
+  'placement-rotation-lerped': { file: 'web/main.js', edits: [[
+    '  slerpA.slerp(slerpB, u);',
+    '  slerpA.set(slerpA.x + (slerpB.x - slerpA.x) * u, slerpA.y + (slerpB.y - slerpA.y) * u,\n'
+    + '    slerpA.z + (slerpB.z - slerpA.z) * u, slerpA.w + (slerpB.w - slerpA.w) * u).normalize();',
+  ]],
+    fails: 'the rotation between two keys lerped and normalised rather than slerped. Reddens '
+      + 'three rows measured: the two camera-pose arms and 6f\'s quarter-turn, which reads '
+      + '27.7958 against the 30 a slerp gives - a placement and a camera pose share `poseAt`, '
+      + 'which is what that row says',
+  },
   'evaluator-repaints': { file: 'web/main.js', edits: [[
     `  withoutRepaint(() => {
-    for (const track of tracks.values()) {
-      if (track.keys.length === 0) continue;
-      if (borrowed && borrowed.has(track.name)) continue;
-      params.set(track.name, track.valueAt(t));
+    // Each clip's own look through its own tables, and then the project's once. Every clip and
+    // not only the drawn ones: an idle clip's values are what the panel shows the moment it is
+    // selected, and a track evaluated only while its clip was on screen would jump on selection.
+    for (const clip of clips) {
+      if (clip.look.tracks.size === 0) continue;
+      withClip(clip, () => {
+        for (const track of clip.look.tracks.values()) write(track, trackEpoch(track.name, clip));
+      });
     }
+    for (const track of projectLook.tracks.values()) write(track, 0);
   });`,
-    `  for (const track of tracks.values()) {
-    if (track.keys.length === 0) continue;
-    if (borrowed && borrowed.has(track.name)) continue;
-    params.set(track.name, track.valueAt(t));
-  }`,
+    `  for (const clip of clips) {
+    if (clip.look.tracks.size === 0) continue;
+    withClip(clip, () => {
+      for (const track of clip.look.tracks.values()) write(track, trackEpoch(track.name, clip));
+    });
+  }
+  for (const track of projectLook.tracks.values()) write(track, 0);`,
   ]] },
   // The undo snapshot widens to the whole registry, so dropping render scale lands on it.
-  'undo-includes-view': { file: 'web/main.js', edits: [[
-    '  const lookParams = params.values(lookNames);',
-    '  const lookParams = params.values(params.names());',
-  ]] },
+  // Two edits, because view state in a clip block is refused by the scope door as well: without
+  // the second the mutated build cannot read back what it writes, and the run ends in a crash
+  // rather than in the row this control is about.
+  'undo-includes-view': { file: 'web/main.js', edits: [
+    [
+      '  const values = Object.fromEntries(names.map((n) => [n, look.values.get(n)]));',
+      '  const values = Object.fromEntries([...names, ...(scope === \'clip\' ? params.names(\'view\') : [])]\n'
+      + '    .map((n) => [n, params.get(n)]));',
+    ],
+    [
+      '    if (spec.scope !== scope) {',
+      '    if (spec.scope !== scope && spec.tag === \'look\') {',
+    ],
+  ] },
   // Undo pushes per input event rather than per interaction: one drag is two hundred.
   'undo-on-input': { file: 'web/main.js', edits: [[
     "      input.addEventListener('input', () => writeFromControl(name, Number(input.value)));",
@@ -137,24 +227,27 @@ const MUTATIONS = {
         requestRepaint();
         return null;
       }
-      await this.source.ensure(planned.from, planned.to);
+      await this.fetch(planned.spans);
       planned = this.planSeek(programSec, options.frames);
+      this.askFor(planned.spans);
     }
 `, ''],
     [`    let planned = this.planSeek(programSec, options.frames);
-    for (let attempt = 0; !this.source.resident(planned.from, planned.to); attempt++) {
+    this.askFor(planned.spans);
+    for (let attempt = 0; !this.resident(planned.spans); attempt++) {
       if (attempt >= SEEK_REPLANS) {
 `,
     `    const planned = this.planSeek(programSec, options.frames);
-    await this.source.ensure(planned.from, planned.to);
+    this.askFor(planned.spans);
+    await this.fetch(planned.spans);
 `],
   ] },
   // The pre-roll reads the uniforms, which hold the look where the playhead was parked.
   // The surface half alone; `trails-damp-at-target` is the trails half.
   'preroll-reads-uniforms': { file: 'web/main.js', edits: [[
-    `    const surfaceSec = (valueAtProgram('fade', programSec)
-      + valueAtProgram('wake', programSec)) / 1000;`,
-    '    const surfaceSec = uniforms.fadeTime.value + uniforms.wakeTime.value;',
+    `      const surfaceSec = (valueAtProgram('fade', programSec, clip)
+        + valueAtProgram('wake', programSec, clip)) / 1000;`,
+    '      const surfaceSec = uniforms.fadeTime.value + uniforms.wakeTime.value;',
   ]] },
   // The trails half goes back to the closed form, which holds only while damp is constant.
   'trails-damp-at-target': { file: 'web/main.js', edits: [[
@@ -175,9 +268,9 @@ const MUTATIONS = {
   // The retime's editing doors stop holding a key inside its neighbours.
   'retime-unclamped': { file: 'web/main.js', edits: [
     [`  const floor = i > 0 ? keys[i - 1].value : 0;
-  const ceiling = i < keys.length - 1 ? keys[i + 1].value : timeline.source.duration;
+  const ceiling = i < keys.length - 1 ? keys[i + 1].value : timeline.clip.source.duration;
   key.value = Math.max(floor, Math.min(ceiling, key.value));`,
-      '  key.value = Math.max(0, Math.min(timeline.source.duration, key.value));'],
+      '  key.value = Math.max(0, Math.min(timeline.clip.source.duration, key.value));'],
     ['      if (keys[i].value < keys[i - 1].value) {', '      if (false) {'],
   ] },
   // The handle half of the retime guard goes and the key-value half stays: two claims.
@@ -687,7 +780,17 @@ await page.evaluate(`globalThis.__kinect.setOutputSize?.("${STAGE.width}x${STAGE
 await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), null, { timeout: 20000 });
 // `CHROME_H_GUESS` is a first guess: it was 104 while the bar was one row, the bar became
 // two, and the stage quietly came out 570x356 against figures written for 640x400.
-{
+// The lane stack is built when the open finishes, not when the transport appears, and a strip
+// measured before it has its rows grows under the viewport that was just sized to it. The loop
+// below cannot recover from that on its own: it breaks out the moment the buffer matches, and a
+// pre-lane measurement can match. So the open is waited for first, and the loop is left in place
+// for the resize itself.
+await page.waitForFunction(() => globalThis.__kinect.takeOpened(), null, { timeout: 60000 });
+// Measured, resized, and measured again: the lane stack is built after the transport exists and
+// a strip read before it has its rows is a strip that grows under the viewport that was sized to
+// it, leaving the stage smaller than the figures below are written for.
+for (let attempt = 0; attempt < 3; attempt++) {
+  await page.evaluate('globalThis.__kinect.timeline.settled()').catch(() => {});
   const furniture = await page.evaluate(`(() => {
     const strip = document.getElementById('timeline');
     const appBar = document.getElementById('appBar');
@@ -700,13 +803,14 @@ await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), nul
     width: STAGE.width,
     height: STAGE.height + furniture.strip + furniture.shell,
   });
-// `setViewportSize` returning is not the renderer having resized. The predicate answers false on a
-// page with no renderer rather than throwing, because a throw inside `waitForFunction` is
-// not caught by it.
-  await page.waitForFunction((want) => {
+  // `setViewportSize` returning is not the renderer having resized. The predicate answers false on
+  // a page with no renderer rather than throwing, because a throw inside `waitForFunction` is
+  // not caught by it.
+  const landed = await page.waitForFunction((want) => {
     const gl = globalThis.__kinect?.renderer?.getContext?.();
     return !!gl && gl.drawingBufferWidth === want.w && gl.drawingBufferHeight === want.h;
-  }, { w: STAGE.width, h: STAGE.height }, { timeout: 15000 }).catch(() => {});
+  }, { w: STAGE.width, h: STAGE.height }, { timeout: 15000 }).then(() => true).catch(() => false);
+  if (landed) break;
 }
 await page.evaluate(INSTALL);
 
@@ -826,7 +930,7 @@ const RGB_LOOK = shippedDoc('rgb').values;
 console.log('\n== 0. an evaluated frame schedules no work of its own ==');
 {
   await setRetime(FLAT);
-  await setTracks({ bloom: [{ t: 0, value: 0.5 }, { t: 4, value: 3 }] });
+  await setTracks({ bloom: [{ t: 0, value: 0.5 }, { t: 4, value: 0.9 }] });
   // On a budget, because that failure returns no answer at all: the settle helper waits on
   // a queue growing faster than it drains. A healthy build answers in under a second.
   const probe = await Promise.race([
@@ -864,8 +968,8 @@ console.log('\n== 1. scalar with ease handles, step, and pose ==');
 // An ease-out into an ease-in: default handles would agree with a lerp and prove nothing.
 const EASED = [
   { t: 0, value: 0, easeOut: [[0.75, 0]], easeIn: LIN_IN },
-  { t: 4, value: 5, easeOut: [[0.2, 0.9]], easeIn: [[0.25, 1]] },
-  { t: 9, value: 1, easeOut: LIN_OUT, easeIn: [[0.6, 0.05]] },
+  { t: 4, value: 1, easeOut: [[0.2, 0.9]], easeIn: [[0.25, 1]] },
+  { t: 9, value: 0.2, easeOut: LIN_OUT, easeIn: [[0.6, 0.05]] },
 ];
 const STEPS = [
   { t: 0, value: false },
@@ -903,7 +1007,7 @@ const PATH = [
   const bloomSpec = await specOf('bloom');
   const expectedBloom = at.map((t) => scalarAt(EASED, t));
   const bloomErr = worst(read.bloom.map((v, i) => Math.abs(v - expectedBloom[i])));
-  // The control: the same keys read as a straight lerp, which has to be far from them.
+  // The control: the same keys read as a straight lerp, which has to be several slider steps away.
   const lerped = at.map((t) => scalarAt(EASED.map((k) => ({ ...k, easeOut: LIN_OUT, easeIn: LIN_IN })), t));
   const lerpGap = worst(read.bloom.map((v, i) => Math.abs(v - lerped[i])));
 
@@ -911,7 +1015,7 @@ const PATH = [
     + `against this tool's own bezier; a straight lerp of the same keys is ${lerpGap.toFixed(3)} away`);
   check(bloomErr <= halfStep(bloomSpec), 'a scalar track is the eased curve its handles describe',
     `worst ${bloomErr.toExponential(2)} against a half-step of ${halfStep(bloomSpec).toFixed(4)}`);
-  check(lerpGap > 20 * halfStep(bloomSpec),
+  check(lerpGap > 4 * halfStep(bloomSpec),
     'and the handles are doing something, because a lerp of the same keys is elsewhere',
     `${lerpGap.toFixed(3)} apart`);
 
@@ -1232,7 +1336,7 @@ const LOOK_TRACKS = {
   ],
   bloom: [
     { t: 2, value: 0.2, easeOut: LIN_OUT, easeIn: LIN_IN },
-    { t: 12, value: 3.5, easeOut: LIN_OUT, easeIn: LIN_IN },
+    { t: 12, value: 0.9, easeOut: LIN_OUT, easeIn: LIN_IN },
   ],
   additive: [{ t: 0, value: true }, { t: 9, value: false }],
   camera: PATH,
@@ -1464,7 +1568,7 @@ console.log('\n== 4. program time maps to source time through the curve ==');
         source: ${src(probes)}.map((p) => r.sourceSecAt(p)),
         // Which capture frame the transport would bracket, so the mapping is
         // checked all the way down to the index rather than only as arithmetic.
-        bracket: ${src(probes)}.map((p) => t.sourceFrameAt(p)),
+        bracket: ${src(probes)}.map((p) => t.clip.sourceFrameAt(p)),
         duration: t.duration,
       };
     })()`);
@@ -1527,7 +1631,7 @@ console.log('\n== 4b. a hold freezes source time, and the image with it ==');
       out.push({
         p,
         source: k.timeline.retime.sourceSecAt(p),
-        frame: t.sourceFrameAt(p),
+        frame: t.clip.sourceFrameAt(p),
         advances: kf.since(before).stateAdvances,
         hash: await kf.sha(pixels),
       });
@@ -1705,7 +1809,7 @@ console.log('\n== 4e. the retime curve moving while a seek is fetching ==');
       const k = globalThis.__kinect;
       const kf = globalThis.__kf;
       const t = k.timeline.transport();
-      const source = t.source;
+      const source = t.clip.source;
       // Emptied first, or there is nothing to await and the window this is about
       // never opens. The first run of this check counted zero interruptions and
       // reported two failures against a seek that never fetched anything at all.
@@ -1970,10 +2074,14 @@ console.log('\n== 5. undo restores the document and never the view ==');
   })()`);
   const depth = () => page.evaluate('globalThis.__kinect.keyframes.undo.depth()');
   const project = () => page.evaluate('globalThis.__kinect.keyframes.project()');
+  // A look value lives in the project's block or in a clip's, depending on where it writes, so
+  // a reading of "the look" that named one block would pass on whatever happened to be empty.
+  const looksOf = (doc, kind) => Object.assign({}, doc.look[kind], ...doc.clips.map((c) => c[kind]));
+  const retimeOf = (doc) => doc.clips[0].retime;
 
   // (a) one drag is one level, not one per pointer move.
   const before5 = await depth();
-  await drag('bloom', [0.5, 1.0, 1.5, 2.0, 2.5]);
+  await drag('bloom', [0.2, 0.4, 0.6, 0.8, 1.0]);
   await settle();
   const afterDrag = await depth();
   console.log(`  a five-step drag of the bloom slider took the stack from ${before5} to ${afterDrag}`);
@@ -1984,7 +2092,7 @@ console.log('\n== 5. undo restores the document and never the view ==');
   const midDrag = await page.evaluate(`(() => {
     const el = document.getElementById('bloom');
     const start = globalThis.__kinect.keyframes.undo.depth();
-    for (const v of [3.0, 3.5, 4.0]) {
+    for (const v of [0.7, 0.8, 0.9]) {
       el.value = String(v);
       el.dispatchEvent(new Event('input'));
     }
@@ -2030,8 +2138,10 @@ console.log('\n== 5. undo restores the document and never the view ==');
   const snapshot = await project();
   // A v3 document is `{ look: { mode, params, tracks }, composition: { retime, camera } }`,
   // and read flat the `in` below throws rather than failing.
-  check(!('renderScale' in snapshot.look.params) && !('spin' in snapshot.look.params),
-    'the snapshot holds no view state at all', Object.keys(snapshot.look.params).join(' '));
+  const snapshotParams = looksOf(snapshot, 'params');
+  check(!('renderScale' in snapshotParams) && !('spin' in snapshotParams),
+    'the snapshot holds no view state at all, in either of the two blocks a look value can sit in',
+    Object.keys(snapshotParams).join(' '));
 
   // (e) an undo restores the document and moves neither the playhead nor the view.
   const keyed = { wake: [{ t: 0, value: 100 }, { t: 5, value: 1200 }] };
@@ -2064,13 +2174,13 @@ console.log('\n== 5. undo restores the document and never the view ==');
     };
   })()`);
   await settle();
-  // Tracks are look and the curve is composition, so the two readings come from two places.
-  const undoneTracks = undone.project.look.tracks;
-  const undoneRetime = undone.project.composition.retime;
+  // Tracks are look and the curve is the clip's, so the two readings come from two places.
+  const undoneTracks = looksOf(undone.project, 'tracks');
+  const undoneRetime = retimeOf(undone.project);
   console.log(`  a track and a retime curve pushed one level (${depthWithKeys}), then undone: `
-    + `tracks ${Object.keys(withKeys.look.tracks).join(',') || 'none'} -> `
+    + `tracks ${Object.keys(looksOf(withKeys, 'tracks')).join(',') || 'none'} -> `
     + `${Object.keys(undoneTracks).join(',') || 'none'}, `
-    + `retime keys ${withKeys.composition.retime.keys.length} -> ${undoneRetime.keys.length}`);
+    + `retime keys ${retimeOf(withKeys).keys.length} -> ${undoneRetime.keys.length}`);
   check(undone.popped === true, 'the stack had something to pop');
   check(Object.keys(undoneTracks).length === 0 && undoneRetime.keys.length === 0,
     'and undo took the keys and the curve back off', JSON.stringify(undoneTracks));
@@ -2120,23 +2230,40 @@ console.log('\n== 6. look in lanes, composition in the world ==');
   await setRetime(FLAT);
   await setTracks({ bloom: EASED, additive: STEPS, camera: PATH });
   await settle();
-  const lanes = await page.evaluate('globalThis.__kinect.keyframes.lanes()');
+  // The keyed lanes. The stack also carries the clip bar and a row per clip, which are the
+  // edit's structure rather than its animation and are `editor-check` section 22's to count.
+  const lanes = (await page.evaluate('globalThis.__kinect.keyframes.lanes()'))
+    .filter((l) => l.kind !== 'clips' && l.kind !== 'clip');
   const named = await page.evaluate('globalThis.__kinect.keyframes.names()');
+  // A clip's own row is the edit's structure and is excluded; its keyed parameters are not -
+  // they are lanes like any other and they are qualified by the clip that holds them, which is
+  // what stops eight clips of one keyed parameter drawing the selected clip's keys eight times.
   const dom = await page.evaluate(
-    "[...document.querySelectorAll('#tBeds .tlane')].map((el) => el.dataset.owner)",
+    "[...document.querySelectorAll('#tBeds .tlane')].map((el) => el.dataset.owner)"
+    + ".filter((o) => o !== 'clips' && !/^clip:[^/]+$/.test(o))",
   );
   console.log(`  three keyed parameters give lanes ${dom.join(', ')}; `
     + `the registry declares ${lanes.map((l) => `${l.owner}:${l.kind}`).join(' ')}`);
   check(lanes.length === 3 && dom.length === 3, 'only parameters carrying keys get a lane',
     `${lanes.length} lanes for ${named.length} tracks, ${dom.length} in the document`);
   check(String(dom) === String(lanes.map((l) => l.owner)), 'and the lanes drawn are the lanes computed');
-  check(lanes.every((l) => l.kind === (l.owner === 'camera' ? 'pose' : (l.owner === 'additive' ? 'step' : 'scalar'))),
+  // Off the owner's parameter rather than off the whole owner, since a clip's lane names both.
+  const laneParam = (owner) => (owner.includes('/') ? owner.slice(owner.indexOf('/') + 1) : owner);
+  check(lanes.every((l) => l.kind === (laneParam(l.owner) === 'camera' ? 'pose'
+    : (laneParam(l.owner) === 'additive' ? 'step' : 'scalar'))),
     'and each lane takes its kind off the registry rather than off a table of its own',
     lanes.map((l) => `${l.owner}=${l.kind}`).join(' '));
+  // Which half of the split each lane sits in, because that is what the nesting is: a clip value
+  // is drawn under the clip that holds it and a project value at the foot of the stack.
+  check(lanes.filter((l) => l.owner.includes('/')).length === 1
+    && lanes.filter((l) => !l.owner.includes('/')).length === 2,
+    'and a clip value\'s lane is qualified by its clip while the project\'s are not',
+    lanes.map((l) => l.owner).join(' '));
 
   const empty = await page.evaluate(`(() => {
     globalThis.__kinect.keyframes.setTracks({});
-    return [...document.querySelectorAll('#tBeds .tlane')].length;
+    return [...document.querySelectorAll('#tBeds .tlane')]
+      .filter((el) => el.dataset.owner !== 'clips' && !/^clip:[^/]+$/.test(el.dataset.owner)).length;
   })()`);
   check(empty === 0, 'and a clip with no keys has none at all, which is the nine-into-five deletion',
     `${empty} lanes`);
@@ -2298,7 +2425,7 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   await settle();
   await page.evaluate(`(() => {
     const el = document.getElementById('bloom');
-    el.value = '3';
+    el.value = '0.9';
     el.dispatchEvent(new Event('input'));
     el.dispatchEvent(new Event('change'));
   })()`);
@@ -2307,7 +2434,7 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   const before5 = await page.evaluate('globalThis.__kinect.params.get("bloom")');
   await page.evaluate(`(() => {
     const el = document.getElementById('bloom');
-    el.value = '1.25';
+    el.value = '0.55';
     el.dispatchEvent(new Event('input'));
     el.dispatchEvent(new Event('change'));
   })()`);
@@ -2321,18 +2448,18 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
     };
   })()`);
   const planted = fc.keys.find((key) => Math.abs(key.t - 5.0) < 0.05);
-  console.log(`  at 5.0s the curve read ${before5}; dragging the slider to 1.25 gives keys `
+  console.log(`  at 5.0s the curve read ${before5}; dragging the slider to 0.55 gives keys `
     + `${fc.keys.map((key) => `${key.t}s=${key.value}`).join(' ')}`);
   console.log(`  and after the render that follows it, the parameter reads ${fc.value} `
     + `with the slider at ${fc.slider}`);
   check(fc.keys.length === 3 && planted !== undefined,
     'moving a slider on a keyed track writes a key at the playhead',
     `${fc.keys.length} keys`);
-  check(planted !== undefined && Math.abs(planted.value - 1.25) < 0.03,
+  check(planted !== undefined && Math.abs(planted.value - 0.55) < 0.03,
     'holding the value that was dragged to', `${planted?.value}`);
   // The one that matters: a bare `params.set` passes everything above and is then undone by
   // the evaluator on the very next frame.
-  check(Math.abs(fc.value - 1.25) < 0.03 && Math.abs(fc.slider - 1.25) < 0.03,
+  check(Math.abs(fc.value - 0.55) < 0.03 && Math.abs(fc.slider - 0.55) < 0.03,
     'and it stays there through the render that follows, rather than springing back',
     `parameter ${fc.value}, slider ${fc.slider}`);
   // The control: with no keys the same drag must write no key at all.
@@ -2340,7 +2467,7 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   await settle();
   await page.evaluate(`(() => {
     const el = document.getElementById('bloom');
-    el.value = '2';
+    el.value = '0.7';
     el.dispatchEvent(new Event('input'));
     el.dispatchEvent(new Event('change'));
   })()`);
@@ -2449,6 +2576,448 @@ console.log('\n== 6c. the furniture draws outside the frame ==');
     `${insetPct.toFixed(1)}% of the stage`);
 }
 
+console.log('\n== 6f. a clip\'s placement is keyed on its own clock ==');
+{
+  // Restored rather than dragged, because what this section needs is a clip that does not start
+  // at the head of the edit - and at a start of zero project time and clip time are the same
+  // number, which is the one fixture where the claim below cannot be false.
+  const at = async (start, programSec) => page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips[0].start = ${start};
+    doc.clips[0].tracks.transform = [
+      { t: 0, value: { position: [0, 0, 0], quaternion: [0, 0, 0, 1] } },
+      { t: 2, value: { position: [1, 0, 0], quaternion: [0, 0, 0, 1] } },
+    ];
+    k.library.restoreProject(doc);
+    await k.timeline.transport().seek(${programSec});
+    await k.timeline.settled();
+    return {
+      // Both ends: what the registry holds, and where the group the shader reads actually is.
+      held: k.params.get('transform').position[0],
+      group: k.timeline.clips()[0].placement.position[0],
+      start: k.timeline.clips()[0].start,
+      lanes: k.keyframes.lanes().map((l) => l.owner),
+    };
+  })()`);
+
+  const head = await at(3, 3);
+  const half = await at(3, 4);
+  const tail = await at(3, 5);
+  console.log(`  a clip at 3s with a placement keyed at 0s and 2s of its own time reads `
+    + `${head.held} at program 3s, ${half.held} at 4s and ${tail.held} at 5s`);
+  check(head.start === 3, 'the clip under this section starts away from the head of the edit, '
+    + 'which is what makes the rows below a claim about whose clock the keys are on',
+    `${head.start}s`);
+  check(Math.abs(head.held) < 1e-6 && Math.abs(tail.held - 1) < 1e-6,
+    'its placement is at each key where that key\'s own second falls in the edit',
+    `${head.held} at the first key, ${tail.held} at the second`);
+  check(Math.abs(half.held - 0.5) < 1e-3,
+    'and halfway between them it is halfway along, so the track is read at program time less the '
+    + 'clip\'s in-point rather than at program time',
+    `${half.held} against 0.5`);
+  check(Math.abs(half.group - half.held) < 1e-6,
+    'and the group the shader reads is where the registry says, so this is a placement rather '
+    + 'than a number in a table',
+    `group ${half.group} against registry ${half.held}`);
+
+  // The reason clip-local is the answer, driven rather than argued: the same clip moved along
+  // the strip has to arrive at the same place at the same point of itself.
+  const movedHalf = await at(9, 10);
+  check(Math.abs(movedHalf.held - half.held) < 1e-6,
+    'and moving the clip carries its placement with it: the same second of the clip is the same '
+    + 'place in the room wherever the clip has been dragged to',
+    `${movedHalf.held} at 9s+1 against ${half.held} at 3s+1`);
+  check(half.lanes.includes('clip:c1/transform'),
+    'and the track draws a lane of its own, under the clip that holds it',
+    half.lanes.join(', '));
+
+  // The rotation between two placement keys, which is the half a position sample cannot see.
+  // 120 degrees about Y read a quarter of the way along: a slerp turns at a constant rate and
+  // lands on exactly 30, while a lerp between the two quaternions with a normalise after it
+  // lands on 27.75 - the two agree at the midpoint and nowhere else, which is why the sample is
+  // taken off it.
+  const TURN_DEG = 120;
+  const half120 = (TURN_DEG / 2) * (Math.PI / 180);
+  const turned = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips[0].start = 0;
+    doc.clips[0].tracks.transform = [
+      { t: 0, value: { position: [0, 0, 0], quaternion: [0, 0, 0, 1] } },
+      { t: 4, value: { position: [0, 0, 0], quaternion: [0, ${Math.sin(half120)}, 0, ${Math.cos(half120)}] } },
+    ];
+    k.library.restoreProject(doc);
+    const read = async (sec) => {
+      await k.timeline.transport().seek(sec);
+      await k.timeline.settled();
+      // Off the group the shader reads rather than off the registry, and as an angle rather than
+      // as four numbers, because the angle is what a slerp and a lerp disagree about.
+      const q = k.timeline.clips()[0].placement.quaternion;
+      return (2 * Math.acos(Math.min(1, Math.abs(q[3])))) * (180 / Math.PI);
+    };
+    return { quarter: await read(1), half: await read(2), end: await read(4) };
+  })()`);
+  console.log(`  a placement turned ${TURN_DEG} degrees about Y over 4s reads `
+    + `${turned.quarter.toFixed(3)} at a quarter, ${turned.half.toFixed(3)} at the half and `
+    + `${turned.end.toFixed(3)} at the end`);
+  check(Math.abs(turned.end - TURN_DEG) < 1e-6 && Math.abs(turned.half - TURN_DEG / 2) < 1e-6,
+    'a placement reaches its second key\'s rotation, and the midpoint between two keys is the '
+    + 'half-turn either interpolation would give, so the row below is the one that separates them',
+    `${turned.end.toFixed(4)} at the end, ${turned.half.toFixed(4)} at the half`);
+  check(Math.abs(turned.quarter - TURN_DEG / 4) < 0.01,
+    'and a quarter of the way along it has turned exactly a quarter of the way, so a placement '
+    + 'is slerped by the same path a camera pose is rather than lerped between its keys',
+    `${turned.quarter.toFixed(4)} against ${(TURN_DEG / 4).toFixed(4)}, `
+      + 'which a normalised lerp would read as 27.7500');
+  await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips[0].start = 0;
+    delete doc.clips[0].tracks.transform;
+    doc.clips[0].params.transform = { position: [0, 0, 0], quaternion: [0, 0, 0, 1] };
+    doc.clips[0].params.transform = { position: [0, 0, 0], quaternion: [0, 0, 0, 1] };
+    k.library.restoreProject(doc);
+    await k.timeline.settled();
+  })()`);
+}
+
+
+console.log('\n== 6g. a keyed look travels with the clip that holds it ==');
+{
+  // Brightness rather than the placement: an ordinary look scalar with a slider and a diamond,
+  // so these rows are about the rule rather than about the one parameter that used to be the
+  // exception to it. Both values sit on the registry's 0.05 grid, so nothing is snapped on the
+  // way in and an expectation computed here is the number the page holds.
+  const HEAD = 0.5;
+  const TAIL = 3;
+  const MID = (HEAD + TAIL) / 2;
+  const KEY_SEC = 2;
+  const START = 3;
+
+  // Staged away from the head of the edit for the reason 6f gives: at a start of zero, program
+  // time and the clip's own time are the same number and nothing below can be false.
+  const stage = (start) => page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips[0].start = ${start};
+    doc.clips[0].tracks.exposure = [
+      { t: 0, value: ${HEAD} },
+      { t: ${KEY_SEC}, value: ${TAIL} },
+    ];
+    k.library.restoreProject(doc);
+    await k.timeline.settled();
+  })()`);
+
+  const readAt = (programSec) => page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    await k.timeline.transport().seek(${programSec});
+    await k.timeline.settled();
+    return {
+      // Both ends, the way 6f reads a placement: what the registry holds, and the uniform the
+      // points are drawn through. A number in a table that never reached the draw is not a grade.
+      held: k.params.get('exposure'),
+      uniform: k.uniforms.exposure.value,
+      start: k.timeline.clips()[0].start,
+      keys: k.keyframes.project().clips[0].tracks.exposure.map((key) => +key.t.toFixed(4)),
+    };
+  })()`);
+
+  await stage(START);
+  const head = await readAt(START);
+  const half = await readAt(START + 1);
+  const tail = await readAt(START + KEY_SEC);
+  console.log(`  a clip at ${START}s with brightness keyed at 0s and ${KEY_SEC}s of its own time `
+    + `reads ${head.held} at program ${START}s, ${half.held} at ${START + 1}s and `
+    + `${tail.held} at ${START + KEY_SEC}s`);
+  check(head.start === START,
+    'the clip under this section starts away from the head of the edit, which is what makes the '
+    + 'rows below a claim about whose clock its look is on', `${head.start}s`);
+  check(Math.abs(head.held - HEAD) < 1e-9 && Math.abs(tail.held - TAIL) < 1e-9,
+    'a keyed look is at each key where that key\'s own second falls in the edit',
+    `${head.held} at the first key, ${tail.held} at the second`);
+  check(Math.abs(half.held - MID) < 1e-3,
+    'and halfway between them it is halfway along, so a clip\'s look is read at program time less '
+    + 'the clip\'s in-point rather than at program time', `${half.held} against ${MID}`);
+  check(Math.abs(half.uniform - half.held) < 1e-6,
+    'and the uniform the points are drawn through holds what the registry says, so this is a '
+    + 'graded clip rather than a number in a table',
+    `uniform ${half.uniform} against registry ${half.held}`);
+
+  // The gesture itself and not a second restore, because what is claimed is what a hand does:
+  // press on the body of the clip, move, release. Nothing on that path rewrites a key time, so
+  // what carries the grade is the epoch rather than a fix-up, which the last row below holds to.
+  const DRAG_FROM = START + 2;
+  const DRAG_BY = 6;
+  const grab = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const bed = document.getElementById('tBed').getBoundingClientRect();
+    // The ruler's own mapping run backwards, because that is what the drag will read the
+    // pointer through: a box measured off its own rectangle would be a second answer.
+    const xOf = (t) => bed.left + (k.editor.view.pct(t) / 100) * bed.width;
+    // The clip's own row and not the bar above it: the bar carries the commands, and the box a
+    // hand grabs is drawn in the lane the clip owns.
+    const owner = 'clip:' + k.timeline.clips()[0].id;
+    const box = document.querySelector('#tBeds .tlane[data-owner="' + owner + '"] .tclip');
+    if (!box) return { at: null, why: 'the ' + owner + ' lane drew no clip box' };
+    const r = box.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return { at: null, why: 'the clip box measures 0x0' };
+    const x = xOf(${DRAG_FROM});
+    const y = r.top + r.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || hit.closest('.tclip') !== box) {
+      return { at: null, why: 'program ${DRAG_FROM}s does not hit-test back to the clip box' };
+    }
+    // A press on an edge trims instead of moving, which would pass the first row below by
+    // changing the clip's length and never move it at all.
+    if (hit.closest('.tclipedge')) {
+      return { at: null, why: 'program ${DRAG_FROM}s lands on a trim edge rather than the body' };
+    }
+    return { at: { x, y, to: xOf(${DRAG_FROM + DRAG_BY}) }, why: '' };
+  })()`);
+
+  // Filed red rather than skipped, for the reason 6e gives: a section that drops rows reports a
+  // smaller count for a broken build than for a working one.
+  const DRAG_ROWS = [
+    'dragging the clip along the strip moves it',
+    'and its keyed look arrives with it: the same second of the clip is the same grade wherever '
+      + 'the clip has been dragged to',
+    'while the program second that used to hold the middle of the ramp no longer does, which is '
+      + 'the whole of what a look left behind would still be doing',
+    'and the keys were not restamped on the way: they are still at the seconds of the clip they '
+      + 'were authored at, so what carried them is the clock and not a rewrite',
+    'and the lane draws each of them where it acts, which is the clip\'s in-point plus the key\'s '
+      + 'own second: a lane on the wrong clock puts every diamond a whole clip away from its grade',
+  ];
+  if (!grab.at) {
+    for (const row of DRAG_ROWS) check(false, row, `did not run: ${grab.why}`);
+  } else {
+    await page.mouse.move(grab.at.x, grab.at.y);
+    await page.mouse.down();
+    await page.mouse.move(grab.at.to, grab.at.y, { steps: 8 });
+    await page.mouse.up();
+    await settle();
+    const stayed = await readAt(START + 1);
+    // Sampled off where the clip landed rather than off where it was aimed: a drag is pixels,
+    // and a pixel of rounding on this bed is a hundredth of a second of program time.
+    const carried = await readAt(stayed.start + 1);
+    console.log(`  dragged ${DRAG_BY}s to the right the clip starts at `
+      + `${stayed.start.toFixed(3)}s; program ${START + 1}s now reads ${stayed.held} and `
+      + `${(stayed.start + 1).toFixed(3)}s reads ${carried.held}`);
+    check(Math.abs(stayed.start - (START + DRAG_BY)) < 0.05, DRAG_ROWS[0],
+      `${stayed.start.toFixed(3)}s against the ${START + DRAG_BY}s it was dragged to`);
+    check(Math.abs(carried.held - MID) < 1e-3, DRAG_ROWS[1],
+      `${carried.held} one second into the clip, against the ${half.held} it read there before`);
+    check(Math.abs(stayed.held - half.held) > 0.5 && Math.abs(stayed.held - HEAD) < 1e-9,
+      DRAG_ROWS[2],
+      `program ${START + 1}s read ${half.held} before the drag and ${stayed.held} after it`);
+    check(String(carried.keys) === String([0, KEY_SEC]), DRAG_ROWS[3],
+      `keyed at ${carried.keys.join('s and ')}s of the clip`);
+
+    // Off the strip rather than off the track: the lane is the surface a hand grabs a key on,
+    // and it runs through `laneEpoch` rather than through the evaluator. A lane left on the
+    // edit's clock draws every diamond `start` seconds from the frame it grades.
+    const drawn = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const clip = k.timeline.clips()[0];
+      const owner = 'clip:' + clip.id + '/exposure';
+      const lane = [...document.querySelectorAll('#tBeds .tlane')]
+        .find((l) => l.dataset.owner === owner);
+      if (!lane) return { at: null, why: 'no ' + owner + ' lane' };
+      const keys = [...lane.querySelectorAll('.tkey')];
+      return {
+        at: keys.map((el) => Number.parseFloat(el.style.left)),
+        want: [0, ${KEY_SEC}].map((t) => k.editor.view.pct(clip.start + t)),
+        // Where the same two keys would draw on the edit's clock, which is the other answer
+        // and the distance the row is really about.
+        wrong: [0, ${KEY_SEC}].map((t) => k.editor.view.pct(t)),
+        hidden: keys.filter((el) => el.hidden).length,
+        why: '',
+      };
+    })()`);
+    // A tenth of a percent of the bed is well under a pixel at this stage, and the wrong clock
+    // is a whole clip away - so the threshold is a gap and not an epsilon, and the run says how
+    // wide the gap it is choosing between actually was.
+    const drawnOff = drawn.at === null ? null
+      : worst(drawn.at.map((got, i) => Math.abs(got - drawn.want[i])));
+    const clockGap = drawn.at === null ? null
+      : worst(drawn.wrong.map((got, i) => Math.abs(got - drawn.want[i])));
+    check(drawn.at !== null && drawn.at.length === 2 && drawn.hidden === 0
+      && drawnOff < 0.1 && clockGap > 1,
+    DRAG_ROWS[4], drawn.at === null ? `did not run: ${drawn.why}`
+      : `${drawn.at.length} drawn, ${drawn.hidden} hidden, ${drawnOff.toFixed(5)}% off where they `
+        + `act against the ${clockGap.toFixed(2)}% a lane on the edit's clock would be`);
+  }
+
+  // The other half of the boundary, and the half only a hand can reach: where a key lands when
+  // one is planted. Both diamonds are pressed at one playhead, over a clip that does not start
+  // at zero, so the two clocks are different numbers and a control that used the wrong one says
+  // so. The clip row is taken first because the panel's clip half is disabled without one.
+  const KEY_AT = START + DRAG_BY + 1;
+  await page.click('#panelTabLook');
+  await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    k.keyframes.setTracks({});
+    k.editor.selectClipRow('c1');
+    await k.timeline.transport().seek(${KEY_AT});
+    await k.timeline.settled();
+  })()`);
+  const KEY_ROWS = [
+    'a key planted from the panel on a clip\'s own parameter is stamped at the playhead less the '
+      + 'clip\'s in-point',
+    'and not at the program second the playhead is at, which is the reading it would have if the '
+      + 'clip half were on the edit\'s clock',
+    'while one planted on the post chain at the same playhead is stamped at the program second, '
+      + 'because the post chain belongs to the edit and not to any clip',
+    'and both diamonds read "here" afterwards, so each control reads its key back on the clock it '
+      + 'wrote it on',
+  ];
+  const diamond = (name) => `.kf[aria-label="${name} keyframe"]`;
+  const reachable = await page.evaluate(`(() => {
+    for (const name of ['exposure', 'bloom']) {
+      const el = document.querySelector('.kf[aria-label="' + name + ' keyframe"]');
+      if (!el) return name + ' has no keyframe control on the panel';
+      if (el.disabled) return name + '\\'s keyframe control is disabled';
+      if (el.offsetParent === null) return name + '\\'s keyframe control is not on screen';
+    }
+    return '';
+  })()`);
+  if (reachable) {
+    for (const row of KEY_ROWS) check(false, row, `did not run: ${reachable}`);
+  } else {
+    await page.click(diamond('exposure'));
+    await page.click(diamond('bloom'));
+    await settle();
+    const stamped = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const doc = k.keyframes.project();
+      const at = (el) => document.querySelector(el).dataset.kf;
+      return {
+        start: k.timeline.clips()[0].start,
+        playhead: k.timeline.read().programSec,
+        clipKeys: (doc.clips[0].tracks.exposure ?? []).map((key) => key.t),
+        projectKeys: (doc.look.tracks.bloom ?? []).map((key) => key.t),
+        diamonds: [at(${src(diamond('exposure'))}), at(${src(diamond('bloom'))})],
+      };
+    })()`);
+    const local = stamped.playhead - stamped.start;
+    console.log(`  with the playhead at ${stamped.playhead.toFixed(3)}s over a clip starting at `
+      + `${stamped.start.toFixed(3)}s, brightness keyed at `
+      + `${stamped.clipKeys.join(', ') || 'nothing'} and bloom at `
+      + `${stamped.projectKeys.join(', ') || 'nothing'}`);
+    check(stamped.clipKeys.length === 1 && Math.abs(stamped.clipKeys[0] - local) < 1e-6,
+      KEY_ROWS[0], `${stamped.clipKeys.join(', ') || 'no key'} against ${local.toFixed(3)}`);
+    check(stamped.clipKeys.length === 1
+      && Math.abs(stamped.clipKeys[0] - stamped.playhead) > 0.5,
+    KEY_ROWS[1], `${stamped.clipKeys.join(', ') || 'no key'} against ${stamped.playhead.toFixed(3)}`);
+    check(stamped.projectKeys.length === 1
+      && Math.abs(stamped.projectKeys[0] - stamped.playhead) < 1e-6,
+    KEY_ROWS[2], `${stamped.projectKeys.join(', ') || 'no key'} against ${stamped.playhead.toFixed(3)}`);
+    check(String(stamped.diamonds) === 'here,here', KEY_ROWS[3], stamped.diamonds.join(', '));
+  }
+
+  // Committed and not merely restored: the drag and the two diamonds each auto-saved a working
+  // document holding this clip nine seconds along with a grade keyed on it, and a restore that
+  // does not commit leaves that on disk for whatever opens the working project next.
+  await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    k.keyframes.setTracks({});
+    const doc = k.library.serialiseProjectBody();
+    doc.clips[0].start = 0;
+    delete doc.clips[0].tracks.exposure;
+    delete doc.look.tracks.bloom;
+    k.library.restoreProject(doc);
+    k.keyframes.undo.commit();
+    await k.timeline.settled();
+  })()`);
+}
+
+
+console.log('\n== 6h. a speed change holds the playhead on the frame it was parked on ==');
+{
+  // Staged away from the head of the edit for the reason 6f gives, and it is the whole of what
+  // this section is: at a start of zero, a project second and the clip's own second are the same
+  // number, so the two conversions the gesture makes cannot be told apart and no arm above can
+  // see either of them being wrong.
+  const START = 10;
+  const PARKED = 12;
+  const TO = 2;
+
+  // Nothing is keyed and no export range is set here on purpose. A rate change rescales the
+  // in/out pair, and `frameAt` clamps every seek into it, so a range would move under the
+  // gesture and clamp the landing - which would redden the row below on a build whose anchor
+  // arithmetic is right. What this section is about is the anchor and nothing else.
+  const arm = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips[0].start = ${START};
+    doc.clips[0].length = null;
+    doc.clips[0].retime = { rate: 1, keys: [] };
+    k.library.restoreProject(doc);
+    await k.timeline.settled();
+    k.timeline.transport().pause();
+    k.editor.setClipRange(0, null);
+    await k.timeline.transport().seek(${PARKED});
+    await k.timeline.settled();
+    const shot = () => ({
+      programSec: k.timeline.transport().programSec,
+      rate: k.timeline.retime.rate,
+      range: k.editor.clipRange(),
+      start: k.timeline.clips()[0].start,
+      end: k.timeline.clips()[0].end,
+    });
+    const before = shot();
+    // The slider driven through its own events rather than through the setRetime handle,
+    // because the fault is in the gesture: setRetime writes the curve and anchors nothing.
+    const el = document.getElementById('tRate');
+    el.value = String(k.editor.rateSlider.toValue(${TO}));
+    el.dispatchEvent(new Event('input'));
+    el.dispatchEvent(new Event('change'));
+    await k.timeline.settled();
+    return { before, after: shot() };
+  })()`);
+
+  const { before, after } = arm;
+  // The parked project second is `PARKED`, which is `PARKED - START` of the clip's own time and
+  // so that many source seconds at 1x. At `TO` the clip reaches the same source second in half
+  // the time, so the frame that was under the playhead is now at `START + local / TO`.
+  const want = START + (PARKED - START) / TO;
+  console.log(`  a clip at ${START}s parked at ${PARKED}s, ${before.rate}x -> ${after.rate}x: `
+    + `playhead ${before.programSec.toFixed(3)}s -> ${after.programSec.toFixed(3)}s, `
+    + `clip ${before.start}..${before.end.toFixed(2)}s -> ${after.start}..${after.end.toFixed(2)}s`);
+
+  check(before.start === START && Math.abs(before.programSec - PARKED) < 1e-6,
+    'the clip under this section starts away from the head of the edit and the playhead is '
+    + 'parked inside it, which is what lets the rows below be false',
+    `start ${before.start}s, playhead ${before.programSec}s`);
+  check(Math.abs(after.rate - TO) < 1e-6 && after.rate !== before.rate,
+    'and the slider really moved the slope, or none of the rows below are about a speed change',
+    `${before.rate}x -> ${after.rate}x`);
+  check(after.range.out === null,
+    'and no export range is standing that could clamp the landing, so the row below reads the '
+    + 'anchor rather than a cut',
+    `${after.range.in}..${after.range.out}`);
+
+  check(Math.abs(after.programSec - want) < 1e-3,
+    'the playhead lands on the project second holding the source frame it was parked on, which '
+    + 'is the clip\'s own zero plus its rescaled local time',
+    `${after.programSec.toFixed(4)}s against ${want.toFixed(4)}s`);
+  check(after.programSec >= after.start - 1e-6,
+    '  and so it is still inside the clip being edited rather than before its head',
+    `${after.programSec.toFixed(4)}s against a start of ${after.start}s`);
+
+  await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const doc = k.library.serialiseProjectBody();
+    doc.clips[0].start = 0;
+    doc.clips[0].retime = { rate: 1, keys: [] };
+    k.library.restoreProject(doc);
+    k.keyframes.undo.commit();
+    await k.timeline.settled();
+  })()`);
+}
+
+
 {
   const unexpected = errors.filter((text) => {
     const match = expected.find((e) => text.includes(e.fragment));
@@ -2469,4 +3038,5 @@ if (SHOTS) {
 
 console.log(`\n[keyframe] ${failures ? `FAIL (${failures})` : 'PASS'}`);
 await browser.close();
+if (MUTATE && MUTATIONS[MUTATE]?.fails) console.log(`[keyframe] it should redden: ${MUTATIONS[MUTATE].fails}`);
 process.exit(failures ? 1 : 0);
