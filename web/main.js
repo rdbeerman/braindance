@@ -4744,6 +4744,7 @@ class TimelineTransport {
     this.queue = null;
     this.working = false;
     this.faults = 0;
+    this.looping = false;
   }
 
   get programSec() { return this.frame / this.outputFps; }
@@ -5181,7 +5182,10 @@ class TimelineTransport {
       rendered++;
     }
     if (rendered > 0) this.paint();
-    else if (this.frame >= this.lastFrame || this.programSec >= this.clipOutSec - 1e-9) this.pause();
+    else if (this.frame >= this.lastFrame || this.programSec >= this.clipOutSec - 1e-9) {
+      if (this.looping) this.seek(this.clipInSec).catch(showTimelineError);
+      else this.pause();
+    }
     this.behindMs = Math.max(0, nowMs - this.nextDueMs);
     this.prefetch();
   }
@@ -5589,6 +5593,7 @@ const ui = {
   camLensOut: document.getElementById('camLensOut'),
   tCamKey: document.getElementById('tCamKey'),
   tCamView: document.getElementById('tCamView'),
+  tLoop: document.getElementById('tLoop'),
   camSensor: document.getElementById('camSensor'),
   camLevelReset: document.getElementById('camLevelReset'),
   cropBox: document.getElementById('cropBox'),
@@ -10728,6 +10733,12 @@ function toggleCameraView() {
 }
 ui.camView.addEventListener('click', toggleCameraView);
 ui.tCamView?.addEventListener('click', toggleCameraView);
+
+function toggleLoop() {
+  timeline.looping = !timeline.looping;
+  ui.tLoop?.setAttribute('aria-pressed', String(timeline.looping));
+}
+ui.tLoop?.addEventListener('click', toggleLoop);
 
 
 let takeOpened = false;
