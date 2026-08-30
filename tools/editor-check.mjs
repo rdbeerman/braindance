@@ -1518,14 +1518,6 @@ const MUTATIONS = {
     ]],
   },
 
-  'mini-ignores-edges': {
-    file: 'web/main.js',
-    edits: [[
-      "  const edge = e.target.classList.contains('w') ? 'w' : e.target.classList.contains('e') ? 'e' : null;",
-      '  const edge = null;',
-    ]],
-  },
-
   'splitter-unclamped': {
     file: 'web/main.js',
     edits: [[

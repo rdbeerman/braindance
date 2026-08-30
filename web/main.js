@@ -6273,7 +6273,7 @@ for (const surface of [ui.beds, ui.mini]) {
   surface.addEventListener('wheel', onStripWheel(surface), { passive: false });
 }
 
-/** The overview's gestures: drag to pan, drag an edge to zoom, click to bring the window. */
+/** The overview's gestures: drag to pan, click to bring the window. */
 let miniDrag = null;
 
 ui.mini.addEventListener('pointerdown', (e) => {
@@ -6281,15 +6281,14 @@ ui.mini.addEventListener('pointerdown', (e) => {
   const rect = ui.mini.getBoundingClientRect();
   if (rect.width <= 0) return;
   const at = (e.clientX - rect.left) / rect.width;
-  const edge = e.target.classList.contains('w') ? 'w' : e.target.classList.contains('e') ? 'e' : null;
-  const inside = e.target === ui.miniWin || edge !== null;
+  const inside = e.target === ui.miniWin;
   ui.mini.setPointerCapture(e.pointerId);
   if (!inside) {
     const half = (view.b - view.a) / 2;
     view.set(at - half, at + half);
     viewChanged();
   }
-  miniDrag = { edge, at, a: view.a, b: view.b };
+  miniDrag = { at, a: view.a, b: view.b };
 });
 
 ui.mini.addEventListener('pointermove', (e) => {
@@ -6297,11 +6296,7 @@ ui.mini.addEventListener('pointermove', (e) => {
   const rect = ui.mini.getBoundingClientRect();
   const at = (e.clientX - rect.left) / Math.max(1, rect.width);
   const d = at - miniDrag.at;
-  const moved = miniDrag.edge === 'w'
-    ? view.set(Math.min(miniDrag.a + d, miniDrag.b - view.minSpan()), miniDrag.b)
-    : miniDrag.edge === 'e' ? view.set(miniDrag.a, miniDrag.b + d)
-      : view.set(miniDrag.a + d, miniDrag.b + d);
-  if (moved) viewChanged();
+  if (view.set(miniDrag.a + d, miniDrag.b + d)) viewChanged();
 });
 
 for (const type of ['pointerup', 'pointercancel']) {
