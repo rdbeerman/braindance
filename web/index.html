@@ -215,20 +215,6 @@
   }
   .grouptoggle[aria-expanded=false]:hover i { border-left-color: var(--ink); }
 
-  /* A shut group that is carrying something has to say so, or the panel is quietly
-     lying about what is shaping the frame - which is the exact worry this feature
-     exists to answer, inverted. It carries a count where the group's own parameters are
-     what moved, and stands as a plain dot where the group is relevant because another
-     group's values made it so, which is `Reading · detail` and nothing else. */
-  .groupmark {
-    flex: 0 0 auto; min-width: 14px; height: 14px; padding: 0 4px; border-radius: 7px;
-    display: grid; place-items: center; background: var(--accent-low);
-    color: var(--accent); font-size: 9px; font-variant-numeric: tabular-nums;
-  }
-  .groupmark[hidden] { display: none; }
-  .groupmark:empty { min-width: 6px; width: 6px; height: 6px; padding: 0; border-radius: 3px;
-    background: var(--accent); }
-
   /* 4px under a 16px row is the design's 20px pitch. The gap is the only half of that
      stated here - the height belongs to `.kf`/`.reset`, which are the tallest things a
      row holds and therefore what decides it. */

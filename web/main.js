@@ -1380,21 +1380,19 @@ function panelHead(group) {
   const head = panelNode('div', 'grouphead');
   const label = panelNode('label', null, group.label);
   head.append(label);
-  if (!group.collapses) return { head, button: null, mark: null };
+  if (!group.collapses) return { head, button: null };
 
   label.style.cursor = 'pointer';
   label.addEventListener('click', () => toggleGroup(group.key));
 
-  // How many parameters here carry something, shown only while the group is shut.
-  const mark = panelNode('span', 'groupmark');
   const button = panelNode('button', 'grouptoggle');
   button.type = 'button';
   button.dataset.groupToggle = group.key;
   button.id = `${group.key}Toggle`;
   button.append(panelNode('i', 'groupchevron'));
   button.addEventListener('click', () => toggleGroup(group.key));
-  head.append(mark, button);
-  return { head, button, mark };
+  head.append(button);
+  return { head, button };
 }
 
 let panelRowsEmitted = 0;
@@ -1422,13 +1420,13 @@ function buildPanel() {
   groupNode.dataset.group = group.key;
   groupNode.dataset.panelTab = group.tab;
   panelGroupElements.set(group.key, groupNode);
-  const { head, button: headButton, mark: headMark } = panelHead(group);
+  const { head, button: headButton } = panelHead(group);
   if (group.label || group.collapses) groupNode.append(head);
   if (group.before) groupNode.append(...group.before());
   const names = [];
   panelGroupParams.set(group.key, names);
   if (group.collapses) {
-    panelGroupNodes.set(group.key, { group, node: groupNode, button: headButton, mark: headMark });
+    panelGroupNodes.set(group.key, { group, node: groupNode, button: headButton });
   }
 
   let rows = 0;
@@ -2199,8 +2197,6 @@ function refreshUnderRows() {
   }
 }
 
-let effectRackConfirming = null;
-
 function addEffectToRack(id) {
   if (!effectInstalled(id)) return false;
   rackedEffects.add(id);
@@ -2220,7 +2216,6 @@ function removeEffectFromRack(id) {
   if (!effectInstalled(id)) return false;
   if (refuseEdit('taking ' + id + ' out of the rack')) return false;
   const { names } = effectRackEntry(id);
-  effectRackConfirming = null;
   rackedEffects.delete(id);
   storeRackedEffects();
 
@@ -2284,35 +2279,12 @@ function paintEffectRackDialog() {
       add.setAttribute('aria-label', `add ${title} to the sidebar`);
       add.addEventListener('click', () => addEffectToRack(id));
       actions.append(add);
-    } else if (effectRackConfirming === id) {
-      const cancel = panelNode('button', 'dialog-secondary', 'cancel');
-      cancel.type = 'button';
-      cancel.addEventListener('click', () => {
-        effectRackConfirming = null;
-        paintEffectRackDialog();
-        document.querySelector(`[data-effect-remove="${CSS.escape(id)}"]`)?.focus();
-      });
-      const remove = panelNode('button', 'dialog-secondary', 'reset & remove');
-      remove.type = 'button';
-      remove.dataset.effectConfirmRemove = id;
-      remove.setAttribute('aria-label', `reset and remove ${title}`);
-      remove.addEventListener('click', () => removeEffectFromRack(id));
-      actions.append(cancel, remove);
     } else {
       const remove = panelNode('button', 'dialog-secondary', 'remove');
       remove.type = 'button';
       remove.dataset.effectRemove = id;
       remove.setAttribute('aria-label', `remove ${title} from the sidebar`);
-      remove.addEventListener('click', () => {
-        const now = effectRackEntry(id);
-        if (now.moved.length || now.keys) {
-          effectRackConfirming = id;
-          paintEffectRackDialog();
-          document.querySelector(`[data-effect-confirm-remove="${CSS.escape(id)}"]`)?.focus();
-        } else {
-          removeEffectFromRack(id);
-        }
-      });
+      remove.addEventListener('click', () => removeEffectFromRack(id));
       actions.append(remove);
     }
     row.append(name, actions);
@@ -2347,10 +2319,6 @@ function groupIsOpen(group) {
   return groupOverride.get(group.key) ?? groupRevealed(group);
 }
 
-function groupTouchedCount(key) {
-  return (panelGroupParams.get(key) ?? []).filter(paramTouched).length;
-}
-
 /** How often the panel has re-derived which groups are open, since boot. */
 let groupRefreshes = 0;
 let groupOverrideDirty = false;
@@ -2358,7 +2326,7 @@ let groupOverrideDirty = false;
 const groupSeen = new Map();
 function refreshGroups() {
   groupRefreshes++;
-  for (const [key, { group, node, button, mark }] of panelGroupNodes) {
+  for (const [key, { group, node, button }] of panelGroupNodes) {
     const inUse = groupRevealed(group);
     const want = groupOverride.get(key);
     const pair = `${want}/${inUse}`;
@@ -2370,18 +2338,13 @@ function refreshGroups() {
     groupSeen.set(key, `${groupOverride.get(key)}/${inUse}`);
     // Nothing here may author an override.
     const open = groupIsOpen(group);
-    const touched = groupTouchedCount(key);
-    const state = `${open}/${inUse}/${touched}`;
+    const state = `${open}/${inUse}`;
     if (groupPainted.get(key) === state) continue;
     groupPainted.set(key, state);
 
     node.classList.toggle('shut', !open);
     button.setAttribute('aria-expanded', String(open));
     button.setAttribute('aria-label', `${open ? 'collapse' : 'expand'} ${group.label}`);
-    mark.hidden = open || !inUse;
-    mark.textContent = touched > 0 ? String(touched) : '';
-    mark.title = touched > 0
-      ? `${touched} of these are set to something` : 'this group is in use';
   }
   // Once at the end and only where the map moved, since `setItem` serialises the whole thing.
   if (groupOverrideDirty) {
@@ -10328,12 +10291,10 @@ shell.projectSettings.addEventListener('click', () => openDialog(shell.projectDi
 function closeEffectRack({ restore = false } = {}) {
   shell.effectRackPanel.hidden = true;
   shell.effectRackOpen.setAttribute('aria-expanded', 'false');
-  effectRackConfirming = null;
   if (restore) shell.effectRackOpen.focus();
 }
 
 function openEffectRack() {
-  effectRackConfirming = null;
   shell.effectRackSearch.value = '';
   paintEffectRackDialog();
   shell.effectRackPanel.hidden = false;
@@ -10346,10 +10307,7 @@ shell.effectRackOpen.addEventListener('click', () => {
   else closeEffectRack({ restore: true });
 });
 shell.effectRackClose.addEventListener('click', () => closeEffectRack({ restore: true }));
-shell.effectRackSearch.addEventListener('input', () => {
-  effectRackConfirming = null;
-  paintEffectRackDialog();
-});
+shell.effectRackSearch.addEventListener('input', () => paintEffectRackDialog());
 shell.wholeClip.addEventListener('click', () => {
   closeApplicationMenus();
   clearClipRange();
