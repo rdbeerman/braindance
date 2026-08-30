@@ -514,7 +514,9 @@ value carries one where it is stored per clip, and view state carries none becau
 nowhere. A preset is applied through the same door, so its cloud values land on the selected clip
 and its post values land on the project - which is to say applying a preset to one clip moves the
 grade every other clip in the edit is seen through, and the editor says so rather than leaving it
-to be discovered. There is no union: `checkProject` reads each clip's block into that clip, and two clips
+to be discovered. Framing stays outside that door: levelling, clip planes and the crop box belong
+to the shot and no preset, including `none`, can write them. There is no union: `checkProject`
+reads each clip's block into that clip, and two clips
 of one document are allowed to disagree about every value in them.
 
 **Which clip is selected is decided at the door the editor was opened through.** Opening a take

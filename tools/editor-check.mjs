@@ -1260,6 +1260,22 @@ const MUTATIONS = {
       + 'than arming a redraw the animation loop pumps. Reddens the two rebuild rows of 22b: '
       + '30 rebuilds for 30 moves, against the 34-for-one this program has shipped',
   },
+  'gizmo-runs-through-the-look': {
+    file: 'web/main.js',
+    edits: [['  gizmoScene.add(gizmoHelper);', '  scene.add(gizmoHelper);']],
+    fails: 'the clip handles drawn into the scene before the post chain rather than over its '
+      + 'finished picture. Reddens 22b\'s neutral-versus-Blackwall axis-pixel row',
+  },
+  'preset-includes-framing': {
+    file: 'web/main.js',
+    edits: [[
+      "function presetValueNames() {\n  return params.names('look').filter((name) => PARAMS[name].group !== 'framing');\n}",
+      "function presetValueNames() {\n  return params.names('look');\n}",
+    ]],
+    fails: 'framing admitted into the preset contract. The export-ownership arm loses its '
+      + 'whole-look stamp, and section 22b reddens the None reset, subset-picker and '
+      + 'stored-document refusal rows',
+  },
   // A preset's cloud half written to every clip rather than to the selected one, which is the
   // whole of what makes a look a clip's own. Must redden 22b's "and on no other clip".
   'preset-writes-every-clip': {
@@ -6220,12 +6236,12 @@ try {
         whole: heads.filter((h) => h.checked && !h.indeterminate).length,
       };
     })()`);
-    const lookNames = await page.evaluate("globalThis.__kinect.params.names('look')");
+    const lookNames = await page.evaluate('globalThis.__kinect.presetValueNames()');
     const noBox = lookNames.filter((n) => !offered.named.includes(n));
     const extraBox = offered.named.filter((n) => !lookNames.includes(n));
     check(noBox.length === 0 && extraBox.length === 0,
-      `the dialog offers every look parameter and only those (${lookNames.length})`,
-      noBox.length || extraBox.length ? `no box for ${noBox.join(', ') || 'none'}; not a look value: ${extraBox.join(', ') || 'none'}`
+      `the dialog offers every preset value and only those (${lookNames.length})`,
+      noBox.length || extraBox.length ? `no box for ${noBox.join(', ') || 'none'}; not a preset value: ${extraBox.join(', ') || 'none'}`
         : `${offered.named.length} boxes`);
     check(offered.ticked === offered.named.length && offered.whole === offered.heads,
       'and every box starts ticked, so the gesture that existed before this dialog writes what it wrote before',
@@ -9720,6 +9736,21 @@ try {
       + `key ${JSON.stringify(beforeOffsetHead.keys)} -> ${JSON.stringify(afterOffsetHead.keys)}, `
       + `source ${beforeOffsetHead.sourceSec.toFixed(4)}s -> ${afterOffsetHead.sourceSec.toFixed(4)}s`);
 
+    // Keep the two edge handles apart. The two trims above can leave this clip at the minimum
+    // length, where a real pointer cannot distinguish the head from the tail.
+    const refusalLength = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const body = k.library.serialiseProjectBody();
+      const clip = body.clips.find((candidate) => candidate.id === k.editor.clipSelection());
+      clip.length = Math.max(4, clip.length ?? 0);
+      k.library.restoreProject(body);
+      k.editor.selectClipRow(clip.id);
+      return k.timeline.clips().find((candidate) => candidate.id === clip.id).length;
+    })()`);
+    check(refusalLength >= 4,
+      'the keyed-curve refusal arm gives the head and tail separate pointer targets',
+      `${refusalLength.toFixed(3)}s of clip`);
+
     // The same edge on a clip whose curve says more than an in-point.
     await page.evaluate(`globalThis.__kinect.keyframes.setRetime({ rate: 1, keys: [
       { t: 0, value: 2 }, { t: 4, value: 6 } ] })`);
@@ -9924,6 +9955,102 @@ try {
     check(armed.mode === 'translate' && armed.clip === 'gz2' && armed.shown === true,
       'pressing move arms the translate handles on the selected clip and draws them',
       `${armed.mode} on ${armed.clip}, shown ${armed.shown}`);
+
+    // The handles are editor furniture. The look must change the picture behind them without
+    // changing the axis pixels themselves.
+    const gizmoBox = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const clip = k.timeline.clips().find((c) => c.id === 'gz2');
+      const point = k.freeCamera.position.clone().fromArray(clip.placement.position);
+      point.project(k.freeCamera);
+      const canvas = k.renderer.domElement.getBoundingClientRect();
+      const size = Math.min(240, Math.floor(canvas.width), Math.floor(canvas.height));
+      const cx = canvas.left + (point.x + 1) * canvas.width / 2;
+      const cy = canvas.top + (1 - point.y) * canvas.height / 2;
+      return {
+        x: Math.max(canvas.left, Math.min(canvas.right - size, cx - size / 2)),
+        y: Math.max(canvas.top, Math.min(canvas.bottom - size, cy - size / 2)),
+        width: size,
+        height: size,
+      };
+    })()`);
+    const gizmoPixels = async () => {
+      const shot = await page.screenshot({ clip: gizmoBox });
+      return page.evaluate(`(async (dataUrl) => {
+        const img = new Image();
+        img.src = dataUrl;
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const context = canvas.getContext('2d');
+        context.drawImage(img, 0, 0);
+        const pixels = context.getImageData(0, 0, img.width, img.height).data;
+        let pictureHash = 2166136261;
+        let axisHash = 2166136261;
+        let axes = 0;
+        const mix = (hash, value) => Math.imul(hash ^ value, 16777619);
+        for (let i = 0; i < pixels.length; i += 4) {
+          const r = pixels[i];
+          const g = pixels[i + 1];
+          const b = pixels[i + 2];
+          pictureHash = mix(mix(mix(pictureHash, r), g), b);
+          const high = Math.max(r, g, b);
+          const low = Math.min(r, g, b);
+          const primary = (r > g * 2.5 && r > b * 2.5)
+            || (g > r * 2.5 && g > b * 2.5)
+            || (b > r * 2.5 && b > g * 2.5);
+          // Count the opaque cores of the axes. Their antialiased edges deliberately blend with
+          // the finished picture behind them, so an edge pixel is not invariant when that picture
+          // changes even though the overlay itself never enters the effect pipeline.
+          if (high < 220 || low > 80 || !primary) continue;
+          const pixel = i / 4;
+          axisHash = mix(mix(mix(mix(axisHash, pixel), r), g), b);
+          axes++;
+        }
+        return { pictureHash: pictureHash >>> 0, axisHash: axisHash >>> 0, axes };
+      })(${JSON.stringify(`data:image/png;base64,${shot.toString('base64')}`)})`);
+    };
+    const setPointCloudsVisible = (visible) => page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      k.scene.traverse((object) => { if (object.isPoints) object.visible = ${visible}; });
+      k.renderProgramFrame(k.timeline.transport().programSec);
+    })()`);
+    await page.evaluate("__kinect.params.reset(__kinect.params.names('look'))");
+    await settle();
+    await setPointCloudsVisible(true);
+    const neutralPicture = await gizmoPixels();
+    await setPointCloudsVisible(false);
+    const neutralAxes = await gizmoPixels();
+    await page.evaluate(`(async () => {
+      const doc = await (await fetch('/presets/blackwall')).json();
+      __kinect.library.applyStoredPreset(doc);
+      await __kinect.timeline.settled();
+    })()`);
+    await setPointCloudsVisible(true);
+    const blackwallPicture = await gizmoPixels();
+    await setPointCloudsVisible(false);
+    const blackwallAxes = await gizmoPixels();
+    console.log(`  movement handles under neutral and Blackwall: picture hashes `
+      + `${neutralPicture.pictureHash}/${blackwallPicture.pictureHash}, axis pixels `
+      + `${neutralAxes.axes}/${blackwallAxes.axes} at hashes `
+      + `${neutralAxes.axisHash}/${blackwallAxes.axisHash}`);
+    check(neutralPicture.pictureHash !== blackwallPicture.pictureHash,
+      'Blackwall changes the picture behind the handles, so the equality below is not a look '
+      + 'that failed to apply',
+      `picture hashes ${neutralPicture.pictureHash} and ${blackwallPicture.pictureHash}`);
+    check(neutralAxes.axes > 80,
+      'the isolated handle image contains enough primary-colour pixels to compare',
+      `${neutralAxes.axes} primary-colour pixels`);
+    check(blackwallAxes.axes === neutralAxes.axes
+      && blackwallAxes.axisHash === neutralAxes.axisHash,
+    'the movement handles render over the finished look, so effects cannot recolour or bloom them',
+    `${neutralAxes.axes}/${neutralAxes.axisHash} neutral, `
+      + `${blackwallAxes.axes}/${blackwallAxes.axisHash} Blackwall`);
+    await setPointCloudsVisible(true);
+    await page.evaluate("__kinect.params.reset(__kinect.params.names('look'))");
+    await settle();
+
     await page.locator('#tRotateClip').click();
     await settle();
     const turned = await page.evaluate('__kinect.editor.gizmo()');
@@ -10101,6 +10228,93 @@ try {
     check(/project/i.test(copy) && /every other clip/i.test(copy),
       'and the dialog that saves one says the same thing in words, on the surface a person reads',
       copy.replace(/\s+/g, ' ').slice(0, 160));
+
+    // Framing belongs to the shot. Drive the crop and both preset choices through the controls a
+    // person uses, then ask the file door and the save dialog for the same boundary.
+    await page.locator('#panelTabFraming').click();
+    await page.locator('#left').evaluate((control) => {
+      control.value = '-1.25';
+      control.dispatchEvent(new Event('input', { bubbles: true }));
+      control.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.evaluate("__kinect.params.set('pointSize', 19.5)");
+    await settle();
+    const framingBeforePreset = await page.evaluate(`(() => ({
+      left: __kinect.params.get('left'),
+      pointSize: __kinect.params.get('pointSize'),
+    }))()`);
+    await page.locator('#panelTabLook').click();
+    const choosePreset = async (name) => {
+      await page.locator('#tPreset').click();
+      await page.waitForFunction("document.getElementById('tPresetList').hidden === false");
+      await page.locator(`#tPresetList .pickeroption[data-name=${JSON.stringify(name)}]`).click();
+      await settle();
+    };
+    await choosePreset('blackwall');
+    const afterBlackwall = await page.evaluate(`(() => ({
+      left: __kinect.params.get('left'),
+      pointSize: __kinect.params.get('pointSize'),
+    }))()`);
+    check(afterBlackwall.left === framingBeforePreset.left
+      && afterBlackwall.pointSize !== framingBeforePreset.pointSize,
+    'choosing a look changes the look and leaves the crop exactly where it was framed',
+    `left ${framingBeforePreset.left} -> ${afterBlackwall.left}, point size `
+      + `${framingBeforePreset.pointSize} -> ${afterBlackwall.pointSize}`);
+    await choosePreset('');
+    const afterNone = await page.evaluate(`(() => ({
+      left: __kinect.params.get('left'),
+      pointSize: __kinect.params.get('pointSize'),
+      pointSizeDefault: __kinect.params.spec('pointSize').default,
+    }))()`);
+    check(afterNone.left === framingBeforePreset.left
+      && afterNone.pointSize === afterNone.pointSizeDefault,
+    'choosing preset None resets the look and leaves the crop exactly where it was framed',
+    `left ${framingBeforePreset.left} -> ${afterNone.left}, point size `
+      + `${afterNone.pointSize} against default ${afterNone.pointSizeDefault}`);
+
+    await page.locator('#tPresetSave').click();
+    await page.waitForFunction("document.getElementById('presetPick').open === true");
+    const framingOffered = await page.evaluate(`(() => {
+      const framingNames = new Set([...document.querySelectorAll(
+        '#panelBody [data-group="framing"] input[id]')]
+        .map((el) => el.id)
+        .filter((name) => __kinect.params.names().includes(name)));
+      return {
+        group: document.getElementById('ppg-framing') !== null,
+        values: [...document.querySelectorAll('#ppGroups input[id^="pp-"]')]
+          .map((el) => el.id.slice(3))
+          .filter((name) => framingNames.has(name)),
+      };
+    })()`);
+    check(framingOffered.group === false && framingOffered.values.length === 0,
+      'the preset subset dialog offers no framing group or framing value to save',
+      `group ${framingOffered.group}, values ${framingOffered.values.join(', ') || 'none'}`);
+    await page.locator('#ppCancel').click();
+    await page.waitForFunction("document.getElementById('presetPick').open === false");
+
+    const framingFile = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const before = k.params.get('left');
+      let message = null;
+      try {
+        k.library.applyStoredPreset({
+          name: 'framing-is-not-a-look',
+          rev: null,
+          body: { version: k.library.PROJECT_VERSION, values: { left: -3.75 } },
+        });
+      } catch (error) {
+        message = error.message;
+      }
+      const after = k.params.get('left');
+      if (after !== before) k.params.set('left', before);
+      return { before, after, message };
+    })()`);
+    check(/framing/.test(framingFile.message ?? '')
+      && framingFile.after === framingFile.before,
+    'a stored document that names framing is refused before it can move the crop',
+    `${JSON.stringify(framingFile.message)} with left ${framingFile.before} -> ${framingFile.after}`);
+    await page.locator('#panelTabFraming').click();
+    await settle();
 
     // A preset request does not own the selection while the server answers. Hold each write,
     // move the visible row, and then let the real continuation finish.

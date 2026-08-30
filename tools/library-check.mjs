@@ -922,8 +922,8 @@ const MUTATIONS = {
   ]] },
   // And the other side of the comparison: the definition, narrowed by one group.
   'complete-look-drops-a-group': { file: 'web/main.js', edits: [[
-    "  .filter((n) => PARAMS[n].group !== 'framing' && effectOf(n) === null);",
-    "  .filter((n) => PARAMS[n].group !== 'framing' && PARAMS[n].group !== 'post' && effectOf(n) === null);",
+    'const coreLookNames = () => presetValueNames().filter((name) => effectOf(name) === null);',
+    "const coreLookNames = () => presetValueNames()\n  .filter((name) => PARAMS[name].group !== 'post' && effectOf(name) === null);",
   ]] },
 };
 

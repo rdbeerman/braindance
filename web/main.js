@@ -4194,9 +4194,7 @@ let frameSink = null;
 function renderProgramFrame(t) {
   counters.renders++;
   viewportRenders++;
-  // Three draws the handles because they are in the scene, and this scene is also the picture -
-  // so an export and a chrome-off look take them back out. The furniture on the second canvas
-  // gets this for free and the gizmo cannot.
+  // The overlay is still a scene, so an export and a chrome-off look take its handles out.
   if (gizmoHelper) gizmoHelper.visible = gizmoShown();
   const now = performance.now();
   if (now - lastViewportFpsAt >= 1000) {
@@ -4283,6 +4281,7 @@ function renderProgramFrame(t) {
     if (timing) gpuTimer.begin(timerGl);
     if (postEnabled()) composer.render(dt);
     else renderer.render(scene, viewCamera);
+    renderGizmo();
     if (timing) gpuTimer.end(timerGl);
 
     if (frameSink !== null && t === frameSink.t) {
@@ -5624,17 +5623,17 @@ ui.keyClip = stripCommand('tKeyClip', 'key', 'Keyframe the selected clip\'s plac
 /**
  * The clip gizmo: three's own handles, attached to the selected clip's placement group.
  *
- * Built only on the editor. It is a scene object rather than chrome on the second canvas, which
- * is the price of using three's own controls - so `renderProgramFrame` takes it back out of the
- * picture for anything that is not the operator's viewport.
+ * Built only on the editor and drawn over the finished picture, so a look cannot grade its
+ * handles and an export cannot contain them.
  */
 const gizmo = EDITING ? new TransformControls(viewCamera, renderer.domElement) : null;
 const gizmoHelper = gizmo ? gizmo.getHelper() : null;
+const gizmoScene = new THREE.Scene();
 if (gizmo) {
   // The room's axes rather than the clip's, so a placed clip is still moved along the floor.
   gizmo.setSpace('world');
   gizmoHelper.visible = false;
-  scene.add(gizmoHelper);
+  gizmoScene.add(gizmoHelper);
 }
 
 // Which handle set is armed - 'translate', 'rotate', or null for off. Session state.
@@ -5652,6 +5651,19 @@ let gizmoWriteWanted = false;
  * comes out of - the paint below and every render ask it rather than each keeping its own answer.
  */
 const gizmoShown = () => gizmoClip !== null && chromeOn && !exporting;
+
+/** Draws the editor handles after the look, without clearing its finished colour. */
+function renderGizmo() {
+  if (!gizmoShown()) return;
+  const autoClear = renderer.autoClear;
+  renderer.autoClear = false;
+  try {
+    renderer.clearDepth();
+    renderer.render(gizmoScene, viewCamera);
+  } finally {
+    renderer.autoClear = autoClear;
+  }
+}
 
 /** Where the handles are, what they do, and whether they are drawn at all. */
 function paintGizmo() {
@@ -7406,10 +7418,15 @@ async function moveMark(mark, newSourceMs) {
 const appliedPreset = () => selectedClip.appliedPreset;
 const stampPreset = (clip, stamp) => { clip.appliedPreset = stamp; };
 
+/** The look values a preset may carry. Framing belongs to the shot. */
+function presetValueNames() {
+  return params.names('look').filter((name) => PARAMS[name].group !== 'framing');
+}
+
 /** A preset is look values, and that is the whole of it. */
 function presetFromCurrentLook(names) {
   // The parked pool is not in here, and it is absent by construction rather than by a filter.
-  const values = params.values(names ?? params.names('look'));
+  const values = params.values(names ?? presetValueNames());
   // The save rule: a whole look sheds every effect it holds at defaults.
   if (wholeLookTag(values)) {
     for (const id of effectIdsIn(Object.keys(values))) {
@@ -7452,9 +7469,8 @@ const missingEffects = () => parkedRequires.map((entry) => ({
   suppressed: suppressedEffects.has(entry.id),
 }));
 
-/** The core half of a whole look: the look tag less framing and less effect parameters. */
-const coreLookNames = () => params.names('look')
-  .filter((n) => PARAMS[n].group !== 'framing' && effectOf(n) === null);
+/** The core half of a whole look: every preset value not owned by an effect. */
+const coreLookNames = () => presetValueNames().filter((name) => effectOf(name) === null);
 
 const wholeLookNames = (values) => [
   ...coreLookNames(),
@@ -7538,7 +7554,7 @@ function buildPresetPicker() {
   presetPickBoxes.clear();
   presetPickGroups.length = 0;
   for (const group of PANEL_GROUPS) {
-    const members = params.names('look').filter((n) => PARAMS[n].group === group.key);
+    const members = presetValueNames().filter((n) => PARAMS[n].group === group.key);
     if (!members.length) continue;
     const groupNode = document.createElement('div');
     groupNode.className = 'ppgroup';
@@ -7658,6 +7674,12 @@ function refusePresetBody(name, body) {
       throw new Error(
         `preset ${name} names ${key}, which is a ${tag} parameter: a preset carries look values `
         + 'and nothing else, so that it can be applied to any clip without moving anything else',
+      );
+    }
+    if (!presetValueNames().includes(key)) {
+      throw new Error(
+        `preset ${name} names ${key}, which is framing: framing belongs to the shot rather than `
+        + 'the look, so a preset cannot move the crop, clip planes or levelling',
       );
     }
     params.normalise(key, value);
@@ -7871,14 +7893,14 @@ function choosePicker(picker, name, { close = false } = {}) {
         }
       }));
     } else {
-      // "none" selected: reset every look parameter to its default, and clear the stamp.
+      // "none" selected: reset every preset value to its default, and clear the stamp.
       if (!target) return;
       if (refuseEdit('resetting the selected clip to defaults')) {
         showPickerChoice(picker, target.appliedPreset?.name ?? '');
         return;
       }
       target.appliedPreset = null;
-      const lookNames = params.names('look');
+      const lookNames = presetValueNames();
       params.reset(lookNames.filter((name) => PARAMS[name].scope === 'project'));
       withClip(target, () => params.reset(lookNames.filter((name) => PARAMS[name].scope === 'clip')));
       history.commit();
@@ -9972,7 +9994,7 @@ ui.presetSave.addEventListener('click', () => withPresetSubset(
     }
     await refreshPresets();
     say(`saved ${saved.name} · ${saved.rev.slice(7, 15)}`
-      + (whole ? '' : ` · ${picked.names.length} of ${params.names('look').length} values`));
+      + (whole ? '' : ` · ${picked.names.length} of ${presetValueNames().length} values`));
   },
 ));
 
@@ -10985,6 +11007,7 @@ globalThis.__kinect = {
   params, applyPreset,
   readings: () => READINGS.slice(),
 
+  presetValueNames,
   coreLookNames,
   wholeLookNames,
   effectOf,

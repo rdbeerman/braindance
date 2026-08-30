@@ -120,6 +120,8 @@ every clip is seen through — stay at the foot of the stack, outside every clip
 A clip carries a position and a rotation in the room and nothing else — no scale, because
 `pointSize` is measured in screen pixels and would not scale with the geometry, and the fog is
 world-space. While the handles have the pointer the orbit stands down and comes back on release.
+The handles draw over the finished picture, so effects change what is behind them and never the
+handles themselves.
 
 **`key` beside them keyframes that placement at the playhead**, and presses again to take the key
 away. It is there because a placement is edited in the world and so has no panel row and no
@@ -857,11 +859,11 @@ if the rows it emitted are not the parameters that were declared.
 ## Presets
 
 Selecting Blackwall used to apply twelve post-chain values with it. They are separate now: a
-preset is look values and nothing else, so applying one never moves your camera and never moves
-a clip.
+preset is look values and nothing else. Framing is the shot rather than the look, so applying one
+never moves your camera, a clip, its crop, its clip planes or its levelling.
 
-**Applying one is not all on one clip.** A preset's cloud values — point size, the readings, the
-crop, every effect that binds the cloud — land on the selected clip. Its post-chain values —
+**Applying one is not all on one clip.** A preset's cloud values — point size, the readings and
+every effect that binds the cloud — land on the selected clip. Its post-chain values —
 bloom, trails, crush, the rest of the grade — are the project's, so they land once and every
 other clip in the edit is seen through them. That is a real consequence rather than a footnote:
 applying a graded look to one clip of four regrades the other three. The editor says how many of
@@ -893,24 +895,22 @@ packages, Ghost, Contour and Blackwall, with all nine of their parameters. A shi
 therefore names at least 36 values. `blackwall.json` claims five more effects whose fourteen
 parameters bring it to 50. Applying a whole look resets every effect the document does not
 claim back to that effect's own defaults, which is what makes leaving an ordinary effect out
-and writing it in at its defaults describe the same look. Framing — levelling, the clip planes,
-the crop box — is the shot rather
-than the look, so no shipped document names it and picking one never reframes what you
-framed. `none` is the one entry that does reach the framing, because it is the way back to
-the defaults rather than a thirteenth look. `library-check` holds the rule against the
+and writing it in at its defaults describe the same look. Framing — levelling, the clip planes
+and the crop box — is the shot rather than the look, so no preset document can name it and
+neither a look nor `none` reframes what you framed. `library-check` holds the rule against the
 registry: a new core value fails all twelve until each names it, and a new parameter added to an
 effect fails only the documents whose `requires` already claims that effect — an effect
 nothing has reached yet fails nothing, because nothing claims it.
 
-Saving and exporting both ask which values go in, every box ticked by default, so a sparse
+Saving and exporting both ask which preset values go in, every box ticked by default, so a sparse
 preset takes deliberate effort. A whole-look save still sheds what it can: an ordinary effect
 sitting wholly at its own defaults leaves no trace in the saved file, because the whole-look
 apply above restores that same effect to those same defaults whenever the document does not
 claim it. The three reading packages stay whole even at their defaults, because a document
 naming `readRgb` and `readDepth` must also carry the other three reading weights. A subset save
 sheds nothing, because a picked value at its default is still a value somebody chose. The
-boxes derive from the registry, so a parameter added later appears under its own heading by
-existing.
+boxes derive from the preset boundary in the registry, so a look parameter added later appears
+under its own heading by existing and a framing parameter never appears there.
 
 **The five reading weights tick and untick together.** A file naming any reading has to name
 all five, because the ones it omits stay at whatever the clip was already wearing, and two
@@ -921,8 +921,8 @@ between.
 **A partial preset does not stamp the clip**, because the stamp answers "what look is this
 clip wearing" and a document short even one of the values its own core and effects call for
 did not answer it. The two surfaces that report an apply say which of the two happened, and a
-document naming the whole look stamps whether it also names the framing or not — the framing
-is not part of the answer.
+document naming the whole look stamps it. Framing is not part of that answer and a document that
+tries to name it is refused before any value is written.
 
 **Saving over a shipped name forks it**: the write lands in your library and shadows the
 built-in, and deleting the fork brings the shipped look back.
