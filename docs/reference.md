@@ -384,10 +384,16 @@ it. Where the slider is drawn and what the shader does are separate facts — `s
 consumes the region service at gate order 200, between `push` and `mask`, wherever the panel puts
 it.
 
-**On the Look tab nothing moved.** `Thermal`, `Edges` and `Duotone` sit where their rows sat
-inside `Style`, ahead of `Rain`; `RGB split`, `Grain`, `Streak` and `Vignette` sit where theirs
-sat inside `Post`, ahead of `Datamosh`. A grouping change that also re-laid out the panel would
-be two changes arriving as one, and the second is the one nobody asked for.
+**On the Look tab one row moved, and it had to.** `Thermal`, `Edges` and `Duotone` sit where
+their rows sat inside `Style`, ahead of `Rain`; `RGB split`, `Grain`, `Streak` and `Vignette` sit
+where theirs sat inside `Post`, ahead of `Datamosh`. A grouping change that also re-laid out the
+panel would be two changes arriving as one, and the second is the one nobody asked for. The
+exception is `crush`, which the registry declares after those four effects and which therefore
+drew below them: a core group is emitted whole before the groups anchored under it, so a term
+that stays in `Post` cannot stay below effects that have left it. `Post` is now `bloom` and
+`crush` together, which is the pair the grade pass already describes - the rolloff and the
+black-toe crush ride along with the same pass - so the one row this cost is a row that reads
+better where it landed.
 
 **The Region tab reads the box first and then the readings of it, in the order the shader takes
 them.** `Region (metres)`, then `Region push`, `Turbulence`, `Region mask` and `Ripple` at gate
