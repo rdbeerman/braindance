@@ -9218,9 +9218,11 @@ try {
 
     const held = await page.evaluate('__kinect.controls.target.toArray()');
     const empty = await pressOn(0);
-    check(empty.after.target.every((v, i) => v === held[i]),
+    const emptyDrift = Math.max(...empty.after.target.map((v, i) => Math.abs(v - held[i])));
+    check(emptyDrift === 0,
       'a press with nothing under it leaves the pivot exactly where it was',
-      `${empty.after.target.map((v) => v.toFixed(6)).join(', ')} against ${held.map((v) => v.toFixed(6)).join(', ')}`);
+      `${empty.after.target.map((v) => v.toFixed(12)).join(', ')} against `
+      + `${held.map((v) => v.toFixed(12)).join(', ')}, worst drift ${emptyDrift.toExponential(2)}`);
 
     const singleton = await pressOn(300, { singleton: true });
     check(singleton.after.target.every((v, i) => v === singleton.before.target[i]),
@@ -10704,9 +10706,12 @@ try {
       const k = globalThis.__kinect;
       const body = k.library.serialiseProjectBody();
       const selected = k.editor.clipSelection();
-      body.clips.find((clip) => clip.id === selected).appliedPreset = null;
+      const clip = body.clips.find((candidate) => candidate.id === selected);
+      clip.appliedPreset = null;
+      delete clip.tracks.pointSize;
       k.library.restoreProject(body);
       k.editor.selectClipRow(selected);
+      k.keyframes.setTracks(clip.tracks);
     })()`);
     await settle();
     await page.locator('#panelTabFraming').click();

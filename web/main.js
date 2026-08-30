@@ -6690,6 +6690,13 @@ function finishOrbitDrift() {
   controls.enableDamping = damped;
 }
 
+/** Settles damping only after the pointer has found something that can use the press. */
+function hitAfterOrbitSettles(readHit) {
+  if (!readHit()) return null;
+  finishOrbitDrift();
+  return readHit();
+}
+
 /** The only thing that continues a drag at a parked playhead, once per animation frame. */
 function pumpParkedDraft() {
   if (!timeline || timeline.playing || exporting) {
@@ -9567,11 +9574,9 @@ let nodeDrag = null;
 // Captured on the window and not the canvas, because OrbitControls listens on the canvas.
 addEventListener('pointerdown', (e) => {
   if (!chromeOn || e.target !== renderer.domElement) return;
-  // Before the hit test, because the hit carries a depth read through the camera.
-  finishOrbitDrift();
   const view = viewUnder(e.clientX, e.clientY);
   if (!view) return;
-  const hit = nodeUnder(view);
+  const hit = hitAfterOrbitSettles(() => nodeUnder(view));
   if (!hit) return;
   e.preventDefault();
   e.stopPropagation();
@@ -9625,10 +9630,9 @@ function cropHandleUnder(view) {
 addEventListener('pointerdown', (e) => {
   if (!cropBoxLive() || !chromeOn || nodeDrag) return;
   if (e.target !== renderer.domElement || e.button !== 0) return;
-  finishOrbitDrift();
   const view = viewUnder(e.clientX, e.clientY);
   if (!view) return;
-  const hit = cropHandleUnder(view);
+  const hit = hitAfterOrbitSettles(() => cropHandleUnder(view));
   if (!hit) return;
   e.preventDefault();
   e.stopPropagation();
@@ -9698,9 +9702,7 @@ addEventListener('pointerdown', (e) => {
   if (viewCamera !== freeCamera || !controls.enabled) return;
   const view = viewUnder(e.clientX, e.clientY);
   if (!view || view.plan) return;
-  // Settle damping so the pick uses the axis the camera will keep.
-  finishOrbitDrift();
-  const hit = pickDepth({
+  const hit = hitAfterOrbitSettles(() => pickDepth({
     depth: depthCurr.image.data,
     focal: uniforms.focal.value,
     center: uniforms.center.value,
@@ -9710,7 +9712,7 @@ addEventListener('pointerdown', (e) => {
     x: view.x,
     y: view.y,
     croppedOut,
-  });
+  }));
   // Empty space, a hole in the returns or a press past the crop box keeps the pivot it had.
   if (!hit) return;
   setPivotDistance(hit.distance);
