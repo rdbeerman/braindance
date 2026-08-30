@@ -2096,6 +2096,14 @@ drags the stage to 31.9% and reddens that one row. This is the dead-zone rule wi
 terms in a `min` rather than in a sum, and the tell was in the row's own detail line - it
 printed a strip height that was neither the ceiling nor anywhere near it.
 
+**The content clamp has since gone, and the lesson is what tells you where to probe now.**
+`applyLaneHeight` writes `max(0, min(asked, ceiling))`, so the ceiling is the only bound left,
+and the fourteen-lane arm cannot tell a build that clamps to the content from one that does not
+- both answer with the ceiling there. So section 11 clears the tracks at the end and drags the
+splitter open again, which is the arrangement where the stack is shorter than the ceiling and
+the two builds disagree. `splitter-unclamped` deletes the ceiling clamp instead, because that is
+the clamp there is left to delete.
+
 ### Place a probe where its answer would be different, not where it is convenient
 
 A third flaw came out of this on step 5: a mutation replacing the pre-roll's window query

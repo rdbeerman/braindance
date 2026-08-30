@@ -2067,6 +2067,14 @@ for collapsing and not for tabs, and it arrived through the tab door. A crash ca
 thirty-second timeout and no failed assertion is the shape `CLAUDE.md`'s third rule names — read
 the assertion count, not the exit code.
 
+**It arrived a third time through a door nobody had thought of: somebody else deleting the
+control.** PR #99 took the effect rack's confirm step out, and section 1 waits for a `cancel`
+button that is never coming — 15 assertions of about 720, then a timeout. **A tool this happens
+to does not report the removal; it reports almost nothing**, and no hosted check can say so,
+because `editor-check` needs a browser and a take and CI runs neither. So a merge that changes
+the editor is a merge whose first proof is running this tool once, before believing a green CI
+job means anything about those surfaces.
+
 **Re-measured after the Phase C work, and the readings are byte-identical**: `530 assertions,
 3 failed` on `--take fixture-1g --no-render` at load average 9.31, against the same three rows
 — `1 fallbacks`, `3 keys left`, and `dragged from 0.3333 to 0.3333, against a neighbour at

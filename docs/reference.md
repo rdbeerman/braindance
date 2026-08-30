@@ -69,12 +69,17 @@ on the smear the eye is aimed at.
 The ruler shows a *window* of the clip, because a fifteen-minute take across one screen puts
 a keyframe against gradations forty times coarser than the thing being placed. Scroll to
 zoom about the pointer, `+`/`-` about the playhead, `,`/`.` to pan, `F` to fit the clip, `Z`
-to frame the trim. The overview underneath is always the whole clip: drag its box to pan, an
-edge to zoom, click to go there.
+to frame the trim. The overview underneath is always the whole clip: drag its box to pan, click
+to go there.
 
 Press `I` and `O` to set the trim at the playhead. Choose **Output > Whole clip**, or press
 Option-X, to restore `{ in: 0, out: null }`. The null end means the range continues to the end
 if the program later grows; writing the current duration would freeze it there instead.
+
+**Loop**, at the right of the transport row, plays that trimmed range round instead of stopping
+at its end: reaching the out-point seeks back to the in-point and playback carries on. It is off
+whenever the editor opens, because the transport is built fresh each time and a loop you set on
+one take is not a fact about the next one.
 
 **Clips are the rows at the head of the lane stack**, one box each from where a clip starts to
 where it ends, above the curves that animate them. `+ add clip` opens the library's takes and the
@@ -137,6 +142,10 @@ the clip along the strip carries the move it was given with it.
 footage, so two clips of one take share them; where a mark ticks on the ruler is that source
 second put through the selected clip's curve *and* its placement, which is why the same mark sits
 somewhere else when you select the other clip of the same take.
+
+**mark** plants one at the playhead and presses again to take that one away, and `M` does the
+same from the keyboard. "Already at the playhead" means within half an output frame either side,
+so a press never has two marks to choose between.
 
 **The `lens` row on the *Camera* tab says what the camera's `fov` says, in the millimetres a
 lens is sold under.** It is a 35mm equivalent against the full-frame gate — 36x24mm, so a
@@ -858,7 +867,9 @@ and label, and the row, bounds, readout and keyframe control are built from that
 effect cannot get a control the registry does not own. Package-effect rows are hidden until
 the effect is added with **+ add effect** or any of its values or tracks carries work.
 Rows declared `under` another parameter are hidden while that master is at its absent value.
-Removing one resets every value and deletes every track in one confirmed, undoable edit.
+Removing one resets every value and deletes every track in one undoable edit, and it asks
+nothing first: **remove** in the picker and the cross that appears on a group's own header when
+you hover it are the same edit, and undo is what takes either of them back.
 The local rack preference is panel state, not project state. The generator refuses to boot
 if the rows it emitted are not the parameters that were declared.
 

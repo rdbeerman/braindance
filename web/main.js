@@ -6187,7 +6187,9 @@ const LANE_KEY_STEP = 22;
 
 ui.grip.addEventListener('keydown', (e) => {
   const from = parseFloat(getComputedStyle(ui.root).getPropertyValue('--tlanes-h')) || 0;
-  const ceiling = Math.min(laneStackHeight, laneHeightCeiling());
+  // The same bound `applyLaneHeight` writes and `aria-valuemax` reports, or End would stop short
+  // of the maximum the separator declares whenever the lanes stack shorter than the ceiling.
+  const ceiling = laneHeightCeiling();
   const to = e.key === 'ArrowUp' ? from + LANE_KEY_STEP
     : e.key === 'ArrowDown' ? from - LANE_KEY_STEP
       : e.key === 'PageUp' ? from + LANE_KEY_STEP * 4
@@ -6467,7 +6469,7 @@ addEventListener('keydown', (e) => {
       if (selection) { deleteSelectedKey(); return; }
       if (selectedClipRow()) { deleteSelectedClip(); return; }
       return;
-    case 'm': case 'M': e.preventDefault(); markHere().catch(showTimelineError); return;
+    case 'm': case 'M': e.preventDefault(); toggleMarkHere().catch(showTimelineError); return;
     case '[': case ']': {
       e.preventDefault();
       if (!clipGestureLive()) { say('select a clip before moving to a mark'); return; }
@@ -7446,6 +7448,14 @@ async function deleteMark(mark) {
   return adoptMarks(id, marks, () => {
     if (selectedMark?.id === mark.id) selectedMark = null;
   });
+}
+
+/** Plants a mark at the playhead, or takes away the one already under it. */
+function toggleMarkHere() {
+  const t = playheadSec();
+  const tol = keyTolerance();
+  const onMark = takeMarks.find((m) => Math.abs(programSecOfSource(m.sourceMs / 1000) - t) <= tol);
+  return onMark ? deleteMark(onMark) : markHere();
 }
 
 /** Moves a mark to a new source position. */
@@ -9992,16 +10002,7 @@ ui.exportSize.addEventListener('change', () => {
 });
 setProjectAspect(defaultAspect(), { fromDocument: true });
 
-ui.mark.addEventListener('click', () => {
-  const t = playheadSec();
-  const tol = keyTolerance();
-  const onMark = takeMarks.find((m) => {
-    const program = programSecOfSource(m.sourceMs / 1000);
-    return Math.abs(program - t) <= tol;
-  });
-  if (onMark) deleteMark(onMark).catch(showTimelineError);
-  else markHere().catch(showTimelineError);
-});
+ui.mark.addEventListener('click', () => { toggleMarkHere().catch(showTimelineError); });
 
 /** `near`/`far` are viewer uniforms and must never reach `--min-depth`/`--max-depth`. */
 function paintPreviewRange(minDepth, maxDepth) {
@@ -10848,6 +10849,8 @@ async function enterEditor() {
   paintPanelScope();
   paintGizmo();
   timeline = new TimelineTransport();
+  // A fresh transport is not looping, and the button is the only thing that says so.
+  ui.tLoop?.setAttribute('aria-pressed', String(timeline.looping));
   await paintOpenTake();
   document.body.classList.add('editing');
   ui.root.hidden = false;

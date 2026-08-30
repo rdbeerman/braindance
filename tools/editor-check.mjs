@@ -1518,11 +1518,41 @@ const MUTATIONS = {
     ]],
   },
 
+  // The out-point stops the take whether or not the loop is armed, which is the whole of what
+  // the button does. Reddens the armed row and leaves the unarmed one green.
+  'loop-never-wraps': {
+    file: 'web/main.js',
+    edits: [[
+      '      if (this.looping) this.seek(this.clipInSec).catch(showTimelineError);\n      else this.pause();',
+      '      this.pause();',
+    ]],
+  },
+
+  // The mark gesture plants and never removes, which is what the key did before both doors were
+  // made one edit: the second press leaves two marks stacked at one source second.
+  'mark-never-toggles': {
+    file: 'web/main.js',
+    edits: [[
+      '  return onMark ? deleteMark(onMark) : markHere();',
+      '  return markHere();',
+    ]],
+  },
+
+  // The cross on a group's header is drawn and does nothing, which a sweep counting controls
+  // cannot see: it is there, it is pressable, and the press is the part that is missing.
+  'group-head-remove-inert': {
+    file: 'web/main.js',
+    edits: [[
+      "    remove.addEventListener('click', () => removeEffectFromRack(owner));",
+      "    remove.addEventListener('click', () => {});",
+    ]],
+  },
+
   'splitter-unclamped': {
     file: 'web/main.js',
     edits: [[
-      '  const height = Math.min(laneStackHeight, Math.max(0, Math.min(wanted, laneHeightCeiling())));',
-      '  const height = Math.min(laneStackHeight, Math.max(0, wanted));',
+      '  const height = Math.max(0, Math.min(wanted, laneHeightCeiling()));',
+      '  const height = Math.max(0, wanted);',
     ]],
   },
 
@@ -2127,6 +2157,12 @@ const DRIVER_RULES = [
       && (row.tag === 'DIV' || row.label.startsWith('Delete preset') || row.id === 'tPresetAdd'),
   },
   {
+    key: 'groupremove',
+    what: "the remove button in an effect group's own header",
+    by: "section 1 presses one and reads the effect leaving the sidebar, then adds it back",
+    match: (row) => Boolean(row.groupRemove),
+  },
+  {
     key: 'look',
     what: 'a look parameter slider or checkbox',
     by: "registry-check's drop-one sweep proves each one reaches the pixels",
@@ -2148,6 +2184,8 @@ const DRIVER_IDS = {
   tRotateClip: 'section 22b - arms the turn handles and reads that the mode moved with the press',
   tKeyClip: 'section 22b - keys the placement at two playheads and scrubs between them',
   tPlay: 'section 2 - toggles playback and the state is read back',
+  tLoop: 'section 2 - runs playback into the out-point with it off and with it armed, and reads '
+    + 'where the playhead ended up each time',
   tRate: 'section 4 - the anchor rows and the seek-storm row',
   tCamView: 'section 1 - looks through the program camera and reads the orbit back',
   effectRackOpen: 'section 1 - opens the installed-effect search, adds every effect, and removes one',
@@ -2567,21 +2605,19 @@ try {
     else await page.evaluate("document.getElementById('effectRackOpen').click()");
   }
   await page.locator('#effectRackSearch').fill('halation');
-  await page.locator('[data-effect-remove="halation"]').click();
-  const confirmation = await page.evaluate(`(() => ({
-    confirm: Boolean(document.querySelector('[data-effect-confirm-remove="halation"]')),
+  // Remove destroys the values and the tracks on one press and asks nothing first, so the undo
+  // row below is the whole of what stands between a stray click and the work. This arm reads what
+  // is there to destroy before pressing, because a removal from an effect already at its defaults
+  // would pass the two rows under it having reset and deleted nothing.
+  const beforeRemoveDepth = await page.evaluate('__kinect.keyframes.undo.depth()');
+  const carried = await page.evaluate(`(() => ({
     value: globalThis.__kinect.params.get('halation.amount'),
     keyed: globalThis.__kinect.keyframes.names().includes('halation.amount'),
   }))()`);
-  check(confirmation.confirm && confirmation.value === 0.7 && confirmation.keyed,
-    'Remove asks before destroying an effect that carries a value or keyframe, and the first press changes nothing',
-    `confirm=${confirmation.confirm}, value=${confirmation.value}, keyed=${confirmation.keyed}`);
-  await page.getByRole('button', { name: 'cancel', exact: true }).click();
-  check(await page.locator('[data-effect-remove="halation"]').count() === 1,
-    'Cancel returns to the effect without changing it');
+  check(carried.value === 0.7 && carried.keyed,
+    'the effect about to be removed carries a value and a track, so the removal has something to destroy',
+    `value=${carried.value}, keyed=${carried.keyed}`);
   await page.locator('[data-effect-remove="halation"]').click();
-  const beforeRemoveDepth = await page.evaluate('__kinect.keyframes.undo.depth()');
-  await page.locator('[data-effect-confirm-remove="halation"]').click();
   await settle();
   const removedEffect = await page.evaluate(`(() => {
     const k = globalThis.__kinect;
@@ -2599,7 +2635,7 @@ try {
   })()`);
   check(removedEffect.atDefault && !removedEffect.keyed && removedEffect.hidden
     && !removedEffect.stored.includes('halation'),
-  'the confirmed removal resets every value, deletes every track, and takes the effect out of the sidebar',
+  'one press on Remove resets every value, deletes every track, and takes the effect out of the sidebar',
   `default=${removedEffect.atDefault}, keyed=${removedEffect.keyed}, hidden=${removedEffect.hidden}, `
     + `stored=${JSON.stringify(removedEffect.stored)}`);
   check(removedEffect.depth === beforeRemoveDepth + 1,
@@ -2691,6 +2727,41 @@ try {
   `${rackAdds} added in the loop, ${rackComplete.unavailable.length} unavailable, `
     + `${rackComplete.removes} remove controls for ${rackComplete.ids.length} effects`);
 
+  // The remove in a group's own header is a second door onto `removeEffectFromRack`, and the only
+  // one reached without opening the rack at all. Driven here because the loop above racked every
+  // effect, so the header exists; halation is put back afterwards, or the sweep below would be one
+  // control short and say so as a coverage failure rather than as the removal it really was.
+  await page.locator('.paneltab[data-panel-tab="look"]').click();
+  const headRemove = page.locator('#panel .group[data-group="halation"] .grouphead .groupremove');
+  const headRemoveCount = await headRemove.count();
+  if (headRemoveCount === 1) await headRemove.click();
+  await settle();
+  const headRemoved = await page.evaluate(`(() => {
+    let stored = [];
+    try { stored = JSON.parse(localStorage.getItem('kinect.rackedEffects') ?? '[]'); } catch {}
+    const row = document.getElementById('halation.amount')?.closest('.row, .checkrow');
+    return { stored, hidden: row?.hidden ?? null };
+  })()`);
+  check(headRemoveCount === 1 && !headRemoved.stored.includes('halation') && headRemoved.hidden === true,
+    'the remove in a group\'s own header takes that effect out of the sidebar',
+    `${headRemoveCount} button in the header, row hidden=${headRemoved.hidden}, `
+    + `stored ${JSON.stringify(headRemoved.stored)}`);
+  if (await page.evaluate('document.getElementById("effectRackPanel").hidden')) {
+    await page.locator('#effectRackOpen').click();
+  }
+  await page.locator('#effectRackSearch').fill('halation');
+  // Conditional so that a build where the cross did nothing dies on the row below rather than on
+  // a thirty-second wait for an Add button a still-racked effect does not have: the mutation's
+  // blast radius is one row, and a run that stops at 22 assertions cannot say that.
+  const addBack = page.locator('[data-effect-add="halation"]');
+  if (await addBack.count() === 1) await addBack.click();
+  await page.locator('#effectRackSearch').fill('');
+  await settle();
+  check(await page.evaluate(`(() => {
+    const row = document.getElementById('halation.amount')?.closest('.row, .checkrow');
+    return row ? row.hidden === false : false;
+  })()`), '  and adding it back leaves the sweep below the full set of effects to enumerate');
+
   // One mark planted first, because a mark tick is a control that exists only when the take has a
   // mark: "no instance of this class" and "this class is not swept" read the same.
   await page.evaluate("__kinect.editor.setMarks([{ id: 'sweep', sourceMs: 2000, label: 'sweep' }])");
@@ -2732,6 +2803,7 @@ try {
         .filter((g) => el.closest(g)),
       kf: el.classList.contains('kf'),
       mark: el.classList.contains('tmk'),
+      groupRemove: el.classList.contains('groupremove'),
       label: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 24),
     }));
   }).toString()})()`);
@@ -2811,14 +2883,13 @@ try {
           const row = document.getElementById(name)?.closest('.row, .checkrow');
           return row && !row.hidden;
         })),
-      confirms: document.querySelectorAll('[data-effect-confirm-remove]').length,
     };
   })()`);
   check(rackRemoves === rackComplete.ids.length && rackClean.stored.length === 0
-    && rackClean.visible.length === 0 && rackClean.confirms === 0,
+    && rackClean.visible.length === 0,
   'the sweep removes every idle effect through the rack and leaves later sections a fresh sidebar',
   `${rackRemoves} removed, stored ${JSON.stringify(rackClean.stored)}, `
-    + `${rackClean.visible.length} effects still visible, ${rackClean.confirms} confirmations`);
+    + `${rackClean.visible.length} effects still visible`);
 
   await page.locator('#effectRackClose').click();
   check(await page.evaluate('document.getElementById("effectRackPanel").hidden'),
@@ -3637,6 +3708,63 @@ try {
     'and deleted no key');
   await page.evaluate(`(() => { const el = document.getElementById('tExportName'); el.value = ''; el.blur(); })()`);
   await page.locator('#exportClose').click();
+  await focusStage();
+
+  // ---- the loop, which is the only control that changes what reaching the out-point does
+  // Driven over a two-second trim rather than over the clip, because a loop is visible only where
+  // playback reaches an end and this take is a quarter of an hour long. Both halves are here on
+  // purpose: a build that never loops passes the armed row if the unarmed one is not asserted
+  // first, because a playhead that simply never got to the out-point reads the same as one that
+  // wrapped back from it.
+  const rangeBeforeLoop = await range();
+  await page.evaluate('__kinect.editor.setClipRange(8, 10)');
+  const LOOP_IN = 8;
+  const LOOP_OUT = 10;
+  /** Runs playback from just before the out-point and reports where it ended up. */
+  const runToOutPoint = async () => {
+    await page.evaluate('__kinect.timeline.transport().seek(9.6)');
+    await settle();
+    await page.locator('#tPlay').click();
+    return page.evaluate(`(async () => {
+      const t = __kinect.timeline.transport();
+      for (let i = 0; i < 600; i++) {
+        if (!t.playing && t.pendingPlay !== true) break;
+        if (t.programSec < 9.4) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return { playing: t.playing, programSec: t.programSec, looping: t.looping };
+    })()`);
+  };
+
+  const loopOff = await page.evaluate(`(() => ({
+    pressed: document.getElementById('tLoop').getAttribute('aria-pressed'),
+    looping: __kinect.timeline.transport().looping,
+  }))()`);
+  check(loopOff.pressed === 'false' && loopOff.looping === false,
+    'the loop button starts off, and the transport agrees with the button about that',
+    `aria-pressed ${loopOff.pressed}, looping ${loopOff.looping}`);
+  const unlooped = await runToOutPoint();
+  check(!unlooped.playing && unlooped.programSec > LOOP_OUT - 0.1,
+    '  and with it off, playback stops at the out-point rather than carrying on',
+    `playing ${unlooped.playing} at ${unlooped.programSec.toFixed(3)}s of a ${LOOP_IN}-${LOOP_OUT}s range`);
+
+  await page.locator('#tLoop').click();
+  const loopOn = await page.evaluate(`(() => ({
+    pressed: document.getElementById('tLoop').getAttribute('aria-pressed'),
+    looping: __kinect.timeline.transport().looping,
+  }))()`);
+  check(loopOn.pressed === 'true' && loopOn.looping === true,
+    '  pressing it arms the transport, and the button says so',
+    `aria-pressed ${loopOn.pressed}, looping ${loopOn.looping}`);
+  const looped = await runToOutPoint();
+  check(looped.playing && looped.programSec < 9.4,
+    '  and armed, the out-point sends the playhead back to the in-point with the take still running',
+    `playing ${looped.playing} at ${looped.programSec.toFixed(3)}s of a ${LOOP_IN}-${LOOP_OUT}s range`);
+
+  await page.evaluate('__kinect.timeline.transport().pause()');
+  await page.locator('#tLoop').click();
+  await page.evaluate(`__kinect.editor.setClipRange(${rangeBeforeLoop.in}, ${rangeBeforeLoop.out})`);
+  await settle();
   await focusStage();
 
   console.log('\n[3] the in and out markers, which is the claim nothing was making');
@@ -5862,14 +5990,13 @@ try {
   // so a build whose pointerdown handler never fires would paint that box correctly
   // forever and pass it.
   const miniBox = await page.locator('#tMini').boundingBox();
-  const dragMini = async (fromF, toF, target) => {
+  const dragMini = async (toF, target) => {
     await page.evaluate('__kinect.editor.view.set(0.30, 0.42)');
     await settle();
     const before = await page.evaluate('__kinect.editor.view.window()');
     const y = miniBox.y + miniBox.height / 2;
-    const grab = target ? await page.locator(target).boundingBox() : null;
-    const fromX = grab ? grab.x + grab.width / 2 : miniBox.x + miniBox.width * fromF;
-    await page.mouse.move(fromX, y);
+    const grab = await page.locator(target).boundingBox();
+    await page.mouse.move(grab.x + grab.width / 2, y);
     await page.mouse.down();
     await page.mouse.move(miniBox.x + miniBox.width * toF, y, { steps: 4 });
     await page.mouse.up();
@@ -5877,19 +6004,12 @@ try {
     return { before, after: await page.evaluate('__kinect.editor.view.window()') };
   };
 
-  const panned = await dragMini(0.36, 0.56, '#tMiniWin');
+  const panned = await dragMini(0.56, '#tMiniWin');
   check(near(panned.after.a - panned.before.a, 0.2, 0.02)
     && near(panned.after.spanSec, panned.before.spanSec, 1e-6),
     '  dragging the window box pans by what the pointer moved, and does not resize it',
     `a ${panned.before.a.toFixed(3)} -> ${panned.after.a.toFixed(3)}, `
     + `span ${panned.before.spanSec.toFixed(3)}s -> ${panned.after.spanSec.toFixed(3)}s`);
-
-  const stretched = await dragMini(0, 0.62, '#tMiniWin .e');
-  check(stretched.after.spanSec > stretched.before.spanSec * 1.4
-    && near(stretched.after.a, stretched.before.a, 0.01),
-    '  and dragging its right edge zooms out from that edge, holding the left one',
-    `span ${stretched.before.spanSec.toFixed(3)}s -> ${stretched.after.spanSec.toFixed(3)}s, `
-    + `a ${stretched.before.a.toFixed(3)} -> ${stretched.after.a.toFixed(3)}`);
 
   await page.evaluate('__kinect.editor.view.set(0.30, 0.42)');
   await settle();
@@ -6237,9 +6357,9 @@ try {
   check(stageShare >= 0.35,
     '  and dragging it to the top of the window still leaves the stage a third of it',
     `strip ${maxed.height}px of ${VIEWPORT.height}px leaves the stage ${(stageShare * 100).toFixed(1)}%`);
-  check(maxed.lanes <= maxed.stacked,
-    '  and never taller than the lanes it actually has, so content still cannot grow it',
-    `${maxed.lanes}px against ${maxed.stacked}px stacked`);
+  check(maxed.lanes === maxed.ceiling,
+    '  and it stops exactly at that ceiling, which is the one thing bounding it',
+    `${maxed.lanes}px against a ${maxed.ceiling}px ceiling, ${maxed.stacked}px stacked`);
 
   // `resize()` reallocates the drawing buffer and the composer's targets, so a drag that ran it
   // per pointer event is the failure `repositionLanes` was split out to avoid.
@@ -6298,8 +6418,12 @@ try {
 
   // The height outlives the page, which is the only reason it is in `localStorage` at all - a
   // build that never called `setItem` would pass every row above.
-  const askedFor = await dragGrip(200);
+  // Dragged to a computed target rather than by a fixed amount: a flat 200px landed 42px from the
+  // default once `--timeline-h` moved, and the row below would then have passed on a build that
+  // stored nothing at all.
   const defaulted = Math.round(VIEWPORT.height * 0.35);
+  const beforeAsking = await page.evaluate('__kinect.editor.strip()');
+  const askedFor = await dragGrip(beforeAsking.lanes - Math.round(defaulted / 2));
   check(Math.abs(askedFor.lanes - defaulted) > 60,
     'the dragged height is nowhere near the default, so the reload row below means something',
     `dragged to ${askedFor.lanes}px against a ${defaulted}px default`);
@@ -6313,6 +6437,28 @@ try {
   check(near(reloaded.lanes, askedFor.lanes, 2),
     'the height survives a reload, which is the only reason it is stored at all',
     `${askedFor.lanes}px before, ${reloaded.lanes}px after`);
+
+  // The one arrangement where the two candidate bounds disagree, and every row above sits outside
+  // it: with fourteen lanes stacking past the ceiling, a build clamping to the content and one
+  // clamping to the ceiling give the same height. Cleared of tracks the stack is shorter than the
+  // ceiling, and only there does it show that the strip is bounded by the stage's share rather
+  // than by what is in it.
+  await page.evaluate('__kinect.keyframes.setTracks({})');
+  await settle();
+  const shortStack = await page.evaluate('__kinect.editor.strip()');
+  check(shortStack.stacked < shortStack.ceiling,
+    'cleared of tracks the lanes stack shorter than the ceiling, which is where the two bounds differ',
+    `${shortStack.stacked}px stacked against a ${shortStack.ceiling}px ceiling`);
+  const gs = await gripAt();
+  await page.mouse.move(gs.x + gs.width / 2, gs.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(gs.x + gs.width / 2, 4, { steps: 8 });
+  await page.mouse.up();
+  await settle();
+  const opened = await page.evaluate('__kinect.editor.strip()');
+  check(opened.lanes === opened.ceiling && opened.lanes > opened.stacked,
+    '  and the splitter still opens to the ceiling, past the last lane rather than stopping at it',
+    `${opened.lanes}px against a ${opened.ceiling}px ceiling and ${opened.stacked}px stacked`);
 
   // Put it back, so nothing below inherits a strip somebody dragged.
   await page.evaluate('__kinect.keyframes.setTracks({})');
@@ -7764,14 +7910,11 @@ try {
       const rows = (g) => [...g.querySelectorAll('.row, .checkrow, .check')];
       return [...document.querySelectorAll('#panel .group[data-group]')].map((g) => {
         const toggle = g.querySelector(':scope > .grouphead > .grouptoggle');
-        const mark = g.querySelector(':scope > .grouphead > .groupmark');
         return {
           key: g.dataset.group,
           collapsible: Boolean(toggle),
           shut: g.classList.contains('shut'),
           expanded: toggle ? toggle.getAttribute('aria-expanded') : null,
-          markVisible: vis(mark),
-          mark: mark ? mark.textContent : null,
           tab: g.dataset.panelTab,
           rendered: vis(g),
           inDom: rows(g).length,
@@ -7839,9 +7982,6 @@ try {
     check(fresh.every((g) => g.inDom > 0),
       'and their rows are hidden rather than absent, so the panel is still the whole registry',
       `${fresh.reduce((n, g) => n + g.inDom, 0)} rows in the document, ${fresh.reduce((n, g) => n + g.onScreen, 0)} on screen`);
-    check(fresh.every((g) => !g.markVisible),
-      'with nothing marked, because a group at its defaults has nothing to announce',
-      fresh.map((g) => `${g.key}:${g.markVisible}`).join(' '));
 
     // ---- 15c. moving a value opens the group that holds it
     // `bloom` because it is in `optical` and because `keyframe-check` clicks its keyframe
@@ -7912,15 +8052,9 @@ try {
       return groupOf(key);
     };
     const marked = await shut('post');
-    check(marked.shut && marked.markVisible && marked.mark === '1',
-      'a shut group carrying a value says how many of its parameters are set',
-      `post: shut=${marked.shut}, mark visible=${marked.markVisible}, reads "${marked.mark}"`);
-    await page.evaluate("__kinect.params.set('grain.amount', 0.4)");
-    await settle();
-    const marked2 = await groupOf('post');
-    check(marked2.mark === '2',
-      'and it is a count of them rather than a lamp, so the header says how much is hidden',
-      `two parameters set, the mark reads "${marked2.mark}"`);
+    check(marked.shut && marked.onScreen === 0,
+      'a group carrying a value can still be shut, and shutting it takes its rows off the screen',
+      `post: shut=${marked.shut}, ${marked.onScreen} of ${marked.available} available rows on screen`);
 
     // ---- 15f. the override is a disagreement, and a toggle that agrees writes none
     // Half of the store rule, and only the half a toggle can reach: opening the group again puts
@@ -7996,9 +8130,6 @@ try {
     check(ghostShut.shut && ghostStored.ghost === false,
       'shutting a group while it is in use stays shut and is written down',
       `shut=${ghostShut.shut}, stored ${JSON.stringify(ghostStored)}`);
-    check(ghostShut.markVisible && ghostShut.mark === '1',
-      'and it is marked as in use with a count of what it is holding',
-      `mark visible=${ghostShut.markVisible}, reads "${ghostShut.mark}"`);
 
     // ---- 15i. the override outlives the page that wrote it
     // This page reloaded rather than a second page opened beside it, because `page.route` is
@@ -8044,11 +8175,10 @@ try {
     await page.evaluate("__kinect.params.set('bloom', 0.75)");
     await settle();
     const collapseCarried = await groupOf('post');
-    check(collapseCarried.shut && collapseCarried.onScreen === 0
-      && collapseCarried.markVisible && collapseCarried.mark === '1',
+    check(collapseCarried.shut && collapseCarried.onScreen === 0,
       'and the collapse survives it too, so a group shut while it was in use is still shut when the value comes back',
       `shut=${collapseCarried.shut}, ${collapseCarried.onScreen} of ${collapseCarried.inDom} rows on screen, `
-      + `mark visible=${collapseCarried.markVisible} reading "${collapseCarried.mark}", stored ${await stored()}`);
+      + `stored ${await stored()}`);
 
     // ---- 13j. every toggle the page renders is one this section has driven
     // The reverse of the driver rule above, asked of the page rather than of this file, so a
@@ -10064,6 +10194,62 @@ try {
     check(markWrites.length === 2 && markWrites[1].id === 'dragged' && markWrites[1].sourceMs === 0,
       'and dragging a mark there applies the same source bound through the pointer gesture',
       `${markWrites.length} writes; dragged at source ${markWrites[1]?.sourceMs}ms`);
+    // The two doors onto the same edit. Both plant a mark at the playhead and both take away the
+    // one already under it, and the key is asserted as well as the button because the key reached
+    // only half of that and stacked a second mark on the first, invisibly, at one source second.
+    // Served over a route that merges the way the sidecar does - the response is the surviving
+    // list, so a tombstone has to remove a mark rather than become one.
+    const toggleState = new Map();
+    const togglePattern = '**/capture/*/marks';
+    const recordToggle = async (route) => {
+      if (route.request().method() !== 'POST') {
+        await route.continue();
+        return;
+      }
+      for (const mark of route.request().postDataJSON().marks) {
+        if (mark.deleted) toggleState.delete(mark.id);
+        else toggleState.set(mark.id, mark);
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ marks: [...toggleState.values()] }),
+      });
+    };
+    await page.route(togglePattern, recordToggle);
+    const ticks = () => page.evaluate('__kinect.library.markTicks().length');
+    try {
+      await page.evaluate(`(async () => {
+        const k = globalThis.__kinect;
+        k.editor.setMarks([]);
+        await k.timeline.transport().seek(k.timeline.clips().find((c) => c.selected).start + 1);
+        await k.timeline.settled();
+      })()`);
+      await settle();
+      await page.locator('#tMark').click();
+      await settle();
+      const buttonPlanted = await ticks();
+      await page.locator('#tMark').click();
+      await settle();
+      const buttonRemoved = await ticks();
+      check(buttonPlanted === 1 && buttonRemoved === 0,
+        'the mark button plants one at the playhead and presses again to take that one away',
+        `${buttonPlanted} tick after the first press, ${buttonRemoved} after the second`);
+
+      await focusStage();
+      await page.keyboard.press('m');
+      await settle();
+      const keyPlanted = await ticks();
+      await page.keyboard.press('m');
+      await settle();
+      const keyRemoved = await ticks();
+      check(keyPlanted === 1 && keyRemoved === 0,
+        '  and M is the same edit through the other door, rather than a second mark on top of the first',
+        `${keyPlanted} tick after the first press, ${keyRemoved} after the second`);
+    } finally {
+      await page.unroute(togglePattern, recordToggle);
+    }
+
     await page.evaluate(
       `globalThis.__kinect.editor.setMarks([{ id: 'placed', sourceMs: ${MARK_SOURCE_MS}, label: 'placed' }])`,
     );

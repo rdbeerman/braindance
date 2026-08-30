@@ -50,11 +50,10 @@
        lane builder writes - a lane appearing is a structural change and should
        move the stage, where a three-digit frame count should not.
 
-       The sum of the two `.tbar` rows: 51 for the transport and 44 for the document
-       row below it, plus the 22px mini-map and the borders. It read 126 for as long as
-       the document row was missing, which is the same number with that row's 44 taken
-       out - so the constant and the markup disagreeing is what a strip losing a row
-       looks like from here. */
+       The parts it has to cover, measured at 1440x900: the strip's 1px top border, the
+       51px transport bar, the 32px ruler row and the 26px mini-map. That is 110, and the
+       2px over land in the lane stack, because `.tlanes` is the `flex: 1` child that
+       takes whatever the fixed ones leave. */
     --timeline-h: 112px;
     --tlanes-h: 0px;
   }
