@@ -11,6 +11,17 @@
 export const PROJECT_VERSION = 7;
 
 /**
+ * How many clips this build composites.
+ *
+ * A clip costs a cloud whether it is on screen or not - four textures and two float targets -
+ * and what it costs per frame is set by how many are live at once, which the edit decides rather
+ * than the document's length. Eight is the document gate; `docs/performance.md` carries what the
+ * overlap actually costs. Here rather than in the editor because the media picker refuses a pick
+ * that would cross it, and a second number would let the two disagree about what fits.
+ */
+export const CLIP_CEILING = 8;
+
+/**
  * The sentence a document from the wrong version gets, in one place because two doors saying
  * different things about one file is how one of them ends up false. A version that is not a
  * finite number is its own band, because it says nothing about older or newer.
@@ -57,12 +68,84 @@ export function captureFormatRefusal(what, format) {
 }
 
 /**
- * What may be a take id, a document name, or anything else this program joins to a path.
- * One expression, imported by both sides: the page's copy is a courtesy and the gate is
- * `server/library.js`, because a request does not have to come from this page at all. The
- * leading character rules out `..`, and an underscore is allowed for `__working__`.
+ * What may be a take id: a name the recorder mints, since nothing types one. One expression,
+ * imported by both sides: the page's copy is a courtesy and the gate is `server/library.js`,
+ * because a request does not have to come from this page at all. The leading character rules
+ * out `..`.
  */
 export const VALID_ID = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
+
+/**
+ * The longest a document name may be. A directory entry holds 255 bytes on every filesystem this
+ * runs on and the file the name makes carries `.json` after it, so the cap is on the filename and
+ * the name itself is five bytes shorter.
+ */
+export const MAX_DOCUMENT_NAME_BYTES = 255 - '.json'.length;
+
+/**
+ * A document name held to what may be joined to a path, as a sentence or null. A person types this
+ * one where nothing types a take id, so it allows a space - and it is the second expression
+ * guarding the same join as `VALID_ID`, so it is written with the same suspicion: what it names is
+ * a floor, and `DocumentStore.pathFor` checks the path it produces on top of it.
+ *
+ * Case and Unicode normal form are the volume's answer rather than this rule's: `Beach` and
+ * `beach`, or one name in NFC and the same one in NFD, are one document on APFS and two on ext4.
+ */
+export function documentNameRefusal(kind, name) {
+  if (typeof name !== 'string' || name.length === 0) {
+    return `a ${kind} needs a name and this one is ${JSON.stringify(name)}, which is not one`;
+  }
+  const bytes = new TextEncoder().encode(name).length;
+  if (bytes > MAX_DOCUMENT_NAME_BYTES) {
+    return `this ${kind} name is ${bytes} bytes and ${MAX_DOCUMENT_NAME_BYTES} is the most a name can be: `
+      + 'the file it makes carries .json after it and a directory entry holds 255 bytes, so a longer '
+      + 'name is refused here with a reason rather than by the filesystem with an errno';
+  }
+  if (name.includes('..')) {
+    return `${JSON.stringify(name)} cannot be a ${kind} name: it carries .., which walks out of the `
+      + `directory ${kind}s are kept in`;
+  }
+  if (name.startsWith('.')) {
+    return `${JSON.stringify(name)} cannot be a ${kind} name: it starts with a dot, which hides the `
+      + 'file from the directory this program lists';
+  }
+  if (name.includes('/') || name.includes('\\')) {
+    return `${JSON.stringify(name)} cannot be a ${kind} name: it carries a slash, and a name is one `
+      + 'entry in one directory rather than a path';
+  }
+  if (/[\u0000-\u001f\u007f]/.test(name)) {
+    return `${JSON.stringify(name)} cannot be a ${kind} name: it carries a control character, which `
+      + 'nothing can read off a list and type back';
+  }
+  if (name !== name.trim()) {
+    return `${JSON.stringify(name)} cannot be a ${kind} name: it starts or ends with a space, and two `
+      + 'names differing by one are the same name to everybody reading the list';
+  }
+  return null;
+}
+
+/**
+ * The next free `Untitled N`. A name allocation and not a count: `Untitled 2` can be free while
+ * `Untitled 1` and `Untitled 3` are taken, and handing out `Untitled 3` again would collide.
+ */
+export function nextUntitledName(taken) {
+  for (let n = 1; ; n++) {
+    if (!taken.has(`Untitled ${n}`)) return `Untitled ${n}`;
+  }
+}
+
+/**
+ * Finder's rule: `Untitled 4` becomes `Untitled 4 copy`, then `copy 2`, `copy 3`. A copy of a
+ * copy keeps the one base rather than growing `copy copy`.
+ */
+export function copyName(name, taken) {
+  const already = /^(.*) copy(?: (\d+))?$/.exec(name);
+  const base = already ? already[1] : name;
+  if (!taken.has(`${base} copy`)) return `${base} copy`;
+  for (let n = 2; ; n++) {
+    if (!taken.has(`${base} copy ${n}`)) return `${base} copy ${n}`;
+  }
+}
 
 /**
  * The sensor's depth grid, here for the same delivery reason: the browser can only import

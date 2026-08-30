@@ -1,0 +1,215 @@
+/* The clip picker's dialog, linked by every page that opens one - the projects page and the
+ * editor. `nav.css` is the precedent for a stylesheet two pages share; the split is the same one
+ * it makes, which is that the shared file owns the surface and the page owns its palette.
+ *
+ * **The palette is read through fallbacks and that is load-bearing.** `nav.css` reads
+ * `var(--faint)` while declaring it nowhere, which works only because all three pages that link
+ * it happen to declare that token - and `web/index.html`'s own comment flags how fragile that is.
+ * The pages linking this file do not agree: `library.html` and `projects.html` declare the whole
+ * palette, and `index.html` declares no `--paper`, `--well`, `--on-accent`, `--rec`, `--rec-low`,
+ * `--warn-low` or `--scrim`. So every token is resolved once into a `--tp-` name below, with the
+ * literal beside it, and the rules read those. A page that declares the token wins; one that does
+ * not gets the value rather than an unset colour, and the fallback lives in one block rather than
+ * at forty use sites.
+ *
+ * `.pos`, `.done` and `.mk` keep the names `web/take-draw.js` writes and reads - those three are
+ * its contract with a caller's scrub bar. Everything else here is `tp-` prefixed, so nothing in
+ * this file can reach an editor or library element and nothing of theirs can reach into here. */
+
+.takepicker {
+  --tp-paper: var(--paper, #05070a);
+  --tp-paper-1: var(--paper-1, #0d1014);
+  --tp-paper-2: var(--paper-2, #151920);
+  --tp-paper-3: var(--paper-3, #1e232b);
+  --tp-well: var(--well, #04060a);
+  --tp-ink: var(--ink, #e8ecf1);
+  --tp-dim: var(--dim, #8b94a1);
+  --tp-faint: var(--faint, #828c99);
+  --tp-line: var(--line, rgba(255, 255, 255, 0.1));
+  --tp-line-2: var(--line-2, rgba(255, 255, 255, 0.2));
+  --tp-line-3: var(--line-3, rgba(255, 255, 255, 0.34));
+  --tp-accent: var(--accent, #5ad1c4);
+  --tp-accent-low: var(--accent-low, rgba(90, 209, 196, 0.14));
+  --tp-on-accent: var(--on-accent, #04231f);
+  --tp-warn: var(--warn, #f0b04a);
+  --tp-warn-low: var(--warn-low, rgba(240, 176, 74, 0.16));
+  --tp-rec: var(--rec, #ff3b4e);
+  --tp-rec-low: var(--rec-low, rgba(255, 59, 78, 0.16));
+
+  width: min(1100px, calc(100% - 32px));
+  max-width: none;
+  max-height: calc(100% - 48px);
+  padding: 0;
+  border: 1px solid var(--tp-line-3);
+  border-radius: 0;
+  background: var(--tp-paper-1);
+  color: var(--tp-ink);
+  font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* A column, so the grid between the head and the foot is the only part that scrolls and the
+     confirm stays reachable however many takes the library holds. */
+  flex-direction: column;
+  overflow: hidden;
+}
+.takepicker[open] { display: flex; }
+.takepicker::backdrop { background: var(--scrim, rgba(0, 0, 0, 0.68)); }
+.takepicker * { box-sizing: border-box; }
+
+.tp-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid var(--tp-line);
+}
+.tp-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.tp-room { color: var(--tp-dim); font-size: 10px; }
+.tp-head .tp-act { margin-left: auto; }
+
+/* The one line that says why something did not happen: a pick over the ceiling, a take that
+   cannot be opened, or a listing that could not be read. Empty until there is something to say. */
+.tp-note { flex: none; padding: 8px 12px 0; color: var(--tp-warn); font-size: 10px; line-height: 1.45; }
+.tp-note:empty { display: none; }
+
+.tp-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 252px);
+  gap: 12px;
+  padding: 12px;
+  align-content: start;
+  align-items: start;
+  justify-content: start;
+}
+
+/* The dead end, which is the whole dialog rather than a row in it: a person who opens this with
+   no footage on the machine needs the way forward, not an empty grid. */
+.tp-empty { grid-column: 1 / -1; padding: 24px 12px; color: var(--tp-faint); }
+.tp-empty p { margin: 0 0 16px; max-width: 62ch; line-height: 1.5; }
+
+.tp-tile {
+  border: 1px solid var(--tp-line);
+  background: var(--tp-paper-1);
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+.tp-tile:hover { border-color: var(--tp-line-2); }
+.tp-tile:focus-visible { outline: 1px solid var(--tp-accent); outline-offset: -1px; }
+.tp-tile[aria-pressed="true"] { border-color: var(--tp-accent); background: var(--tp-accent-low); }
+/* A take that cannot be a clip is shown and not hidden, because the person looking for it needs
+   to see why it is not pickable rather than wonder where it went. */
+.tp-tile[aria-disabled="true"] { cursor: not-allowed; opacity: 0.55; }
+.tp-tile[aria-disabled="true"]:hover { border-color: var(--tp-line); }
+
+/* The poster, the same 16:9 box the library tile draws, and for the reason its own comment
+   gives: the ratio is on the container with the canvas out of flow, so a resize cannot leave
+   the picture at a stale pixel height. */
+.takepicker .tp-skim {
+  position: relative;
+  flex: none;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--tp-well);
+  cursor: ew-resize;
+  touch-action: pan-y;
+}
+.takepicker .tp-skim canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.takepicker .tp-time {
+  position: absolute; top: 6px; right: 7px;
+  font-size: 9px; color: var(--tp-dim); font-variant-numeric: tabular-nums;
+  pointer-events: none; background: var(--tp-paper); padding: 1px 4px; border-radius: 3px;
+}
+/* Where in the sequence this take goes. "In sequence" says nothing unless the sequence is on
+   screen, so the number is on the poster rather than in a count at the foot. */
+.takepicker .tp-order {
+  position: absolute; top: 6px; left: 7px;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--tp-accent); color: var(--tp-on-accent);
+  font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+/* `display` here beats the user agent's `[hidden] { display: none }` on specificity, so an
+   unpicked tile wore an empty chip until this line existed. */
+.takepicker .tp-order[hidden] { display: none; }
+.takepicker .tp-flags {
+  position: absolute; left: 7px; bottom: 7px; right: 7px;
+  display: flex; gap: 4px; flex-wrap: wrap-reverse; pointer-events: none;
+}
+.takepicker .tp-flag {
+  font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 1px 5px; border-radius: 3px;
+  background: var(--tp-warn-low); color: var(--tp-warn); border: 1px solid var(--tp-warn);
+  white-space: nowrap;
+}
+.takepicker .tp-flag.rec { background: var(--tp-rec-low); color: var(--tp-rec); border-color: var(--tp-rec); }
+
+.takepicker .tp-bar { position: relative; height: 14px; flex: none; background: var(--tp-paper-2); }
+.takepicker .tp-bar .pos { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--tp-ink); }
+.takepicker .tp-bar .done { position: absolute; top: 0; bottom: 0; left: 0; background: var(--tp-accent-low); }
+.takepicker .tp-bar .mk {
+  position: absolute; top: 3px; width: 5px; height: 5px; margin-left: -2.5px;
+  background: var(--tp-accent); transform: rotate(45deg);
+}
+
+/* One line per row, the way the library tile's meta is one line per row: a tile whose height
+   depends on how many facts a take carries makes a ragged grid. */
+.tp-meta { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 5px; }
+.tp-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.tp-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-dur { color: var(--tp-dim); font-variant-numeric: tabular-nums; font-size: 11px; flex: none; }
+.tp-facts {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 9px; color: var(--tp-faint);
+  white-space: nowrap; overflow: hidden; height: 13px;
+}
+.tp-facts span { overflow: hidden; text-overflow: ellipsis; }
+
+.tp-foot {
+  flex: none;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--tp-line);
+}
+/* The sequence in words beside the numbers on the tiles, because the tiles are in library order
+   and the order picked is not the order they sit in. */
+.tp-order-line {
+  min-width: 0; flex: 1;
+  color: var(--tp-dim); font-size: 10px; line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.tp-act {
+  appearance: none; flex: 0 0 auto;
+  height: 34px; padding: 0 14px;
+  border: 1px solid var(--tp-line-2); border-radius: 0;
+  background: var(--tp-paper-2); color: var(--tp-ink);
+  font: inherit; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  cursor: pointer; white-space: nowrap;
+}
+.tp-act:hover:not(:disabled) { background: var(--tp-paper-3); border-color: var(--tp-line-3); }
+.tp-act.go { border-color: var(--tp-accent); color: var(--tp-accent); background: var(--tp-accent-low); }
+.tp-act.go:hover:not(:disabled) { background: var(--tp-accent); color: var(--tp-on-accent); }
+/* Both disabled rules together and after the lit ones, because `.tp-act.go` is two classes and
+   a bare `.tp-act:disabled` loses to it on specificity - which is how the library page once
+   shipped a lit, pressable-looking button that was disabled the whole time. */
+.tp-act:disabled, .tp-act.go:disabled {
+  color: var(--tp-faint); background: var(--tp-paper-1); border-color: var(--tp-line);
+  cursor: not-allowed;
+}
+.tp-act.close { width: 34px; padding: 0; font-size: 14px; color: var(--tp-dim); }
+
+@media (max-width: 560px) {
+  .tp-grid { grid-template-columns: minmax(0, 1fr); }
+  .tp-foot { flex-wrap: wrap; }
+  .tp-order-line { flex: 1 0 100%; }
+}

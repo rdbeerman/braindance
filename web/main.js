@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import {
-  DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, VALID_ID, effectIdsIn, effectOf, presetCarriesLookName,
-  snapScalar,
+  CLIP_CEILING, DEPTH_H, DEPTH_W, POINTS, PROJECT_VERSION, VALID_ID, copyName, documentNameRefusal,
+  effectIdsIn, effectOf, nextUntitledName, presetCarriesLookName, snapScalar,
   versionRefusal, captureFormatRefusal, requiresEntryRefusal, requiresListRefusal,
 } from './format.js';
 import { pollRecordState } from './record-poll.js';
+import { pickTakes } from './take-picker.js';
 // The renderer, imported first: its body appends the canvas, so import order is boot order.
 import {
   renderer, scene, freeCamera, programCamera, viewCamera, controls, WORLD_UP,
@@ -12,8 +13,8 @@ import {
 } from './scene.js';
 import {
   EASE_OUT_LINEAR, EASE_IN_LINEAR, SEGMENT_POINT_CEILING, copyHandle, easeAt, elevate, keyBefore,
-  HOLD_ENDS, EXTEND_ENDS, scalarAt, segmentSlope, scalarSlopeAt, stepAt, hermite, tangentAt,
-  handleRefusal, foldRefusal, foldFreeX,
+  HOLD_ENDS, scalarAt, scalarSlopeAt, stepAt, hermite, tangentAt,
+  handleRefusal, foldRefusal, foldFreeX, retimeSourceSecAt, retimeProgramSecAt,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
 import { verticalFovForFocalLength, focalLengthForVerticalFov } from './lens.js';
@@ -166,25 +167,14 @@ const EDITING = location.pathname === '/edit';
  */
 const PROGRAM_OUT = location.pathname === '/program';
 
-// In one place, because the auto-save writer and the recovery offer have to agree about it.
-const WORKING_PROJECT = '__working__';
-
-// Which project the menu's Editor entry resumes. Client state rather than document state.
-const LAST_OPENED = 'kinect.lastOpened';
+// The project this page has open, and the revision the store last answered about it with. Both
+// null on a page opened as `/edit?take=`, which holds no document at all: it has no file to write
+// into, and that is the rule the hidden working document used to carry by existing.
 let openedProjectName = null;
-
-function rememberOpened() {
-  if (!openTakeHash()) return;
-  try {
-    localStorage.setItem(LAST_OPENED, JSON.stringify({
-      takeHash: openTakeHash(),
-      takeId: openTakeId(),
-      project: openedProjectName,
-    }));
-  } catch {
-    // Private browsing, or a full quota. Resuming is a convenience, so this stays quiet.
-  }
-}
+let openedProjectRev = null;
+// When this tab's last write landed, and whether the store has refused one as somebody else's.
+let lastSavedAt = null;
+let projectDiverged = false;
 
 const statusEl = document.getElementById('status');
 const appStatusEl = document.getElementById('appStatus');
@@ -2673,16 +2663,6 @@ function refuseFolds(owner, keys) {
   }
 }
 
-/**
- * How many clips this build composites.
- *
- * A clip costs a cloud whether it is on screen or not - four textures and two float targets -
- * and what it costs per frame is set by how many are live at once, which the edit decides rather
- * than the document's length. Eight is the document gate; `docs/performance.md` carries what the
- * overlap actually costs.
- */
-const CLIP_CEILING = 8;
-
 /** What a clip's take looks like on the wire: an id as a label beside the hash it is joined on. */
 const TAKE_HASH = /^sha256:[0-9a-f]{64}$/;
 
@@ -3172,16 +3152,116 @@ function restoreProject(project) {
 // Whole snapshots, because a command stack needs every mutation path to cooperate.
 const UNDO_LIMIT = 100;
 
-/** Every write to the working document, in the order asked. The server does not order them. */
-let workingWrites = Promise.resolve();
-function writeWorking(body) {
-  const wrote = workingWrites.then(() => fetch(`/projects/${WORKING_PROJECT}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }));
-  workingWrites = wrote.catch(() => {});
-  return wrote;
+/**
+ * The refusal a document write came back with. `stale` is the store's own mark for a revision
+ * that has moved, and it is the one refusal this page answers by stopping rather than by saying
+ * a sentence: every other one is about the document, and that one is about somebody else.
+ */
+function documentRefusal(res, body) {
+  const refused = new Error(body?.error ?? `HTTP ${res.status}`);
+  if (body?.stale) {
+    refused.stale = true;
+    refused.rev = body.rev;
+  }
+  return refused;
+}
+
+/**
+ * Everything that writes the open project, in the order asked. The store does not order them, and
+ * a rename that overtook an auto-save would move the file out from under it.
+ */
+let projectWrites = Promise.resolve();
+function queueProjectWrite(run) {
+  const done = projectWrites.then(run);
+  projectWrites = done.catch(() => {});
+  return done;
+}
+
+/**
+ * Writes the open project, carrying the revision this tab last saw and keeping the one it is
+ * answered with. The revision is read inside the queue rather than at the call, because a burst
+ * of commits would otherwise every one of them carry the revision the first of them replaced,
+ * and every write after the first would be refused as somebody else's.
+ */
+function writeOpenProject(body) {
+  return queueProjectWrite(async () => {
+    const res = await fetch(
+      `/projects/${encodeURIComponent(openedProjectName)}?rev=${encodeURIComponent(openedProjectRev)}`,
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    );
+    const saved = await res.json().catch(() => null);
+    if (!res.ok || saved?.error) throw documentRefusal(res, saved);
+    openedProjectRev = saved.rev;
+    lastSavedAt = Date.now();
+    return saved;
+  });
+}
+
+/**
+ * Writes a preset or a deliverable, carrying the revision the store is at right now.
+ *
+ * Every change to a document names the revision it was made against. A project holds one, because
+ * the page is inside it and every write hands the next one back - these two are written blind from
+ * a picker and there is nowhere between writes to keep one, so the revision is read here. That is
+ * check-then-act on the wire, and the store is what closes it: the compare runs inside its own
+ * per-name queue, so a name that moved between this read and the write is refused rather than
+ * quietly overwritten. One helper and not four call sites each growing a parameter.
+ */
+async function writeDocumentAtCurrentRev(kind, name, { method = 'PUT', body = null } = {}) {
+  const send = async (rev) => {
+    const res = await fetch(`/${kind}/${encodeURIComponent(name)}?rev=${encodeURIComponent(rev)}`, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      ...(body === null ? {} : { body: JSON.stringify(body) }),
+    });
+    return { res, saved: await res.json().catch(() => null) };
+  };
+  // Off the listing rather than off a read of the name, because a name with no file behind it
+  // answers a read with 404 and a 404 this page asked for on purpose is still a console error
+  // somebody has to explain. A shipped preset is in the listing with the shipped file's revision,
+  // so saving over one forks it instead of reading as a create against a name already taken.
+  const listed = await documentsIn(kind);
+  const first = await send(listed.find((doc) => doc.name === name)?.rev ?? 'absent');
+  if (first.res.ok && !first.saved?.error) return first.saved;
+  // The listing skips a document this build cannot read, so a name can be filed and not listed.
+  // The refusal carries the revision the file is at, which is the one this write wanted.
+  if (!first.saved?.stale) throw documentRefusal(first.res, first.saved);
+  const again = await send(first.saved.rev);
+  if (!again.res.ok || again.saved?.error) throw documentRefusal(again.res, again.saved);
+  return again.saved;
+}
+
+/** The URL this page would be reopened at, moved without navigating. */
+const showProjectInUrl = (name) => {
+  // `history` here is the undo stack, so the browser's own is reached through `globalThis`.
+  globalThis.history.replaceState(null, '', `/edit?project=${encodeURIComponent(name)}`);
+};
+
+/**
+ * Stops writing, and says so where it stays said.
+ *
+ * Retrying is not merely noisy, it is impossible: the other tab holds the revision this file is
+ * at, so a write carrying the one this tab read can never land, and reading the file again would
+ * either throw that work away or merge two edits nobody asked to have merged. So this tab stops -
+ * and because it has stopped, the sentence has to still be on screen an hour later, or a tab that
+ * saves nothing looks exactly like a tab that does.
+ */
+function stopWritingProject(refused) {
+  if (projectDiverged) return;
+  projectDiverged = true;
+  // The store's own sentence, on the banner's title the way `say` puts a long refusal on `#tNote`.
+  if (ui.diverged) ui.diverged.title = refused.message;
+  paintDiverged();
+}
+
+/** The banner, which is shown by having been earned and hidden by a copy having been made. */
+function paintDiverged() {
+  if (!ui.diverged) return;
+  ui.diverged.hidden = !projectDiverged;
+  if (!projectDiverged) return;
+  ui.divergedWhen.textContent = lastSavedAt === null
+    ? 'Nothing this tab has changed has been written.'
+    : `Saved up to ${new Date(lastSavedAt).toLocaleTimeString()}. Nothing after that has been written.`;
 }
 
 const history = {
@@ -3224,16 +3304,16 @@ const history = {
       effectVersionSkew = [];
       paintMissingEffects();
     }
-    // Auto-save after every change. Fire-and-forget, so a failed save blocks nothing.
-    const workingBody = serialiseProjectBody();
-    writeWorking(workingBody).then(async (res) => {
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        say(`auto-save failed: ${text.slice(0, 80)}`);
-      }
-    }).catch((err) => {
-      say(`auto-save failed: ${err.message}`);
-    });
+    // Every change is written to the project's own file. A page holding no document has no file
+    // to write into and writes nothing at all, and a tab the store has refused has stopped.
+    if (openedProjectName !== null && !projectDiverged) {
+      const savedBody = serialiseProjectBody();
+      // Fire-and-forget, so a refusal blocks nothing on screen.
+      writeOpenProject(savedBody).catch((err) => {
+        if (err.stale) stopWritingProject(err);
+        else say(`this change could not be written to ${openedProjectName}: ${err.message}`);
+      });
+    }
     return true;
   },
 
@@ -3678,12 +3758,7 @@ const createRetime = () => ({
   rate: 1,
   keys: [],
 
-  sourceSecAt(programSec) {
-    const keys = this.keys;
-    if (keys.length === 0) return programSec * this.rate;
-    if (keys.length === 1) return keys[0].value + (programSec - keys[0].t) * this.rate;
-    return scalarAt(keys, programSec, EXTEND_ENDS);
-  },
+  sourceSecAt(programSec) { return retimeSourceSecAt(this, programSec); },
 
   // The local slope, in source seconds per program second.
   slopeAt(programSec) {
@@ -3708,30 +3783,7 @@ const createRetime = () => ({
   },
 
   /** The program position a source position sits at. */
-  programSecAt(sourceSec) {
-    const keys = this.keys;
-    if (keys.length === 0) return sourceSec / this.rate;
-    if (keys.length === 1) return keys[0].t + (sourceSec - keys[0].value) / this.rate;
-    if (sourceSec <= keys[0].value) {
-      const slope = segmentSlope(keys, 0, 0);
-      return slope > 0 ? keys[0].t - (keys[0].value - sourceSec) / slope : keys[0].t;
-    }
-    for (let i = 0; i < keys.length - 1; i++) {
-      if (keys[i + 1].value < sourceSec) continue;
-      // Bisected rather than solved: an eased cubic has no useful closed-form inverse.
-      let lo = keys[i].t;
-      let hi = keys[i + 1].t;
-      for (let k = 0; k < 50; k++) {
-        const mid = (lo + hi) / 2;
-        if (this.sourceSecAt(mid) < sourceSec) lo = mid;
-        else hi = mid;
-      }
-      return hi;
-    }
-    const last = keys[keys.length - 1];
-    const slope = segmentSlope(keys, keys.length - 2, 1);
-    return slope > 0 ? last.t + (sourceSec - last.value) / slope : last.t;
-  },
+  programSecAt(sourceSec) { return retimeProgramSecAt(this, sourceSec); },
 
   // How long a program is, given a source that long.
   programDurationFor(sourceSec) { return Math.max(0, this.programSecAt(sourceSec)); },
@@ -5622,20 +5674,15 @@ const ui = {
   pickCount: document.getElementById('ppCount'),
   pickCancel: document.getElementById('ppCancel'),
   pickGo: document.getElementById('ppGo'),
-  resume: document.getElementById('tResume'),
-  resumeWhen: document.getElementById('tResumeWhen'),
-  resumeOpen: document.getElementById('tResumeOpen'),
+  diverged: document.getElementById('tDiverged'),
+  divergedWhen: document.getElementById('tDivergedWhen'),
+  divergedCopy: document.getElementById('tDivergedCopy'),
   missing: document.getElementById('tMissing'),
   recGo: document.getElementById('recGo'),
   recMark: document.getElementById('recMark'),
   recNote: document.getElementById('recNote'),
   recSpace: document.getElementById('recSpace'),
   recRange: document.getElementById('recRange'),
-  clipPick: document.getElementById('clipPick'),
-  clipList: document.getElementById('cpList'),
-  clipPickNote: document.getElementById('cpNote'),
-  clipPickClose: document.getElementById('cpClose'),
-  clipPickCancel: document.getElementById('cpCancel'),
 };
 
 /**
@@ -6305,18 +6352,28 @@ for (const type of ['pointerup', 'pointercancel']) {
   ui.mini.addEventListener(type, () => { miniDrag = null; });
 }
 
+// A press on a cut marker, and whether it has turned into a drag yet. Four pixels rather than
+// zero because a finger never holds still, and the same number the media picker's tiles use.
 let handleDrag = null;
+const HANDLE_DRAG_SLOP = 4;
 
 for (const handle of [ui.in, ui.out]) {
+  const side = handle === ui.in ? 'in' : 'out';
   handle.addEventListener('pointerdown', (e) => {
     if (!timeline) return;
     handle.setPointerCapture(e.pointerId);
-    handleDrag = handle === ui.in ? 'in' : 'out';
-    pauseTransport();
+    handleDrag = { side, from: e.clientX, moved: false };
+    // Held back rather than let through: the strip below deselects on every press that is not on
+    // a clip, and grabbing a marker is not that press. `pointerup` hands it back if no drag came.
     e.stopPropagation();
   });
   handle.addEventListener('pointermove', (e) => {
-    if (handleDrag !== (handle === ui.in ? 'in' : 'out')) return;
+    if (handleDrag?.side !== side) return;
+    if (!handleDrag.moved) {
+      if (Math.abs(e.clientX - handleDrag.from) <= HANDLE_DRAG_SLOP) return;
+      handleDrag.moved = true;
+      pauseTransport();
+    }
     const t = programAtPointer(e);
     if (handle === ui.in) {
       writeClipRange({ in: Math.max(0, Math.min(t, clipOut ?? timeline.duration)) }, timeline.duration);
@@ -6327,8 +6384,18 @@ for (const handle of [ui.in, ui.out]) {
   });
   for (const type of ['pointerup', 'pointercancel']) {
     handle.addEventListener(type, (e) => {
-      if (handleDrag !== (handle === ui.in ? 'in' : 'out')) return;
+      if (handleDrag?.side !== side) return;
+      const dragged = handleDrag.moved;
       handleDrag = null;
+      // A press that never moved is not a trim. The grab zone reaches 12px inward over the lane
+      // whitespace a person presses to come off a clip, so on a long enough program the whole gap
+      // before the first clip is inside it and the deselect could not be made - and a click there
+      // set the in-point to whatever second it landed on. Both stop here: the range is untouched
+      // and the press goes where it was aimed.
+      if (!dragged) {
+        deselectClipRow();
+        return;
+      }
       const t = programAtPointer(e);
       if (handle === ui.in) {
         setClipInOut({ in: Math.max(0, Math.min(t, clipOut ?? timeline.duration)) });
@@ -8045,12 +8112,7 @@ async function deletePreset(picker, name) {
   const at = options.findIndex((option) => option.dataset.name === name);
   const successor = options[at + 1]?.dataset.name ?? options[at - 1]?.dataset.name ?? null;
   await withPresetGesture(picker.note ?? ui.note, () => whileWriting(async () => {
-    // The content type is declared even with no body: every route that changes something asks.
-    const res = await fetch(`/presets/${encodeURIComponent(name)}`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (!res.ok) throw new Error(`${res.status} ${(await res.text()).trim() || res.statusText}`);
+    await writeDocumentAtCurrentRev('presets', name, { method: 'DELETE' });
     if (picker.trigger.value === name) picker.trigger.value = '';
     await refreshPresets();
   })).catch((err) => {
@@ -8116,13 +8178,7 @@ async function importPresetFile(
   const name = file.name.replace(/\.braindance-preset\.json$|\.json$/i, '');
   refuseDuringEvaluation('a preset imported');
   refusePresetBody(name, body);
-  const res = await fetch(`/presets/${encodeURIComponent(name)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const saved = await res.json();
-  if (saved.error) throw new Error(saved.error);
+  const saved = await writeDocumentAtCurrentRev('presets', name, { body });
   if (generation !== documentGeneration || (target && !clips.includes(target))) {
     return { ...saved, applied: false };
   }
@@ -8130,36 +8186,14 @@ async function importPresetFile(
   return { ...saved, applied: applied !== null };
 }
 
-/**
- * The document the resume chip is offering, held because the name it came from
- * does not stay still.
- */
-let offeredWorkingBody = null;
-
-/**
- * The footage a document is cut on, as its clips' hashes in order. Ordered rather than a set:
- * two clips of one take at two placements are a different edit, and a set would call them equal.
- */
-const footageOf = (body) => (Array.isArray(body?.clips) ? body.clips : []).map((c) => c?.take?.hash ?? null);
-
-function offerWorkingDocument(projects) {
-  if (ui.resume) ui.resume.hidden = true;
-  offeredWorkingBody = null;
-  const working = projects?.find((doc) => doc.name === WORKING_PROJECT);
-  if (!working) return;
-  // Matched on hash, not id: a rename frees an id and a later take can be renamed into it.
-  const open = footageOf(serialiseProjectBody());
-  if (!open.every(Boolean)) return;
-  if (String(footageOf(working.body)) !== String(open)) return;
-  if (JSON.stringify(working.body) === history.baseline) return;
-  if (!ui.resume) return;
-  offeredWorkingBody = JSON.parse(JSON.stringify(working.body));
-  if (ui.resumeWhen) ui.resumeWhen.textContent = `autosaved ${new Date(working.savedAt).toLocaleString()}`;
-  ui.resume.hidden = false;
-}
-
-async function refreshProjects() {
-  return documentsIn('projects');
+/** Every project the store holds. Its own route because `/projects` is the page. */
+async function listProjects() {
+  const res = await fetch('/projects/all');
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !Array.isArray(body?.projects)) {
+    throw new Error(body?.error ?? `projects could not be listed: HTTP ${res.status}`);
+  }
+  return body.projects;
 }
 
 async function refreshDeliverables() {
@@ -8181,14 +8215,7 @@ function showAdoptedDeliverable(name) {
 }
 
 async function saveDeliverable(name, deliverable) {
-  const res = await fetch(`/deliverables/${encodeURIComponent(name)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(deliverable),
-  });
-  const saved = await res.json();
-  if (saved.error) throw new Error(saved.error);
-  return saved;
+  return writeDocumentAtCurrentRev('deliverables', name, { body: deliverable });
 }
 
 // One pointer path for keys and handles, since they differ only in what a drag writes.
@@ -8463,13 +8490,13 @@ function paintClipCommands() {
 }
 
 /**
- * A clip of `id`, at the playhead, on a row of its own.
+ * A clip of `id`, starting at `start`, on a row of its own.
  *
  * It comes up on the look of the clip you were working on rather than on the registry's
  * defaults: a layer that arrived ungraded beside four that are graded reads as a broken clip
  * rather than as a new one.
  */
-async function addClipFromTake(id) {
+async function addClipFromTake(id, start) {
   if (refuseEdit('adding a clip')) return null;
   const initiating = selectedClipRow();
   if (!initiating) {
@@ -8481,7 +8508,6 @@ async function addClipFromTake(id) {
     return null;
   }
   const from = params.values(scopeNames('clip'));
-  const start = timeline ? timeline.programSec : 0;
   const generation = documentGeneration;
   pendingClipAdds++;
   paintClipCommands();
@@ -8514,6 +8540,26 @@ async function addClipFromTake(id) {
   if (wasPlaying && gen === transportGen) await timeline.play();
   say(`clip ${clip.id} of ${id} at ${clip.start.toFixed(2)}s`);
   return clip;
+}
+
+/**
+ * The picked takes as clips, laid end to end from `from` in the order they were picked.
+ *
+ * One take is one clip at the playhead, which is exactly what a single add has always been - the
+ * second and the third go after it rather than on top of it, because a pick of three that landed
+ * three clips on one second is three clips nobody can see past the top one.
+ */
+async function addClipsFromTakes(ids, from) {
+  let at = from;
+  const added = [];
+  for (const id of ids) {
+    const clip = await addClipFromTake(id, at);
+    // Whatever refused it has already said so, and the ones after it would be refused the same.
+    if (clip === null) break;
+    added.push(clip);
+    at = clip.end;
+  }
+  return added;
 }
 
 /**
@@ -8581,52 +8627,21 @@ function deleteSelectedClip() {
   return true;
 }
 
-/** The takes this machine holds, offered as the list a new clip is cut from. */
-async function openClipPicker() {
-  if (!ui.clipPick) return;
-  ui.clipList.replaceChildren();
-  ui.clipPickNote.textContent = 'reading the library…';
-  openDialog(ui.clipPick);
-  let takes = [];
-  try {
-    const res = await fetch('/library/takes');
-    const body = await res.json().catch(() => null);
-    if (!res.ok || !Array.isArray(body?.takes)) {
-      throw new Error(body?.error ?? `HTTP ${res.status}`);
-    }
-    takes = body.takes;
-  } catch (err) {
-    ui.clipPickNote.textContent = `the library could not be listed: ${err.message}`;
-    return;
-  }
-  // A take this build refuses to open is not offered: the refusal belongs at the door rather
-  // than four clicks later with the clip already in the document.
-  const usable = takes.filter((take) => take.openable !== false);
-  ui.clipPickNote.textContent = usable.length
-    ? 'The clip lands at the playhead, on a row of its own.'
-    : `none of the ${takes.length} take(s) here can be opened by this build`;
-  for (const take of usable) {
-    const option = document.createElement('button');
-    option.type = 'button';
-    option.className = 'cpoption';
-    option.dataset.take = take.id;
-    const name = document.createElement('b');
-    name.textContent = take.id;
-    const meta = document.createElement('small');
-    meta.textContent = `${take.frames} frames · ${Number(take.durationSec).toFixed(2)}s`;
-    option.append(name, meta);
-    option.addEventListener('click', () => {
-      ui.clipPick.close();
-      addClipFromTake(take.id).catch(showTimelineError);
-    });
-    ui.clipList.appendChild(option);
-  }
-}
-
-ui.addClip.addEventListener('click', () => { openClipPicker().catch(showTimelineError); });
+// The shared media picker, which is the library's tile with the lifecycle buttons taken off.
+// It reads the library itself and words its own ceiling refusal, so this end says which edit is
+// asking and where the clips land, and nothing else.
+ui.addClip.addEventListener('click', () => {
+  // Where the first of them lands, read at the gesture rather than after the dialog: the playhead
+  // is where the operator was when they asked, and the picker is modal over it.
+  const start = timeline ? timeline.programSec : 0;
+  pickTakes({ ceiling: CLIP_CEILING, taken: clips.length, title: 'Add clips', confirmLabel: 'Add to the edit' })
+    .then((picked) => {
+      if (picked === null || picked.length === 0) return null;
+      return addClipsFromTakes(picked.map((take) => take.id), start);
+    })
+    .catch(showTimelineError);
+});
 ui.deleteClip.addEventListener('click', () => { deleteSelectedClip(); });
-ui.clipPickClose?.addEventListener('click', () => ui.clipPick.close());
-ui.clipPickCancel?.addEventListener('click', () => ui.clipPick.close());
 
 /** The shapes a handle drag is usually reaching for, as one press each. */
 const EASE_PRESETS = {
@@ -10069,13 +10084,7 @@ ui.presetSave.addEventListener('click', () => withPresetSubset(
     const target = EDITING ? selectedClipRow() : selectedClip;
     const generation = documentGeneration;
     const body = presetFromCurrentLook(picked.names);
-    const res = await fetch(`/presets/${encodeURIComponent(picked.name)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const saved = await res.json();
-    if (saved.error) throw new Error(saved.error);
+    const saved = await writeDocumentAtCurrentRev('presets', picked.name, { body });
     const whole = wholeLookTag(body.values);
     const targetIsCurrent = generation === documentGeneration && target && clips.includes(target);
     if (whole && targetIsCurrent) {
@@ -10121,42 +10130,128 @@ ui.presetFile.addEventListener('change', () => {
   }));
 });
 
-/** Save the open edit under a name the operator gives. File > Save as and Shift+Cmd+S. */
-async function saveProjectAs() {
-  const name = prompt('save this edit as', openedProjectName || `${openTakeId() ?? 'clip'}-edit`);
-  if (!name) return;
-  try {
-    // The take is named by content hash, which makes a project a self-contained render job.
-    const body = serialiseProjectBody();
-    const res = await fetch(`/projects/${encodeURIComponent(name)}`, {
+/**
+ * Files the open document under the first free name `pick` offers, and again under the next one
+ * if the store says that name is taken.
+ *
+ * `rev=absent` - which is what `server/library.js` calls the revision of a name nothing is filed
+ * under - is what makes this safe rather than the listing being fresh: two tabs both choosing
+ * `Untitled 1` are answered by the file, so the loser is told and takes the next name. Bounded,
+ * because a create that keeps being refused for some other reason is a loop.
+ */
+async function createProjectUnder(pick, body) {
+  const taken = new Set((await listProjects()).map((doc) => doc.name));
+  for (let tries = 0; tries < 12; tries++) {
+    const name = pick(taken);
+    const res = await fetch(`/projects/${encodeURIComponent(name)}?rev=absent`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const saved = await res.json();
-    if (saved.error) throw new Error(saved.error);
-    openedProjectName = saved.name;
-    say(`saved ${saved.name} · ${saved.bytes} bytes`);
-    rememberOpened();
-  } catch (err) {
-    showTimelineError(err);
+    const saved = await res.json().catch(() => null);
+    if (res.ok && !saved?.error) return saved;
+    if (res.status !== 409) throw documentRefusal(res, saved);
+    // The name went while this was being decided. Out of the reckoning, and ask for the next.
+    taken.add(name);
   }
+  throw new Error('twelve names in a row were taken while this project was being written');
 }
 
-ui.resumeOpen?.addEventListener('click', async () => {
-  try {
-    const accepted = offeredWorkingBody;
-    await loadProjectNamed(WORKING_PROJECT, accepted);
-    // Written back before the snapshot is dropped, or recovery lasts only as long as the tab.
-    const kept = await writeWorking(accepted);
-    if (!kept.ok) throw new Error(`restored on screen, but the auto-save could not be rewritten: ${(await kept.text().catch(() => '')).slice(0, 80)}`);
-    if (ui.resume) ui.resume.hidden = true;
-    offeredWorkingBody = null;
-    say('restored the autosaved edit');
-  } catch (err) {
-    showTimelineError(err);
+/** Where a page lands once it holds a document: what it writes into, and what it is called. */
+function enterProject(saved) {
+  openedProjectName = saved.name;
+  openedProjectRev = saved.rev;
+  lastSavedAt = Date.now();
+  showProjectInUrl(saved.name);
+  paintProjectCommands();
+}
+
+/**
+ * The name a mint takes: one take names the project after itself, and two or more give the free
+ * `Untitled N`. A take id is not held to the document-name rule - `all` is a route here and
+ * nothing stops a capture being called that - so a name this store would refuse falls through to
+ * the free one rather than refusing the mint.
+ */
+function mintName(ids, taken) {
+  const wanted = ids.length === 1 ? ids[0] : null;
+  if (wanted !== null && !taken.has(wanted) && documentNameRefusal('project', wanted) === null) {
+    return wanted;
   }
-});
+  return nextUntitledName(taken);
+}
+
+/**
+ * `/edit?new=` : a project cut from these takes, laid end to end in this order, landed in.
+ *
+ * Only this page can mint one. A document carries a look block whose parameter list is the live
+ * registry's, and the registry is assembled at run time out of the effects this build has
+ * installed, so a page without one cannot write a body `checkProject` would take.
+ */
+async function mintProjectFrom(ids) {
+  await openTake(ids[0]);
+  if (ids.length > 1) await addClipsFromTakes(ids.slice(1), clips[0].end);
+  const saved = await createProjectUnder((taken) => mintName(ids, taken), serialiseProjectBody());
+  enterProject(saved);
+  // From the document, the way a load starts: the clips this mint just laid down are what the
+  // file says, so there is nothing behind them to undo back to.
+  history.begin();
+  say(`new project ${saved.name}`);
+}
+
+/**
+ * Stamps a copy of the open edit and leaves you in it, because forking is how somebody declines
+ * to keep something once there is no save to withhold. The original is untouched and one row
+ * down the projects page. The undo stack comes along - the work is the same work.
+ */
+async function duplicateProject() {
+  const body = serialiseProjectBody();
+  const from = openedProjectName;
+  const saved = await queueProjectWrite(() => createProjectUnder(
+    (taken) => (from === null ? nextUntitledName(taken) : copyName(from, taken)), body,
+  ));
+  enterProject(saved);
+  // A file nobody else holds, so whatever refused the last one has nothing to say about this.
+  projectDiverged = false;
+  if (ui.diverged) ui.diverged.title = '';
+  paintDiverged();
+  say(`working in ${saved.name}`);
+}
+
+/**
+ * Moves the open project to `to`. One call rather than a create and a delete, because two would
+ * leave a window with the edit filed under both names and a crash in it leaves two forever - and
+ * it goes through the same queue as the auto-save, or a rename could overtake a write and move
+ * the file out from under it.
+ */
+async function renameProjectTo(to) {
+  const saved = await queueProjectWrite(async () => {
+    const res = await fetch(`/projects/${encodeURIComponent(openedProjectName)}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, rev: openedProjectRev }),
+    });
+    const answer = await res.json().catch(() => null);
+    if (!res.ok || answer?.error) throw documentRefusal(res, answer);
+    return answer;
+  });
+  openedProjectName = saved.name;
+  openedProjectRev = saved.rev;
+  showProjectInUrl(saved.name);
+  paintProjectCommands();
+  say(`renamed to ${saved.name}`);
+}
+
+/** The two File items that need a document, on a page that may be holding none. */
+function paintProjectCommands() {
+  const held = EDITING && openedProjectName !== null;
+  const why = EDITING
+    ? 'this page was opened on a take, so it holds no project to act on'
+    : 'the recorder holds no project to act on';
+  for (const control of [shell.renameProject, shell.duplicateProject]) {
+    control.disabled = !held;
+    control.title = held ? '' : why;
+  }
+}
 
 ui.deliverable?.addEventListener('change', async () => {
   const name = ui.deliverable.value;
@@ -10206,7 +10301,8 @@ function shellElements(ids) {
 
 const shell = shellElements({
   surfaceName: 'surfaceName',
-  saveProject: 'menuSaveProject',
+  renameProject: 'menuRenameProject',
+  duplicateProject: 'menuDuplicateProject',
   projectSettings: 'menuProjectSettings',
   wholeClip: 'menuWholeClip',
   export: 'menuExport',
@@ -10230,6 +10326,13 @@ const shell = shellElements({
   projectDialog: 'projectDialog',
   projectClose: 'projectClose',
   projectDone: 'projectDone',
+  renameDialog: 'renameDialog',
+  renameClose: 'renameClose',
+  renameCancel: 'renameCancel',
+  renameGo: 'renameGo',
+  renameField: 'renameField',
+  renameName: 'renameName',
+  renameNote: 'renameNote',
   obsDialog: 'obsDialog',
   obsClose: 'obsClose',
   obsDone: 'obsDone',
@@ -10251,11 +10354,13 @@ shell.menus = [...document.querySelectorAll('.appmenu')];
 
 shell.surfaceName.textContent = EDITING ? 'Editor' : 'Record';
 for (const control of [
-  shell.saveProject, shell.projectSettings, shell.wholeClip, shell.export,
-  shell.lookImport, shell.lookExport,
+  shell.projectSettings, shell.wholeClip, shell.export, shell.lookImport, shell.lookExport,
 ]) {
   control.disabled = !EDITING;
 }
+// The two document items have a second condition beside the surface - whether this page is
+// holding a project at all - so one painter owns them rather than this loop and that painter both.
+paintProjectCommands();
 
 function closeApplicationMenus({ restore = false } = {}) {
   for (const menu of shell.menus) {
@@ -10330,10 +10435,55 @@ shell.wholeClip.addEventListener('click', () => {
   clearClipRange();
 });
 shell.export.addEventListener('click', () => openDialog(ui.exportDialog));
-shell.saveProject.addEventListener('click', () => {
+shell.renameProject.addEventListener('click', () => {
   closeApplicationMenus();
-  saveProjectAs();
+  if (openedProjectName === null) return;
+  shell.renameName.value = openedProjectName;
+  paintRenameRefusal();
+  openDialog(shell.renameDialog);
+  shell.renameName.select();
 });
+
+shell.duplicateProject.addEventListener('click', () => {
+  closeApplicationMenus();
+  if (openedProjectName === null) return;
+  duplicateProject().catch(showTimelineError);
+});
+
+// The banner's own copy of the same act, because the banner is where somebody who cannot save is
+// looking and a menu two clicks away is not a recovery.
+ui.divergedCopy?.addEventListener('click', () => {
+  ui.divergedCopy.disabled = true;
+  duplicateProject()
+    .catch(showTimelineError)
+    .finally(() => { ui.divergedCopy.disabled = false; });
+});
+
+/** What the typed name would be refused for, said while it is being typed. */
+function paintRenameRefusal() {
+  const to = shell.renameName.value.trim();
+  const refused = to === openedProjectName
+    ? 'that is already its name'
+    : documentNameRefusal('project', to);
+  shell.renameField.classList.toggle('bad', to !== '' && refused !== null);
+  shell.renameGo.disabled = refused !== null;
+  shell.renameNote.textContent = refused
+    ?? 'The file moves with the name. Nothing else about the edit changes.';
+}
+
+shell.renameName.addEventListener('input', paintRenameRefusal);
+shell.renameName.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || shell.renameGo.disabled) return;
+  event.preventDefault();
+  shell.renameGo.click();
+});
+shell.renameGo.addEventListener('click', () => {
+  const to = shell.renameName.value.trim();
+  shell.renameDialog.close();
+  renameProjectTo(to).catch(showTimelineError);
+});
+shell.renameClose.addEventListener('click', () => shell.renameDialog.close());
+shell.renameCancel.addEventListener('click', () => shell.renameDialog.close());
 shell.lookImport.addEventListener('click', () => {
   closeApplicationMenus();
   ui.presetImport.click();
@@ -10530,10 +10680,7 @@ addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
   if (key === 'o' && EDITING) {
     event.preventDefault();
-    location.assign('/gallery');
-  } else if (key === 's' && event.shiftKey && EDITING) {
-    event.preventDefault();
-    saveProjectAs();
+    location.assign('/projects');
   } else if (key === 'e' && EDITING) {
     event.preventDefault();
     shell.export.click();
@@ -10612,7 +10759,7 @@ async function loadProjectNamed(name, offered = null) {
   // Footage that changed under an editor already up takes its label, its window and its marks
   // with it: the ruler's ticks belong to the take rather than to the project drawn over it.
   else if (sources.size) await paintOpenTake();
-  const listed = first ? await listLibrary() : null;
+  if (first) await listLibrary();
   // Started from the document, always. The stack holds whole documents and the synchronous door
   // will only take one whose footage is already open, which a live session guarantees and a load
   // cannot: it opens what the body names while a stack reaches below it.
@@ -10627,11 +10774,14 @@ async function loadProjectNamed(name, offered = null) {
   // until somebody says which clip they mean. That is the case the split is worth showing in:
   // a project is where there is a choice to make.
   deselectClipRow();
-  // The working document is crash recovery, not a named edit for the menu to reopen directly.
-  openedProjectName = name === WORKING_PROJECT ? null : name;
+  // What every change from here writes into. A body handed straight in has no revision behind it
+  // and is a tool's document rather than a file, so it opens read-only and writes nothing.
+  openedProjectName = offered === null ? name : null;
+  openedProjectRev = doc.rev ?? null;
+  lastSavedAt = null;
+  paintProjectCommands();
   say(`opened ${name}`);
-  rememberOpened();
-  if (listed) await finishEditor(listed);
+  if (first) await finishEditor();
   return doc;
 }
 
@@ -10857,14 +11007,14 @@ async function enterEditor() {
   showInspector();
   chromeOn = true;
   placeChrome();
-  rememberOpened();
+  paintProjectCommands();
 }
 
-/** The library's three lists, fetched softly but never silently. */
+/** The library's two lists, fetched softly but never silently. */
 async function listLibrary() {
   const unavailable = [];
   const listed = {};
-  for (const [what, refresh] of [['presets', refreshPresets], ['projects', refreshProjects],
+  for (const [what, refresh] of [['presets', refreshPresets],
     ['deliverables', refreshDeliverables]]) {
     listed[what] = await refresh().catch((err) => { unavailable.push(`${what} (${err.message})`); return null; });
   }
@@ -10873,8 +11023,7 @@ async function listLibrary() {
 }
 
 /** The last of the bring-up, once the entry point has settled what the document is. */
-async function finishEditor(listed) {
-  if (listed.projects) offerWorkingDocument(listed.projects);
+async function finishEditor() {
   // The take's first accurate frame. A repaint, because the playhead may have moved by now.
   await timeline.repaintHere();
   // With the playhead parked `tick` returns at once, so this is what continues a drag.
@@ -10887,6 +11036,7 @@ async function openTake(id) {
   const opened = await openSource(id);
   adoptSource(selectedClip, opened);
   openedProjectName = null;
+  openedProjectRev = null;
   // This door opens one clip, so select it before the awaited mark load paints the ruler.
   // Otherwise the marks exist before a clip owns gestures and the second load races the paint.
   selectClipRow(selectedClip);
@@ -10894,13 +11044,13 @@ async function openTake(id) {
   // Before the lists, because everything after this reads a clip the fit has finished writing.
   await fitCropToTake(id, params.get('near'), params.get('far'))
     .catch((err) => { say(`the crop box could not be fitted to this take: ${err.message}`); });
-  const listed = await listLibrary();
+  await listLibrary();
   ensureActiveDeliverable();
   applyDeliverable(activeDeliverable);
   // The stack starts from whatever the clip already is, so the first undo has
   // somewhere to land.
   history.begin();
-  await finishEditor(listed);
+  await finishEditor();
   return timeline;
 }
 
@@ -10976,24 +11126,37 @@ function warmPrograms() {
 }
 warmPrograms();
 
-// Which transport owns the loop is decided once, here, and the two are exclusive.
-const REQUESTED_TAKE = new URLSearchParams(location.search).get('take');
-const REQUESTED_PROJECT = new URLSearchParams(location.search).get('project');
+// Which transport owns the loop is decided once, here, and the three doors are exclusive.
+const EDIT_QUERY = new URLSearchParams(location.search);
+const REQUESTED_TAKE = EDIT_QUERY.get('take');
+const REQUESTED_PROJECT = EDIT_QUERY.get('project');
+// Comma-joined, and a take id cannot carry a comma by its own rule, so the list is unambiguous.
+const REQUESTED_NEW = EDIT_QUERY.get('new');
 
-if (EDITING && !REQUESTED_TAKE && !REQUESTED_PROJECT) {
-  location.replace('/gallery');
+/**
+ * The editor's three doors, and what each one leaves the page holding.
+ *
+ * `?project=` opens an existing document. `?new=` mints one from the takes it names, in the
+ * order it names them, and lands in it. `?take=` is the render worker's bootstrap: the page comes
+ * up on one clip of that take, holds no document, and writes nothing at all. Asked in that order
+ * because only one of them is ever set, and a URL carrying two is answered rather than refused.
+ */
+const editorDoor = () => {
+  if (REQUESTED_PROJECT) return { what: `project ${REQUESTED_PROJECT}`, open: () => loadProjectNamed(REQUESTED_PROJECT) };
+  if (REQUESTED_NEW) return { what: `a project on ${REQUESTED_NEW}`, open: () => mintProjectFrom(REQUESTED_NEW.split(',')) };
+  return { what: `take ${REQUESTED_TAKE}`, open: () => openTake(REQUESTED_TAKE) };
+};
+
+if (EDITING && !REQUESTED_TAKE && !REQUESTED_PROJECT && !REQUESTED_NEW) {
+  // The editor has no entry that comes up on no footage, and a project is the human route in.
+  location.replace('/projects');
 } else if (EDITING) {
-  // The project owns the take list, so a named one opens the footage its clips name and the page
-  // starts on nothing. A bare `?take=` is a new project holding one clip of that take.
-  (REQUESTED_PROJECT ? loadProjectNamed(REQUESTED_PROJECT) : openTake(REQUESTED_TAKE))
+  const door = editorDoor();
+  door.open()
     .catch((err) => {
-      sensorLabel = REQUESTED_PROJECT
-        ? `cannot open project ${REQUESTED_PROJECT}`
-        : `cannot open take ${REQUESTED_TAKE}`;
+      sensorLabel = `cannot open ${door.what}`;
       setStatus();
-      showTimelineError(REQUESTED_PROJECT
-        ? new Error(`project ${REQUESTED_PROJECT}: ${err.message}`)
-        : err);
+      showTimelineError(new Error(`${door.what}: ${err.message}`));
     });
 } else if (PROGRAM_OUT) {
   // A live socket like the viewer, and no animation loop, because `handleFrame` draws.

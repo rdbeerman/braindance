@@ -338,6 +338,46 @@ function foldFreeX(a, b, side, index, from, to) {
   return good;
 }
 
+// A clip's retime curve, as the `{ rate, keys }` block a project document writes it as. The
+// editor holds the same curve behind an object with a renderer attached, and the projects page
+// holds nothing but the document - so the arithmetic is here and both read it.
+
+/**
+ * The source second a clip's own program second maps to. Program time here is measured from the
+ * clip's start rather than the project's, which is what every caller has to subtract first.
+ */
+function retimeSourceSecAt({ rate, keys }, programSec) {
+  if (keys.length === 0) return programSec * rate;
+  if (keys.length === 1) return keys[0].value + (programSec - keys[0].t) * rate;
+  return scalarAt(keys, programSec, EXTEND_ENDS);
+}
+
+/** The program position a source position sits at, which is `retimeSourceSecAt` run backwards. */
+function retimeProgramSecAt(curve, sourceSec) {
+  const { rate, keys } = curve;
+  if (keys.length === 0) return sourceSec / rate;
+  if (keys.length === 1) return keys[0].t + (sourceSec - keys[0].value) / rate;
+  if (sourceSec <= keys[0].value) {
+    const slope = segmentSlope(keys, 0, 0);
+    return slope > 0 ? keys[0].t - (keys[0].value - sourceSec) / slope : keys[0].t;
+  }
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (keys[i + 1].value < sourceSec) continue;
+    // Bisected rather than solved: an eased cubic has no useful closed-form inverse.
+    let lo = keys[i].t;
+    let hi = keys[i + 1].t;
+    for (let k = 0; k < 50; k++) {
+      const mid = (lo + hi) / 2;
+      if (retimeSourceSecAt(curve, mid) < sourceSec) lo = mid;
+      else hi = mid;
+    }
+    return hi;
+  }
+  const last = keys[keys.length - 1];
+  const slope = segmentSlope(keys, keys.length - 2, 1);
+  return slope > 0 ? last.t + (sourceSec - last.value) / slope : last.t;
+}
+
 export {
   handleRefusal,
   foldRefusal,
@@ -353,7 +393,8 @@ export {
   HOLD_ENDS,
   EXTEND_ENDS,
   scalarAt,
-  segmentSlope,
+  retimeSourceSecAt,
+  retimeProgramSecAt,
   scalarSlopeAt,
   stepAt,
   hermite,

@@ -308,7 +308,7 @@ try {
       // says they are against the same footage.
       const takeIds = await takesForCaptures(job.captures);
       // The editor has no entry that comes up on nothing - `/edit` with neither a take nor a
-      // project redirects to the gallery - so it is brought up on the first clip's footage and the
+      // project redirects to the projects page - so it is brought up on the first clip's footage and the
       // project opens the rest. `openTakes` is keyed by id, so the second open is not a second
       // fetch of that index.
       await page.goto(`${URL_}/edit?take=${encodeURIComponent(takeIds[0])}`, { waitUntil: 'load' });

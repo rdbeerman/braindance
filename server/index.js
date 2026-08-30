@@ -616,7 +616,7 @@ async function serveRemoteFrame(req, res, [id, n], query) {
     res.writeHead(400).end('decimate must be a whole number from 1 to 16');
     return;
   }
-  // Bound before the fetch: the gallery asks for a poster on every pointer move, and a scrub
+  // Bound before the fetch: the library asks for a poster on every pointer move, and a scrub
   // across a shelf abandons dozens of these.
   let upstream;
   try {
@@ -806,22 +806,49 @@ async function serveEffectRefusal(req, res) {
   return sendJson(res, { setAside, skipped });
 }
 
-async function writeDocument(req, res, store, name) {
+// A refused change, in one shape at every door that refuses one. `stale` and the revision the file
+// holds now are for the caller, which has to tell a file that moved from a document this build
+// cannot read: the first is answered by reading it again and the second never can be. The sentence
+// is for the person, and both travel together.
+const sendRefusal = (res, err) => sendJson(res, {
+  error: err.message,
+  ...(err.stale ? { stale: true, rev: err.rev } : {}),
+}, 409);
+
+async function writeDocument(req, res, store, name, query) {
+  // The revision travels in the query rather than in the body, because the body is the document and
+  // a document's shape says nothing about which one of two tabs wrote it.
+  const rev = query?.get('rev') ?? '';
   if (req.method === 'DELETE') {
     try {
-      sendJson(res, await store.remove(name));
-    } catch {
-      // Removing what is not there is a 404 rather than an uncaught ENOENT with a path in it.
-      sendJson(res, { error: `no ${store.kind} named ${name}` }, 404);
+      sendJson(res, await store.remove(name, rev));
+    } catch (err) {
+      // Removing what is not there is a 404 rather than an uncaught ENOENT with a path in it. Every
+      // other refusal here is the revision rule, and a revision that has moved is a conflict.
+      if (err?.code === 'ENOENT') sendJson(res, { error: `no ${store.kind} named ${name}` }, 404);
+      else sendRefusal(res, err);
     }
     return;
   }
   try {
-    sendJson(res, await store.write(name, await readBody(req)));
+    sendJson(res, await store.write(name, await readBody(req), rev));
   } catch (err) {
-    // A document this build cannot faithfully interpret is a refusal with a reason rather than a
-    // 500 - see `DocumentStore.write` on why the version is checked rather than restamped.
-    sendJson(res, { error: err.message }, 409);
+    // A document this build cannot faithfully interpret, or one whose revision has moved under the
+    // writer, is a refusal with a reason rather than a 500 - see `DocumentStore.write`.
+    sendRefusal(res, err);
+  }
+}
+
+// One call rather than three, because a client doing this as create-then-copy-then-delete leaves a
+// window with the document filed under both names and a crash in it leaves two forever.
+async function renameDocument(req, res, store, name) {
+  const body = await readBody(req);
+  // Trimmed the way `renameTake` trims, because this name was typed: a trailing space is a slip
+  // rather than a request, and the name rule refuses one.
+  try {
+    sendJson(res, await store.rename(name, String(body.to ?? '').trim(), body.rev));
+  } catch (err) {
+    sendRefusal(res, err);
   }
 }
 
@@ -1082,8 +1109,8 @@ const serveRecordState = async (req, res) => {
   const costly = consumersCostingTheTake();
   sendJson(res, {
     ...recorder.state,
-    // The gallery draws a library spanning both machines, so on an editing station every fact this
-    // route reported was about a recorder that station does not have. Null on the node itself.
+    // The library page spans both machines, so on an editing station every fact this route
+    // reported was about a recorder that station does not have. Null on the node itself.
     node: node ? await node.recordState() : null,
     storage: await remaining(CAPTURES_DIR, recordingRate()),
     monitors: {
@@ -1153,7 +1180,6 @@ const ROUTES = [
   { path: '/library/reveal/:id', pattern: /^\/library\/reveal\/([^/]+)$/, write: { methods: ['POST'], run: serveReveal } },
 
   // ---- documents
-  { path: '/projects', pattern: /^\/projects\/?$/, read: (req, res) => listDocuments(res, PROJECTS) },
   { path: '/presets', pattern: /^\/presets\/?$/, read: (req, res) => listDocuments(res, PRESETS) },
   // The chunk route serves text/plain because what the tools anchor and the client compiles is the
   // file's own bytes. The write is on the same entry as the read, which puts it behind
@@ -1189,24 +1215,35 @@ const ROUTES = [
   // that an effect id is a directory name and `mkdir` is all it takes.
   { path: '/effect-refusals', pattern: /^\/effect-refusals\/?$/, write: { methods: ['POST'], run: serveEffectRefusal } },
 
+  // The listing is at `/projects/all` and not at the bare namespace, mirroring `/library/all`: this
+  // table is matched before `PAGES`, so a route on `/projects` takes the URL away from the page.
+  // Above `/projects/:name`, which matches this path too and is answered second.
+  { path: '/projects/all', pattern: /^\/projects\/all$/, read: (req, res) => listDocuments(res, PROJECTS) },
+  // The lookahead is why a project cannot be called `all`: without it this entry matches
+  // `/projects/all` too, and the reservation below would rest on nothing but this table's order.
   {
     path: '/projects/:name',
-    pattern: /^\/projects\/([^/]+)$/,
+    pattern: /^\/projects\/(?!all$)([^/]+)$/,
     read: (req, res, args) => readDocument(res, PROJECTS, args[0]),
-    write: { methods: ['PUT', 'POST', 'DELETE'], run: (req, res, args) => writeDocument(req, res, PROJECTS, args[0]) },
+    write: { methods: ['PUT', 'POST', 'DELETE'], run: (req, res, args, query) => writeDocument(req, res, PROJECTS, args[0], query) },
+  },
+  {
+    path: '/projects/:name/rename',
+    pattern: /^\/projects\/([^/]+)\/rename$/,
+    write: { methods: ['POST'], run: (req, res, args) => renameDocument(req, res, PROJECTS, args[0]) },
   },
   {
     path: '/presets/:name',
     pattern: /^\/presets\/([^/]+)$/,
     read: (req, res, args) => readDocument(res, PRESETS, args[0]),
-    write: { methods: ['PUT', 'POST', 'DELETE'], run: (req, res, args) => writeDocument(req, res, PRESETS, args[0]) },
+    write: { methods: ['PUT', 'POST', 'DELETE'], run: (req, res, args, query) => writeDocument(req, res, PRESETS, args[0], query) },
   },
   { path: '/deliverables', pattern: /^\/deliverables\/?$/, read: (req, res) => listDocuments(res, DELIVERABLES) },
   {
     path: '/deliverables/:name',
     pattern: /^\/deliverables\/([^/]+)$/,
     read: (req, res, args) => readDocument(res, DELIVERABLES, args[0]),
-    write: { methods: ['PUT', 'POST', 'DELETE'], run: (req, res, args) => writeDocument(req, res, DELIVERABLES, args[0]) },
+    write: { methods: ['PUT', 'POST', 'DELETE'], run: (req, res, args, query) => writeDocument(req, res, DELIVERABLES, args[0], query) },
   },
 
   // ---- the webcam
@@ -1264,6 +1301,35 @@ if (RESERVED_BY_ROUTES.join(',') !== [...RESERVED_EFFECT_IDS].sort().join(',')) 
     + 'fetches it, which is a page that does not boot');
 }
 
+// Each namespace that files documents by name gives its store the names its own literal routes take
+// away: a literal segment beside `/:name` outranks it, so a document filed under that name would be
+// written here and read back as the route - the mistake `/effects/refuse` made once. Derived from
+// the table and handed to the store, so a literal added later reserves its name by existing, and
+// only the namespace that has a collision reserves anything.
+const DOCUMENT_STORES = new Map([['projects', PROJECTS], ['presets', PRESETS], ['deliverables', DELIVERABLES]]);
+for (const entry of ROUTES) {
+  const namespace = entry.path.match(/^\/([a-z-]+)\/:name$/)?.[1];
+  if (namespace === undefined) continue;
+  const store = DOCUMENT_STORES.get(namespace);
+  if (!store) {
+    throw new Error(`/${namespace}/:name files documents by name and no store here owns ${namespace}, so `
+      + 'nothing would take the names this table has already claimed under it away from the documents');
+  }
+  const taken = ROUTES.map((r) => r.path.match(new RegExp(`^/${namespace}/([^/:]+)$`))?.[1])
+    .filter((segment) => segment !== undefined)
+    .map((segment) => [segment, `/${namespace}/${segment}`]);
+  store.reserve(taken);
+  // The store refusing a name is only as good as this entry not matching it first. Held rather than
+  // built from the table, because a pattern derived from the table is the table checking itself.
+  for (const [segment] of taken) {
+    if (entry.pattern.test(`/${namespace}/${segment}`)) {
+      throw new Error(`${entry.path} matches /${namespace}/${segment}, which is a route beside it: the `
+        + `${store.kind} store refuses that name, but this entry answering it first is what decides `
+        + 'whether the refusal is ever reached');
+    }
+  }
+}
+
 // The pages, and the only URLs they answer at. Deliberately not entries in `ROUTES`: a guard whose
 // list contains things it does not guard teaches people to skim it. `/record` and `/edit` are one
 // file because the recorder and the editor are one page in two modes.
@@ -1271,7 +1337,10 @@ const PAGES = {
   '/': 'menu.html',
   '/record': 'index.html',
   '/edit': 'index.html',
-  '/gallery': 'library.html',
+  // The store this page draws is called the library everywhere it is implemented, and `gallery`
+  // named nothing but the URL it was served at.
+  '/library': 'library.html',
+  '/projects': 'projects.html',
   // The program-out source, which OBS opens as a browser source: the same renderer drawing the
   // same scene, so a second page would be a second renderer to keep in step.
   '/program': 'index.html',
@@ -1982,7 +2051,7 @@ function startLive() {
     shuttingDown = true;
     stopGrabber({ holdProcessOpen: true });
     // Closed and scanned before the process goes, because a take without a sidecar is one the
-    // gallery has to rebuild. A courtesy: the guarantee is that the bytes are already on disk.
+    // library has to rebuild. A courtesy: the guarantee is that the bytes are already on disk.
     recorder.close('server stopped').finally(() => process.exit(0));
   });
 }

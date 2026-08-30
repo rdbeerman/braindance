@@ -7,7 +7,7 @@
 <link rel="icon" href="data:," />
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
-  /* The same palette the gallery restates, restated again. web/index.html is
+  /* The same palette the library restates, restated again. web/index.html is
      the system and each page carries its own copy of the names it uses, which is the
      convention library.html already set. */
   :root {
@@ -48,7 +48,7 @@
 
   /* An anchor rather than a button, so the three destinations are real URLs a
      browser can show, open in a tab and go back from. The tile idiom is the
-     gallery's: a bordered card on --paper-1 that lifts its border on hover. Sized
+     library's: a bordered card on --paper-1 that lifts its border on hover. Sized
      for the node's touch panel, where these are pressed with a finger. */
   .entry { display: flex; flex-direction: column; gap: 8px; padding: 24px 28px;
     border: 1px solid var(--line); border-radius: 0; background: var(--paper-1);
@@ -60,23 +60,10 @@
 
   .entry.record .what { color: var(--rec); }
   .entry.record:hover { border-color: var(--rec); background: var(--rec-low); }
-  .entry.gallery .what { color: var(--accent); }
-  .entry.gallery:hover { border-color: var(--accent); background: var(--accent-low); }
-  .entry.editor .what { color: var(--accent); }
-  .entry.editor:hover { border-color: var(--accent); background: var(--accent-low); }
-
-  /* Until the resume question is answered the Editor tile has no href at all, which
-     is what makes it unclickable rather than merely styled as if it were. A tile
-     that navigated somewhere while still saying "reading the library" would be the
-     surprise this page exists to remove. */
-  .entry:not([href]) { color: var(--faint); cursor: default; }
-  .entry:not([href]):hover { border-color: var(--line); background: var(--paper-1); }
-  .entry:not([href]) .what { color: var(--faint); }
-
-  /* Where a tile is about to go, said on the tile. The Editor's destination depends
-     on what is on this machine, so it is the one that has to say it. */
-  .entry .dest { font-size: 9px; color: var(--faint); letter-spacing: 0.14em; text-transform: uppercase; }
-  .entry .dest.fallthrough { color: var(--warn); }
+  .entry.projects .what { color: var(--accent); }
+  .entry.projects:hover { border-color: var(--accent); background: var(--accent-low); }
+  .entry.library .what { color: var(--accent); }
+  .entry.library:hover { border-color: var(--accent); background: var(--accent-low); }
 
   @media (max-width: 560px) {
     .menu { grid-template-columns: minmax(0, 1fr); align-content: start; }
@@ -90,195 +77,40 @@
   <div class="sum">capture. replay. transcend.</div>
 </header>
 
+<!-- Three tiles and no fourth. There used to be an EDITOR tile, and what it needed to
+     work was a `localStorage` record of the last take opened, matched back against the
+     library listing by hash to rebuild a URL, plus a sentence for the machine that has
+     never opened anything. Nobody goes to the editor, they go to a project - and a
+     project is a name the server already lists, so picking up yesterday's work is the
+     projects page's own job and nothing has to be remembered on the side to find it. -->
 <main class="menu" aria-label="Main menu">
   <a class="entry record" href="/record">
     <span class="what">Record</span>
     <span class="why">Arm the sensor and shoot a take.</span>
   </a>
-  <a class="entry gallery" href="/gallery">
-    <span class="what">Gallery</span>
-    <span class="why">Every take here and on the node, skimmable.</span>
+  <a class="entry projects" href="/projects">
+    <span class="what">Projects</span>
+    <span class="why">Every edit on this machine, newest worked on first.</span>
   </a>
-  <a class="entry editor" id="editor">
-    <span class="what">Editor</span>
-    <span class="why" id="editorWhy">Reading the library…</span>
-    <span class="dest" id="editorDest"></span>
+  <a class="entry library" href="/library">
+    <span class="what">Library</span>
+    <span class="why">Every take here and on the node, skimmable.</span>
   </a>
 </main>
 
 <script type="module">
-// The main menu. Two of the three entries are plain links written in the markup
-// above; the third has to be worked out, because "the editor" only means something
-// once there is a take to open it on.
-//
-// **The resume decision is taken on load, not on click.** A tile whose destination
-// is computed when it is pressed can only tell you where it went afterwards, and the
-// answer here is genuinely uncertain - the last take opened may have been deleted,
-// may live on the node rather than this machine, or may be somebody else's footage
-// filed under the same name. So the question is asked once when the page arrives and
-// the tile says what it will do, which is also why the tile carries no href until
-// the answer exists.
+// The main menu. Every tile is a plain link written in the markup above, so there is nothing
+// here to decide and nothing to wait for.
+const tiles = [...document.querySelectorAll('.entry')];
 
-const LAST_OPENED = 'kinect.lastOpened';
-
-const editor = document.getElementById('editor');
-const editorWhy = document.getElementById('editorWhy');
-const editorDest = document.getElementById('editorDest');
-
-/**
- * What the editor last had open, or null if that cannot be established.
- *
- * Everything here is text the browser handed back from storage another page wrote,
- * so every step is allowed to fail into the same answer: a machine with no history,
- * which falls through to the gallery. `localStorage` itself throws rather than
- * returning null when a browser has storage switched off, which is a state a kiosk
- * on a node could genuinely be in.
- */
-function lastOpened() {
-  let raw;
-  try {
-    raw = localStorage.getItem(LAST_OPENED);
-  } catch {
-    return null;
-  }
-  if (!raw) return null;
-  let saved;
-  try {
-    saved = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!saved || typeof saved !== 'object') return null;
-  if (typeof saved.takeHash !== 'string' || !saved.takeHash) return null;
-  return saved;
-}
-
-const gallery = (reason) => ({ href: '/gallery', reason, take: null, project: null, savedId: null });
-
-/**
- * Where the Editor tile goes, and why.
- *
- * **Matched by hash and never by the saved id**: a project names its capture by
- * content, which is the same rule `server/library.js` reconciles two machines by
- * and is stated at length there. A take
- * downloaded from the node whose name collided with one already here is stored as
- * `${id}-${hash.slice(7, 15)}.knct`, so the same id names different footage on two
- * machines and resuming by id would open the wrong take while looking like it
- * worked. The saved id is carried only to say what was written down.
- */
-async function resolveResume() {
-  const saved = lastOpened();
-  if (!saved) return gallery('nothing has been opened on this machine yet');
-
-  let library;
-  try {
-    const res = await fetch('/library/all');
-    if (!res.ok) throw new Error(`the library answered ${res.status}`);
-    library = await res.json();
-  } catch (err) {
-    return gallery(`the library could not be read: ${err.message}`);
-  }
-
-  const takes = Array.isArray(library?.takes) ? library.takes : [];
-  const take = takes.find((t) => t.hash === saved.takeHash);
-  if (!take) return gallery('the take last open is not in this library');
-  // A take only on the node has no local file to open, and downloading it is the
-  // gallery's job rather than something to do on the way past.
-  if (take.state === 'remote') return gallery(`${take.id} is only on the node`);
-  // **A take being recorded needs no branch of its own here, and used to have one.** It
-  // spelled its own sentence - "is still being recorded" - for a case this lookup cannot
-  // produce: the match above is by hash, `describeTake` gives a take mid-write no hash
-  // on purpose, and `lastOpened` refuses a saved entry whose `takeHash` is not a
-  // non-empty string. So the branch was a third spelling of a reason the server now owns,
-  // guarding a take that cannot arrive. `library-check` asserts the hash half of that
-  // rather than leaving it as a reading, because a recording take that started carrying
-  // one would make this reachable again - and then it falls through to the block below
-  // and quotes the server, which is the right answer either way.
-  //
-  // The remote branch above stays, and the difference is the point: "only on the node"
-  // is a fact about reconciliation that no take carries in its refusals, where
-  // "recording" is a key the server declares.
-  //
-  // **The predicate is the server's and the sentence is not this page's to write.** This
-  // used to name the two reasons it knew - no sensor hello, or under two frames - and
-  // that stopped being the whole list the moment the capture format grew a band, which is
-  // a third way for `openable` to be false and one neither of those sentences describes.
-  // Enumerating again here would put this page back in the same position one member
-  // later, and the band is expected to gain another when a third message type lands.
-  //
-  // So the gate stays on the one predicate and the reason is read off the take. Read and
-  // not deferred to another page: "the gallery says why" was the shape before this, and
-  // it asks somebody looking at a disabled tile to go somewhere else to find out what is
-  // wrong with it. The sentences are on the take, the take is already in hand, and a
-  // refusal a member wider costs this line nothing.
-  if (!take.openable) {
-    const why = take.openRefusals.map((r) => r.why).join('; ');
-    return gallery(`${take.id} cannot be opened: ${why}`);
-  }
-
-  // Built a value at a time rather than by interpolation, because a project name is
-  // whatever somebody typed and an ampersand in it would otherwise start a second
-  // parameter.
-  const query = new URLSearchParams({ take: take.id });
-  const project = typeof saved.project === 'string' && saved.project ? saved.project : null;
-  if (project) query.set('project', project);
-  // The saved id, kept only so the tile can say when it is not the one being opened.
-  // That happens exactly when a download collided and the same footage is filed here
-  // under a longer name, which is a moment where showing an id nobody wrote down
-  // reads as the wrong take rather than as the right one renamed.
-  const savedId = typeof saved.takeId === 'string' && saved.takeId !== take.id ? saved.takeId : null;
-  return { href: `/edit?${query}`, reason: null, take, project, savedId };
-}
-
-const resume = await resolveResume();
-
-// Written through the DOM rather than through a template. A take id and a project
-// name are both text from outside this page - the id comes off a listing that
-// includes whatever a node offered, the project name is whatever somebody typed -
-// and text from outside this page is never markup, which is the rule the gallery
-// already holds its mark labels to.
-const said = (...parts) => {
-  editorWhy.textContent = '';
-  for (const part of parts) {
-    if (typeof part === 'string') {
-      editorWhy.append(part);
-    } else {
-      const b = document.createElement('b');
-      b.textContent = part.name;
-      editorWhy.append(b);
-    }
-  }
-};
-
-editor.href = resume.href;
-if (resume.take) {
-  said('Resumes ', { name: resume.take.id }, ' · ',
-    ...(resume.project ? ['project ', { name: resume.project }] : ['no project, the take as shot']),
-    ...(resume.savedId ? [' · saved as ', { name: resume.savedId }, ', same footage'] : []));
-  editorDest.textContent = 'opens the editor';
-  editorDest.classList.remove('fallthrough');
-} else {
-  said(`Nothing to resume — ${resume.reason}.`);
-  editorDest.textContent = 'goes to the gallery';
-  editorDest.classList.add('fallthrough');
-}
-
-// What a check reads. The resolved decision rather than the tile's text, because the
-// claim is about where the tile goes and reading that off the copy would pass a page
-// that described one destination and linked another.
+// What a check reads. The href off the tile rather than its copy, because the claim is about
+// where a tile goes and reading that off the label would pass a page that described one
+// destination and linked another.
 globalThis.__menu = {
-  resume: () => ({
-    href: resume.href,
-    reason: resume.reason,
-    takeId: resume.take?.id ?? null,
-    project: resume.project,
-    savedId: resume.savedId,
-  }),
-  entries: () => [...document.querySelectorAll('.entry')].map((el) => ({
+  entries: () => tiles.map((el) => ({
     what: el.querySelector('.what').textContent,
     href: el.getAttribute('href'),
     why: el.querySelector('.why').textContent,
-    dest: el.querySelector('.dest')?.textContent ?? null,
   })),
 };
 </script>

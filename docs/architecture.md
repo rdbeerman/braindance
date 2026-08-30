@@ -554,6 +554,151 @@ answer, and it moves two things together because neither is enough on its own: t
 where the value is stored, and the render core's selection decides which uniform table, material
 and levelling group the registry's `apply` reaches.
 
+## Projects, and which one is open
+
+**A project saves itself and there is no save action.** Every project autosaves the way the one
+working document does today, so the file on disk and the edit on the screen never disagree, and
+there is no dirty flag that has to be kept right on every path that mutates the edit. What that
+costs is the ability to throw an experiment away by declining to save it, and duplicating a
+project is the answer to that rather than a second save model standing beside the first.
+
+**There is one kind of document and it carries a name from the moment it exists.** The hidden
+`__working__` file is gone and the recovery chip that offered it back went with it: the control on
+the projects page makes a project called `Untitled 1`, every edit is in the list from its first
+frame, and a crash loses nothing autosave had not already written, so there is nothing left to
+offer. Nothing prompts for a name, because a name is a label to change later rather than a
+decision to demand before anybody has seen a frame. The save action goes too - `Save project` and
+its shortcut named the moment an unnamed document became a named one, and there is no such moment
+any more.
+
+**Projects and takes get a page each, and the projects page is the one you land on.** The takes
+grid is a store of footage this machine holds or can pull down off the node, and it is a
+different question from which edit you are continuing, so the two stopped sharing a page: the
+landing page lists projects only and carries the control that makes a new one, and the takes grid
+keeps its own page and its whole job - the two-machine manifest, download, reclaim, rename,
+reveal. Neither page grew a section belonging to the other, because a page that answers one
+question is the one that can be made good.
+
+**The library's `Open` says `New project from this take` instead, because `Open` did not say what
+it did.** A control that mints a document is a different act from one that shows you footage, and
+one word covering both is how a list fills with projects somebody only meant to look at. Looking
+is the viewer the library already has - full screen, frame stepping, mark ticks, previous and next
+take - so nothing new was needed to separate them, and the act that creates something now says
+`project` on its face. The project it makes is named after the take and you land in it, because a
+control that says it makes a project and then leaves you looking at the list has not finished.
+
+**`/edit?take=` survives as the render worker's bootstrap and creates nothing.** The human route
+into the editor is a project, so the take door has one consumer left: `tools/render-worker.mjs`
+brings the page up on the first clip's take and then pushes the job's document in by value. A page
+opened that way holds no document, which means it has no file to autosave into and writes nothing
+at all - the same rule that used to be carried by `__working__` existing, now carried by there
+being nothing to write to.
+
+**The takes page is the library, and the word `gallery` is gone.** The store it draws was already
+called that everywhere it is implemented - `server/library.js`, the `/library` routes, the client
+that renders it and the tool that proves it - and `gallery` named nothing but the URL those pages
+were served at, so the page is at `/library` and reads Library. Splitting the pages was the moment
+to spend that rename and not a moment later, because a second page arriving under the old name
+would have doubled what the next reader has to reconcile.
+
+**The menu's tiles are RECORD, PROJECTS and LIBRARY, and the EDITOR tile is gone.** Nobody goes to
+the editor, they go to a project, so picking up yesterday's work is the projects page's own job
+rather than a fourth door standing beside it. What leaves with the tile is the resume record it
+read - a `localStorage` entry naming a take hash, matched back against the library listing to
+rebuild a URL, and a sentence for the machine that has never opened anything. A project is a name
+the server already lists, so nothing has to be remembered on the side to find it again.
+
+**A project shows a picture, and dragging it walks the cut.** The listing hands the whole document
+body over, so the name, the clip count, the shape and the rate cost nothing to show; frames are
+the only thing fetched, and they are drawn by the same depth splat the library's tiles use, which
+is what makes the two pages read as one program. What the finger moves through is program time and
+not one take's frames: the clip covering that second is found by its `start` and `length`, its
+retime curve maps the second into source time, and the skim changes capture at a cut - so the
+bar's length is the edit's length and a cut in the edit is a cut in the skim. The look is the part
+that cannot come along, because nothing on this page holds the grade, the effects or the camera.
+A project skims as raw geometry and reads as a proxy rather than as a small render.
+
+**A project whose footage is not on this machine says so on its row, and the control goes to the
+library.** The loader refuses a document naming a take no local capture hashes, and reclaiming one
+take from the library is enough to put every project cut on it into that state, so the page
+listing every project is the page that has to say which are dark and which take is missing. What
+it does not do is fetch. The download, its progress and the two-machine state live on the library
+page already and a second copy of them here would be the duplicated path this design keeps
+refusing, so the row names the takes it wants and sends you to the page that can get them.
+
+**The clip picker is the library's tile with the lifecycle buttons taken off.** Adding a clip used
+to offer a list of names, and a name is the one thing about a take that says nothing about what is
+on it, so the picker draws the same poster, the same scrub bar, the same mark ticks and the same
+warning badges the library page draws. The only difference is that nothing in here deletes,
+renames, reveals, reclaims or downloads. That is the media picker inside a project, and it arrives
+without the library page having to move into the editor.
+
+**One module draws a take, and three surfaces call it.** `drawFrame`, `createSkim` and
+`paintMarks` were local to `web/library.js` with no exports, which is the whole reason the picker
+showed names: there was no way to reach them. They move behind a seam of their own - a take, a
+canvas and an index in, a drawn frame out, and the capture free to change between draws so a skim
+can cross a cut - and the library page, the clip picker and the projects page's row are its three
+callers. `web/record-poll.js` is the precedent for the move and `module-check` is what holds the
+import graph to it.
+
+**The picker does not know which project it was opened from.** Every local take, one order, newest
+first, and no mark or reordering for the footage this edit already uses - so a tile is in the same
+place whichever project asked for it and nothing moves under a cursor on its way to a click. What
+that costs is a scroll past a long shoot to reach a take already on the timeline, and it is the
+right trade while the dialog is a view of what footage exists rather than a second record of what
+this project has claimed.
+
+**The list is ordered by when each project was last written, and nothing is stored to know it.**
+The listing already carries a `savedAt` off the file's mtime, and every edit autosaves, so the
+project at the top is the one last worked on without a second timestamp existing anywhere. A
+project opened and only watched does not move, which is the honest reading rather than a gap:
+looking at an edit is not working on it, and the alternative is either a field in the document
+that makes opening a project a change to it or the per-machine side record the EDITOR tile just
+took away with it.
+
+**`Save project` became `Rename project`, and `Duplicate project` sits beside it.** The item and
+its shortcut named the moment an unnamed document became a named one, and there is no such moment
+left - but the two acts that survive it are exactly the ones wanted from inside a cut: giving a
+name to the `Untitled 4` somebody has been working on for an hour, and forking it to try
+something. Rename opens a modal because a name is typed, and duplicate is what stands in for the
+save nobody makes.
+
+**Duplicating leaves you in the copy.** Forking is how somebody declines to keep something once
+there is no save to withhold, so the copy is where the next edit is going and landing anywhere
+else costs a second move to get there. The original is untouched and one row down the projects
+page. Deleting is not on this menu at all, because autosave would write the file back the moment
+anything was touched, so it belongs to the page listing projects you are not inside. `Cmd+O` goes
+to that page.
+
+**A name a person types and a name the recorder mints stop sharing one expression.** `VALID_ID`
+guards every string this program joins to a path and it allows no space, so `Untitled 1` could not
+be written and neither could `Beach shoot` - which was invisible while the only document anybody
+named was named through a prompt they could retry. Take ids keep it, because nothing types one.
+Document names get their own rule that allows a space and still rules out what the shared one
+ruled out: a leading dot, `..`, a slash either way round, and control characters. Two expressions
+is the cost and the second one guards the same path join as the first, so it is written with the
+same suspicion.
+
+**A clip whose take is not here draws nothing, and the skim keeps moving.** A row scrubs across
+its clips, so a project missing one take is three clips that resolve and one that does not: the
+span the missing clip covers goes empty, and where that clip carries a length of its own its
+width says how much of the edit the hole costs, beside the row that already names the take. A
+clip nobody trimmed carries no length - `null` there means it runs for everything its curve
+affords, which resolves through the take's own duration - so on the machine that has not got the
+take there is no width to draw, and the row names it rather than measuring it. It
+also leaves one behaviour rather than two - a clip either resolves to a frame or it does not, and
+nothing has to ask whether a project is dark before deciding to answer a drag.
+
+**A write carries the revision it was made against, and a stale one is refused.** The store
+already hands a `rev` back on every read and every write, and a projects page makes opening one
+edit in two tabs ordinary, so autosave sends the rev it last saw and the server refuses a body
+whose rev has moved. It is the rule take rename already runs under - two writes aimed at one name
+are answered by the kernel rather than by a stale reading, and the loser keeps its work - and it
+is what stops rename forking a project into two diverging files, since the tab that renamed moved
+the file and the tab that did not is now writing against a revision that is not there. The cost is
+that autosave gains a failure it has to word, and `auto-save failed` is not the wording: a refused
+write means somebody else has this project open and this tab's last change did not land.
+
 ## Surface memory
 
 A ray landing on a different surface between frames is a death and a birth, and teleporting
@@ -623,7 +768,7 @@ grabber emits.
 
 **Four of the other keys are load-bearing.** `startedAt` is the only durable capture date a
 take has, since frame stamps are `steady_clock` and monotonic since boot; a writer that omits
-it lands every take dated by mtime, so the gallery's ordering silently becomes "when it was
+it lands every take dated by mtime, so the library's ordering silently becomes "when it was
 last copied", and it degrades quietly because `describeTake` reports `dateSource: 'mtime'`
 rather than an error. `minDepth` and `maxDepth` say how much of the world the file was
 allowed to contain, and the editor paints its preview range from them. `lowLight` says
@@ -633,7 +778,7 @@ whether the colour camera was run long-exposure.
 is the whole reason the field works.** The grabber says hello once per process, so the value
 it sends is when *the grabber* came up. Written straight through, that put a byte-identical
 date on every take of a session and none of them was when its own take was shot — two takes
-nine minutes apart came back indistinguishable, on the one field the gallery sorts and prints.
+nine minutes apart came back indistinguishable, on the one field the library sorts and prints.
 So `Recorder.open` replaces it: the hello it writes into a take carries when *that take*
 began, which is the clock it already has to stamp the take with anyway. On the wire the key
 is the session's; in a `.knct` it is the take's, and a take is the only thing a file is about.
@@ -676,6 +821,6 @@ single-valued.** Flipping columns before the wire would leave every take shot be
 mirrored and every take after it not, with nothing in the file to tell them apart — the split
 that `format` exists to prevent, arriving through a different door. Correcting on the way out
 means one geometry for the whole archive, old takes included. The cost is that the sign is
-stated by five readers (the vertex shader, the top-down, the gallery poster, and the oracles in
+stated by five readers (the vertex shader, the top-down, the library poster, and the oracles in
 `export-check` and `monitor-check`) plus this specification, and `level-check` section 8 is what
 holds them to one answer.
