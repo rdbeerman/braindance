@@ -8250,7 +8250,7 @@ ui.beds.addEventListener('pointerdown', (e) => {
   // empty space: its commands are drawn in the bed rather than in the rail, and deselecting
   // under one rebuilds the stack and re-parents the button between the press and its click.
   if (!el) {
-    if (!e.target.closest('.tclipbar')) deselectClipRow();
+    if (!e.target.closest('.tclipbar, .tbed')) deselectClipRow();
     return;
   }
   if (!timeline) return;
