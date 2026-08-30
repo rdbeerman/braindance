@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "mask",
       "panel": {
-        "group": "region",
-        "tab": "look"
+        "group": "mask"
       },
       "bind": {
         "on": "points",
@@ -22,6 +21,17 @@
       "role": "master"
     }
   },
+  "panelGroups": [
+    {
+      "key": "mask",
+      "label": "Region mask",
+      "tab": "region",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "region",
+      "order": 300
+    }
+  ],
   "consumes": [
     {
       "service": "region",

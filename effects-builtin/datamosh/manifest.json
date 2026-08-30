@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "datamosh",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",
@@ -30,8 +29,7 @@
       "kind": "scalar",
       "label": "reach px",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",
@@ -47,8 +45,7 @@
       "kind": "scalar",
       "label": "decay",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",
@@ -64,8 +61,7 @@
       "kind": "scalar",
       "label": "splay",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",
@@ -81,8 +77,7 @@
       "kind": "scalar",
       "label": "line",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",
@@ -98,8 +93,7 @@
       "kind": "scalar",
       "label": "grain px",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",
@@ -115,8 +109,7 @@
       "kind": "scalar",
       "label": "drift",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",
@@ -132,8 +125,7 @@
       "kind": "scalar",
       "label": "speed",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",
@@ -146,8 +138,7 @@
       "kind": "step",
       "label": "cycle",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",
@@ -163,8 +154,7 @@
       "kind": "scalar",
       "label": "refresh s",
       "panel": {
-        "group": "datamosh",
-        "tab": "look"
+        "group": "datamosh"
       },
       "bind": {
         "on": "mosh",

@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "rain",
       "panel": {
-        "group": "rain",
-        "tab": "look"
+        "group": "rain"
       },
       "bind": {
         "on": "points",
@@ -29,8 +28,7 @@
       "kind": "scalar",
       "label": "fall m/s",
       "panel": {
-        "group": "rain",
-        "tab": "look"
+        "group": "rain"
       },
       "bind": {
         "on": "points",
@@ -46,8 +44,7 @@
       "kind": "scalar",
       "label": "head gap m",
       "panel": {
-        "group": "rain",
-        "tab": "look"
+        "group": "rain"
       },
       "bind": {
         "on": "points",
@@ -63,8 +60,7 @@
       "kind": "scalar",
       "label": "trail m",
       "panel": {
-        "group": "rain",
-        "tab": "look"
+        "group": "rain"
       },
       "bind": {
         "on": "points",

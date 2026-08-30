@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "amount",
       "panel": {
-        "group": "glitch",
-        "tab": "look"
+        "group": "glitch"
       },
       "bind": {
         "on": "points",
@@ -29,8 +28,7 @@
       "kind": "scalar",
       "label": "density",
       "panel": {
-        "group": "glitch",
-        "tab": "look"
+        "group": "glitch"
       },
       "bind": {
         "on": "points",
@@ -46,8 +44,7 @@
       "kind": "scalar",
       "label": "shove m",
       "panel": {
-        "group": "glitch",
-        "tab": "look"
+        "group": "glitch"
       },
       "bind": {
         "on": "points",
@@ -63,8 +60,7 @@
       "kind": "scalar",
       "label": "flare",
       "panel": {
-        "group": "glitch",
-        "tab": "look"
+        "group": "glitch"
       },
       "bind": {
         "on": "points",
@@ -80,8 +76,7 @@
       "kind": "scalar",
       "label": "band rows",
       "panel": {
-        "group": "glitch",
-        "tab": "look"
+        "group": "glitch"
       },
       "bind": {
         "on": "points",
@@ -97,8 +92,7 @@
       "kind": "scalar",
       "label": "axis",
       "panel": {
-        "group": "glitch",
-        "tab": "look"
+        "group": "glitch"
       },
       "bind": {
         "on": "points",
@@ -114,8 +108,7 @@
       "kind": "scalar",
       "label": "rate hz",
       "panel": {
-        "group": "glitch",
-        "tab": "look"
+        "group": "glitch"
       },
       "bind": {
         "on": "points",

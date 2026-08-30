@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "edges",
       "panel": {
-        "group": "style",
-        "tab": "look"
+        "group": "edges"
       },
       "bind": {
         "on": "points",
@@ -22,6 +21,17 @@
       "role": "master"
     }
   },
+  "panelGroups": [
+    {
+      "key": "edges",
+      "label": "Edges",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "style",
+      "order": 20
+    }
+  ],
   "chunks": [
     {
       "stage": "f.tone",

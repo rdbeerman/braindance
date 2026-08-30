@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "scanlines",
       "panel": {
-        "group": "raster",
-        "tab": "look"
+        "group": "raster"
       },
       "bind": {
         "on": "grade",
@@ -30,8 +29,7 @@
       "kind": "scalar",
       "label": "angle",
       "panel": {
-        "group": "raster",
-        "tab": "look"
+        "group": "raster"
       },
       "bind": {
         "on": "grade",
@@ -48,8 +46,7 @@
       "kind": "scalar",
       "label": "pitch",
       "panel": {
-        "group": "raster",
-        "tab": "look"
+        "group": "raster"
       },
       "bind": {
         "on": "grade",
@@ -65,8 +62,7 @@
       "kind": "scalar",
       "label": "hardness",
       "panel": {
-        "group": "raster",
-        "tab": "look"
+        "group": "raster"
       },
       "bind": {
         "on": "grade",

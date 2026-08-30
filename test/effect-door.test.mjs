@@ -236,9 +236,10 @@ test('a package may only put its rows in a group that exists, and may not claim 
   assert.match(brokenBy('thermal', (c) => { c.manifest.params.amount.panel.group = 'stlye'; }),
     /asks for the panel group "stlye"/, 'a parameter naming no group anybody holds is refused');
   assert.equal(brokenBy('rain', (c) => { c.manifest.params.amount.panel.group = 'post'; }), null,
-    'a parameter naming a core group is what thirteen shipped packages do');
+    'a parameter may name a core group: the escape hatch the door deliberately keeps open for a '
+    + 'term that belongs beside the spine\'s, which no shipped package uses now that each owns a group');
   assert.equal(brokenBy('rain', (c) => { c.manifest.params.amount.panel.group = 'rain'; }), null,
-    'and a parameter naming its own package\'s group is what the other three do');
+    'and a parameter naming its own package\'s group is what all twenty-two shipped packages do');
 
   assert.match(brokenBy('rain', (c) => {
     c.manifest.panelGroups[0].key = 'post';

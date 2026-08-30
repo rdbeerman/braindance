@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "film stock",
       "panel": {
-        "group": "stock",
-        "tab": "look"
+        "group": "stock"
       },
       "bind": {
         "on": "grade",
@@ -30,8 +29,7 @@
       "kind": "scalar",
       "label": "stock balance",
       "panel": {
-        "group": "stock",
-        "tab": "look"
+        "group": "stock"
       },
       "bind": {
         "on": "grade",
@@ -47,8 +45,7 @@
       "kind": "scalar",
       "label": "stock split",
       "panel": {
-        "group": "stock",
-        "tab": "look"
+        "group": "stock"
       },
       "bind": {
         "on": "grade",
@@ -64,8 +61,7 @@
       "kind": "scalar",
       "label": "stock latitude",
       "panel": {
-        "group": "stock",
-        "tab": "look"
+        "group": "stock"
       },
       "bind": {
         "on": "grade",

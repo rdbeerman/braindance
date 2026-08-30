@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "push",
       "panel": {
-        "group": "region",
-        "tab": "look"
+        "group": "push"
       },
       "bind": {
         "on": "points",
@@ -22,6 +21,17 @@
       "role": "master"
     }
   },
+  "panelGroups": [
+    {
+      "key": "push",
+      "label": "Region push",
+      "tab": "region",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "region",
+      "order": 100
+    }
+  ],
   "consumes": [
     {
       "service": "region",

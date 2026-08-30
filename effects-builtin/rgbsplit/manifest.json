@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "rgb split",
       "panel": {
-        "group": "post",
-        "tab": "look"
+        "group": "rgbsplit"
       },
       "bind": {
         "on": "grade",
@@ -23,6 +22,17 @@
       "role": "master"
     }
   },
+  "panelGroups": [
+    {
+      "key": "rgbsplit",
+      "label": "RGB split",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "post",
+      "order": 10
+    }
+  ],
   "chunks": [
     {
       "slot": "g.fetch",

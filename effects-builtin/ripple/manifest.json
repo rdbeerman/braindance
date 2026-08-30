@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "ripple m",
       "panel": {
-        "group": "region",
-        "tab": "look"
+        "group": "ripple"
       },
       "bind": {
         "on": "points",
@@ -27,10 +26,9 @@
       "max": 10,
       "step": 0.1,
       "kind": "scalar",
-      "label": "ripple per m",
+      "label": "per m",
       "panel": {
-        "group": "region",
-        "tab": "look"
+        "group": "ripple"
       },
       "bind": {
         "on": "points",
@@ -44,10 +42,9 @@
       "max": 4,
       "step": 0.05,
       "kind": "scalar",
-      "label": "ripple hz",
+      "label": "hz",
       "panel": {
-        "group": "region",
-        "tab": "look"
+        "group": "ripple"
       },
       "bind": {
         "on": "points",
@@ -56,6 +53,17 @@
       "under": "amount"
     }
   },
+  "panelGroups": [
+    {
+      "key": "ripple",
+      "label": "Ripple",
+      "tab": "region",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "region",
+      "order": 400
+    }
+  ],
   "consumes": [
     {
       "service": "region",

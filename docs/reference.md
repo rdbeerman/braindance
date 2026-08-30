@@ -364,9 +364,43 @@ document that holds it: the lattice at 1.0 on a 5.5cm cell, `glyph.amount` at 1.
 and the rain key at 0.6, the rain at 0.8 falling 0.55 m/s with heads 1.3m apart, over a depth
 reading with a green duotone, a toe and bloom on top.
 
+**Every effect is one panel group of its own, and a core group holds only the spine's own
+controls.** Twelve effects used to draw loose inside `Style`, `Post`, `Displacement` and
+`Region`, mixed in with `rim`, `bloom`, `crush`, `cell m` and the region box — so they had no
+heading to collapse, and the hover-X that takes an effect out of the rack never appeared on
+them, because `groupOwner` refuses a group with more than one owner. Each of them now declares
+its own group and its own heading. The rule is a convention rather than a refusal: the install
+door still accepts a parameter that names a core group, because an effect may one day have a
+term that genuinely belongs beside the spine's, and a door that forbade it would be a rule
+written where the exception cannot be made. A term under its own heading drops the prefix it
+only carried to stay legible loose in a shared group, so `duotone hue` is `hue` and `streak
+angle` is `angle`; `halation` and `stock` keep theirs, which is the inconsistency this convention
+inherited rather than one it introduced.
+
+**One effect is one group even when its terms belong to two stages.** `Turbulence` is the case:
+three of its terms displace and the fourth, `scramble`, reads the region box, and they sit
+together under one heading so the hover-X removes the whole effect rather than three quarters of
+it. Where the slider is drawn and what the shader does are separate facts — `scramble` still
+consumes the region service at gate order 200, between `push` and `mask`, wherever the panel puts
+it.
+
+**On the Look tab nothing moved.** `Thermal`, `Edges` and `Duotone` sit where their rows sat
+inside `Style`, ahead of `Rain`; `RGB split`, `Grain`, `Streak` and `Vignette` sit where theirs
+sat inside `Post`, ahead of `Datamosh`. A grouping change that also re-laid out the panel would
+be two changes arriving as one, and the second is the one nobody asked for.
+
+**The Region tab reads the box first and then the readings of it, in the order the shader takes
+them.** `Region (metres)`, then `Region push`, `Turbulence`, `Region mask` and `Ripple` at gate
+orders 100 to 400, then `Displacement` and `Lattice`. Reading down the tab is reading the
+pipeline, which is worth more than keeping `Turbulence` next to the other thing that displaces:
+a panel that draws its stages out of order teaches the wrong thing every time somebody looks
+at it. That order is the reason `region` sits before `displacement`
+in the panel spine, which is the one place the spine's order is a statement about meaning rather
+than about history.
+
 **`ripple.amount`** is the region read a fourth way, after displacing, scrambling and masking: a wave
 travelling out along the radius, in metres at a full weight, so the volume breathes where
-`push` only swells it. `ripple per m` is its spacing and `ripple hz` its speed — and the wave
+`push` only swells it. `per m` is its spacing and `hz` its speed — and the wave
 advances in eighths of a cycle rather than sliding, which is the character rather than a
 limitation: the surface arrives at each step instead of gliding between them, so it reads as
 machinery rather than as breathing. A speed of 0 freezes it where it stands rather than
@@ -398,7 +432,7 @@ saved before it existed loses its corner falloff until it names one.
 **`streak.amount`** bleeds light across the frame. Each pixel gathers back along the streak's axis and
 keeps the brightest thing it finds, decayed by distance, so a highlight smears the way a sensor
 smears one down a column of wells — sixteen taps at geometric spacing, reaching about 168 pixels
-at the 1080p reference. `streak angle` beside it is which way, in degrees, and **0 is straight
+at the 1080p reference. `angle` beside it is which way, in degrees, and **0 is straight
 down**, which is what this term did when it did nothing else: a look authored before the control
 existed names no angle and keeps the fall it was graded with, to the bit. Positive turns the
 smear clockwise on the glass, so 90 runs it across to the left, 180 sends it up and -90 across to
@@ -662,7 +696,10 @@ declares `gates` has to be something the grade gate can read, so not either vect
 whose two-component value is not a scalar amount, and not a table the gate does not collect, a
 step may not be finer than `1e-6`, which is a grid neither the rounding nor a 32-bit float can resolve, and a
 parameter may only name a panel group this build holds or one its own package declares, with a
-package group key that collides with either refused by name. A refused package leaves nothing
+package group key that collides with either refused by name. A parameter names its group and
+nothing else about the panel: which tab it draws on is the group's fact, so a manifest carries no
+tab of its own. It used to carry one that nothing read and that five effects stated wrongly,
+which is the shape of thing a reader believes because no check ever contradicted it. A refused package leaves nothing
 behind.
 
 **A page that is open when an install happens rebuilds itself.** Both shader programs are
@@ -786,12 +823,12 @@ a tint, because its two poles carry luminance as well as hue — the near one ru
 and the far one toward hot, so one term gives both the depth-keyed palette and the near-black
 figure against a burning core. A plain global toe cannot draw that second thing at all, since
 it darkens near and far alike, which is why there is no separate silhouette control to look
-for. `duotone depth` is how far the image lands between the poles, `duotone hue` turns both of
-them together, and `duotone split` is the depth they meet at, as a fraction of the clip range
+for. `duotone` is how far the image lands between the poles, `hue` turns both of
+them together, and `split` is the depth they meet at, as a fraction of the clip range
 — so the crossover is a place in the room rather than a fraction of the frame. The pair itself
 is baked, the way `heatRamp` and `depthRamp` are: what is parameterised is how you use them.
 
-**`duotone motion`** keys those same two poles on speed as well, so whatever is moving through
+**`duotone.motion`** keys those same two poles on speed as well, so whatever is moving through
 the room comes out hot against a room graded by distance. It is the reading the depth key
 cannot draw on its own: a subject and the wall behind it are graded by where they stand, so a
 person walking through a scene is exactly as cold as the air they walk through until something
