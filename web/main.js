@@ -6153,8 +6153,8 @@ function laneHeightCeiling() {
 /** `--tlanes-h`, from the two things that decide it, in the one place that writes it. */
 function applyLaneHeight() {
   const wanted = userLaneHeight ?? Math.round(innerHeight * DEFAULT_LANES_SHARE);
-  const reachable = Math.min(laneStackHeight, laneHeightCeiling());
-  const height = Math.min(laneStackHeight, Math.max(0, Math.min(wanted, laneHeightCeiling())));
+  const reachable = laneHeightCeiling();
+  const height = Math.max(0, Math.min(wanted, laneHeightCeiling()));
   // On the root and not on the strip: `#panel` and `#effectRackPanel` are siblings of the strip
   // and a custom property inherits downwards, so written there they read the stylesheet's 0 and
   // stood that many pixels too tall - over the bottom of the lane stack.
