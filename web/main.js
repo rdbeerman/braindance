@@ -10008,7 +10008,16 @@ ui.exportSize.addEventListener('change', () => {
 });
 setProjectAspect(defaultAspect(), { fromDocument: true });
 
-ui.mark.addEventListener('click', () => { markHere().catch(showTimelineError); });
+ui.mark.addEventListener('click', () => {
+  const t = playheadSec();
+  const tol = keyTolerance();
+  const onMark = takeMarks.find((m) => {
+    const program = programSecOfSource(m.sourceMs / 1000);
+    return Math.abs(program - t) <= tol;
+  });
+  if (onMark) deleteMark(onMark).catch(showTimelineError);
+  else markHere().catch(showTimelineError);
+});
 
 /** `near`/`far` are viewer uniforms and must never reach `--min-depth`/`--max-depth`. */
 function paintPreviewRange(minDepth, maxDepth) {
