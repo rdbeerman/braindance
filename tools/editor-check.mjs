@@ -190,6 +190,41 @@ const MUTATIONS = {
       + 'rows: the changed output-rate state and the real export it invalidates',
   },
 
+  'keyed-control-skips-export-guard': {
+    file: 'web/main.js',
+    edits: [[
+      "  if (refuseEdit(`a change to ${name}`)) {\n"
+        + '    writeControl(name, params.get(name));\n'
+        + '    return;\n'
+        + '  }\n',
+      '',
+    ]],
+    fails: 'a keyed slider inserting a key while export owns the document. The keyed-control '
+      + 'export row reddens alone',
+  },
+
+  'camera-delete-skips-export-guard': {
+    file: 'web/main.js',
+    edits: [[
+      "ui.camClear.addEventListener('click', () => {\n"
+        + "  if (refuseEdit('deleting a camera key')) return;",
+      "ui.camClear.addEventListener('click', () => {",
+    ]],
+    fails: 'the camera delete button removing a key while export owns the document. The camera '
+      + 'delete export row reddens alone',
+  },
+
+  'deselected-source-clock-stays-live': {
+    file: 'web/main.js',
+    edits: [[
+      "  ui.source.textContent = EDITING && clipRow === null\n"
+        + "    ? '\\u2014' : timecode(sourceSecOfProgram(program));",
+      '  ui.source.textContent = timecode(sourceSecOfProgram(program));',
+    ]],
+    fails: 'the source clock continuing to read the hidden render binding after the strip has '
+      + 'deselected every clip. The deselected source-clock row reddens alone',
+  },
+
   'import-applies-to-response-time-selection': {
     file: 'web/main.js',
     edits: [[
@@ -1017,8 +1052,8 @@ const MUTATIONS = {
       ['const resetButtons = new Map();', 'const resetButtons = new Map();\nconst resetTouched = new Set();'],
       ['  const modified = value !== resetTarget(name);', '  const modified = resetTouched.has(name);'],
       [
-        'function writeFromControl(name, value) {\n  retainEffectFor(name);\n  const applied = params.set(name, value);',
-        'function writeFromControl(name, value) {\n  retainEffectFor(name);\n  resetTouched.add(name);\n  const applied = params.set(name, value);',
+        'function writeFromControl(name, value) {\n  if (refuseEdit(`a change to ${name}`)) {\n    writeControl(name, params.get(name));\n    return;\n  }\n  retainEffectFor(name);\n  const applied = params.set(name, value);',
+        'function writeFromControl(name, value) {\n  if (refuseEdit(`a change to ${name}`)) {\n    writeControl(name, params.get(name));\n    return;\n  }\n  retainEffectFor(name);\n  resetTouched.add(name);\n  const applied = params.set(name, value);',
       ],
       [
         '    retainEffectFor(name);\n    params.set(name, resetTarget(name));\n    history.commit();',
@@ -9366,6 +9401,10 @@ try {
       'the export race has an uncached third take, so Add Clip must cross its await after export starts',
       raceTake ? raceTake.id : `only ${(library.takes ?? []).map((take) => take.id).join(', ')} were listed`);
     if (raceTake) {
+      const raceRestore = await page.evaluate(`(() => ({
+        project: __kinect.library.serialiseProjectBody(),
+        selection: __kinect.editor.clipSelection(),
+      }))()`);
       const panelBeforeRace = await page.evaluate(
         'document.querySelector(".paneltab[aria-selected=true]")?.dataset.panelTab ?? null');
       await page.locator('.paneltab[data-panel-tab="look"]').click();
@@ -9374,9 +9413,29 @@ try {
       await page.evaluate(`fetch('/presets/blackwall').then((response) => response.json())
         .then((doc) => __kinect.library.applyStoredPreset(doc))`);
       await page.evaluate(`(() => {
-        __kinect.params.set('pointSize', 17.25);
-        __kinect.keyframes.undo.commit();
-        __kinect.keyframes.undo.begin();
+        const k = __kinect;
+        k.params.set('pointSize', 17.25);
+        const pose = {
+          position: k.freeCamera.position.toArray(),
+          quaternion: k.freeCamera.quaternion.toArray(),
+          fov: k.freeCamera.fov,
+        };
+        k.keyframes.setTracks({
+          pointSize: [
+            { t: 0, value: 17.3, easeOut: [[0.42, 0]] },
+            { t: 20, value: 17.3, easeIn: [[0.58, 1]] },
+          ],
+          camera: Array.from({ length: 601 }, (_, frame) => ({
+            t: frame / 30,
+            value: {
+              position: [...pose.position],
+              quaternion: [...pose.quaternion],
+              fov: pose.fov,
+            },
+          })),
+        });
+        k.keyframes.undo.commit();
+        k.keyframes.undo.begin();
       })()`);
       const beforeRace = await page.evaluate(`(() => {
         const project = __kinect.library.serialiseProjectBody();
@@ -9458,6 +9517,34 @@ try {
         await page.waitForFunction('__kinect.export.running()', null, { timeout: 15000 });
         const gizmoDuringExport = await page.evaluate('__kinect.editor.gizmo()');
         const runningAtRelease = await page.evaluate('__kinect.export.running()');
+        const guardedControlsBefore = await page.evaluate(`(() => {
+          const body = __kinect.library.serialiseProjectBody();
+          const selected = body.clips.find((clip) => clip.id === __kinect.editor.clipSelection());
+          return {
+            pointKeys: selected.tracks.pointSize,
+            cameraKeys: body.composition.camera,
+            edits: __kinect.export.editsDuringExport(),
+          };
+        })()`);
+        await page.locator('#pointSize').evaluate((control) => {
+          control.value = control.max;
+          control.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await page.locator('#panelTabCamera').click();
+        await page.locator('#camClear').click();
+        await page.locator('#panelTabLook').click();
+        await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        const guardedControlsAfter = await page.evaluate(`(() => {
+          const body = __kinect.library.serialiseProjectBody();
+          const selected = body.clips.find((clip) => clip.id === __kinect.editor.clipSelection());
+          return {
+            pointKeys: selected.tracks.pointSize,
+            cameraKeys: body.composition.camera,
+            edits: __kinect.export.editsDuringExport(),
+            note: document.getElementById('tNote').textContent,
+            running: __kinect.export.running(),
+          };
+        })()`);
         releasePreset();
         releaseSource();
         await page.waitForFunction(`!__kinect.library.presetGestureRunning()
@@ -9517,6 +9604,7 @@ try {
           running: __kinect.export.running(),
         })`);
         await page.locator('#projectClose').click();
+        const beforeProjectRelease = await page.evaluate('__kinect.library.serialiseProjectBody()');
         releaseProjectSources();
         const projectLoadResult = await page.evaluate(`globalThis.__editorGuardProject.then((result) => ({
           ok: result.ok,
@@ -9546,6 +9634,17 @@ try {
         `before enabled/shown ${gizmoBeforeExport.enabled}/${gizmoBeforeExport.shown}, during `
           + `${gizmoDuringExport.enabled}/${gizmoDuringExport.shown}, after `
           + `${gizmoAfterExport.enabled}/${gizmoAfterExport.shown}`);
+        check(guardedControlsAfter.running
+          && JSON.stringify(guardedControlsAfter.pointKeys)
+            === JSON.stringify(guardedControlsBefore.pointKeys),
+        'moving a keyed control while export owns the document cannot insert or replace a key',
+        `keys ${guardedControlsBefore.pointKeys.length} -> ${guardedControlsAfter.pointKeys.length}, `
+          + `edits ${guardedControlsBefore.edits} -> ${guardedControlsAfter.edits}`);
+        check(JSON.stringify(guardedControlsAfter.cameraKeys)
+          === JSON.stringify(guardedControlsBefore.cameraKeys),
+        'deleting the camera key under the export playhead cannot change the camera track',
+        `keys ${guardedControlsBefore.cameraKeys.length} -> ${guardedControlsAfter.cameraKeys.length}, `
+          + `note ${JSON.stringify(guardedControlsAfter.note)}`);
         check(afterRace.pointSize === beforeRace.pointSize
           && JSON.stringify(afterRace.stamp) === JSON.stringify(beforeRace.stamp),
         'a fetched preset cannot apply values, stamp the clip or commit after export starts',
@@ -9558,10 +9657,10 @@ try {
           + `edits ${beforeRace.edits} -> ${afterRace.edits}`);
         check(projectLoadResult.ok && projectLoadResult.refused && projectLoadResult.running
           && /declined/.test(projectLoadResult.note) && /export/.test(projectLoadResult.note)
-          && JSON.stringify(afterProject) === JSON.stringify(beforeRace.project),
+          && JSON.stringify(afterProject) === JSON.stringify(beforeProjectRelease),
         'a project whose footage resolves after export starts cannot replace the document and says why',
         `load ${JSON.stringify(projectLoadResult)}, document unchanged `
-          + `${JSON.stringify(afterProject) === JSON.stringify(beforeRace.project)}`);
+          + `${JSON.stringify(afterProject) === JSON.stringify(beforeProjectRelease)}`);
         check(beforeNone.stamp?.name === 'blackwall',
           'the selected clip is stamped before preset none is pressed during export, so the refusal below has document state to protect',
           `stamp ${JSON.stringify(beforeNone.stamp)}`);
@@ -9594,7 +9693,7 @@ try {
           const selected = __kinect.timeline.clips().find((clip) => clip.id === selection);
           if (selected) __kinect.editor.selectClipRow(selected.id);
           __kinect.keyframes.undo.begin();
-        }, { project: beforeRace.project, selection: beforeRace.selection });
+        }, raceRestore);
         if (panelBeforeRace) {
           await page.locator(`.paneltab[data-panel-tab="${panelBeforeRace}"]`).click();
         }
@@ -10931,6 +11030,7 @@ try {
       miniMarks: document.querySelectorAll('#tMiniMarks span').length,
       time: __kinect.timeline.transport().programSec,
       gizmoMode: __kinect.editor.gizmo().mode,
+      sourceClock: document.getElementById('tSource').textContent,
       clipCommands: ['tAddClip', 'tDeleteClip', 'tMoveClip', 'tRotateClip', 'tKeyClip',
         'tRate', 'tRateKey', 'tPreset', 'tPresetSave', 'tPresetExport', 'tPresetImport',
         'tMark', 'camSensor', 'cropFit'].map((id) => [id, document.getElementById(id)?.disabled]),
@@ -10939,6 +11039,9 @@ try {
       + `selection ${off.selection}, ${greyedBefore} greyed rows before it and ${off.greyed} after`);
     check(off.selection === null,
       'a press on the empty part of the stack takes the strip off every clip', `${off.selection}`);
+    check(off.sourceClock === '\u2014',
+      'and the source clock is blank because no selected clip says which take time it should show',
+      `source ${JSON.stringify(off.sourceClock)}`);
     check(greyedBefore === 0 && off.greyed > 20 && off.clipControl === true,
       'and the panel greys its clip half rather than hiding it, so the split between what a clip '
       + 'holds and what the project holds stays on screen',

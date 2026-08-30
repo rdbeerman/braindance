@@ -2502,6 +2502,10 @@ const keyPlayhead = (name) => playheadSec() - trackEpoch(name, clipOfLook());
 
 /** A parameter written from its control. With keys, this writes the key at the playhead. */
 function writeFromControl(name, value) {
+  if (refuseEdit(`a change to ${name}`)) {
+    writeControl(name, params.get(name));
+    return;
+  }
   retainEffectFor(name);
   const applied = params.set(name, value);
   const track = tracks.get(name);
@@ -5190,16 +5194,7 @@ class TimelineTransport {
    * otherwise the warm stalls on bytes at exactly the cut it exists to smooth.
    */
   prefetch() {
-    const ahead = Math.min(this.lastFrame, this.frame + PREFETCH_FRAMES);
-    // Every clip's window is clamped before any of them is asked for, because the cache is sized
-    // against what the clips on a take want and not against the ones that happen to need bytes.
-    const wanted = this.spansOver(this.frame, ahead).map((span) => {
-      // Where the walk stands, for a clip already drawing; where it enters, for one that is not.
-      const from = span.clip.showing === 'off'
-        ? span.from
-        : Math.max(0, Math.min(span.clip.source.applied, span.from));
-      return { ...span, from, to: Math.min(span.to, from + MAX_SPAN_FRAMES - 1) };
-    });
+    const { spans: wanted } = this.planPrefetch();
     this.askFor(wanted);
     const waits = [];
     for (const span of wanted) {
@@ -5219,6 +5214,48 @@ class TimelineTransport {
       waits.push(fetching);
     }
     return waits.length === 0 ? null : Promise.all(waits);
+  }
+
+  /** The furthest common playback horizon whose per-take frame union fits each shared cache. */
+  planPrefetch() {
+    const ahead = Math.min(this.lastFrame, this.frame + PREFETCH_FRAMES);
+    const planned = (target) => this.spansOver(this.frame, target).map((span) => {
+      // Where the walk stands, for a clip already drawing; where it enters, for one that is not.
+      const from = span.clip.showing === 'off'
+        ? span.from
+        : Math.max(0, Math.min(span.clip.source.applied, span.from));
+      return { ...span, from };
+    });
+    const full = planned(ahead);
+    const fits = (spans) => [...this.frameLoad(spans).values()]
+      .every((frames) => frames <= MAX_SPAN_FRAMES);
+    const current = planned(this.frame);
+    if (!fits(current)) {
+      const bound = Math.max(...this.frameLoad(current).values());
+      throw new Error(
+        `the current playback frame asks one take for ${bound} decoded frames and its cache holds `
+        + `${MAX_SPAN_FRAMES}: the source walks cannot advance together`,
+      );
+    }
+    let target = ahead;
+    if (!fits(full)) {
+      let lo = this.frame;
+      let hi = ahead;
+      while (lo < hi) {
+        const mid = integerMidpoint(lo, hi, true);
+        if (fits(planned(mid))) lo = mid;
+        else hi = mid - 1;
+      }
+      target = lo;
+    }
+    const spans = target === ahead ? full : planned(target);
+    return {
+      ahead,
+      target,
+      spans,
+      fullLoad: this.frameLoad(full),
+      load: this.frameLoad(spans),
+    };
   }
 
   /** Playback with the wall clock out: every output frame in order, as fast as bytes arrive. */
@@ -5936,7 +5973,8 @@ function paintTimeline(t) {
   ui.play.textContent = t.playing ? '❙❙' : '▶';
   ui.play.setAttribute('aria-label', t.playing ? 'Pause' : 'Play');
   ui.program.textContent = timecode(program);
-  ui.source.textContent = timecode(sourceSecOfProgram(program));
+  ui.source.textContent = EDITING && clipRow === null
+    ? '\u2014' : timecode(sourceSecOfProgram(program));
   if (!ui.exportName.placeholder) ui.exportName.placeholder = t.clip.source.id;
   paintStripPositions();
   paintDeliverable();
@@ -9698,6 +9736,7 @@ ui.camKey.addEventListener('click', keyCameraHere);
 ui.tCamKey?.addEventListener('click', keyCameraHere);
 
 ui.camClear.addEventListener('click', () => {
+  if (refuseEdit('deleting a camera key')) return;
   const track = tracks.get('camera');
   const key = track?.keyAt(playheadSec(), keyTolerance());
   if (!key) return;

@@ -82,6 +82,14 @@ const MUTATIONS = {
     fails: 'a take outside the current plan keeping the demand and decoded frames of the last '
       + 'plan that named it. Section 8a\'s two release rows are the catch',
   },
+  'prefetch-ignores-shared-take-demand': { file: 'web/main.js', edits: [[
+    '    const fits = (spans) => [...this.frameLoad(spans).values()]\n'
+      + '      .every((frames) => frames <= MAX_SPAN_FRAMES);',
+    '    const fits = () => true;',
+  ]],
+    fails: 'prefetch keeping the full output horizon when the disjoint windows of eight clips '
+      + 'overflow their shared take cache. Section 8c\'s bounded-plan row reddens alone',
+  },
   // The pre-roll stops being a function of anything.
   'preroll-constant': { file: 'web/main.js', edits: [[
     'const frames = Math.max(surface, trails, back3.frames);',
@@ -2338,6 +2346,15 @@ const MIXED_CLIPS = [
     look: { fade: 100, wake: 0 } },
 ];
 
+const PREFETCH_CLIPS = Array.from({ length: CLIP_CEILING }, (_, i) => ({
+  id: `p${i}`,
+  start: 0,
+  length: 2,
+  keys: [[0, i * 5], [2, i * 5 + 8]],
+  second: false,
+  look: {},
+}));
+
 console.log('\n== 8b. the demand is each clip\'s own, not one persistence for the project ==');
 {
   await page.evaluate(
@@ -2377,6 +2394,40 @@ console.log('\n== 8b. the demand is each clip\'s own, not one persistence for th
   check(shot.seek.frames === shot.seek.plan.frames && shot.seek.capped === false,
     'and the seek still renders the whole pre-roll it computed',
     `${shot.seek.frames}/${shot.seek.plan.frames}, capped ${shot.seek.capped}`);
+}
+
+console.log('\n== 8c. playback prefetch is bounded by each shared take\'s combined demand ==');
+{
+  await page.evaluate(
+    `globalThis.__mc.load(${JSON.stringify(PREFETCH_CLIPS)}, null, ${JSON.stringify(STACK_LOOK)})`,
+  );
+  const plan = await page.evaluate(`(async () => {
+    const t = __kinect.timeline.transport();
+    await t.seek(0);
+    if (typeof t.planPrefetch !== 'function') return { available: false };
+    const planned = t.planPrefetch();
+    const load = Object.fromEntries([...planned.load].map(([take, frames]) => [take.id, frames]));
+    const fullLoad = Object.fromEntries([...planned.fullLoad].map(([take, frames]) => [take.id, frames]));
+    return {
+      available: true,
+      ahead: planned.ahead,
+      target: planned.target,
+      spans: planned.spans.map((span) => ({ id: span.clip.id, from: span.from, to: span.to })),
+      load,
+      fullLoad,
+    };
+  })()`);
+  const full = plan.available ? Math.max(...Object.values(plan.fullLoad)) : 0;
+  const held = plan.available ? Math.max(...Object.values(plan.load)) : 0;
+  console.log(plan.available
+    ? `  full horizon ${plan.ahead} asks ${full} frames; bounded horizon ${plan.target} asks ${held}`
+    : '  the transport exposes no prefetch plan');
+  check(plan.available && plan.spans.length === CLIP_CEILING && full > CACHE.span,
+    `the fixture puts ${CLIP_CEILING} disjoint 4x windows on one take and overfills an uncapped prefetch`,
+    plan.available ? `${plan.spans.length} spans asking ${full} frames against ${CACHE.span}` : 'no plan');
+  check(plan.available && plan.target < plan.ahead && held <= CACHE.span,
+    'prefetch shortens the common output horizon until the union fits the shared take cache',
+    plan.available ? `target ${plan.target}/${plan.ahead}, ${held}/${CACHE.span} frames` : 'no plan');
 }
 
 if (SHOTS) {
