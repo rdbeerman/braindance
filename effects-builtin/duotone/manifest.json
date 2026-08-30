@@ -10,10 +10,9 @@
       "max": 1,
       "step": 0.01,
       "kind": "scalar",
-      "label": "duotone depth",
+      "label": "duotone",
       "panel": {
-        "group": "style",
-        "tab": "look"
+        "group": "duotone"
       },
       "bind": {
         "on": "points",
@@ -27,10 +26,9 @@
       "max": 180,
       "step": 1,
       "kind": "scalar",
-      "label": "duotone hue",
+      "label": "hue",
       "panel": {
-        "group": "style",
-        "tab": "look"
+        "group": "duotone"
       },
       "bind": {
         "on": "points",
@@ -45,10 +43,9 @@
       "max": 1,
       "step": 0.01,
       "kind": "scalar",
-      "label": "duotone split",
+      "label": "split",
       "panel": {
-        "group": "style",
-        "tab": "look"
+        "group": "duotone"
       },
       "bind": {
         "on": "points",
@@ -62,10 +59,9 @@
       "max": 9.5,
       "step": 0.05,
       "kind": "scalar",
-      "label": "duotone span m",
+      "label": "span m",
       "panel": {
-        "group": "style",
-        "tab": "look"
+        "group": "duotone"
       },
       "bind": {
         "on": "points",
@@ -79,10 +75,9 @@
       "max": 1,
       "step": 0.01,
       "kind": "scalar",
-      "label": "duotone motion",
+      "label": "motion",
       "panel": {
-        "group": "style",
-        "tab": "look"
+        "group": "duotone"
       },
       "bind": {
         "on": "points",
@@ -91,6 +86,17 @@
       "under": "amount"
     }
   },
+  "panelGroups": [
+    {
+      "key": "duotone",
+      "label": "Duotone",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "style",
+      "order": 30
+    }
+  ],
   "chunks": [
     {
       "stage": "f.tone",

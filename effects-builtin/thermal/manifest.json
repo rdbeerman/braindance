@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "thermal",
       "panel": {
-        "group": "style",
-        "tab": "look"
+        "group": "thermal"
       },
       "bind": {
         "on": "points",
@@ -22,6 +21,17 @@
       "role": "master"
     }
   },
+  "panelGroups": [
+    {
+      "key": "thermal",
+      "label": "Thermal",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "style",
+      "order": 10
+    }
+  ],
   "chunks": [
     {
       "stage": "f.tone",

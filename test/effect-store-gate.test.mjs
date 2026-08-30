@@ -112,7 +112,17 @@ test('the fork that changed is the one set aside, not the one it broke', () => {
 test('a package called refuse is an ordinary package again', () => {
   // The id `refuse` specifically, because that is the one the old routing collision was
   // about; a row using any other id would pass on the build that had the defect.
-  const named = { ...builtinManifest('thermal'), id: 'refuse', title: 'A package named for what was once a route' };
+  // The donor's group key travels with the fork, so it is renamed too: every builtin owns a
+  // group now, and a fork keeping the donor's key collides with the donor rather than standing.
+  const donor = builtinManifest('thermal');
+  const named = {
+    ...donor,
+    id: 'refuse',
+    title: 'A package named for what was once a route',
+    panelGroups: donor.panelGroups.map((g) => ({ ...g, key: 'refuse', label: 'Refuse' })),
+    params: Object.fromEntries(Object.entries(donor.params)
+      .map(([short, spec]) => [short, { ...spec, panel: { ...spec.panel, group: 'refuse' } }])),
+  };
   withStore((dir) => {
     const at = join(dir, 'refuse');
     mkdirSync(at, { recursive: true });

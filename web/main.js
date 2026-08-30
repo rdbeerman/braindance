@@ -652,9 +652,10 @@ const CORE_PANEL_GROUPS = [
     ]),
   },
   { key: 'signal', label: 'Signal', tab: 'look', lookgroup: true, collapses: true },
-  { key: 'displacement', label: 'Displacement', tab: 'region', lookgroup: true, collapses: true },
-  // One region in the room, read three ways. Everything here is metres in the sensor frame.
+  // The box itself, in metres in the sensor frame. The groups spliced under it are its readings,
+  // which is why it comes before displacement here.
   { key: 'region', label: 'Region (metres)', tab: 'region', lookgroup: true, collapses: true },
+  { key: 'displacement', label: 'Displacement', tab: 'region', lookgroup: true, collapses: true },
   { key: 'points', label: 'Points', tab: 'look', lookgroup: true, collapses: true },
   { key: 'motion', label: 'Motion', tab: 'look', lookgroup: true, collapses: true },
   { key: 'post', label: 'Post', tab: 'look', lookgroup: true, collapses: true },
@@ -805,7 +806,7 @@ const buildParams = () => ({
 
   ...effectSlice('glitch.amount', 'glitch.rate'),
 
-  // One region, authored once and read three ways. Three scalars rather than a `point` kind.
+  // One region, authored once and read four ways. Three scalars rather than a `point` kind.
   regionX: { def: 0, min: -3, max: 3, step: 0.05, kind: 'scalar', tag: 'look', scope: 'clip',
     group: 'region', label: 'x',
     apply: (v) => { uniforms.regionCentre.value.x = v; } },

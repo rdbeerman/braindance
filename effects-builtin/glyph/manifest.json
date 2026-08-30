@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "glyph",
       "panel": {
-        "group": "glyph",
-        "tab": "look"
+        "group": "glyph"
       },
       "bind": {
         "on": "points",
@@ -29,8 +28,7 @@
       "kind": "scalar",
       "label": "tone key",
       "panel": {
-        "group": "glyph",
-        "tab": "look"
+        "group": "glyph"
       },
       "bind": {
         "on": "points",
@@ -46,8 +44,7 @@
       "kind": "scalar",
       "label": "hash key",
       "panel": {
-        "group": "glyph",
-        "tab": "look"
+        "group": "glyph"
       },
       "bind": {
         "on": "points",
@@ -63,8 +60,7 @@
       "kind": "scalar",
       "label": "rain key",
       "panel": {
-        "group": "glyph",
-        "tab": "look"
+        "group": "glyph"
       },
       "bind": {
         "on": "points",

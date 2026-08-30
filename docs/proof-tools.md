@@ -704,11 +704,14 @@ that into a sentence.
 
 **Its section 6e stands on something nobody wrote down until it nearly broke.** The two
 `page.click('.kf[aria-label="bloom keyframe"]')` calls need that diamond *visible*, and `bloom`
-lives in the `optical` panel group, which collapses when every parameter in it is at its
-default. They work only because 6e applies the Blackwall look first and that look moves `bloom`,
-`rgbsplit.amount`, `raster.amount` and `grain.amount` off their defaults, so the group has derived itself open by
-the time the click lands. Nothing in either file says so, and the two ends can move
-independently: a look re-graded to leave `optical` alone, or a change to the reveal predicate,
+lives in the `post` panel group, which collapses when every parameter in it is at its
+default. They work only because 6e applies the Blackwall look first and that look moves `bloom`
+off its default, so the group has derived itself open by the time the click lands. That used to
+be four parameters carrying it - Blackwall moves `rgbsplit.amount`, `grain.amount` and
+`vignette.amount` too, and all three sat in `post` - and each of those effects now has a panel
+group of its own, so `post` holds `bloom` and `crush` and Blackwall leaves `crush` where it found
+it. The clicked parameter is now the only thing opening the group it is in. Nothing in either file says so, and the two ends can move
+independently: a look re-graded to leave `bloom` at zero, or a change to the reveal predicate,
 turns those clicks into thirty-second timeouts - which arrive as a crash with **zero failed
 assertions**, the shape this repo has twice recorded being written down as a bug found. If you
 touch either end, run `keyframe-check`; `editor-check`'s row 'moving one parameter off its

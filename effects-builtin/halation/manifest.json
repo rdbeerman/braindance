@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "halation",
       "panel": {
-        "group": "halation",
-        "tab": "look"
+        "group": "halation"
       },
       "bind": {
         "on": "grade",
@@ -30,8 +29,7 @@
       "kind": "scalar",
       "label": "halation radius",
       "panel": {
-        "group": "halation",
-        "tab": "look"
+        "group": "halation"
       },
       "bind": {
         "on": "grade",
@@ -47,8 +45,7 @@
       "kind": "scalar",
       "label": "halation threshold",
       "panel": {
-        "group": "halation",
-        "tab": "look"
+        "group": "halation"
       },
       "bind": {
         "on": "grade",
@@ -64,8 +61,7 @@
       "kind": "scalar",
       "label": "halation tint",
       "panel": {
-        "group": "halation",
-        "tab": "look"
+        "group": "halation"
       },
       "bind": {
         "on": "grade",

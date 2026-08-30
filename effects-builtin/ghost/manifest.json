@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "ghost",
       "panel": {
-        "group": "ghost",
-        "tab": "look"
+        "group": "ghost"
       },
       "bind": {
         "on": "points",
@@ -30,8 +29,7 @@
       "kind": "scalar",
       "label": "rim",
       "panel": {
-        "group": "ghost",
-        "tab": "look"
+        "group": "ghost"
       },
       "bind": {
         "on": "points",
@@ -47,8 +45,7 @@
       "kind": "scalar",
       "label": "fill",
       "panel": {
-        "group": "ghost",
-        "tab": "look"
+        "group": "ghost"
       },
       "bind": {
         "on": "points",

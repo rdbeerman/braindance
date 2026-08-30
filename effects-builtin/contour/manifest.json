@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "contour",
       "panel": {
-        "group": "contour",
-        "tab": "look"
+        "group": "contour"
       },
       "bind": {
         "on": "points",
@@ -30,8 +29,7 @@
       "kind": "scalar",
       "label": "bands /m",
       "panel": {
-        "group": "contour",
-        "tab": "look"
+        "group": "contour"
       },
       "bind": {
         "on": "points",
@@ -47,8 +45,7 @@
       "kind": "scalar",
       "label": "thickness",
       "panel": {
-        "group": "contour",
-        "tab": "look"
+        "group": "contour"
       },
       "bind": {
         "on": "points",

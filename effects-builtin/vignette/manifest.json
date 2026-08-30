@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "vignette",
       "panel": {
-        "group": "post",
-        "tab": "look"
+        "group": "vignette"
       },
       "bind": {
         "on": "grade",
@@ -23,6 +22,17 @@
       "role": "master"
     }
   },
+  "panelGroups": [
+    {
+      "key": "vignette",
+      "label": "Vignette",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "post",
+      "order": 40
+    }
+  ],
   "chunks": [
     {
       "stage": "g.body",

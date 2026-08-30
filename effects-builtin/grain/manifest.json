@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "grain",
       "panel": {
-        "group": "post",
-        "tab": "look"
+        "group": "grain"
       },
       "bind": {
         "on": "grade",
@@ -23,6 +22,17 @@
       "role": "master"
     }
   },
+  "panelGroups": [
+    {
+      "key": "grain",
+      "label": "Grain",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "post",
+      "order": 20
+    }
+  ],
   "chunks": [
     {
       "stage": "g.body",

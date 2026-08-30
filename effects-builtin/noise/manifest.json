@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "turbulence",
       "panel": {
-        "group": "displacement",
-        "tab": "look"
+        "group": "noise"
       },
       "bind": {
         "on": "points",
@@ -29,8 +28,7 @@
       "kind": "scalar",
       "label": "grain m",
       "panel": {
-        "group": "displacement",
-        "tab": "look"
+        "group": "noise"
       },
       "bind": {
         "on": "points",
@@ -46,8 +44,7 @@
       "kind": "scalar",
       "label": "speed",
       "panel": {
-        "group": "displacement",
-        "tab": "look"
+        "group": "noise"
       },
       "bind": {
         "on": "points",
@@ -63,8 +60,7 @@
       "kind": "scalar",
       "label": "scramble",
       "panel": {
-        "group": "region",
-        "tab": "look"
+        "group": "noise"
       },
       "bind": {
         "on": "points",
@@ -72,6 +68,17 @@
       }
     }
   },
+  "panelGroups": [
+    {
+      "key": "noise",
+      "label": "Turbulence",
+      "tab": "region",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "region",
+      "order": 200
+    }
+  ],
   "consumes": [
     {
       "service": "region",

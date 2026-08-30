@@ -865,7 +865,8 @@ const MUTATIONS = {
     ]],
   },
 
-  // Must redden: the keyed-at-default row, and that row alone.
+  // Must redden: the keyed-at-default row in 15d and the rack's own track row, because both
+  // read the keyframe term through `paramTouched`. Measured on this tree and on HEAD.
   'reveal-ignores-tracks': {
     file: 'web/main.js',
     edits: [[
@@ -7984,7 +7985,7 @@ try {
       `${fresh.reduce((n, g) => n + g.inDom, 0)} rows in the document, ${fresh.reduce((n, g) => n + g.onScreen, 0)} on screen`);
 
     // ---- 15c. moving a value opens the group that holds it
-    // `bloom` because it is in `optical` and because `keyframe-check` clicks its keyframe
+    // `bloom` because it is in `post` and because `keyframe-check` clicks its keyframe
     // diamond, a control Playwright will only press when it is visible.
     await page.evaluate("__kinect.params.set('bloom', 0.75)");
     await settle();
@@ -7999,23 +8000,23 @@ try {
 
     await freshLook();
     await settle();
-    const styleDefault = await defaultOf('thermal.amount');
-    const styleSpec = await page.evaluate("__kinect.params.spec('thermal.amount')");
+    const thermalDefault = await defaultOf('thermal.amount');
+    const thermalSpec = await page.evaluate("__kinect.params.spec('thermal.amount')");
     // Whichever end of the travel the default is not, so this cannot become a write of the value
     // that was already there - which would leave the group untouched and the row below asserting
     // the state it started in.
-    await page.evaluate(`__kinect.params.set('thermal.amount', ${styleDefault === styleSpec.max ? styleSpec.min : styleSpec.max})`);
+    await page.evaluate(`__kinect.params.set('thermal.amount', ${thermalDefault === thermalSpec.max ? thermalSpec.min : thermalSpec.max})`);
     await settle();
-    const styleNow = await page.evaluate("__kinect.params.get('thermal.amount')");
+    const thermalNow = await page.evaluate("__kinect.params.get('thermal.amount')");
     const readingsQuiet = await page.evaluate(`__kinect.readings().every((n) =>
       __kinect.params.get(n) === __kinect.params.normalise(n, __kinect.params.spec(n).default))`);
-    check(styleNow !== styleDefault && readingsQuiet,
-      'one style parameter moved with every reading left at its default, or the row below tests nothing',
-      `thermal.amount reads ${styleNow} against a default of ${styleDefault}, readings untouched: ${readingsQuiet}`);
-    const tuned = await groupOf('style');
+    check(thermalNow !== thermalDefault && readingsQuiet,
+      'one effect parameter moved with every reading left at its default, or the row below tests nothing',
+      `thermal.amount reads ${thermalNow} against a default of ${thermalDefault}, readings untouched: ${readingsQuiet}`);
+    const tuned = await groupOf('thermal');
     check(!tuned.shut && tuned.onScreen === tuned.available,
-      'moving a style parameter opens the style group, so the open set is the whole diff',
-      `style: shut=${tuned.shut}, ${tuned.onScreen} of ${tuned.available} available rows on screen, ${tuned.inDom} in the registry`);
+      'moving an effect parameter opens that effect\'s own group, so the open set is the whole diff',
+      `thermal: shut=${tuned.shut}, ${tuned.onScreen} of ${tuned.available} available rows on screen, ${tuned.inDom} in the registry`);
 
     // ---- 15d. a keyframe counts even where the value does not
     // The whole reason the predicate has a keyframe term, and the one row `reveal-ignores-tracks`
@@ -8034,10 +8035,10 @@ try {
     check(parked === grainDefault,
       'the keyed parameter really is sitting on its default at the parked frame, or the row below tests nothing',
       `grain reads ${parked} against a default of ${grainDefault}`);
-    const keyed = await groupOf('post');
+    const keyed = await groupOf('grain');
     check(!keyed.shut && keyed.onScreen === keyed.available,
       'a keyframe opens the group even where the value it holds is the default',
-      `post: shut=${keyed.shut}, ${keyed.onScreen} of ${keyed.available} available rows on screen, ${keyed.inDom} in the registry`);
+      `grain: shut=${keyed.shut}, ${keyed.onScreen} of ${keyed.available} available rows on screen, ${keyed.inDom} in the registry`);
 
     // ---- 15e. a shut group that is in use says so
     // Pressed rather than assumed shut, because the state it starts in is exactly what

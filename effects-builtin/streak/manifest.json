@@ -12,8 +12,7 @@
       "kind": "scalar",
       "label": "streak",
       "panel": {
-        "group": "post",
-        "tab": "look"
+        "group": "streak"
       },
       "bind": {
         "on": "grade",
@@ -28,10 +27,9 @@
       "max": 180,
       "step": 1,
       "kind": "scalar",
-      "label": "streak angle",
+      "label": "angle",
       "panel": {
-        "group": "post",
-        "tab": "look"
+        "group": "streak"
       },
       "bind": {
         "on": "grade",
@@ -41,6 +39,17 @@
       "under": "amount"
     }
   },
+  "panelGroups": [
+    {
+      "key": "streak",
+      "label": "Streak",
+      "tab": "look",
+      "lookgroup": true,
+      "collapses": true,
+      "after": "post",
+      "order": 30
+    }
+  ],
   "chunks": [
     {
       "stage": "g.decl",
