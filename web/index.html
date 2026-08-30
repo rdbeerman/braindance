@@ -967,7 +967,8 @@
   /* The rebuild's own territory. It empties this and nothing else, so a sibling in
      either column - the cuts, the playhead, the shading - is out of its reach because
      of where it sits rather than because the loop remembers to skip it. */
-  .tstack { display: flex; flex-direction: column; flex: none; min-width: 0; }
+  .tstack { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0;
+    justify-content: flex-end; }
   /* Capped at whatever `--tlanes-h` is, so the lanes scroll instead of pushing the
      strip taller without limit. Every keyed parameter used to add a permanent row and
      take that height off the stage with no way to get it back.
@@ -993,7 +994,7 @@
      is exactly the surface step 4 left behind. Every other row is fixed and adds
      to it — only parameters that actually carry keys get one. */
   .trow { position: relative; flex: none; border-top: 1px solid var(--line); }
-  .trow.ruler { flex: 1; min-height: 0; border-top: 0; }
+  .trow.ruler { flex: none; height: 32px; border-top: 0; }
   .tcol.rail .trow { display: flex; align-items: center; justify-content: space-between;
     gap: 6px; padding: 0 8px; overflow: hidden; }
   .tcol.rail .trow span { color: var(--dim); font-size: 11px; overflow: hidden;
@@ -1030,8 +1031,7 @@
      tell you about itself. */
   .tmini { flex: none; height: 26px; display: grid; grid-template-columns: 115px minmax(0, 1fr);
     align-items: center; border-top: 1px solid var(--line); }
-  .tmini > span { padding: 0 10px; font-size: 11px; letter-spacing: 0.14em;
-    text-transform: uppercase; color: var(--faint); }
+  .tmini > span { padding: 0 10px; font-size: 11px; color: var(--faint); }
   .tminibed { position: relative; height: 100%; overflow: hidden; cursor: pointer;
     touch-action: none; background: var(--paper-2); }
   /* What the export keeps, so the overview answers "where is my clip" as well as
@@ -1607,7 +1607,7 @@
          out of the rebuild's reach by construction rather than by remembering. -->
     <div class="tlanes">
       <div class="tcol rail" id="tRail">
-        <div class="trow ruler"><span>program</span></div>
+        <div class="trow ruler"></div>
         <div class="tstack" id="tRailLanes"></div>
       </div>
       <div class="tcol beds" id="tBeds">
@@ -1632,7 +1632,7 @@
          and the playhead. It carries the same 96px rail offset as the lanes so its
          coordinates line up with theirs by construction rather than by arithmetic. -->
     <div class="tmini">
-      <span>clip</span>
+      <span>timeline</span>
       <div class="tminibed" id="tMini">
         <div class="tminirange" id="tMiniRange"></div>
         <div class="tminimarks" id="tMiniMarks"></div>
