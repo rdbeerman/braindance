@@ -143,7 +143,8 @@
   #status b { color: var(--accent); font-weight: 500; }
 
   .group { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }
-  #recordGroup, #cameraGroup, [data-group="framing"] { border-top: 0; }
+  #recordGroup, #cameraGroup, [data-group="framing"],
+  #lookPresetGroup, #effectRackGroup, [data-group="colour"], [data-group="displacement"] { border-top: 0; }
   /* OBS is an editor command and dialog in the Pencil shell. The recorder keeps this
      inline block because its output is part of the live shooting setup. */
   body.editing #programOutGroup { display: none; }
@@ -214,6 +215,22 @@
     border-top: 4px solid transparent; border-bottom: 4px solid transparent;
   }
   .grouptoggle[aria-expanded=false]:hover i { border-left-color: var(--ink); }
+
+  .groupremove {
+    flex: 0 0 14px; width: 14px; height: 14px;
+    border: 0; background: transparent; padding: 0; cursor: pointer;
+    opacity: 0; transition: opacity 0.1s;
+    position: relative;
+  }
+  .groupremove::before, .groupremove::after {
+    content: ''; position: absolute;
+    top: 50%; left: 50%; width: 8px; height: 1px;
+    background: var(--dim); transform-origin: center;
+  }
+  .groupremove::before { transform: translate(-50%, -50%) rotate(45deg); }
+  .groupremove::after { transform: translate(-50%, -50%) rotate(-45deg); }
+  .grouphead:hover .groupremove { opacity: 1; }
+  .groupremove:hover::before, .groupremove:hover::after { background: var(--ink); }
 
   /* 4px under a 16px row is the design's 20px pitch. The gap is the only half of that
      stated here - the height belongs to `.kf`/`.reset`, which are the tallest things a

@@ -1380,6 +1380,17 @@ function panelHead(group) {
   const head = panelNode('div', 'grouphead');
   const label = panelNode('label', null, group.label);
   head.append(label);
+
+  // Effect groups get a remove button that appears on hover.
+  const owner = groupOwner(group.key);
+  if (owner) {
+    const remove = panelNode('button', 'groupremove');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', `remove ${group.label}`);
+    remove.addEventListener('click', () => removeEffectFromRack(owner));
+    head.append(remove);
+  }
+
   if (!group.collapses) return { head, button: null };
 
   label.style.cursor = 'pointer';
@@ -2154,6 +2165,16 @@ function effectPresent(id) {
 function effectGroups(id) {
   const keys = new Set(effectParamNames(id).map((name) => PARAMS[name].group));
   return PANEL_GROUPS.filter((group) => keys.has(group.key));
+}
+
+// The effect that owns a group, or null if the group is core or mixed.
+function groupOwner(key) {
+  const names = Object.keys(PARAMS).filter((n) => PARAMS[n].group === key);
+  if (!names.length) return null;
+  const ids = new Set(names.map(effectOf));
+  if (ids.size !== 1) return null;
+  const [id] = ids;
+  return id;
 }
 
 function refreshEffectRack() {
