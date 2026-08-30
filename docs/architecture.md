@@ -354,10 +354,10 @@ evaluate the tracks, `sourceMs = retime(programTime)`, binary-search the index.
 - **Export needs no inverse.** Keying in source time would force export to invert the retime
   curve, which requires it to stay monotonic, so a hold or a reverse breaks it outright.
 - **The camera keeps its own pace when the footage slows**, which is the creative point: a
-  photographer's movement is independent of what they are filming. This is about the retime
-  *curve*, where a ramp leaves the program length alone so a camera key at program 10s stays
-  there. The speed control is different: it changes the clip's output length, so every
-  program time is reparameterised together, camera track included.
+  photographer's movement is independent of what they are filming. A ramp leaves the program
+  length alone, so a camera key at program 10s stays there. The speed control changes the selected
+  clip's output length and rescales that clip's local look and placement keys around the curve's
+  rate pivot. Project tracks, camera keys and output cuts keep their authored program seconds.
 - **`fade` and `wake` stay in source time**, because they drive surface memory, which
   advances per source frame. Dividing by the local retime slope would divide by zero at a
   hold, snapping every trail off exactly where a freeze should hold it.

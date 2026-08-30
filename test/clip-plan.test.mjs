@@ -50,6 +50,13 @@ test('a clip speed change rescales only that clip local keys', () => {
   assert.equal(camera.keys[0].t, 12);
 });
 
+test('a clip speed change rescales keys around its nonzero retime pivot', () => {
+  const clipTracks = [{ keys: [{ t: 2 }, { t: 6 }] }];
+  const snapshot = snapshotClipKeys(clipTracks);
+  rescaleClipKeys(snapshot, 0.5, 2);
+  assert.deepEqual(clipTracks[0].keys.map((key) => key.t), [2, 4]);
+});
+
 test('stored rates stay inside the same finite range the editor offers', () => {
   assert.equal(usableClipRate(RATE_MIN), true);
   assert.equal(usableClipRate(RATE_MAX), true);

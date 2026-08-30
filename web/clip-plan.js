@@ -46,7 +46,7 @@ export function frameLoadByTake(spans) {
 export const snapshotClipKeys = (tracks) => [...tracks]
   .flatMap((track) => track.keys.map((key) => [key, key.t]));
 
-/** Rescales only clip-local key times from the gesture's starting values. */
-export function rescaleClipKeys(snapshot, factor) {
-  for (const [key, time] of snapshot) key.t = time * factor;
+/** Rescales clip-local key times around the retime curve's rate pivot. */
+export function rescaleClipKeys(snapshot, factor, pivot = 0) {
+  for (const [key, time] of snapshot) key.t = pivot + (time - pivot) * factor;
 }

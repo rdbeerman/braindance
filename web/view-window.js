@@ -10,20 +10,12 @@
 // one step further out: there is one mapping from a program second to a position on the
 // strip, and it is imported rather than found.
 //
-// **The window is held as fractions of the program duration, and that is load-bearing
-// rather than a unit preference.** A speed change rescales the duration and every program
-// time in the document by the same factor - see `reparameteriseProgramTime` in `main.js` -
-// so a window in *seconds* would be a twelfth quantity somebody had to remember to scale,
-// and forgetting it would move the visible footage on a gesture whose whole point is that
-// nothing moves. In fractions there is nothing to remember: the ruler and the window
-// rescale together and the same footage stays on screen because the arithmetic cannot
-// express anything else.
-//
-// The one place that reads oddly is the consequence of the same choice, and it is worth
-// stating so it is not filed as this bug returning: a *retime key* changes the program
-// duration non-uniformly, so dragging one shifts the visible window on release. That is a
-// different situation from the speed slider - there the map is uniform and nothing moves
-// at all - and it is accepted rather than overlooked.
+// **The window is held as fractions of the program duration.** This keeps the same footage
+// visible when one clip fills the program and a speed change scales that clip uniformly.
+// A clip inside a larger edit changes the duration non-uniformly; `main.js` then rebases these
+// fractions from the program-second bounds captured at the start of the speed gesture.
+// Dragging one retime key remains different: it changes the map non-uniformly without a speed
+// gesture, so the window keeps its fractions and shifts in program seconds on release.
 //
 // **Two readings arrive at construction rather than being reached for, and that is what
 // makes the arithmetic testable without a browser.** How long the program currently is,

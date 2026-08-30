@@ -1351,17 +1351,72 @@ const MUTATIONS = {
   'rate-rescales-cuts': {
     file: 'web/main.js',
     edits: [[
-      '  rescaleClipKeys(was.keys, k);',
-      '  rescaleClipKeys(was.keys, k);\n  setClipInOut({ in: clipIn * k, out: clipOut === null ? null : clipOut * k });',
+      '  rescaleClipKeys(was.keys, k, was.pivot);',
+      '  rescaleClipKeys(was.keys, k, was.pivot);\n  setClipInOut({ in: clipIn * k, out: clipOut === null ? null : clipOut * k });',
     ]],
   },
 
   'rate-holds-keys': {
     file: 'web/main.js',
     edits: [[
-      '  rescaleClipKeys(was.keys, k);',
-      '  rescaleClipKeys(was.keys, 1);',
+      '  rescaleClipKeys(was.keys, k, was.pivot);',
+      '  rescaleClipKeys(was.keys, 1, was.pivot);',
     ]],
+  },
+
+  'rate-keys-ignore-retime-pivot': {
+    file: 'web/main.js',
+    edits: [[
+      '  rescaleClipKeys(was.keys, k, was.pivot);',
+      '  rescaleClipKeys(was.keys, k, 0);',
+    ]],
+    fails: 'the nonzero-pivot row in section 4: the look key lands at local 3s/source 7s instead '
+      + 'of local 4s/source 9s',
+  },
+
+  'rate-window-stays-fractional': {
+    file: 'web/main.js',
+    edits: [[
+      "    window: clips.length === 1 && selectedClipRow()?.start === 0\n"
+      + "      ? null : { startSec: view.startSec, endSec: view.endSec },",
+      '    window: null,',
+    ]],
+    fails: 'the multi-clip ruler row in section 22b: its 10s start moves to about 5.6s when the '
+      + 'selected clip shortens the project under stale fractions',
+  },
+
+  'clip-drag-keeps-playing': {
+    file: 'web/main.js',
+    edits: [[
+      '    const wasPlaying = timeline.playing || timeline.pendingPlay;\n'
+      + '    timeline.pause();\n    clipDrag = {',
+      '    const wasPlaying = timeline.playing || timeline.pendingPlay;\n    clipDrag = {',
+    ]],
+    fails: 'the live clip-drag pause row in section 22b: playback stays live while the mapping '
+      + 'moves instead of yielding the accumulator state first',
+  },
+
+  'added-clip-skips-reseek': {
+    file: 'web/main.js',
+    edits: [
+      [[
+        '  const gen = takeTransport();',
+        '  const wasPlaying = timeline.playing || timeline.pendingPlay;',
+        '  const held = timeline.programSec;',
+        '  timeline.pause();',
+      ].join('\n'), [
+        '  const gen = transportGen;',
+        '  const wasPlaying = timeline.playing;',
+        '  const held = timeline.programSec;',
+      ].join('\n')],
+      [[
+        '  history.commit();',
+        '  await timeline.seek(Math.min(held, timeline.duration));',
+        '  if (wasPlaying && gen === transportGen) await timeline.play();',
+      ].join('\n'), '  history.commit();'],
+    ],
+    fails: 'the delayed-add pre-roll row in section 22: the new clip enters behind a live '
+      + 'playhead without yielding and rebuilding its accumulator history',
   },
 
   'zoom-about-centre': {
@@ -3917,6 +3972,38 @@ try {
     `in ${at120.tIn} -> ${undone.tIn}, out ${at120.tOut} -> ${undone.tOut}`);
   check(undone.clipKeys === at120.clipKeys && undone.clipKeyTimes === at120.clipKeyTimes,
     "  and the selected clip's keys", `${at120.clipKeyTimes} -> ${undone.clipKeyTimes}`);
+
+  const pivoted = await page.evaluate(`(async () => {
+    const k = globalThis.__kinect;
+    const original = k.library.serialiseProjectBody();
+    const selected = k.editor.clipSelection();
+    k.keyframes.setRetime({ rate: 1, keys: [{ t: 2, value: 5 }] });
+    k.keyframes.setTracks({ pointSize: [{ t: 6, value: 12 }] });
+    await k.timeline.transport().seek(4);
+    await k.timeline.settled();
+    return { original, selected };
+  })()`);
+  await driveRate(2);
+  const pivotResult = await page.evaluate(`(() => {
+    const k = globalThis.__kinect;
+    const clip = k.library.serialiseProjectBody().clips
+      .find((candidate) => candidate.id === k.editor.clipSelection());
+    const key = clip.tracks.pointSize[0];
+    return {
+      keyTime: key.t,
+      sourceAtKey: k.timeline.retime.sourceSecAt(key.t),
+      pivot: k.timeline.retime.keys[0].t,
+    };
+  })()`);
+  check(near(pivotResult.pivot, 2, 1e-9) && near(pivotResult.keyTime, 4, 1e-9)
+      && near(pivotResult.sourceAtKey, 9, 1e-9),
+    'a speed change rescales clip-local keys around a nonzero retime pivot and keeps their source association',
+    `pivot ${pivotResult.pivot}s, key ${pivotResult.keyTime}s at source ${pivotResult.sourceAtKey}s`);
+  await page.evaluate(({ original, selected }) => {
+    __kinect.library.restoreProject(original);
+    __kinect.editor.selectClipRow(selected);
+  }, pivoted);
+  await settle();
 
   // The detent at 1.00x, the one rate that has to be reachable exactly rather than approximately:
   // `slopeAt` reports it to the audio gate, and a take playing at 0.9995 reads as retimed.
@@ -9270,6 +9357,10 @@ try {
     const pickId = other ? other.id : TAKE;
     const raceTake = (library.takes ?? []).find((take) => take.id !== TAKE
       && take.id !== pickId && take.openable !== false) ?? null;
+    const movingAddChoices = (library.takes ?? []).filter((take) => take.id !== TAKE
+      && take.id !== pickId && take.id !== raceTake?.id && take.openable !== false);
+    const movingAddTake = movingAddChoices.find((take) => take.id === 'sample')
+      ?? movingAddChoices[0] ?? null;
 
     check(raceTake !== null,
       'the export race has an uncached third take, so Add Clip must cross its await after export starts',
@@ -9512,8 +9603,117 @@ try {
     }
     one = await read();
 
+    check(movingAddTake !== null,
+      'the moving-playhead add arm has an uncached take, so opening it must cross a real request',
+      movingAddTake ? movingAddTake.id : `only ${(library.takes ?? []).map((take) => take.id).join(', ')} were listed`);
+    if (movingAddTake) {
+      const beforeMovingAdd = await page.evaluate(`(async () => {
+        const k = globalThis.__kinect;
+        k.timeline.transport().pause();
+        await k.timeline.transport().seek(4);
+        await k.timeline.settled();
+        return {
+          project: k.library.serialiseProjectBody(),
+          selection: k.editor.clipSelection(),
+          clips: k.timeline.clips().length,
+          program: k.timeline.transport().programSec,
+          seeks: k.timeline.counters.seeks,
+        };
+      })()`);
+      let releaseMovingSource = () => {};
+      let movingSourceRequests = 0;
+      const holdMovingSource = async (route) => {
+        movingSourceRequests++;
+        await new Promise((resolve) => { releaseMovingSource = resolve; });
+        await route.continue();
+      };
+      await page.route(`**/capture/${movingAddTake.id}/index`, holdMovingSource);
+      try {
+        await page.evaluate('__kinect.timeline.transport().play()');
+        await page.waitForFunction('__kinect.timeline.transport().playing', null, { timeout: 15000 });
+        await page.locator('#tAddClip').click();
+        await page.waitForSelector(`.cpoption[data-take="${movingAddTake.id}"]`, { timeout: 15000 });
+        await page.evaluate((id) => {
+          document.querySelector(`.cpoption[data-take="${CSS.escape(id)}"]`)
+            .addEventListener('click', () => {
+              globalThis.__editorMovingAddPressedAt = __kinect.timeline.transport().programSec;
+            }, { capture: true, once: true });
+        }, movingAddTake.id);
+        await page.locator(`.cpoption[data-take="${movingAddTake.id}"]`).click();
+        const began = Date.now();
+        while (movingSourceRequests !== 1) {
+          if (Date.now() - began > 15000) throw new Error(
+            `the moving-playhead add request did not arrive: ${movingSourceRequests}`,
+          );
+          await new Promise((resolve) => { setTimeout(resolve, 20); });
+        }
+        const pressedAt = await page.evaluate('globalThis.__editorMovingAddPressedAt');
+        await page.waitForFunction(
+          (at) => globalThis.__kinect.timeline.transport().programSec > at + 0.25,
+          pressedAt,
+          { timeout: 15000 },
+        );
+        const whileOpening = await page.evaluate(`({
+          playing: __kinect.timeline.transport().playing,
+          program: __kinect.timeline.transport().programSec,
+          seeks: __kinect.timeline.counters.seeks,
+        })`);
+        releaseMovingSource();
+        await page.waitForFunction(
+          (id) => globalThis.__kinect.timeline.clips().some((clip) => clip.take?.id === id)
+            && document.getElementById('tNote').textContent.includes(id),
+          movingAddTake.id,
+          { timeout: 25000 },
+        );
+        for (let i = 0; i < 250; i++) {
+          const complete = await page.evaluate((seeks) => __kinect.timeline.counters.seeks > seeks
+            && __kinect.timeline.transport().playing, whileOpening.seeks);
+          if (complete) break;
+          await new Promise((resolve) => { setTimeout(resolve, 20); });
+        }
+        const afterMovingAdd = await page.evaluate(`(() => {
+          const clips = __kinect.timeline.clips();
+          const added = clips.find((clip) => clip.take?.id === ${JSON.stringify(movingAddTake.id)});
+          return {
+            clip: added ?? null,
+            playing: __kinect.timeline.transport().playing,
+            program: __kinect.timeline.transport().programSec,
+            seeks: __kinect.timeline.counters.seeks,
+          };
+        })()`);
+        check(whileOpening.playing
+          && whileOpening.program > pressedAt + 0.25,
+        'playback moves past the insertion point while the new take is still opening',
+        `program ${pressedAt.toFixed(3)}s -> ${whileOpening.program.toFixed(3)}s, playing ${whileOpening.playing}`);
+        check(afterMovingAdd.clip !== null
+          && near(afterMovingAdd.clip.start, pressedAt, 1 / 30),
+          'the delayed clip keeps the playhead position at which Add Clip was pressed',
+          `${afterMovingAdd.clip?.start?.toFixed(3) ?? 'missing'}s against ${pressedAt.toFixed(3)}s`);
+        check(afterMovingAdd.seeks > whileOpening.seeks,
+          'and insertion pre-rolls the new clip at the current playhead before playback continues',
+          `seeks ${whileOpening.seeks} -> ${afterMovingAdd.seeks} at program ${afterMovingAdd.program.toFixed(3)}s`);
+        check(afterMovingAdd.playing,
+          'and restores the play intent after the insertion seek',
+          `playing ${afterMovingAdd.playing}`);
+      } finally {
+        releaseMovingSource();
+        await page.unroute(`**/capture/${movingAddTake.id}/index`, holdMovingSource);
+        await page.evaluate(({ project, selection }) => {
+          __kinect.timeline.transport().pause();
+          __kinect.library.restoreProject(project);
+          __kinect.editor.selectClipRow(selection);
+          __kinect.keyframes.undo.begin();
+        }, beforeMovingAdd);
+        await page.evaluate((program) => __kinect.timeline.transport().seek(program),
+          beforeMovingAdd.program);
+        await settle();
+      }
+    }
+    one = await read();
+
     // The add, pressed rather than called: the picker is the one entry point and this is it.
     await page.evaluate(`(async () => {
+      globalThis.__kinect.timeline.transport().pause();
       await globalThis.__kinect.timeline.transport().seek(4);
       await globalThis.__kinect.timeline.settled();
     })()`);
@@ -9977,6 +10177,90 @@ try {
       'two clips are staged for this section, which is what makes both arms below a comparison',
       staged.map((c) => `${c.id} at ${c.start}s`).join(', '));
 
+    const stagedProject = await page.evaluate('__kinect.library.serialiseProjectBody()');
+    const rateWindowBefore = await page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const body = k.library.serialiseProjectBody();
+      body.clips[0].start = 0;
+      body.clips[0].length = 10;
+      body.clips[0].retime = { rate: 1, keys: [] };
+      body.clips[1].start = 10;
+      body.clips[1].length = null;
+      body.clips[1].retime = { rate: 1, keys: [] };
+      k.library.restoreProject(body);
+      k.editor.selectClipRow('gz2');
+      const duration = k.timeline.transport().duration;
+      k.editor.view.set(10 / duration, 1);
+      await k.timeline.transport().seek(12);
+      await k.timeline.settled();
+      return k.editor.view.window();
+    })()`);
+    await driveRate(2);
+    const rateWindowAfter = await page.evaluate('__kinect.editor.view.window()');
+    check(rateWindowAfter.duration < rateWindowBefore.duration - 1
+      && near(rateWindowBefore.startSec, 10, 1e-6),
+    'the selected untrimmed clip shortens a multi-clip project whose ruler starts at its 10s in-point',
+    `duration ${rateWindowBefore.duration.toFixed(3)}s -> ${rateWindowAfter.duration.toFixed(3)}s, `
+      + `window started at ${rateWindowBefore.startSec.toFixed(3)}s`);
+    check(near(rateWindowAfter.startSec, 10, 1e-6)
+      && near(rateWindowAfter.endSec, rateWindowAfter.duration, 1e-6),
+    'and the ruler keeps the program bounds it was showing instead of applying stale whole-project fractions',
+    `window ${rateWindowBefore.startSec.toFixed(3)}-${rateWindowBefore.endSec.toFixed(3)}s -> `
+      + `${rateWindowAfter.startSec.toFixed(3)}-${rateWindowAfter.endSec.toFixed(3)}s`);
+    await page.evaluate((body) => {
+      __kinect.library.restoreProject(body);
+      __kinect.editor.selectClipRow('gz2');
+      __kinect.editor.view.fit();
+    }, stagedProject);
+    await settle();
+
+    await page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      await k.timeline.transport().seek(5);
+      await k.timeline.settled();
+      await k.timeline.transport().play();
+    })()`);
+    await page.waitForFunction('__kinect.timeline.transport().playing', null, { timeout: 15000 });
+    const movingClipBefore = await page.evaluate(`(() => {
+      const clip = __kinect.timeline.clips().find((candidate) => candidate.id === 'gz2');
+      return { start: clip.start, program: __kinect.timeline.transport().programSec };
+    })()`);
+    {
+      const movingBox = (await page.$$('.tclip'))[1];
+      const r = await movingBox.boundingBox();
+      await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+      await page.mouse.down();
+      const pausedDuringClipMove = await page.evaluate('__kinect.timeline.transport().playing');
+      await page.mouse.move(r.x + r.width / 2 + (await page.locator('#tBed').boundingBox()).width * 0.04,
+        r.y + r.height / 2, { steps: 6 });
+      await page.mouse.up();
+      for (let i = 0; i < 100 && !(await page.evaluate('__kinect.timeline.transport().playing')); i++) {
+        await new Promise((resolve) => { setTimeout(resolve, 20); });
+      }
+      const movingClipAfter = await page.evaluate(`(() => {
+        const clip = __kinect.timeline.clips().find((candidate) => candidate.id === 'gz2');
+        return {
+          start: clip.start,
+          playing: __kinect.timeline.transport().playing,
+          program: __kinect.timeline.transport().programSec,
+        };
+      })()`);
+      check(pausedDuringClipMove === false && movingClipAfter.start > movingClipBefore.start + 0.2,
+        'dragging a live clip pauses playback before its source mapping moves',
+        `playing during drag ${pausedDuringClipMove}, start ${movingClipBefore.start.toFixed(3)}s -> ${movingClipAfter.start.toFixed(3)}s`);
+      check(movingClipAfter.playing
+        && movingClipAfter.program >= movingClipBefore.program - 1 / 30,
+      'and seeks the edited mapping before restoring playback at the held program position',
+      `playing ${movingClipAfter.playing}, program ${movingClipBefore.program.toFixed(3)}s -> ${movingClipAfter.program.toFixed(3)}s`);
+    }
+    await page.evaluate((body) => {
+      __kinect.timeline.transport().pause();
+      __kinect.library.restoreProject(body);
+      __kinect.editor.selectClipRow('gz2');
+    }, stagedProject);
+    await page.evaluate('__kinect.timeline.transport().seek(5)');
+    await settle();
+
     // Both tracks are evaluated because both clouds must be ready to draw. Only the selected
     // clip may paint the one inspector the clips share, regardless of which clip is evaluated
     // last. The selected track sits at the default so the reset control checks the same owner.
@@ -10311,6 +10595,21 @@ try {
 
     // Framing belongs to the shot. Drive the crop and both preset choices through the controls a
     // person uses, then ask the file door and the save dialog for the same boundary.
+    const choosePreset = async (name) => {
+      await page.locator('#tPreset').click();
+      await page.waitForFunction("document.getElementById('tPresetList').hidden === false");
+      await page.locator(`#tPresetList .pickeroption[data-name=${JSON.stringify(name)}]`).click();
+      await settle();
+    };
+    await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const body = k.library.serialiseProjectBody();
+      const selected = k.editor.clipSelection();
+      body.clips.find((clip) => clip.id === selected).appliedPreset = null;
+      k.library.restoreProject(body);
+      k.editor.selectClipRow(selected);
+    })()`);
+    await settle();
     await page.locator('#panelTabFraming').click();
     await page.locator('#left').evaluate((control) => {
       control.value = '-1.25';
@@ -10324,12 +10623,6 @@ try {
       pointSize: __kinect.params.get('pointSize'),
     }))()`);
     await page.locator('#panelTabLook').click();
-    const choosePreset = async (name) => {
-      await page.locator('#tPreset').click();
-      await page.waitForFunction("document.getElementById('tPresetList').hidden === false");
-      await page.locator(`#tPresetList .pickeroption[data-name=${JSON.stringify(name)}]`).click();
-      await settle();
-    };
     await choosePreset('blackwall');
     const afterBlackwall = await page.evaluate(`(() => ({
       left: __kinect.params.get('left'),

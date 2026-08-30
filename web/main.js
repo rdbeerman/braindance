@@ -3799,12 +3799,14 @@ let retime = null;
 
 /** Every selected-clip key time, rescaled by `k` when its slope changes. */
 function reparameteriseProgramTime(k, was) {
-  rescaleClipKeys(was.keys, k);
+  rescaleClipKeys(was.keys, k, was.pivot);
 }
 
 /** Where a later rescale reads its times from. Live objects, and the `t` they had. */
 const programTimeSnapshot = () => ({
   keys: snapshotClipKeys(lookOf().tracks.values()),
+  // With one key, the rate changes the slope on both sides of that key rather than at zero.
+  pivot: retime.keys.length === 1 ? retime.keys[0].t : 0,
 });
 
 class LivePairSource {
@@ -6521,6 +6523,10 @@ function beginRateGesture({ fromKey = false } = {}) {
     // The parameterisation the gesture started in. Every time is rescaled from these.
     rate: retime.rate,
     times: programTimeSnapshot(),
+    // Fractions preserve footage when one clip is the whole program. A clip inside a larger edit
+    // changes the program length non-uniformly, so its existing program bounds are held instead.
+    window: clips.length === 1 && selectedClipRow()?.start === 0
+      ? null : { startSec: view.startSec, endSec: view.endSec },
     applied: false,
   };
   timeline.pause();
@@ -6556,6 +6562,12 @@ function applyRate(rate) {
   // `frameOf` rather than `frameAt`, which clamps to a clip range that is stale here.
   timeline.frame = timeline.frameOf(program);
   reparameteriseProgramTime(rateGesture.rate / rate, rateGesture.times);
+  if (rateGesture.window) {
+    const duration = view.duration;
+    const start = Math.min(rateGesture.window.startSec, duration);
+    const end = Math.max(start, Math.min(rateGesture.window.endSec, duration));
+    view.set(start / duration, end / duration);
+  }
   return program;
 }
 
@@ -8169,9 +8181,15 @@ ui.beds.addEventListener('pointerdown', (e) => {
       return;
     }
     if (refuseEdit('moving a clip')) return;
+    const gen = takeTransport();
+    const wasPlaying = timeline.playing || timeline.pendingPlay;
+    timeline.pause();
     clipDrag = {
       clip,
       side,
+      gen,
+      wasPlaying,
+      program: timeline.programSec,
       grabbedAt: laneProgramAt(e.clientX) - (side === 'tail' ? clip.end : clip.start),
       // The out-point, held for the length of a head trim so the far end does not walk.
       end: clip.end,
@@ -8280,11 +8298,20 @@ ui.beds.addEventListener('pointermove', (e) => {
 for (const type of ['pointerup', 'pointercancel']) {
   ui.beds.addEventListener(type, () => {
     if (clipDrag) {
-      const moved = clipDrag.moved;
+      const drag = clipDrag;
+      const { moved } = drag;
       clipDrag = null;
       // The warm window and every position on the ruler move with a clip, so this is the same
       // door a retime change goes through rather than a lane rebuild.
       if (moved) { timingChanged(); history.commit(); }
+      if (drag.gen !== transportGen) return;
+      if (!moved) {
+        if (drag.wasPlaying) timeline.play().catch(showTimelineError);
+        return;
+      }
+      timeline.seek(Math.min(drag.program, timeline.duration))
+        .then(() => { if (drag.wasPlaying && drag.gen === transportGen) return timeline.play(); })
+        .catch(showTimelineError);
       return;
     }
     if (!laneDrag) return;
@@ -8432,6 +8459,10 @@ async function addClipFromTake(id) {
     say(`this build composites ${CLIP_CEILING} clips and this edit already holds ${clips.length}`);
     return null;
   }
+  const gen = takeTransport();
+  const wasPlaying = timeline.playing || timeline.pendingPlay;
+  const held = timeline.programSec;
+  timeline.pause();
   const clip = new Clip(mintClipId(), livePairs, createClipCloud());
   clips.push(clip);
   adoptSource(clip, opened);
@@ -8440,6 +8471,8 @@ async function addClipFromTake(id) {
   orderClips();
   selectClipRow(clip);
   history.commit();
+  await timeline.seek(Math.min(held, timeline.duration));
+  if (wasPlaying && gen === transportGen) await timeline.play();
   say(`clip ${clip.id} of ${id} at ${clip.start.toFixed(2)}s`);
   return clip;
 }
