@@ -614,6 +614,25 @@ half measures 7.1 ms against a 33 ms budget. That figure is a correction: it was
 p50. Its occlusion filter's share has *not* been re-measured here and should not be quoted as
 if it had.
 
+**The orbit pivot's press cannot be made free, and a target write has never been free.** The
+pick that moves the pivot was designed to leave the camera bit-identical, so that
+`renderedCameraChanged` would stay false and no screen-space history would be cleared. It cannot:
+`OrbitControls.update()` rebuilds `position` out of `target` every frame, so any write to the
+pivot re-rounds the position by about an ulp, and the comparison is exact. Nudging the target by
+the residual and retrying does not converge - measured, 8 attempts still moving at 7 of 9
+camera poses. What it costs is one afterimage clear per press, which is exactly what one move of
+a right-drag pan has always cost, and the drag a press precedes clears on every frame anyway. The
+mosh history is not involved: `renderedCameraChanged` drives `clearAfterimage()` alone, and the
+mosh's two targets are cleared only by `resetAccumulators`.
+
+**The pick itself is cheap; its retry is not.** Interleaved in one loop, 80 trials with the first
+20 discarded, headless Chromium at 1512x900 on the M2 Max, `performance.now` quantised to 0.1 ms:
+a press that hits costs 0.600 ms at p50 (0.700 at p95), against a 0.100 ms floor for a press that
+enters the handler and leaves at the button test. A press that finds nothing over a full grid
+costs 2.8 ms, because it sweeps every second texel and then every texel. That is a one-off on a
+pointer event against a 33 ms frame, and it buys presses on surfaces far enough away that
+stride-2 samples land more than twelve stage pixels apart.
+
 **Compressing the wire is bounded by colour.** 434 KB of the 486 KB frame is uncompressed
 depth, and an early estimate put zstd-over-temporal-deltas at 35-45 Mbit/s. Measured,
 per-frame zstd manages 1.75x on depth, and a u16 temporal delta plus zstd reaches 2.75x on

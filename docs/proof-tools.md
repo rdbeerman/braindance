@@ -414,6 +414,14 @@ node tools/editor-check.mjs --mutate collapsed-keeps-the-editor-height --no-rend
 node tools/editor-check.mjs --mutate collapsed-keeps-the-tab-rail --no-render # ... and the half of that a lower rule cannot fix, because `:not()` carries its argument's weight
 node tools/editor-check.mjs --mutate dock-sensor-takes-the-centre --no-render # ... a dock button forwarding faithfully to the neighbouring control
 node tools/editor-check.mjs --mutate dock-offers-the-take-on-the-editor --no-render # ... and `record` offered on the surface that never polls a recorder to paint it
+node tools/editor-check.mjs --mutate pick-moves-the-camera --no-render  # ... the orbit pivot written off the view axis, which re-aims
+                                                                       #     the camera on the frame after the press
+node tools/editor-check.mjs --mutate pick-ignores-the-crop --no-render  # ... and a pivot on geometry the renderer discarded
+node tools/editor-check.mjs --mutate pick-rehomes-reset --no-render     # ... and Reset re-homed on the last pivot picked, so the
+                                                                       #     one control for getting un-lost goes nowhere known
+node tools/editor-check.mjs --mutate pick-answers-on-nothing --no-render # ... and a press with nothing under it moving the pivot anyway
+node tools/editor-check.mjs --mutate pick-accepts-a-singleton --no-render # ... and one isolated sensor return treated as a surface
+node tools/editor-check.mjs --mutate pick-rehomes-modified-pan --no-render # ... and a modified left press re-homing the pivot before its pan
 node tools/editor-check.mjs --mutate fit-lands-after-history-begins --no-render # ... the box a take opens with, which is the clip rather than the first thing you can undo
 node tools/editor-check.mjs --mutate fit-outlives-a-restored-project --no-render # ... and a document's own box, which only the ordering still protects
 node tools/editor-check.mjs --mutate play-button-skips-pausetransport --no-render # ... the one pause on this surface that did

@@ -21,6 +21,7 @@ import {
 import {
   INSET, TOP_CENTRE, PLAN_STRIDE, FRUSTUM_LEN, planScale, planPoint, planWorld, projectThrough,
 } from './plan-geometry.js';
+import { pickDepth, sensorPoint } from './depth-pick.js';
 import { ZOOM_PER_NOTCH, TICK_STEPS, tickLabel, makeViewWindow } from './view-window.js';
 import { clipIn, clipOut, clipBoundOrThrow, writeClipRange } from './clip-range.js';
 import {
@@ -6847,17 +6848,13 @@ function drawPlanCloud(rect) {
   chromeCtx.fillStyle = 'rgba(232, 236, 241, 0.55)';
   for (let row = 0; row < DEPTH_H; row += PLAN_STRIDE) {
     for (let col = 0; col < DEPTH_W; col += PLAN_STRIDE) {
-      const mm = depth[row * DEPTH_W + col];
-      if (mm === 0) continue;
-      const z = mm * 0.001;
-      // libfreenect2's pinhole model, off the same two uniforms the vertex shader
-      // unprojects with.
-      const wx = (-(col + 0.5 - cx) / fx) * z;
-      const wy = -((row + 0.5 - cy) / fy) * z;
+      // Reuse the depth picker's forward map so the plan and pivot cannot drift apart.
+      const z = sensorPoint(planVec, depth[row * DEPTH_W + col], col, row, fx, fy, cx, cy);
+      if (z === 0) continue;
       // All four lateral faces, so the plan does not draw points the renderer discards.
-      if (croppedOut(wx, wy, z)) continue;
+      if (croppedOut(planVec.x, planVec.y, z)) continue;
       // A canted room drawn about the sensor's axes is a slanted section labelled TOP-DOWN.
-      planVec.set(wx, wy, -z).applyQuaternion(worldTilt);
+      planVec.applyQuaternion(worldTilt);
       const px = rect.x + rect.w / 2 + (planVec.x - TOP_CENTRE.x) * s;
       const py = rect.y + rect.h / 2 + (planVec.z - TOP_CENTRE.z) * s;
       if (px < rect.x || px > rect.x + rect.w || py < rect.y || py > rect.y + rect.h) continue;
@@ -7481,6 +7478,45 @@ for (const type of ['pointerup', 'pointercancel']) {
     requestRepaint();
   });
 }
+
+// Avoid hypersensitive near pivots and pivots beyond the drawn range.
+const PIVOT_MIN_M = 0.15;
+
+const pivotForward = new THREE.Vector3();
+
+/** Moves the pivot along the view axis without changing the saved Reset pose. */
+function setPivotDistance(distance) {
+  const d = Math.min(Math.max(distance, PIVOT_MIN_M), uniforms.farClip.value);
+  freeCamera.getWorldDirection(pivotForward);
+  controls.target.copy(freeCamera.position).addScaledVector(pivotForward, d);
+  return d;
+}
+
+// Capture before OrbitControls reads the target; a canvas listener would write it too late.
+addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey
+    || e.target !== renderer.domElement) return;
+  if (nodeDrag || cropDrag) return;
+  if (viewCamera !== freeCamera || !controls.enabled) return;
+  const view = viewUnder(e.clientX, e.clientY);
+  if (!view || view.plan) return;
+  // Settle damping so the pick uses the axis the camera will keep.
+  finishOrbitDrift();
+  const hit = pickDepth({
+    depth: depthCurr.image.data,
+    focal: uniforms.focal.value,
+    center: uniforms.center.value,
+    tilt: worldTilt,
+    camera: freeCamera,
+    stage: { x: 0, y: 0, ...stageSize() },
+    x: view.x,
+    y: view.y,
+    croppedOut,
+  });
+  // Empty space, a hole in the returns or a press past the crop box keeps the pivot it had.
+  if (!hit) return;
+  setPivotDistance(hit.distance);
+}, true);
 
 function keyCameraHere() {
   if (!timeline) return;

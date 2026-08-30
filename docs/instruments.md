@@ -343,6 +343,24 @@ that reading the code did not:
 Report which mutations you ran and what each one caught. A check nobody has broken on purpose is
 a check nobody knows the sensitivity of.
 
+### A "caught" verdict on a tree that was already red
+
+`editor-check` declares a mutation caught when the run ends with any failures at all, and on this
+tree three rows about `datamosh.refresh` have been red since `4d711ef`. So a mutation that nothing
+tests still reports `caught ... as required`, and the row count in the verdict line does not
+distinguish the three that were already failing from the one that was supposed to fire.
+
+That is not hypothetical: `pick-rehomes-reset` was recorded as caught, and reading the fired
+labels showed only the three pre-existing rows. The Reset row it was aimed at read the home pose
+*after* the presses, so on the mutated build it compared `target0` against itself. Rule 3 - count
+the failed assertions and read which ones fired - is what found it, and the fix was to read the
+home pose before the section's first press.
+
+The general shape: **whenever a suite has a standing failure, its own catch verdict is a false
+positive generator, and a baseline run is the only thing that separates the two populations.**
+Run the tool once unmutated first and note which rows are red, then read every mutation run
+against that list rather than against zero.
+
 ### A source row that reads the staged tree cannot be falsified by a page mutation
 
 The match-exactly-once rule guards the *anchor*. This is the same hole one layer out, in the

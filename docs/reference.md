@@ -56,6 +56,16 @@ halves, and [SECURITY.md](../SECURITY.md) has the threat model.
 
 Drag to orbit, scroll to zoom, right-drag to pan, `H` hides the panel.
 
+**The orbit turns about whatever you pressed on.** A left press reads the depth under the
+pointer and moves the pivot along the view axis to that range, so orbiting a subject four metres
+out turns around it rather than swinging it across the frame. The pivot stays on the view axis,
+which is why the press changes nothing to look at - what changes is the turning radius. A press
+on the background, on a hole in the depth returns, or on geometry outside the crop box leaves
+the pivot where it was, and **Reset** still goes to the home pose rather than to the last pivot
+you picked. The pick reads the depth frame and not the drawn picture, so with the displacement
+effects or the datamosh up it lands on the surface that is really under the pointer rather than
+on the smear the eye is aimed at.
+
 The ruler shows a *window* of the clip, because a fifteen-minute take across one screen puts
 a keyframe against gradations forty times coarser than the thing being placed. Scroll to
 zoom about the pointer, `+`/`-` about the playhead, `,`/`.` to pan, `F` to fit the clip, `Z`
