@@ -394,7 +394,10 @@ them.** `Region (metres)`, then `Region push`, `Turbulence`, `Region mask` and `
 orders 100 to 400, then `Displacement` and `Lattice`. Reading down the tab is reading the
 pipeline, which is worth more than keeping `Turbulence` next to the other thing that displaces:
 a panel that draws its stages out of order teaches the wrong thing every time somebody looks
-at it. That order is the reason `region` sits before `displacement`
+at it. **The two numbers are equal by hand and nothing holds them equal** — a fifth effect
+consuming the region service, or a gate order changed without its panel order following, draws
+the tab out of pipeline order and makes this paragraph wrong rather than merely stale. That
+order is the reason `region` sits before `displacement`
 in the panel spine, which is the one place the spine's order is a statement about meaning rather
 than about history.
 
