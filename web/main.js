@@ -7493,11 +7493,14 @@ const pivotForward = new THREE.Vector3();
  *
  * **On the axis, and built from the forward vector the camera already holds.** `controls.update()`
  * ends in `camera.lookAt(this.target)`, so a target written off-axis re-aims the camera on the
- * frame after the press and the view jumps before the drag has started; and a target derived from
- * a freshly computed direction is on-axis in real arithmetic but need not be in floating point,
- * where one differing bit rebuilds the quaternion. `renderedCameraChanged` compares the quaternion
- * exactly, so that bit clears the afterimage and the mosh history both - a visible smear reset on
- * a press that was supposed to change nothing.
+ * frame after the press and the view jumps before the drag has started.
+ *
+ * It is still not free, and no arrangement of this function makes it so: `update()` also rebuilds
+ * `position` out of `target`, so any write here re-rounds the position by about an ulp, and
+ * `renderedCameraChanged` compares exactly. The press therefore clears the afterimage once - the
+ * price one move of a right-drag pan has always paid, and the drag this press precedes pays on
+ * every frame. The mosh history is not involved; only `resetAccumulators` clears that.
+ * `docs/performance.md` carries the measurement and the fixed point that does not exist.
  *
  * No `saveState()`: Reset must still go to the home pose `scene.js` takes such care over.
  */
