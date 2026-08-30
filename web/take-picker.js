@@ -97,9 +97,7 @@ export function pickTakes({ ceiling, taken = 0, title = 'Pick footage', confirmL
   heading.textContent = title;
   const roomLine = document.createElement('span');
   roomLine.className = 'tp-room';
-  roomLine.textContent = taken === 0
-    ? `up to ${room}`
-    : `${taken} already in the edit, up to ${room} more`;
+  roomLine.textContent = `${room} available`;
   head.append(heading, roomLine);
 
   const note = document.createElement('div');
@@ -109,9 +107,9 @@ export function pickTakes({ ceiling, taken = 0, title = 'Pick footage', confirmL
 
   const foot = document.createElement('div');
   foot.className = 'tp-foot';
-  const orderLine = document.createElement('span');
-  orderLine.className = 'tp-order-line';
-  foot.appendChild(orderLine);
+  const spacer = document.createElement('span');
+  spacer.className = 'tp-spacer';
+  foot.appendChild(spacer);
 
   dlg.append(head, note, grid, foot);
   document.body.appendChild(dlg);
@@ -153,11 +151,6 @@ export function pickTakes({ ceiling, taken = 0, title = 'Pick footage', confirmL
       chip.hidden = at < 0;
     }
     go.disabled = picked.length === 0;
-    orderLine.textContent = picked.length === 0
-      ? 'Nothing picked yet.'
-      : picked.length === 1
-        ? picked[0].id
-        : `${picked.map((t) => t.id).join(', then ')} - laid end to end in that order`;
   };
 
   const toggle = (take, why) => {
@@ -169,11 +162,7 @@ export function pickTakes({ ceiling, taken = 0, title = 'Pick footage', confirmL
     const at = picked.findIndex((t) => (t.hash ?? t.id) === (take.hash ?? take.id));
     if (at >= 0) picked.splice(at, 1);
     else if (picked.length >= room) {
-      note.textContent = taken === 0
-        ? `This build composites ${ceiling} clips, so ${room} takes is the most one project can start `
-          + 'with. Unpick one to pick another.'
-        : `This build composites ${ceiling} clips and this edit already holds ${taken}, so ${room} `
-          + `more can go in. Unpick one to pick another.`;
+      note.textContent = `Clip limit: ${ceiling}. Unpick one first.`;
       return;
     } else picked.push(take);
     paintPicked();
@@ -304,7 +293,6 @@ export function pickTakes({ ceiling, taken = 0, title = 'Pick footage', confirmL
     if (actLabel) button(box, actLabel, 'tp-act go', () => { location.href = href; });
     grid.replaceChildren(box);
     go.hidden = true;
-    orderLine.textContent = '';
     cancel.textContent = 'Close';
   }
 
@@ -317,7 +305,7 @@ export function pickTakes({ ceiling, taken = 0, title = 'Pick footage', confirmL
         throw new Error(body?.error ?? `HTTP ${res.status}`);
       }
     } catch (err) {
-      deadEnd(`The library could not be read, so there is nothing to pick from: ${err.message}`, null, null);
+      deadEnd(`Media library unavailable: ${err.message}`, null, null);
       return;
     }
     const nodeName = body.node?.name ?? 'the capture node';
@@ -328,15 +316,13 @@ export function pickTakes({ ceiling, taken = 0, title = 'Pick footage', confirmL
     if (here.length === 0) {
       if (takes.length === 0) {
         deadEnd(
-          'No takes on this machine yet. A clip is drawn from a capture, so there is nothing here '
-          + 'to build a project on until something has been recorded.',
+          'No takes.',
           'Record a take', '/record',
         );
       } else {
         deadEnd(
-          `Every take is on ${nodeName} and none of them is here. A clip is drawn from a capture on `
-          + 'this machine, so one has to be downloaded before it can go in a project.',
-          'Open the library', '/library',
+          `No local takes. ${nodeName} has ${takes.length}.`,
+          'Open Media library', '/library',
         );
       }
       return;
@@ -346,7 +332,6 @@ export function pickTakes({ ceiling, taken = 0, title = 'Pick footage', confirmL
   }
 
   dlg.showModal();
-  orderLine.textContent = 'Reading the library…';
   fill();
   return answer;
 }

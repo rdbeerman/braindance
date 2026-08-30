@@ -144,6 +144,36 @@ const MUTATIONS = {
       + 'placement, and the row that says the mark arm has a placement to be about at all',
   },
 
+  'add-clip-needs-selection': {
+    file: 'web/main.js',
+    edits: [[
+      '  ui.addClip.disabled = clips.length + pendingClipAdds >= CLIP_CEILING;',
+      '  ui.addClip.disabled = !selected || clips.length + pendingClipAdds >= CLIP_CEILING;',
+    ]],
+    fails: 'the stack add control becoming disabled when no clip row is selected',
+  },
+
+  'add-clip-uses-hidden-selection': {
+    file: 'web/main.js',
+    edits: [[
+      '  const initiating = selectedClipRow() ?? clips[0];',
+      '  const initiating = selectedClipRow() ?? selectedClip;',
+    ]],
+    fails: 'an add with no selection copying the hidden last selection instead of the first clip',
+  },
+
+  'add-clip-stays-with-selected-clip-commands': {
+    file: 'web/main.js',
+    edits: [[
+      "  rows.push({ owner: 'clip-add', label: '', kind: 'clip-add', height: CLIP_ADD_H });",
+      '',
+    ], [
+      '    lane.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
+      '    lane.append(ui.addClip, ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
+    ]],
+    fails: 'the plus control returning to the bed beside commands that need a selected clip',
+  },
+
   'add-clip-skips-post-open-export-guard': {
     file: 'web/main.js',
     edits: [[
@@ -1327,6 +1357,21 @@ const MUTATIONS = {
       + 'than arming a redraw the animation loop pumps. Reddens the two rebuild rows of 22b: '
       + '30 rebuilds for 30 moves, against the 34-for-one this program has shipped',
   },
+  'gizmo-drag-keeps-orbit-ownership': {
+    file: 'web/main.js',
+    edits: [[
+      "    if (e.value) {\n"
+        + '      // Orbit sees the shared pointerdown first; the gizmo owns this gesture from here.\n'
+        + '      orbiting = false;\n'
+        + '      orbitSettling = false;\n'
+        + '      orbitRedrawWanted = false;\n'
+        + '      return;\n'
+        + '    }',
+      '    if (e.value) return;',
+    ]],
+    fails: 'the move handles leaving the orbit gesture armed after claiming the pointer. '
+      + 'Section 22b reddens the before-release render row',
+  },
   'gizmo-runs-through-the-look': {
     file: 'web/main.js',
     edits: [['  gizmoScene.add(gizmoHelper);', '  scene.add(gizmoHelper);']],
@@ -2460,7 +2505,8 @@ const range = () => page.evaluate('__kinect.editor.clipRange()');
 const lanes = () => page.evaluate('__kinect.keyframes.lanes()');
 // The lanes that carry keys. The stack also holds the clip bar and a row per clip, which are
 // structure rather than animation and are counted by section 22 instead.
-const keyedLanes = async () => (await lanes()).filter((l) => l.kind !== 'clips' && l.kind !== 'clip');
+const keyedLanes = async () => (await lanes())
+  .filter((l) => l.kind !== 'clips' && l.kind !== 'clip' && l.kind !== 'clip-add');
 const keyCount = async (owner) => ((await lanes()).find((l) => l.owner === owner)?.keys ?? 0);
 const text = (sel) => page.locator(sel).textContent();
 /** Focus somewhere with no claim on the keyboard, so the window handler gets the key. */
@@ -10290,11 +10336,8 @@ try {
         for (const id of order) {
           await page.locator(`#takePicker .tp-tile[data-take="${id}"] .tp-meta`).click();
         }
-        // The picker's own reading of what it is about to do, taken before the press: a build that
-        // laid them in its own order would already disagree here, and reading it after the dialog
-        // has gone would leave the rows below to say which of the two ends was wrong.
+        // Read the numbered tiles before the dialog closes, then compare them with the rows added.
         const picker = await page.evaluate(`(() => ({
-          line: document.querySelector('#takePicker .tp-order-line').textContent,
           pressed: [...document.querySelectorAll('#takePicker .tp-tile')]
             .filter((t) => t.getAttribute('aria-pressed') === 'true')
             .map((t) => ({ take: t.dataset.take, at: t.querySelector('.tp-order').textContent })),
@@ -10319,7 +10362,7 @@ try {
           'and it numbers the picked tiles in the order they were pressed, which is the reading a '
           + 'build laying them in its own order gets wrong before anything is added',
           `${picker.pressed.map((p) => `${p.take}#${p.at}`).join(' ')} reads as ${numbered.map((p) => p.take).join(' ')}`
-          + ` against the pick order ${order.join(' ')} - "${picker.line}"`);
+          + ` against the pick order ${order.join(' ')}`);
         check(fresh.map((c) => c.take).join(' ') === order.join(' '),
           'confirming adds every picked take as a clip, in pick order rather than in the order the '
           + 'picker happened to list them',
@@ -11127,14 +11170,17 @@ try {
     const dragged = await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
       const before = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
+      // OrbitControls receives the shared pointerdown before TransformControls claims the axis.
+      k.controls.dispatchEvent({ type: 'start' });
       k.editor.gizmoDrag(true);
       const orbitDuring = k.editor.orbitEnabled();
       for (let i = 1; i <= ${MOVES}; i++) k.editor.moveGizmo([i * 0.02, 0, 0]);
-      const midDrag = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
       // Two animation frames, which is where the write is allowed to happen.
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const midDrag = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
       const pumped = k.params.get('transform').position[0];
       k.editor.gizmoDrag(false);
+      k.controls.dispatchEvent({ type: 'end' });
       await k.timeline.settled();
       const after = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
       return {
@@ -11164,6 +11210,10 @@ try {
       'and no pointer move rebuilt the lane stack: the drag arms a redraw and the animation loop '
       + 'is the only thing allowed to start one',
       `${dragged.duringRebuilds} rebuilds across ${MOVES} moves`);
+    check(dragged.duringRenders > 0,
+      'and the changed picture is rendered while the pointer is still down rather than waiting '
+      + 'for release',
+      `${dragged.duringRenders} renders before release`);
     check(dragged.rebuilds <= 2,
       'and the whole gesture costs one rebuild rather than one per move, which is the 34-for-one '
       + 'this program has already shipped once',
@@ -11278,13 +11328,6 @@ try {
       'and the apply says how many of them were the shared half, so the operator is told rather '
       + 'than left to find out',
       `${preset.report.shared} of ${preset.report.written} written`);
-    const copy = await page.evaluate(
-      "[...document.querySelectorAll('#presetPick p')].map((p) => p.textContent).join(' ')",
-    );
-    check(/project/i.test(copy) && /every other clip/i.test(copy),
-      'and the dialog that saves one says the same thing in words, on the surface a person reads',
-      copy.replace(/\s+/g, ' ').slice(0, 160));
-
     // Framing belongs to the shot. Drive the crop and both preset choices through the controls a
     // person uses, then ask the file door and the save dialog for the same boundary.
     const choosePreset = async (name) => {
@@ -11627,7 +11670,12 @@ try {
       time: __kinect.timeline.transport().programSec,
       gizmoMode: __kinect.editor.gizmo().mode,
       sourceClock: document.getElementById('tSource').textContent,
-      clipCommands: ['tAddClip', 'tDeleteClip', 'tMoveClip', 'tRotateClip', 'tKeyClip',
+      addClip: (() => {
+        const button = document.getElementById('tAddClip');
+        return { disabled: button.disabled, text: button.textContent,
+          parent: button.parentElement?.className ?? '' };
+      })(),
+      clipCommands: ['tDeleteClip', 'tMoveClip', 'tRotateClip', 'tKeyClip',
         'tRate', 'tRateKey', 'tPreset', 'tPresetSave', 'tPresetExport', 'tPresetImport',
         'tMark', 'camSensor', 'cropFit'].map((id) => [id, document.getElementById(id)?.disabled]),
     }))()`);
@@ -11655,8 +11703,14 @@ try {
       + 'a gesture onto the hidden selection',
     `crop shown ${off.cropShown}, ${off.cropHandles} handles, faint ${off.cropOutside}, `
       + `${off.markTicks} ruler and ${off.miniMarks} overview mark ticks`);
+    check(off.addClip.disabled === false && off.addClip.text === '+'
+      && off.addClip.parent.includes('clip-add-row'),
+    'while the full-width plus below the clip rows stays enabled, because adding belongs to the '
+      + 'edit and not to one selected clip',
+    `text ${JSON.stringify(off.addClip.text)}, disabled ${off.addClip.disabled}, `
+      + `parent ${JSON.stringify(off.addClip.parent)}`);
     check(off.clipCommands.every(([, disabled]) => disabled === true),
-      'and every command that needs a clip is disabled until a row is selected',
+      'and every command that does need a clip is disabled until a row is selected',
       off.clipCommands.map(([id, disabled]) => `${id}:${disabled}`).join(' '));
 
     // Press where the crop handle was, rather than only reading that its list is empty. This is
@@ -11721,6 +11775,56 @@ try {
     'and the mark-jump and clip-handle keys refuse rather than acting through the hidden clip',
     `time ${off.time} -> ${hiddenNavigation.time}, gizmo ${off.gizmoMode} -> `
       + `${hiddenNavigation.gizmoMode}, note "${hiddenNavigation.note}"`);
+
+    const addWithoutSelectionRestore = await page.evaluate(`(() => {
+      const k = __kinect;
+      const body = k.library.serialiseProjectBody();
+      body.clips[0].params.pointSize = 17.3;
+      body.clips.find((clip) => clip.id === 'gz2').params.pointSize = 31.5;
+      k.library.restoreProject(body);
+      return { body, count: body.clips.length, first: body.clips[0].id };
+    })()`);
+    await settle();
+    if (off.addClip.disabled === false) {
+      await page.locator('#tAddClip').click();
+      await page.waitForSelector(`#takePicker .tp-tile[data-take="${pickId}"]`, { timeout: 15000 });
+      await page.locator(`#takePicker .tp-tile[data-take="${pickId}"] .tp-meta`).click();
+      await page.locator('#takePicker .tp-act.go').click();
+      await page.waitForFunction(
+        (count) => __kinect.timeline.clips().length === count + 1,
+        addWithoutSelectionRestore.count,
+        { timeout: 25000 },
+      );
+      await settle();
+      const addedWithoutSelection = await page.evaluate((first) => {
+        const body = __kinect.library.serialiseProjectBody();
+        const selected = __kinect.editor.clipSelection();
+        return {
+          count: body.clips.length,
+          selected,
+          pointSize: body.clips.find((clip) => clip.id === selected)?.params.pointSize ?? null,
+          firstPointSize: body.clips.find((clip) => clip.id === first)?.params.pointSize ?? null,
+          hiddenPointSize: body.clips.find((clip) => clip.id === 'gz2')?.params.pointSize ?? null,
+        };
+      }, addWithoutSelectionRestore.first);
+      check(addedWithoutSelection.count === addWithoutSelectionRestore.count + 1
+        && addedWithoutSelection.selected !== null,
+      'the plus opens the picker with no clip selected and the chosen take lands as a selected clip',
+      `${addWithoutSelectionRestore.count} -> ${addedWithoutSelection.count} clips, `
+        + `selection ${addedWithoutSelection.selected}`);
+      check(addedWithoutSelection.firstPointSize === 17.3
+        && addedWithoutSelection.hiddenPointSize === 31.5
+        && addedWithoutSelection.pointSize === addedWithoutSelection.firstPointSize,
+      'and with no selection the new clip copies the first clip rather than the hidden last selection',
+      `new ${addedWithoutSelection.pointSize}, first ${addedWithoutSelection.firstPointSize}, `
+        + `hidden ${addedWithoutSelection.hiddenPointSize}`);
+    }
+    await page.evaluate((body) => {
+      __kinect.library.restoreProject(body);
+      __kinect.editor.deselectClipRow();
+      __kinect.keyframes.undo.begin();
+    }, addWithoutSelectionRestore.body);
+    await settle();
 
     await page.evaluate(`__kinect.editor.selectClipRow('gz2')`);
     await settle();

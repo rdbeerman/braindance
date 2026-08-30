@@ -82,12 +82,14 @@ whenever the editor opens, because the transport is built fresh each time and a 
 one take is not a fact about the next one.
 
 **Clips are the rows at the head of the lane stack**, one box each from where a clip starts to
-where it ends, above the curves that animate them. `+ add clip` opens the library's takes and the
-one you choose lands at the playhead on a row of its own; `delete clip` removes the selected one,
-and so does `Delete` — there is a button as well as a key because the Pi's touchscreen has
-neither a Delete key nor a drag affordance to discover. Click a box to select that clip, drag it
-along the strip to move it, and drag either edge to trim it. The edit refuses to delete its last
-clip, because a project carries at least one.
+where it ends, above the curves that animate them. The full-width `+` below the last clip opens
+the media library's takes even when no row is selected. The first one you choose lands at the
+playhead on a row of its own. With no selection, it copies the first clip's look; otherwise it
+copies the selected clip's. `delete clip` removes the selected one, and so does `Delete`. There is
+a button as well as a key because the Pi's touchscreen has neither a Delete key nor a drag affordance to
+discover. Click a box to select that clip, drag it along the strip to move it, and drag either
+edge to trim it. The edit refuses to delete its last clip, because a project carries at least
+one.
 
 **The two edges do different things.** The right edge moves where the edit stops using the take,
 which is the clip's own `length`. The left edge is a head trim: the clip starts later in the take,

@@ -180,13 +180,7 @@
   padding: 10px 12px;
   border-top: 1px solid var(--tp-line);
 }
-/* The sequence in words beside the numbers on the tiles, because the tiles are in library order
-   and the order picked is not the order they sit in. */
-.tp-order-line {
-  min-width: 0; flex: 1;
-  color: var(--tp-dim); font-size: 10px; line-height: 1.4;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
+.tp-spacer { flex: 1; }
 
 .tp-act {
   appearance: none; flex: 0 0 auto;
@@ -211,5 +205,5 @@
 @media (max-width: 560px) {
   .tp-grid { grid-template-columns: minmax(0, 1fr); }
   .tp-foot { flex-wrap: wrap; }
-  .tp-order-line { flex: 1 0 100%; }
+  .tp-spacer { flex: 1 0 100%; }
 }

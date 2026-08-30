@@ -564,15 +564,11 @@ function askDelete(tile, take) {
   document.getElementById('cTitle').textContent = alsoOnNode ? 'Two copies exist' : 'Delete take';
   // The id goes in as text: this is the confirm in front of the only irreversible action.
   const body = document.getElementById('cBody');
-  body.innerHTML =
-    `<b class="tid"></b> · ${mmss(take.durationSec)} · ${gb(take.bytes)}`
-    + (countOf(take.marks?.length) ? ` · ${countOf(take.marks.length)} marks` : ' · no marks')
-    + `<br>on ${take.state === 'remote' ? library.node?.name : alsoOnNode ? `this ${library.here} and ${library.node?.name}` : `this ${library.here}`}.`;
+  body.innerHTML = '<b class="tid"></b>';
   body.querySelector('.tid').textContent = take.id;
   document.getElementById('cWarn').textContent = alsoOnNode
-    ? `Delete removes the last copy, and this take has two - so it is refused while ${library.node?.name} still holds one. `
-      + 'Reclaim removes the copy over there, after re-hashing the one here.'
-    : 'This is the only copy. Deleting it cannot be undone, and any project built on it loses its footage.';
+    ? `Delete is disabled: two copies exist. Reclaim the copy on ${library.node?.name} first.`
+    : 'This is the only copy. Cannot be undone. Projects using it will lose footage.';
   const go = document.getElementById('cGo');
   go.textContent = 'Delete';
   go.disabled = alsoOnNode;
@@ -586,11 +582,9 @@ function askReclaim(tile, take) {
   document.getElementById('cGo').disabled = false;
   document.getElementById('cTitle').textContent = `Reclaim on ${library.node?.name}`;
   const rBody = document.getElementById('cBody');
-  rBody.innerHTML =
-    `Free <b>${gb(take.bytes)}</b> on ${library.node?.name} by removing its copy of <b class="tid"></b>. `
-    + `The copy here is re-hashed before anything is removed, and stays.`;
+  rBody.innerHTML = '<b class="tid"></b>';
   rBody.querySelector('.tid').textContent = take.id;
-  document.getElementById('cWarn').textContent = '';
+  document.getElementById('cWarn').textContent = 'Removes the node copy after this copy is verified.';
   document.getElementById('cGo').textContent = 'Reclaim';
   confirmAction = () => run(tile, `reclaiming ${take.id}`,
     () => post(`/library/reclaim/${encodeURIComponent(take.id)}`)).catch(() => {});
@@ -611,10 +605,6 @@ let renaming = null;
  */
 function askRename(tile, take) {
   renaming = { tile, take };
-  const body = document.getElementById('nBody');
-  body.innerHTML = `Renaming <b class="tid"></b> · ${gb(take.bytes)} · ${countOf(take.frames)} frames.<br>`
-    + 'The take keeps its content hash, so every project built on it still finds its footage.';
-  body.querySelector('.tid').textContent = take.id;
   renameInput.value = take.id;
   validateRename();
   renameDlg.showModal();
@@ -634,9 +624,8 @@ function validateRename() {
   else if (!VALID_ID.test(typed)) {
     why = 'letters, digits, dots, dashes and underscores only, starting with a letter, a digit or an underscore';
   } else if (typed === renaming.take.id) why = 'that is already its name';
-  else if (clash) why = `${typed} is taken by another take in this library`;
-  renameWhy.textContent = why || `${renaming.take.id}.knct becomes ${typed}.knct, marks and index with it`;
-  renameWhy.classList.toggle('ok', !why);
+  else if (clash) why = `${typed} is taken by another take in this media library`;
+  renameWhy.textContent = why;
   renameInput.classList.toggle('bad', Boolean(why) && Boolean(typed));
   renameGo.disabled = Boolean(why);
   return !why;
@@ -812,7 +801,7 @@ function paint() {
     const empty = document.createElement('div');
     empty.className = 'empty';
     empty.textContent = library.takes.length === 0
-      ? 'No takes here yet. Record one, or link a capture node with --node.'
+      ? 'No takes.'
       : `No takes are ${filter}.`;
     grid.appendChild(empty);
   }
@@ -823,10 +812,10 @@ function paint() {
     `<b>${library.takes.length}</b> take${library.takes.length === 1 ? '' : 's'} · <b>${mmss(total)}</b>`;
   const node = library.node;
   document.getElementById('where').innerHTML = node
-    ? `<span class="dot${node.reachable ? '' : ' off'}"></span>on <b>${library.here}</b> · node <b>${node.name}</b> ${node.reachable ? 'linked' : 'unreachable'} · reconciled by hash`
-    : `<span class="dot"></span>on <b>${library.here}</b> · no node linked`;
+    ? `<span class="dot${node.reachable ? '' : ' off'}"></span><b>${library.here}</b> · <b>${node.name}</b> ${node.reachable ? '' : 'unreachable'}`
+    : `<span class="dot"></span><b>${library.here}</b>`;
   const space = document.getElementById('space');
-  space.textContent = `${library.storage.label} left at current settings`;
+  space.textContent = `${library.storage.label} available`;
   space.classList.toggle('low', library.storage.secondsLeft < 15 * 60);
 
   for (const tab of document.querySelectorAll('.tab')) {
@@ -842,7 +831,7 @@ function paint() {
     if (still) openViewer(viewing.key);
     else {
       viewer.close();
-      say('that take is no longer in the library');
+      say('that take is no longer in the media library');
     }
   }
 }
@@ -872,7 +861,7 @@ async function refreshNow(mine, bound) {
   // Checked before it replaces the last library that worked: the server's refusals are JSON,
   // so `paint` reads `storage.label` off one and throws out of the top-level catch.
   if (!res.ok || !Array.isArray(body?.takes)) {
-    throw new Error(body?.error ?? `the library could not be listed: HTTP ${res.status}`);
+    throw new Error(body?.error ?? `the media library could not be listed: HTTP ${res.status}`);
   }
   if (mine !== refreshGeneration) return newestRefresh;
   library = body;
@@ -899,7 +888,7 @@ for (const tab of document.querySelectorAll('.tab')) {
 try {
   await refresh();
 } catch (err) {
-  say(`the library could not be read: ${err.message}`);
+  say(`the media library could not be read: ${err.message}`);
   paint();
 }
 
@@ -910,7 +899,7 @@ pollRecordState(async (state, changed) => {
   try {
     await refresh({ bound: true });
   } catch (err) {
-    say(`the library could not be reread: ${err.message}`);
+    say(`the media library could not be reread: ${err.message}`);
     throw err;
   }
 }, believedFromLibrary());

@@ -474,7 +474,9 @@ is not part of the edit, and a document recording it would make two people's sav
 work differ over nothing. A reopened project selects nothing.
 
 **Adding and removing a clip is an ordinary undo step**, because clips live in the body
-`history.snapshot()` stringifies. Removing one is the one case that needed more than a
+`history.snapshot()` stringifies. An add copies the selected clip's look, or the first clip's
+look when the stack has no selection, so the project-level action never depends on session
+selection. Removing one is the one case that needed more than a
 `history.commit()`: `restoreProject` is synchronous and refuses a document whose clip names
 footage this page is not already holding, and the undo of a delete hands it a clip array with a
 slot the page no longer has. Footage that is *open* is not a fetch, so that slot is re-pointed
@@ -594,14 +596,14 @@ opened that way holds no document, which means it has no file to autosave into a
 at all - the same rule that used to be carried by `__working__` existing, now carried by there
 being nothing to write to.
 
-**The takes page is the library, and the word `gallery` is gone.** The store it draws was already
+**The takes page is the media library, and the word `gallery` is gone.** The store it draws was already
 called that everywhere it is implemented - `server/library.js`, the `/library` routes, the client
 that renders it and the tool that proves it - and `gallery` named nothing but the URL those pages
-were served at, so the page is at `/library` and reads Library. Splitting the pages was the moment
+were served at, so the page is at `/library` and reads Media library. Splitting the pages was the moment
 to spend that rename and not a moment later, because a second page arriving under the old name
 would have doubled what the next reader has to reconcile.
 
-**The menu's tiles are RECORD, PROJECTS and LIBRARY, and the EDITOR tile is gone.** Nobody goes to
+**The menu's tiles are RECORD, PROJECTS and MEDIA LIBRARY, and the EDITOR tile is gone.** Nobody goes to
 the editor, they go to a project, so picking up yesterday's work is the projects page's own job
 rather than a fourth door standing beside it. What leaves with the tile is the resume record it
 read - a `localStorage` entry naming a take hash, matched back against the library listing to

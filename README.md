@@ -45,12 +45,10 @@ npm run build:native      # one-time, offline; skip it if you have no sensor
 npm start                 # menu on http://localhost:8080
 ```
 
-`npm start` lands on a menu: record a take, open your projects, or browse the library.
+`npm start` lands on a menu: record a take, open your projects, or browse the media library.
 
-![The menu, under a bar reading Braindance · capture. replay. transcend.: three cards
-reading RECORD, PROJECTS and LIBRARY. Record offers to arm the sensor and shoot a take,
-Projects offers every edit on this machine newest worked on first, and Library offers every
-take here and on the node, skimmable.](media/menu.png)
+![The menu, under a bar reading Braindance: three cards reading RECORD, PROJECTS and
+MEDIA LIBRARY.](media/menu.png)
 
 Two shortcuts past it:
 
@@ -78,7 +76,7 @@ tab is open, showing the record and mark buttons, "not recording", colour camera
 light toggles, monitor decimation and the OBS output settings. The bar's right-hand end
 reads the sensor serial, its firmware and "29 fps in".](media/viewer.png)
 
-**mark** drops a mark at the current frame, which shows up later on the library's scrub bar
+**mark** drops a mark at the current frame, which shows up later on the media library's scrub bar
 and the editor's ruler. **stop** closes the take: the `.knct` and its `.idx` index land in
 `captures/`, with a `.marks.jsonl` sidecar if you marked anything. `R` and `M` do the same
 two things from the keyboard.
@@ -127,16 +125,16 @@ parked, and export refuses until you say it may go without it.
 [Installing an effect](docs/reference.md#installing-an-effect-and-taking-one-away) has the
 routes, the rules the door enforces and the `--effects` flags.
 
-### 2. Find it in the library
+### 2. Find it in the media library
 
-**Library** on the menu, or the link in any surface's header.
+**Media library** on the menu, or the link in any surface's header.
 
-![The library: four take cards of identical size with depth thumbnails, each showing its
+![The media library: four take cards of identical size with depth thumbnails, each showing its
 duration, LOCAL badge, size, frame count, mark count and date above a New project from
 this take, a Delete and a three-dot menu. A filter row above them reads ALL 4, LOCAL 4,
 NODE ONLY 0 and BOTH 0, and the application bar carries a link back to the menu, Projects
-and Library beside each other with Library marked, and reads 4 takes, 04:58 and that no
-node is linked.](media/library.png)
+and Media library beside each other with Media library marked, and reads 4 takes, 04:58 and a linked
+node.](media/library.png)
 
 Every take is a same-size tile carrying its poster, duration, size, frame count, mark count
 and date. Skim a poster to scrub it; tap to open it large, with arrow keys stepping a frame
@@ -144,7 +142,7 @@ and up and down moving between takes.
 
 The **⋯** menu holds what does not fit on a 228px tile: **rename**, **show in the file
 manager** and **reclaim on node**. With a capture node linked, the filter row splits the
-library into *local*, *node only* and *both*.
+media library into *local*, *node only* and *both*.
 
 ### 3. Start a project on it
 
@@ -161,7 +159,7 @@ duplicate one to try something, or delete one.
 ![The projects page: two rows, each a wide depth thumbnail of the edit beside the project
 name, when it was last written, its clip count, its shape and its rate, with a three-dot
 menu at the right. A New project button sits above them and the application bar reads
-2 projects, with Projects marked beside Library.](media/projects.png)
+2 projects, with Projects marked beside Media library.](media/projects.png)
 
 In the editor the cloud draws on the left, the keyed camera path with it and in the top-down
 inset, and the timeline underneath.

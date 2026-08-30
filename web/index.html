@@ -324,11 +324,6 @@
     border: 1px solid var(--line-3); border-radius: 0; background: transparent; }
   .check input[type=checkbox]:checked { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 2px var(--paper-1); }
 
-  /* Clear of the panel rather than under it. The panel is 252px at 16px from the
-     left and scrolls to the full window height, so a hint sharing that column sat
-     underneath the last control on any window tall enough to fill it. */
-  #hint { position: fixed; bottom: 10px; left: 318px; color: var(--dim); z-index: 10; font-size: 11px; }
-
   #camNote, #recNote, #recSpace, #monNote, #recRange, #viewNote, #progNote {
     color: var(--dim); font-size: 12px; line-height: 1.45; opacity: 0.75; margin-top: 2px;
   }
@@ -675,7 +670,6 @@
     background: var(--paper-1); border-top: 1px solid var(--line);
   }
   #timeline[hidden] { display: none; }
-  body.editing #hint { display: none; }
   body.editing #panel { height: calc(100vh - var(--timeline-h) - var(--tlanes-h) - 38px); }
 
   /* ── the collapsed panel ───────────────────────────────────────────────────
@@ -724,9 +718,6 @@
     height: auto;
     bottom: calc(var(--timeline-h) + var(--tlanes-h));
   }
-  /* The hint names a mouse - drag, scroll, right-drag - and sits at `left: 318px`,
-     which is inside the cloud once the panel is not 302px wide any more. */
-  body.panelcollapsed #hint { display: none; }
   /* The two that act on the take are the recorder's, and the editor does not have them.
      `body.editing #panelTabRecord` above takes the whole Record tab off that surface, so
      the panel there offers no `record` and no `mark` at all - and the dock is the panel's
@@ -762,7 +753,6 @@
      leave behind still saying `display: none` about an element the shared sheet had
      renamed. */
   body.program-out #panel,
-  body.program-out #hint,
   body.program-out #timeline { display: none; }
   body.program-out { background: #000; overflow: hidden; }
   #programOutReadout {
@@ -1217,7 +1207,7 @@
   .tclipedge.head::after { left: 3px; }
   .tclipedge.tail::after { right: 3px; }
   .tclip.sel .tclipedge::after { background: var(--accent); }
-  /* The head of the stack: the two commands that add and remove a clip. */
+  /* The bed carries commands that need one selected clip. */
   .tlane.tclipbar { display: flex; align-items: center; gap: 6px; padding-left: 4px; }
   .tclipcmd {
     font: inherit; font-size: 10px; color: var(--dim); background: none;
@@ -1225,6 +1215,11 @@
   }
   .tclipcmd:hover:not(:disabled) { color: var(--ink); border-color: var(--accent); }
   .tclipcmd:disabled { opacity: 0.4; cursor: default; }
+  .tcol.rail .trow.clip-add-row { padding: 3px 8px; }
+  .tclipcmd.tclipadd {
+    flex: 1 1 auto; width: 100%; height: 28px; padding: 0; border-radius: 3px;
+    color: var(--accent); font-size: 20px; line-height: 26px;
+  }
   /* A command that is a mode rather than an action says which mode is armed. Without this the
      only thing on screen saying so is the shape of the handles in the viewport. */
   .tclipcmd[aria-pressed=true] { color: var(--bg); background: var(--accent);
@@ -1365,9 +1360,6 @@
   <div class="diverged" id="tDiverged" role="alert" hidden>
     <b>Somebody else has this project open.</b>
     <span id="tDivergedWhen"></span>
-    <p>This tab has stopped writing. The file has moved on, so anything it sent now would either
-      be refused or take that work away. What is on screen is intact and still undoable, so
-      duplicating carries it on under a name of its own.</p>
     <button class="dialog-action" id="tDivergedCopy" type="button">Duplicate project</button>
   </div>
 
@@ -1518,8 +1510,6 @@
     <input id="effectRackSearch" type="search" autocomplete="off" spellcheck="false" placeholder="search">
     <div class="effect-rack-list" id="effectRackList" aria-label="Installed effects"></div>
   </aside>
-
-  <div id="hint">drag to orbit · scroll to zoom · right-drag to pan · <b>R</b> record · <b>M</b> mark · <b>H</b> hides panel</div>
 
   <section id="timeline" hidden aria-label="Timeline">
     <!-- `tabindex` because the role is a promise. A functional `separator` that only a
@@ -1699,9 +1689,6 @@
       <label for="tFps">Frame rate</label>
       <select id="tFps"></select>
     </div>
-    <p id="projectNote">The shape and the rate belong to the edit, so changing either is
-      undoable and every deliverable made from this clip inherits it. Resolution and format
-      are per-deliverable and live in Export.</p>
     <div class="dialog-actions">
       <!-- The spacer the other two dialogs get from their status note, and not a `.note`
            of its own, because a `.note` is a place a message lands and this dialog has no
@@ -1729,8 +1716,7 @@
         <input id="renameName" type="text" autocomplete="off" spellcheck="false" />
       </div>
     </div>
-    <p class="note" id="renameNote">The file moves with the name. Nothing else about the edit
-      changes, and every deliverable made from it keeps working.</p>
+    <p class="note" id="renameNote"></p>
     <div class="dialog-actions">
       <span class="dialog-spacer"></span>
       <button class="dialog-secondary" id="renameCancel" type="button">cancel</button>
@@ -1862,7 +1848,6 @@
       <span class="dialog-label">Webcam source</span>
       <div class="dialog-copy"><input id="obsWebcamUrl" type="text" readonly><button class="dialog-secondary" id="obsCopyWebcam" type="button">copy</button></div>
     </div>
-    <p id="obsNote">The browser source renders the program camera. The webcam URL serves the Kinect colour camera directly.</p>
     <div class="dialog-actions">
       <!-- The dot is lit off the server's own subscriber list rather than off the fact
            that this dialog is open. The literal it replaces said `ready` on a machine
@@ -1899,12 +1884,6 @@
        written here is the furniture the generator hangs them on. -->
   <dialog id="presetPick" aria-labelledby="ppTitle">
     <h2 id="ppTitle">Save this look</h2>
-    <p>A preset carries the values you tick and nothing else, so a clip it is applied to
-      keeps everything left out. The five reading weights tick and untick together,
-      because a look naming some of them renders as a blend nobody authored.</p>
-    <p>Applying one is not all on one clip. The cloud values land on the selected clip;
-      the post chain - bloom, trails, crush and the rest of the grade - is the project's,
-      so those land once and every other clip in the edit is seen through them.</p>
     <input id="ppName" type="text" autocomplete="off" spellcheck="false" aria-label="Preset name" />
     <div id="ppGroups"></div>
     <div class="ppacts">

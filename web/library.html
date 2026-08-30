@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Braindance · Library</title>
+<title>Braindance · Media library</title>
 <link rel="icon" href="data:," />
 <link rel="stylesheet" href="/nav.css" />
 <style>
@@ -261,8 +261,8 @@
     border-radius: 0; background: var(--well); color: var(--ink); font: inherit; font-size: 12px; }
   #rName:focus { outline: none; border-color: var(--accent); }
   #rName.bad { border-color: var(--rec); }
-  #rWhy { margin: 8px 0 0; min-height: 30px; font-size: 10px; }
-  #rWhy.ok { color: var(--dim); }
+  #rWhy { margin: 8px 0 0; font-size: 10px; }
+  #rWhy:empty { display: none; }
 
   /* The viewer: one take, large, with the scrub bar it deserves.
 
@@ -300,7 +300,6 @@
   .vfoot .vfacts { font-size: 9px; color: var(--faint); display: flex; gap: 8px; flex-wrap: wrap; }
   .vfoot .vacts { margin-left: auto; display: flex; gap: 8px; flex: none; }
   .vfoot .vacts .act { flex: 0 0 auto; padding: 0 14px; }
-  .vkeys { padding: 0 12px 12px; color: var(--faint); font-size: 9px; }
   .vnote { padding: 0 12px 10px; color: var(--warn); font-size: 10px; }
   .vnote:empty { display: none; }
   /* The status line the viewer needs of its own. `say` writes what an action is doing
@@ -351,7 +350,7 @@
   <a class="appback" id="toMenu" href="/"><span class="arrow">&lt;</span><span>Menu</span></a>
   <nav class="surfaces" id="navRow" aria-label="Surface navigation">
     <a class="surface" id="toProjects" href="/projects">Projects</a>
-    <a class="surface" id="toLibrary" href="/library" aria-current="page">Library</a>
+    <a class="surface" id="toLibrary" href="/library" aria-current="page">Media library</a>
   </nav>
   <div class="appstatus">
     <span class="sum" id="sum">reading…</span>
@@ -368,7 +367,7 @@
 </div>
 
 <div id="note"></div>
-<main class="grid" id="grid" aria-label="Takes"></main>
+<main class="grid" id="grid" aria-label="Media library"></main>
 
 <dialog id="confirm">
   <h2 id="cTitle">Delete take</h2>
@@ -382,7 +381,6 @@
 
 <dialog id="rename">
   <h2>Rename take</h2>
-  <p id="nBody"></p>
   <input id="rName" type="text" autocomplete="off" spellcheck="false" aria-label="New take name" />
   <p class="warnline" id="rWhy"></p>
   <div class="row">
@@ -411,9 +409,6 @@
   </div>
   <div class="vnote" id="vNote"></div>
   <div class="vsay" id="vSay"></div>
-  <div class="vkeys">
-    &larr; &rarr; step a frame · shift for ten · home / end · &uarr; &darr; another take · esc to close
-  </div>
 </dialog>
 
 <script type="module" src="/library.js"></script>

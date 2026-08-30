@@ -23,6 +23,10 @@ redesigning.** That has happened repeatedly and reporting was the right move eve
 ## Working with the person who asked
 
 - **Write plainly.** Short sentences, ordinary words, no term the reader did not use first.
+- **Less is more in the interface.** Controls and labels must explain themselves. Do not add
+  taglines, helper captions, onboarding copy or modal prose that repeats what the surface already
+  says. Keep text for live state, values, errors, accessibility and consequences the controls
+  cannot show, especially destructive ones.
 - **Surface open questions instead of implementing one reading of them.** An ambiguous
   requirement gets a question with concrete options, asked before the work rather than explained
   after it. Guessing costs a rewrite and asking costs a minute.

@@ -5685,13 +5685,7 @@ const ui = {
   recRange: document.getElementById('recRange'),
 };
 
-/**
- * The two clip commands at the head of the lane stack.
- *
- * Built here rather than declared in the page because `rebuildLanes` empties the stack that
- * holds them: a button declared in the markup would be swept away on the first key drag. They
- * are moved into each rebuild rather than rebuilt, so they keep their listeners and their focus.
- */
+/** Clip commands moved through lane rebuilds without losing their listeners or focus. */
 const stripCommand = (id, text, title) => {
   const el = document.createElement('button');
   el.type = 'button';
@@ -5701,7 +5695,9 @@ const stripCommand = (id, text, title) => {
   el.title = title;
   return el;
 };
-ui.addClip = stripCommand('tAddClip', '+ add clip', 'Add a clip from the library');
+ui.addClip = stripCommand('tAddClip', '+', 'Add clips from Media library');
+ui.addClip.classList.add('tclipadd');
+ui.addClip.setAttribute('aria-label', 'Add clips');
 ui.deleteClip = stripCommand('tDeleteClip', 'delete clip', 'Delete the selected clip (Del)');
 ui.moveClip = stripCommand('tMoveClip', 'move', 'Move the selected clip in the room (g)');
 ui.rotateClip = stripCommand('tRotateClip', 'rotate', 'Turn the selected clip in the room (g)');
@@ -5814,7 +5810,13 @@ if (gizmo) {
     // Both controls want the pointer, so the orbit stands down for the drag and comes back to
     // whatever the view camera says it should be - not unconditionally on.
     controls.enabled = e.value ? false : viewCamera === freeCamera;
-    if (e.value) return;
+    if (e.value) {
+      // Orbit sees the shared pointerdown first; the gizmo owns this gesture from here.
+      orbiting = false;
+      orbitSettling = false;
+      orbitRedrawWanted = false;
+      return;
+    }
     // The last move of the drag, then the lane rebuild and the one undo step the gesture is.
     pumpGizmo();
     lanesChanged();
@@ -6864,9 +6866,10 @@ let selection = null;
 /** The clip the strip has selected, or null. Not `selectedClip`, which is never null. */
 const selectedClipRow = () => clipRow;
 
-// The row at the head of the stack that carries the two clip commands, and one row per clip.
+// The stack header, one row per clip, and the add row beneath them.
 const CLIP_BAR_H = 26;
 const CLIP_LANE_H = 24;
+const CLIP_ADD_H = 34;
 // The least a clip may be trimmed to, so an edge drag cannot make one that cannot be grabbed.
 const MIN_CLIP_SEC = 0.2;
 
@@ -6925,6 +6928,7 @@ function laneRows() {
       });
     }
   }
+  rows.push({ owner: 'clip-add', label: '', kind: 'clip-add', height: CLIP_ADD_H });
   if (retime.keys.length > 0) {
     rows.push({ owner: 'retime', label: 'retime', kind: 'scalar', height: RETIME_LANE_H });
   }
@@ -6977,7 +6981,7 @@ const withLaneClip = (owner, write) => {
 
 // A clip row and the bar above it own no keys, so a lane's key list is empty rather than absent.
 const keysOf = (owner) => {
-  if (owner === 'clips' || isClipRow(owner)) return [];
+  if (owner === 'clips' || owner === 'clip-add' || isClipRow(owner)) return [];
   return owner === 'retime' ? retime.keys : (trackOf(owner)?.keys ?? []);
 };
 
@@ -6986,6 +6990,7 @@ const clipOf = (owner) => (isClipRow(owner) ? laneClip(owner) : null);
 
 function laneReadout(owner) {
   if (owner === 'clips') return `${clips.length} of ${CLIP_CEILING}`;
+  if (owner === 'clip-add') return '';
   const clip = clipOf(owner);
   // The length rather than the placement: where a clip sits is what its box already says, and
   // the rail is 96px wide, which fits one number and not two.
@@ -7028,7 +7033,12 @@ function rebuildLanes() {
       fold.addEventListener('click', () => toggleClipLanes(row.clip));
       rail.append(fold);
     }
-    rail.append(label, value);
+    if (row.kind === 'clip-add') {
+      rail.classList.add('clip-add-row');
+      rail.append(ui.addClip);
+    } else {
+      rail.append(label, value);
+    }
     ui.railLanes.appendChild(rail);
 
     const bed = document.createElement('div');
@@ -7124,12 +7134,11 @@ function placeClipBox(box, clip) {
 }
 
 function drawLane(lane, row) {
+  if (row.kind === 'clip-add') return;
   if (row.kind === 'clips') {
-    // In the bed rather than in the rail: the rail is 96px wide and these are two word-shaped
-    // commands. Moved in rather than rebuilt, so they keep their listeners and their focus
-    // across a rebuild the stack does on every key drag.
+    // These commands act on a selected clip. Add has its own row below the clip stack.
     lane.classList.add('tclipbar');
-    lane.append(ui.addClip, ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);
+    lane.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);
     return;
   }
   if (row.kind === 'clip') {
@@ -8468,10 +8477,10 @@ function deselectClipRow() {
   requestRepaint();
 }
 
-/** How the two clip commands read: what the edit can still take, and what is selected. */
+/** How the clip commands read: what the edit can still take, and what is selected. */
 function paintClipCommands() {
   const selected = !EDITING || selectedClipRow() !== null;
-  ui.addClip.disabled = !selected || clips.length + pendingClipAdds >= CLIP_CEILING;
+  ui.addClip.disabled = clips.length + pendingClipAdds >= CLIP_CEILING;
   ui.deleteClip.disabled = !selected || clips.length === 1;
   // The handles need a clip to be on, which is the same thing the delete needs.
   ui.moveClip.disabled = !selected;
@@ -8492,22 +8501,16 @@ function paintClipCommands() {
 /**
  * A clip of `id`, starting at `start`, on a row of its own.
  *
- * It comes up on the look of the clip you were working on rather than on the registry's
- * defaults: a layer that arrived ungraded beside four that are graded reads as a broken clip
- * rather than as a new one.
+ * It comes up on the selected clip's look, or the first clip's when the stack has no selection.
  */
 async function addClipFromTake(id, start) {
   if (refuseEdit('adding a clip')) return null;
-  const initiating = selectedClipRow();
-  if (!initiating) {
-    say('select the clip whose look the new clip should copy');
-    return null;
-  }
+  const initiating = selectedClipRow() ?? clips[0];
   if (clips.length + pendingClipAdds >= CLIP_CEILING) {
     say(`this build composites ${CLIP_CEILING} clips and this edit already holds ${clips.length}`);
     return null;
   }
-  const from = params.values(scopeNames('clip'));
+  const from = withClip(initiating, () => params.values(scopeNames('clip')));
   const generation = documentGeneration;
   pendingClipAdds++;
   paintClipCommands();
@@ -10467,8 +10470,7 @@ function paintRenameRefusal() {
     : documentNameRefusal('project', to);
   shell.renameField.classList.toggle('bad', to !== '' && refused !== null);
   shell.renameGo.disabled = refused !== null;
-  shell.renameNote.textContent = refused
-    ?? 'The file moves with the name. Nothing else about the edit changes.';
+  shell.renameNote.textContent = refused ?? '';
 }
 
 shell.renameName.addEventListener('input', paintRenameRefusal);
@@ -10706,7 +10708,7 @@ async function sourcesFor(plan) {
   const listed = await fetch('/library/takes');
   const library = await listed.json().catch(() => null);
   if (!listed.ok || !Array.isArray(library?.takes)) {
-    throw new Error(library?.error ?? `the take library could not be read: HTTP ${listed.status}`);
+    throw new Error(library?.error ?? `the media library could not be read: HTTP ${listed.status}`);
   }
   const { takes } = library;
   const opened = new Map();
@@ -10723,7 +10725,7 @@ async function sourcesFor(plan) {
     if (source.take.index.hash !== planned.take.hash) {
       throw new Error(
         `clip ${planned.id} asks for ${planned.take.hash.slice(0, 22)}… but ${match.id} opened as `
-        + `${source.take.index.hash.slice(0, 22)}…: the library changed while the project was opening`,
+        + `${source.take.index.hash.slice(0, 22)}…: the media library changed while the project was opening`,
       );
     }
     opened.set(at, source);
@@ -11172,7 +11174,7 @@ if (EDITING && !REQUESTED_TAKE && !REQUESTED_PROJECT && !REQUESTED_NEW) {
 
   programOutReadout = document.createElement('div');
   programOutReadout.id = 'programOutReadout';
-  programOutReadout.textContent = 'PROGRAM OUT  waiting for the operator';
+  programOutReadout.textContent = 'PROGRAM OUT  idle';
   document.body.appendChild(programOutReadout);
 
   connect();

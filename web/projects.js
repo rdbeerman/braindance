@@ -284,7 +284,7 @@ function buildRow(project) {
       ? `No footage here. This project is cut on ${missing.join(', ')}.`
       : `${missing.length} of ${body.clips.length} clips have no footage here: ${missing.join(', ')}.`;
     dark.appendChild(what);
-    addButton(dark, 'Open the library', 'act small', (e) => {
+    addButton(dark, 'Open Media library', 'act small', (e) => {
       e.stopPropagation();
       location.href = '/library';
     }, { item: 'to-library' });
@@ -452,8 +452,7 @@ function paint() {
     const empty = document.createElement('div');
     empty.className = 'empty';
     const p = document.createElement('p');
-    p.textContent = 'No projects yet. New project asks which footage first, and picking it is what '
-      + 'makes the project - so there is nothing here to clean up if you change your mind.';
+    p.textContent = 'No projects.';
     empty.appendChild(p);
     listEl.appendChild(empty);
   }
@@ -550,16 +549,9 @@ document.getElementById('cGo').addEventListener('click', () => {
 
 function askDelete(project) {
   const body = document.getElementById('cBody');
-  // Off the body defensively: an unreadable project keeps its menu precisely so it can be
-  // deleted, and reaching for a clip count it has not got threw before the dialog ever opened.
-  const clips = Array.isArray(project.body?.clips) ? project.body.clips.length : null;
-  body.innerHTML = '<b class="pid"></b>'
-    + (clips === null ? '' : ` · ${clips} clip${clips === 1 ? '' : 's'}`)
-    + ` · last written ${stamp(project.savedAt)}`;
+  body.innerHTML = '<b class="pid"></b>';
   body.querySelector('.pid').textContent = project.name;
-  document.getElementById('cWarn').textContent =
-    'Deleting a project cannot be undone. The footage it was cut from is untouched - this removes '
-    + 'the edit, not the takes.';
+  document.getElementById('cWarn').textContent = 'Footage is kept. This cannot be undone.';
   document.getElementById('cGo').textContent = 'Delete';
   document.getElementById('cGo').disabled = false;
   // The rev goes with it, so a confirm built against one listing cannot delete a project that
@@ -594,10 +586,6 @@ let renaming = null;
  */
 function askRename(project) {
   renaming = project;
-  const body = document.getElementById('nBody');
-  body.innerHTML = 'Renaming <b class="pid"></b>. The file moves with the name; nothing else about '
-    + 'the edit changes.';
-  body.querySelector('.pid').textContent = project.name;
   renameInput.value = project.name;
   validateRename();
   renameDlg.showModal();
@@ -611,8 +599,7 @@ function validateRename() {
   let why = documentNameRefusal('project', typed) ?? '';
   if (!why && typed === renaming.name) why = 'that is already its name';
   else if (!why && names().has(typed)) why = `${typed} is taken by another project`;
-  renameWhy.textContent = why || `${renaming.name} becomes ${typed}.`;
-  renameWhy.classList.toggle('ok', !why);
+  renameWhy.textContent = why;
   renameInput.classList.toggle('bad', Boolean(why) && Boolean(typed));
   renameGo.disabled = Boolean(why);
   return !why;

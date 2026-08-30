@@ -395,15 +395,15 @@ const MUTATIONS = {
   // The bound goes back onto the first listing, where a cold library is slow for a legitimate
   // reason and fifteen seconds is not enough to build 200 indexes.
   'first-load-bounded': { file: 'web/library.js', edits: [[
-    'try {\n  await refresh();\n} catch (err) {\n  say(`the library could not be read',
-    'try {\n  await refresh({ bound: true });\n} catch (err) {\n  say(`the library could not be read',
+    'try {\n  await refresh();\n} catch (err) {\n  say(`the media library could not be read',
+    'try {\n  await refresh({ bound: true });\n} catch (err) {\n  say(`the media library could not be read',
   ]] },
 
   // The first listing goes back to being unguarded, so anything it throws ends module
   // evaluation before the poll is started and before the page has a hook to drive.
   'first-load-strands-the-page': { file: 'web/library.js', edits: [[
     'try {\n  await refresh();\n} catch (err) {\n'
-    + '  say(`the library could not be read: ${err.message}`);\n  paint();\n}',
+    + '  say(`the media library could not be read: ${err.message}`);\n  paint();\n}',
     'await refresh();',
   ]] },
 
@@ -411,7 +411,7 @@ const MUTATIONS = {
   // it was until a JSON refusal was found walking straight past the catch above.
   'listing-takes-a-refusal-as-a-library': { file: 'web/library.js', edits: [[
     '  if (!res.ok || !Array.isArray(body?.takes)) {\n'
-    + '    throw new Error(body?.error ?? `the library could not be listed: HTTP ${res.status}`);\n'
+    + '    throw new Error(body?.error ?? `the media library could not be listed: HTTP ${res.status}`);\n'
     + '  }\n',
     '',
   ]] },
@@ -3111,12 +3111,12 @@ async function runChecks() {
     const { page, errors } = await openPage(browser, libraryPage(emptyUrl));
     await page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     const line = await page.evaluate('globalThis.__library.emptyLine()');
-    check(/No takes here yet/.test(line ?? ''), 'an empty library says so rather than rendering nothing',
+    check(/^No takes\.$/.test(line ?? ''), 'an empty media library says so rather than rendering nothing',
       String(line));
     // A library with nothing in it says so whichever tab is selected.
     await page.evaluate('globalThis.__library.filter("local")');
     const filtered = await page.evaluate('globalThis.__library.emptyLine()');
-    check(/No takes here yet/.test(filtered ?? ''),
+    check(/^No takes\.$/.test(filtered ?? ''),
       'and it keeps saying so under a filter rather than blaming the filter',
       String(filtered));
     check(errors.length === 0, 'and an empty library raises no page errors', errors.slice(0, 2).join(' | '));

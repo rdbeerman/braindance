@@ -36,10 +36,9 @@
     font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: clip; }
   body { display: flex; flex-direction: column; }
 
-  .head { flex: none; height: 37px; display: flex; align-items: center; gap: 16px;
+  .head { flex: none; height: 37px; display: flex; align-items: center;
     padding: 0 15px; background: var(--paper-1); border-bottom: 1px solid var(--line); }
   .head h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.14em; }
-  .head .sum { color: var(--dim); font-size: 9px; letter-spacing: 0.02em; }
 
   /* Centred rather than filling, because there are three of them and a grid stretched
      to the viewport puts the labels at the corners of a large display. */
@@ -50,13 +49,11 @@
      browser can show, open in a tab and go back from. The tile idiom is the
      library's: a bordered card on --paper-1 that lifts its border on hover. Sized
      for the node's touch panel, where these are pressed with a finger. */
-  .entry { display: flex; flex-direction: column; gap: 8px; padding: 24px 28px;
+  .entry { display: flex; padding: 24px 28px;
     border: 1px solid var(--line); border-radius: 0; background: var(--paper-1);
-    color: inherit; text-decoration: none; justify-content: center; }
+    color: inherit; text-decoration: none; align-items: center; }
   .entry:hover { border-color: var(--line-2); background: var(--paper-2); }
   .entry .what { font-size: 23px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
-  .entry .why { font-size: 11px; color: var(--dim); }
-  .entry .why b { color: var(--ink); font-weight: 500; }
 
   .entry.record .what { color: var(--rec); }
   .entry.record:hover { border-color: var(--rec); background: var(--rec-low); }
@@ -74,7 +71,6 @@
 
 <header class="head">
   <h1>Braindance</h1>
-  <div class="sum">capture. replay. transcend.</div>
 </header>
 
 <!-- Three tiles and no fourth. There used to be an EDITOR tile, and what it needed to
@@ -86,15 +82,12 @@
 <main class="menu" aria-label="Main menu">
   <a class="entry record" href="/record">
     <span class="what">Record</span>
-    <span class="why">Arm the sensor and shoot a take.</span>
   </a>
   <a class="entry projects" href="/projects">
     <span class="what">Projects</span>
-    <span class="why">Every edit on this machine, newest worked on first.</span>
   </a>
   <a class="entry library" href="/library">
-    <span class="what">Library</span>
-    <span class="why">Every take here and on the node, skimmable.</span>
+    <span class="what">Media library</span>
   </a>
 </main>
 
@@ -110,7 +103,6 @@ globalThis.__menu = {
   entries: () => tiles.map((el) => ({
     what: el.querySelector('.what').textContent,
     href: el.getAttribute('href'),
-    why: el.querySelector('.why').textContent,
   })),
 };
 </script>
