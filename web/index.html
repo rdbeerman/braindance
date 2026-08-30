@@ -55,7 +55,7 @@
        the document row was missing, which is the same number with that row's 44 taken
        out - so the constant and the markup disagreeing is what a strip losing a row
        looks like from here. */
-    --timeline-h: 170px;
+    --timeline-h: 112px;
     --tlanes-h: 0px;
   }
   * { box-sizing: border-box; }
@@ -967,8 +967,7 @@
   /* The rebuild's own territory. It empties this and nothing else, so a sibling in
      either column - the cuts, the playhead, the shading - is out of its reach because
      of where it sits rather than because the loop remembers to skip it. */
-  .tstack { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0;
-    justify-content: flex-end; }
+  .tstack { display: flex; flex-direction: column; flex: none; min-width: 0; }
   /* Capped at whatever `--tlanes-h` is, so the lanes scroll instead of pushing the
      strip taller without limit. Every keyed parameter used to add a permanent row and
      take that height off the stage with no way to get it back.
