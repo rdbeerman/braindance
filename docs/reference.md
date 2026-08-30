@@ -450,6 +450,10 @@ middle out. `line` is where that split sits, as a fraction of frame height from 
 of separate needles, and at 16 it comes apart in ribbons. Ragged rather than a clean stretch is
 the whole difference between this and a vertical zoom.
 
+`drift` blends the fixed column pattern into the animated one, so its full range is exactly 0 to
+1. The shader clamps that blend at both ends; exposing values above 1 would add dead slider travel.
+`speed` sets the animated pattern's clock and does nothing while drift is zero.
+
 `refresh s` is the one control that is not only a look: it is how long the pass is allowed to
 remember, and every that many seconds of program time the picture snaps back to the frame it was
 handed. That snap is the pulse the look wants and it is also what makes the timeline work — a seek
@@ -800,8 +804,9 @@ a raster can rotate under the playhead. `pitch` is the line frequency, promoted 
 and defaulting to it — and **the settings worth having are below that default, not above it**,
 because the wave is sized against 1080p and 1.3 is already about 220 cycles across the frame.
 That is a television scanline; the wide bands the reference frames cut a picture into want
-something under 0.6, and 0.1 is bands you can read across the room. The slider runs to 4 rather
-than further because a line thinner than the pixel drawing it is aliasing rather than a raster.
+something under 0.6, and 0.1 is bands you can read across the room. The slider ends at 1.5 because
+the settings above it only make a line thinner than the pixel drawing it, which is aliasing rather
+than a raster.
 `hardness` squares the wave into a grille with dark gaps between the
 lines, and it is the one that makes the other two worth having: an angle over a sine only ever
 buys rotated softness, where the references are hard line grilles.
@@ -856,6 +861,11 @@ Rows declared `under` another parameter are hidden while that master is at its a
 Removing one resets every value and deletes every track in one confirmed, undoable edit.
 The local rack preference is panel state, not project state. The generator refuses to boot
 if the rows it emitted are not the parameters that were declared.
+
+The bounds are authoring travel, not mathematical limits. Mixes, angles and positions keep their
+full semantic range. Amplifiers end where the live picture stops producing a useful new setting,
+so a small pointer move remains a small change and the slider has no dead or destructive tail.
+Every shipped preset sits on those same grids.
 
 ## Presets
 

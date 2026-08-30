@@ -3230,7 +3230,7 @@ async function runChecks() {
 
     // A look nothing defaults to, so a restore that did nothing cannot pass.
     const SCRAMBLE = {
-      pointSize: 21.6, opacity: 0.62, exposure: 2.35, bloom: 1.35, trails: 0.62,
+      pointSize: 21.6, opacity: 0.62, exposure: 2.35, bloom: 0.85, trails: 0.62,
       'rgbsplit.amount': 2.4, 'raster.amount': 0.44, 'grain.amount': 0.31,
       'blackwall.scan': 0.62, rim: 0.28, fade: 340, wake: 720,
     };
@@ -3602,7 +3602,7 @@ async function runChecks() {
     const real = await page.evaluate(`(() => {
       const k = globalThis.__kinect;
       try {
-        return { spec: typeof k.params.spec('bloom').max, normalised: k.params.normalise('bloom', 1.25), set: k.params.set('bloom', 1.25), got: k.params.get('bloom') };
+        return { spec: typeof k.params.spec('bloom').max, normalised: k.params.normalise('bloom', 0.75), set: k.params.set('bloom', 0.75), got: k.params.get('bloom') };
       } catch (e) { return { error: e.message }; }
     })()`);
     check(real.spec === 'number' && Number.isFinite(real.normalised) && real.got === real.set,
@@ -3621,7 +3621,7 @@ async function runChecks() {
     await page.evaluate('globalThis.__kinect.timeline.settled()');
 
     // A preset saved off a Blackwall clip whose values have then been moved away from.
-    const TUNED = { bloom: 2.4, trails: 0.11, 'rgbsplit.amount': 4.2, 'grain.amount': 0.77, pointSize: 30.5 };
+    const TUNED = { bloom: 0.9, trails: 0.11, 'rgbsplit.amount': 2.7, 'grain.amount': 0.77, pointSize: 30.5 };
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
       k.params.apply({ readRgb: 0, 'blackwall.amount': 1 });
@@ -3764,7 +3764,7 @@ async function runChecks() {
 
     const builtinPath = join(WORK, 'builtin-presets/blackwall.json');
     const bytesBefore = readFileSync(builtinPath, 'utf8');
-    const forkBody = { version: PROJECT_VERSION, requires: shipped.requires, values: { ...shipped.values, bloom: 5.5 } };
+    const forkBody = { version: PROJECT_VERSION, requires: shipped.requires, values: { ...shipped.values, bloom: 0.95 } };
     await post(`${macUrl}/presets/blackwall`, forkBody, 'PUT');
     check(readFileSync(builtinPath, 'utf8') === bytesBefore,
       'saving over a shipped look leaves the shipped file byte-identical',
@@ -3773,7 +3773,7 @@ async function runChecks() {
     check(existsSync(forkPath), 'and the save landed in the user\'s own library instead',
       existsSync(forkPath) ? readdirSync(join(WORK, 'presets')).join(' ') : 'no fork on disk');
     const afterFork = await getJson(`${macUrl}/presets/blackwall`);
-    check(afterFork.builtin === false && afterFork.body.values.bloom === 5.5,
+    check(afterFork.builtin === false && afterFork.body.values.bloom === 0.95,
       'and reading the name now answers the fork, not the look it was forked from',
       `builtin=${afterFork.builtin} bloom=${afterFork.body.values.bloom}`);
 

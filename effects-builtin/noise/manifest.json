@@ -7,7 +7,7 @@
     "amount": {
       "def": 0,
       "min": 0,
-      "max": 1,
+      "max": 0.25,
       "step": 0.005,
       "kind": "scalar",
       "label": "turbulence",
@@ -41,7 +41,7 @@
     "speed": {
       "def": 0.7,
       "min": 0,
-      "max": 3,
+      "max": 2,
       "step": 0.05,
       "kind": "scalar",
       "label": "speed",
@@ -58,7 +58,7 @@
     "region": {
       "def": 0,
       "min": 0,
-      "max": 1,
+      "max": 0.25,
       "step": 0.005,
       "kind": "scalar",
       "label": "scramble",

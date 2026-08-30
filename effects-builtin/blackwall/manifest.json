@@ -25,7 +25,7 @@
     "sweep": {
       "def": 0.28,
       "min": 0,
-      "max": 2,
+      "max": 1,
       "step": 0.01,
       "kind": "scalar",
       "label": "sweep",
@@ -42,7 +42,7 @@
     "scan": {
       "def": 0,
       "min": 0,
-      "max": 1.5,
+      "max": 1,
       "step": 0.01,
       "kind": "scalar",
       "label": "scan",

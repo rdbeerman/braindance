@@ -930,7 +930,7 @@ const RGB_LOOK = shippedDoc('rgb').values;
 console.log('\n== 0. an evaluated frame schedules no work of its own ==');
 {
   await setRetime(FLAT);
-  await setTracks({ bloom: [{ t: 0, value: 0.5 }, { t: 4, value: 3 }] });
+  await setTracks({ bloom: [{ t: 0, value: 0.5 }, { t: 4, value: 0.9 }] });
   // On a budget, because that failure returns no answer at all: the settle helper waits on
   // a queue growing faster than it drains. A healthy build answers in under a second.
   const probe = await Promise.race([
@@ -968,8 +968,8 @@ console.log('\n== 1. scalar with ease handles, step, and pose ==');
 // An ease-out into an ease-in: default handles would agree with a lerp and prove nothing.
 const EASED = [
   { t: 0, value: 0, easeOut: [[0.75, 0]], easeIn: LIN_IN },
-  { t: 4, value: 5, easeOut: [[0.2, 0.9]], easeIn: [[0.25, 1]] },
-  { t: 9, value: 1, easeOut: LIN_OUT, easeIn: [[0.6, 0.05]] },
+  { t: 4, value: 1, easeOut: [[0.2, 0.9]], easeIn: [[0.25, 1]] },
+  { t: 9, value: 0.2, easeOut: LIN_OUT, easeIn: [[0.6, 0.05]] },
 ];
 const STEPS = [
   { t: 0, value: false },
@@ -1007,7 +1007,7 @@ const PATH = [
   const bloomSpec = await specOf('bloom');
   const expectedBloom = at.map((t) => scalarAt(EASED, t));
   const bloomErr = worst(read.bloom.map((v, i) => Math.abs(v - expectedBloom[i])));
-  // The control: the same keys read as a straight lerp, which has to be far from them.
+  // The control: the same keys read as a straight lerp, which has to be several slider steps away.
   const lerped = at.map((t) => scalarAt(EASED.map((k) => ({ ...k, easeOut: LIN_OUT, easeIn: LIN_IN })), t));
   const lerpGap = worst(read.bloom.map((v, i) => Math.abs(v - lerped[i])));
 
@@ -1015,7 +1015,7 @@ const PATH = [
     + `against this tool's own bezier; a straight lerp of the same keys is ${lerpGap.toFixed(3)} away`);
   check(bloomErr <= halfStep(bloomSpec), 'a scalar track is the eased curve its handles describe',
     `worst ${bloomErr.toExponential(2)} against a half-step of ${halfStep(bloomSpec).toFixed(4)}`);
-  check(lerpGap > 20 * halfStep(bloomSpec),
+  check(lerpGap > 4 * halfStep(bloomSpec),
     'and the handles are doing something, because a lerp of the same keys is elsewhere',
     `${lerpGap.toFixed(3)} apart`);
 
@@ -1336,7 +1336,7 @@ const LOOK_TRACKS = {
   ],
   bloom: [
     { t: 2, value: 0.2, easeOut: LIN_OUT, easeIn: LIN_IN },
-    { t: 12, value: 3.5, easeOut: LIN_OUT, easeIn: LIN_IN },
+    { t: 12, value: 0.9, easeOut: LIN_OUT, easeIn: LIN_IN },
   ],
   additive: [{ t: 0, value: true }, { t: 9, value: false }],
   camera: PATH,
@@ -2081,7 +2081,7 @@ console.log('\n== 5. undo restores the document and never the view ==');
 
   // (a) one drag is one level, not one per pointer move.
   const before5 = await depth();
-  await drag('bloom', [0.5, 1.0, 1.5, 2.0, 2.5]);
+  await drag('bloom', [0.2, 0.4, 0.6, 0.8, 1.0]);
   await settle();
   const afterDrag = await depth();
   console.log(`  a five-step drag of the bloom slider took the stack from ${before5} to ${afterDrag}`);
@@ -2092,7 +2092,7 @@ console.log('\n== 5. undo restores the document and never the view ==');
   const midDrag = await page.evaluate(`(() => {
     const el = document.getElementById('bloom');
     const start = globalThis.__kinect.keyframes.undo.depth();
-    for (const v of [3.0, 3.5, 4.0]) {
+    for (const v of [0.7, 0.8, 0.9]) {
       el.value = String(v);
       el.dispatchEvent(new Event('input'));
     }
@@ -2425,7 +2425,7 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   await settle();
   await page.evaluate(`(() => {
     const el = document.getElementById('bloom');
-    el.value = '3';
+    el.value = '0.9';
     el.dispatchEvent(new Event('input'));
     el.dispatchEvent(new Event('change'));
   })()`);
@@ -2434,7 +2434,7 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   const before5 = await page.evaluate('globalThis.__kinect.params.get("bloom")');
   await page.evaluate(`(() => {
     const el = document.getElementById('bloom');
-    el.value = '1.25';
+    el.value = '0.55';
     el.dispatchEvent(new Event('input'));
     el.dispatchEvent(new Event('change'));
   })()`);
@@ -2448,18 +2448,18 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
     };
   })()`);
   const planted = fc.keys.find((key) => Math.abs(key.t - 5.0) < 0.05);
-  console.log(`  at 5.0s the curve read ${before5}; dragging the slider to 1.25 gives keys `
+  console.log(`  at 5.0s the curve read ${before5}; dragging the slider to 0.55 gives keys `
     + `${fc.keys.map((key) => `${key.t}s=${key.value}`).join(' ')}`);
   console.log(`  and after the render that follows it, the parameter reads ${fc.value} `
     + `with the slider at ${fc.slider}`);
   check(fc.keys.length === 3 && planted !== undefined,
     'moving a slider on a keyed track writes a key at the playhead',
     `${fc.keys.length} keys`);
-  check(planted !== undefined && Math.abs(planted.value - 1.25) < 0.03,
+  check(planted !== undefined && Math.abs(planted.value - 0.55) < 0.03,
     'holding the value that was dragged to', `${planted?.value}`);
   // The one that matters: a bare `params.set` passes everything above and is then undone by
   // the evaluator on the very next frame.
-  check(Math.abs(fc.value - 1.25) < 0.03 && Math.abs(fc.slider - 1.25) < 0.03,
+  check(Math.abs(fc.value - 0.55) < 0.03 && Math.abs(fc.slider - 0.55) < 0.03,
     'and it stays there through the render that follows, rather than springing back',
     `parameter ${fc.value}, slider ${fc.slider}`);
   // The control: with no keys the same drag must write no key at all.
@@ -2467,7 +2467,7 @@ console.log('\n== 6e. keying from the panel, and dragging a handle ==');
   await settle();
   await page.evaluate(`(() => {
     const el = document.getElementById('bloom');
-    el.value = '2';
+    el.value = '0.7';
     el.dispatchEvent(new Event('input'));
     el.dispatchEvent(new Event('change'));
   })()`);

@@ -2038,7 +2038,7 @@ parameters` and never publishes `__kinect`.
 
 Sizing a take's cache by demand has two numbers in it: what a plan may ask one take for, and what
 that take's cache then holds. `cache-is-a-constant` takes both back to the old constant and fires
-seven rows. A second control, `capacity-ignores-demand`, was written to take only the cache back -
+nine rows. A second control, `capacity-ignores-demand`, was written to take only the cache back -
 and it does not redden anything, because it hangs the page instead: a cache smaller than the span
 a fetch is allowed to request evicts the frames that fetch has just put in it, `resident()` never
 comes true, and the run dies in an unrelated section with **zero failed assertions and a non-zero

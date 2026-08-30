@@ -863,7 +863,7 @@ const buildParams = () => ({
 
   ...effectSlice('rain.amount', 'rain.trail'),
   // A post pass costs a full-screen read and write, so a zero value switches it off.
-  bloom: { def: 0, min: 0, max: 6, step: 0.05, kind: 'scalar', tag: 'look', scope: 'project',
+  bloom: { def: 0, min: 0, max: 1, step: 0.05, kind: 'scalar', tag: 'look', scope: 'project',
     group: 'post', label: 'bloom',
     apply: (v) => { bloom.strength = v; bloom.enabled = v > 0; } },
   trails: { def: 0, min: 0, max: 0.97, step: 0.01, kind: 'scalar', tag: 'look', scope: 'project',
@@ -1742,6 +1742,17 @@ async function reloadEffects() {
 /** Every client converges by polling, because one installing does not tell the others. */
 const EFFECT_POLL_MS = 6000;
 let effectReloading = false;
+
+/** Runs a requested rebuild after the poll has released the effect set. */
+async function requestEffectReload() {
+  while (effectReloading) await new Promise((resolve) => setTimeout(resolve, 0));
+  effectReloading = true;
+  try {
+    return await reloadEffects();
+  } finally {
+    effectReloading = false;
+  }
+}
 
 /**
  * Why a document edit cannot happen right now, by name, or null.
@@ -10965,7 +10976,7 @@ globalThis.__kinect = {
 
   /** The installed effects, and the rebuild an install triggers. */
   effects: {
-    reload: reloadEffects,
+    reload: requestEffectReload,
     pollNow: pollEffects,
     packages: () => effectPackages.map((p) => ({ id: p.id, version: p.manifest.version, rev: p.rev })),
     signature: () => effectSignature,

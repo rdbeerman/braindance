@@ -196,6 +196,14 @@ const MUTATIONS = {
       + 'inside a gesture that opened while it was reading. Reddens one row of section 8',
   },
 
+  'requested-reload-skips-the-poll-lock': {
+    file: 'web/main.js',
+    edits: [['    reload: requestEffectReload,', '    reload: reloadEffects,']],
+    fails: 'the rebuild exposed to an installer no longer waits for the periodic poll to release '
+      + 'the effect set. Reddens one row of section 8: with the poll\'s listing held open, the '
+      + 'requested rebuild starts a second listing instead of waiting',
+  },
+
   /**
    * The whole statement is anchored rather than its first line: the throw is a marked one, and
    * swapping only the first line leaves a live call to the minter standing under a `void`.
@@ -1673,7 +1681,7 @@ try {
       postShut: post.classList.contains('shut'),
       postExpanded: post.querySelector('.grouptoggle').getAttribute('aria-expanded'),
       boxes: [...document.querySelectorAll('#ppGroups input[type="checkbox"]')].map((b) => b.id),
-      lookNames: k.params.names('look'),
+      presetNames: k.presetValueNames(),
     };
   });
 
@@ -1697,8 +1705,8 @@ try {
   const pickedNames = rebuilt.boxes.filter((id) => id.startsWith('pp-')).map((id) => id.slice(3));
   ok('the preset subset dialog is a statement of the registry that exists now: the installed effect has its boxes',
     pickedNames.includes('probe.amount') && pickedNames.includes('probe.hue')
-      && JSON.stringify([...pickedNames].sort()) === JSON.stringify([...rebuilt.lookNames].sort()),
-    `${pickedNames.length} boxes against ${rebuilt.lookNames.length} look values, `
+      && JSON.stringify([...pickedNames].sort()) === JSON.stringify([...rebuilt.presetNames].sort()),
+    `${pickedNames.length} boxes against ${rebuilt.presetNames.length} preset values, `
     + `probe ${pickedNames.filter((n) => n.startsWith('probe.')).join(' and ') || 'absent'}`);
 
   await del('probe');
@@ -1717,13 +1725,13 @@ try {
       names: boxes.filter((b) => b.id.startsWith('pp-')).map((b) => b.id.slice(3)),
       threw,
       count: document.getElementById('ppCount')?.textContent ?? '',
-      lookNames: k.params.names('look'),
+      presetNames: k.presetValueNames(),
     };
   });
   ok('and the uninstalled effect has none, with every box left in the dialog still pressable',
     unpicked.names.includes('probe.amount') === false && unpicked.threw === null
-      && JSON.stringify([...unpicked.names].sort()) === JSON.stringify([...unpicked.lookNames].sort()),
-    unpicked.threw ?? `${unpicked.names.length} boxes against ${unpicked.lookNames.length} look values, readout "${unpicked.count}"`);
+      && JSON.stringify([...unpicked.names].sort()) === JSON.stringify([...unpicked.presetNames].sort()),
+    unpicked.threw ?? `${unpicked.names.length} boxes against ${unpicked.presetNames.length} preset values, readout "${unpicked.count}"`);
 
   // Four claims about the rebuild rather than about its result: the grade gate has to be
   // re-derived, a package that changed no GLSL must not warm, one that did must release the program
@@ -1919,6 +1927,34 @@ try {
     inFlight
       ? `${duringOverlap} reads of the store were in flight at once${listCalls > duringOverlap ? `, ${listCalls} in all` : ''}`
       : 'no read of the store ever went out, so nothing was held and this row measured nothing');
+
+  // A requested rebuild uses the same lock as the periodic poll. Without that lock, the request
+  // can adopt a stale package set after the poll has already adopted the newer one.
+  let lockedListCalls = 0;
+  let releaseLockedList;
+  const lockedListHeld = new Promise((resolve) => { releaseLockedList = resolve; });
+  await page.route('**/effects', async (route) => {
+    lockedListCalls += 1;
+    if (lockedListCalls === 1) await lockedListHeld;
+    await route.continue();
+  });
+  const lockedPoll = page.evaluate(() => globalThis.__kinect.effects.pollNow()).catch(() => {});
+  let lockedPollInFlight = false;
+  for (let waited = 0; waited < 9000 && !lockedPollInFlight; waited += 100) {
+    lockedPollInFlight = lockedListCalls >= 1;
+    if (!lockedPollInFlight) await wait(100);
+  }
+  const requestedReload = page.evaluate(() => globalThis.__kinect.effects.reload()).catch(() => {});
+  await wait(400);
+  const readsBeforeRelease = lockedListCalls;
+  releaseLockedList();
+  await Promise.all([lockedPoll, requestedReload]);
+  await page.unroute('**/effects');
+  ok('a requested rebuild waits for a poll that is already reading instead of rebuilding beside it',
+    lockedPollInFlight === true && readsBeforeRelease === 1 && lockedListCalls === 3,
+    lockedPollInFlight
+      ? `${readsBeforeRelease} listing read before release, ${lockedListCalls} after both operations finished`
+      : 'no poll read went out, so nothing was held and this row measured nothing');
 
   await put('probe', recompiledProbe(5));
   // The closing read is the first listing after a package read, not "every second one": the page's

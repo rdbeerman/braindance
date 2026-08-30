@@ -41,7 +41,7 @@
     "shove": {
       "def": 0.45,
       "min": 0,
-      "max": 2,
+      "max": 1,
       "step": 0.01,
       "kind": "scalar",
       "label": "shove m",
@@ -58,7 +58,7 @@
     "tint": {
       "def": 1.8,
       "min": 0,
-      "max": 8,
+      "max": 3,
       "step": 0.05,
       "kind": "scalar",
       "label": "flare",
@@ -75,7 +75,7 @@
     "bands": {
       "def": 12,
       "min": 1,
-      "max": 64,
+      "max": 32,
       "step": 1,
       "kind": "scalar",
       "label": "band rows",
@@ -109,7 +109,7 @@
     "rate": {
       "def": 7,
       "min": 0,
-      "max": 30,
+      "max": 15,
       "step": 0.5,
       "kind": "scalar",
       "label": "rate hz",

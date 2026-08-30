@@ -516,8 +516,8 @@ byte count climbing.
 **`contour.width` lands two edges, computed in JavaScript double before either is uploaded.**
 The registry's one-at-a-time and all-at-once landing rows read both components of
 `contourEdges`. `contour-edges-round-in-float` rounds the operands and subtraction first; it
-reddens those two rows, with the low edge moving from `0.22999999999999998` to
-`0.22999998927116394` at the planted width `0.27`. The rendered golden arm is not the precision
+reddens those two rows, with the pair moving from `[0.3,0.7]` to
+`[0.30000001192092896,0.699999988079071]` at the planted width `0.2`. The rendered golden arm is not the precision
 proof: that one-unit-in-the-last-place change can remain within its documented image tolerance.
 
 **It then had six standing red rows again, deliberately, and it does not any more — the middle
@@ -605,13 +605,19 @@ across the two `main` revisions this branch was rebased over and it reports 0 of
 looks unmoved by `main` itself, which is context for reading the 120 rather than a second
 control, since a null result cannot demonstrate sensitivity.
 
-**`timeline-check` runs 128 assertions, 0 failed.** Section 7 is 53 of them and covers more than
+**`timeline-check` runs 169 assertions, 0 failed.** Section 7 is 54 of them and covers more than
 one clip: the composite, the cut, and what a clip enters holding. Its fixture is five clips over
 two takes, listed in an order that is deliberately not the order of their ids, and every clip in
 it is uncomfortable on purpose - a two-second half-speed head, a head shorter than the look asks
 for, one entering mid-hold, one whose footage starts at source 0, and one placed to stand on the
 same source frame as another clip of the same take. Four of them overlap at 6.5s, which is the
 budget `tools/layering-ab.mjs` measures against.
+
+**That fixture names its primary take instead of inheriting the selected clip's take.** A prior
+version copied the first open clip before replacing the clip list. A short live capture selected
+by an earlier section therefore put every later retime on its held final frame and made both the
+warm-history control and the growing-cache arm inert. The tool now clears inherited tracks, owns
+the take for every generated clip, and requires the eight retimes to reach eight distinct frames.
 
 Six mutations belong to it and each fires: `warm-skipped` **3 rows**, `warm-without-reset` **8**,
 `draw-order-by-array` **3**, `take-not-shared` **2**, `look-broadcast` **6** and
@@ -1589,7 +1595,7 @@ it, so seven rows fire and then the run stops — a verdict that put the crash f
 DID NOT RUN over a caught mutation, which is the census of exit codes `docs/instruments.md`
 already carries a case for.
 
-Baseline **111 assertions, 0 failed**, over eleven sections: the store's revisions against hashes
+Baseline **148 assertions, 0 failed**, over sixteen sections: the store's revisions against hashes
 the tool computes off the staged tree, twenty-two hostile packages each refused with the sentence
 for its own rule, the hotload's registry-and-panel coherence including `boot-check`'s own
 control-vs-registry diff on a rebuilt page, the uninstall/reinstall pixel identity, the
@@ -1627,6 +1633,13 @@ and 11 are short and the second closes the browser anyway, so the cost of a bloc
 page unwell is smallest here. The refused fixture is re-staged rather than inherited: the fork is
 installed again and driven through `pollNow`, because the block under test is the *poll's* and a
 `reload` an operator asks for goes nowhere near it.
+
+**The periodic poll and a requested rebuild share one lock.** Section 8 holds the poll's listing
+open, starts the rebuild exposed to an installer, and requires that no second listing starts until
+the poll releases the effect set. `--mutate requested-reload-skips-the-poll-lock` exposes the raw
+rebuild again and reddens that row. Without the lock, the older rebuild can land after the newer
+one and leave the registry, package signature, parked values, and panel describing different
+effect sets.
 
 The first counts what the poll does next. A rollback puts the old signature back on purpose, so
 the comparison a tick makes on its way in goes on saying the store has moved, and without a block

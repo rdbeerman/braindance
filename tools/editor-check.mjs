@@ -4413,7 +4413,7 @@ try {
     `dragged from ${twoPoints.easeOut[1][0].toFixed(4)} to ${landed.toFixed(4)}, `
     + `against a neighbour at ${neighbour.toFixed(4)}`);
 
-  await plant({ bloom: [{ t: 1, value: 0.2, ...BENT }, { t: 6, value: 1.4, ...BENT }] });
+  await plant({ bloom: [{ t: 1, value: 0.2, ...BENT }, { t: 6, value: 0.9, ...BENT }] });
   await page.evaluate(`__kinect.editor.select('bloom', 0)`);
   await settle();
   await page.locator('#tEase button[data-ease=ends]').click();
@@ -6212,13 +6212,13 @@ try {
     }
   };
   try {
-    const known = { bloom: 2.75, 'grain.amount': 0.66, 'blackwall.amount': 1, readRgb: 0 };
+    const known = { bloom: 0.75, 'grain.amount': 0.66, 'blackwall.amount': 1, readRgb: 0 };
     await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(known)})`);
     // Moved again after the apply and never saved, which is what makes the row below able to fail:
     // `exportPresetFile` takes its name from the picker and its values from the live look, and a
     // build exporting the picker's document instead of the screen would write a file containing
-    // `known` and pass. 3.9 exists in neither the picker's document nor any shipped look.
-    const onlyOnScreen = 3.9;
+    // `known` and pass. 0.9 exists in neither the picker's document nor any shipped look.
+    const onlyOnScreen = 0.9;
     await page.evaluate(`globalThis.__kinect.params.set('bloom', ${onlyOnScreen})`);
     await settle();
 
@@ -6286,7 +6286,7 @@ try {
       wrong.length ? wrong.map(([n, v]) => `${n} ${exported.values?.[n]} not ${v}`).join(' ') : `version ${exported.version}, bloom ${exported.values.bloom}`);
 
     const edited = join(TMP, `${NAME_EDITED}.braindance-preset.json`);
-    const nextBody = { ...exported, values: { ...exported.values, bloom: 4.4, 'grain.amount': 0.13 } };
+    const nextBody = { ...exported, values: { ...exported.values, bloom: 0.6, 'grain.amount': 0.13 } };
     writeFileSync(edited, `${JSON.stringify(nextBody, null, 2)}\n`);
     await page.evaluate("globalThis.__kinect.params.reset(globalThis.__kinect.params.names('look'))");
     await settle();
@@ -6295,7 +6295,7 @@ try {
     await settle();
     const back = await page.evaluate("(() => { const k = globalThis.__kinect; return JSON.stringify({ bloom: k.params.get('bloom'), grain: k.params.get('grain.amount'), blackwall: k.params.get('blackwall.amount'), stamp: k.library.appliedPreset() }); })()");
     const landed = JSON.parse(back);
-    check(landed.bloom === 4.4 && landed.grain === 0.13 && landed.blackwall === 1,
+    check(landed.bloom === 0.6 && landed.grain === 0.13 && landed.blackwall === 1,
       'and importing it puts the edited look on screen', `bloom ${landed.bloom} grain ${landed.grain}`);
     check(landed.stamp?.name === NAME_EDITED,
       'and stamps the clip with where it came from', JSON.stringify(landed.stamp?.name));
@@ -6531,7 +6531,7 @@ try {
     await page.waitForFunction("document.getElementById('tNote').textContent.includes('bloom')", null, { timeout: 15000 })
       .catch(() => {});
     const afterBad = await page.evaluate("(() => ({ note: document.getElementById('tNote').textContent, bloom: globalThis.__kinect.params.get('bloom') }))()");
-    check(/bloom/.test(afterBad.note) && afterBad.bloom === 4.4,
+    check(/bloom/.test(afterBad.note) && afterBad.bloom === 0.6,
       'a malformed file is refused at the key that is wrong, and leaves the look alone',
       `"${afterBad.note}" with bloom still ${afterBad.bloom}`);
 
@@ -6555,7 +6555,7 @@ try {
     await page.waitForFunction("document.getElementById('tNote').textContent.includes('__proto__')", null, { timeout: 15000 })
       .catch(() => {});
     const afterProto = await page.evaluate("(() => ({ note: document.getElementById('tNote').textContent, polluted: ({}).polluted ?? null, bloom: globalThis.__kinect.params.get('bloom') }))()");
-    check(/__proto__/.test(afterProto.note) && afterProto.polluted === null && afterProto.bloom === 4.4,
+    check(/__proto__/.test(afterProto.note) && afterProto.polluted === null && afterProto.bloom === 0.6,
       'and a file carrying __proto__ is refused as an unknown parameter, polluting nothing',
       `"${afterProto.note}" polluted=${afterProto.polluted}`);
 
@@ -6587,7 +6587,7 @@ try {
     const partReadings = await refuse(NAME_PART_READINGS,
       JSON.stringify({
         version: PROJECT_VERSION,
-        values: { bloom: 1.2, ...Object.fromEntries(namedTwo.map((n) => [n, 1])) },
+        values: { bloom: 0.8, ...Object.fromEntries(namedTwo.map((n) => [n, 1])) },
       }));
     check(missingThree.every((n) => partReadings.includes(n))
       && namedTwo.every((n) => partReadings.includes(n))
@@ -6597,7 +6597,7 @@ try {
       `"${partReadings}" against ${namedTwo.join(', ')} named and ${missingThree.join(', ')} missing`);
 
     const strayKey = await refuse(NAME_STRAY_KEY,
-      JSON.stringify({ version: PROJECT_VERSION, mode: 4, values: { bloom: 4.4 } }));
+      JSON.stringify({ version: PROJECT_VERSION, mode: 4, values: { bloom: 0.6 } }));
     check(/mode/.test(strayKey) && /preset/.test(strayKey),
       'a document carrying a key beside version and values is refused by name, so a field an older version had is answered rather than ignored',
       `"${strayKey}"`);
@@ -7698,7 +7698,7 @@ try {
     // ---- 15c. moving a value opens the group that holds it
     // `bloom` because it is in `optical` and because `keyframe-check` clicks its keyframe
     // diamond, a control Playwright will only press when it is visible.
-    await page.evaluate("__kinect.params.set('bloom', 1.5)");
+    await page.evaluate("__kinect.params.set('bloom', 0.75)");
     await settle();
     const opened = await groupOf('post');
     check(!opened.shut && opened.expanded === 'true' && opened.onScreen === opened.available,
@@ -7756,7 +7756,7 @@ try {
     // `group-never-reveals` changes: on that build every group is already shut and a blind
     // press would open one.
     await freshLook();
-    await page.evaluate("__kinect.params.set('bloom', 1.5)");
+    await page.evaluate("__kinect.params.set('bloom', 0.75)");
     await settle();
     const shut = async (key) => {
       if (!(await groupOf(key)).shut) await page.click(`[data-group-toggle=${key}]`);
@@ -7804,7 +7804,7 @@ try {
     check(!pinned.shut && pinned.onScreen === pinned.available && pinnedStore.post === true,
       'pinning a quiet group open is a disagreement and is written down, or the two rows below test nothing',
       `open=${!pinned.shut}, ${pinned.onScreen} of ${pinned.available} available rows on screen, stored ${JSON.stringify(pinnedStore)}`);
-    await page.evaluate("__kinect.params.set('bloom', 1.5)");
+    await page.evaluate("__kinect.params.set('bloom', 0.75)");
     await settle();
     const caughtUp = await groupOf('post');
     const caughtStore = JSON.parse((await stored()) ?? '{}');
@@ -7857,7 +7857,7 @@ try {
     // installed per page and a second page would take the tree's own `main.js` - two different
     // builds inside one measurement.
     await freshLook();
-    await page.evaluate("__kinect.params.set('bloom', 1.5)");
+    await page.evaluate("__kinect.params.set('bloom', 0.75)");
     await settle();
     if (!(await groupOf('post')).shut) await page.click('[data-group-toggle=post]');
     if ((await groupOf('points')).shut) await page.click('[data-group-toggle=points]');
@@ -7893,7 +7893,7 @@ try {
       'and the page reloaded still finds the pinned one open, on a document holding nothing that would open it',
       `open=${!pinCarried.shut}, ${pinCarried.onScreen} of ${pinCarried.inDom} rows on screen, `
       + `${quietAfter.names} parameters in the group and all at their defaults: ${quietAfter.quiet}`);
-    await page.evaluate("__kinect.params.set('bloom', 1.5)");
+    await page.evaluate("__kinect.params.set('bloom', 0.75)");
     await settle();
     const collapseCarried = await groupOf('post');
     check(collapseCarried.shut && collapseCarried.onScreen === 0
@@ -10266,7 +10266,7 @@ try {
       const k = globalThis.__kinect;
       const body = {
         version: k.library.PROJECT_VERSION,
-        values: { pointSize: 33.3, opacity: 0.44, bloom: 2.5, crush: 0.05 },
+        values: { pointSize: 33.3, opacity: 0.44, bloom: 0.75, crush: 0.05 },
       };
       const before = k.library.serialiseProjectBody();
       const report = k.library.applyStoredPreset({ name: 'scope-probe', rev: null, body });
@@ -10295,7 +10295,7 @@ try {
     check(preset.theirsAfter === preset.theirsBefore,
       'and on no other clip, which is what makes a look the clip\'s own',
       `${preset.theirsBefore} -> ${preset.theirsAfter}`);
-    check(near(preset.bloomAfter, 2.5, 1e-9) && preset.bloomBefore !== preset.bloomAfter,
+    check(near(preset.bloomAfter, 0.75, 1e-9) && preset.bloomBefore !== preset.bloomAfter,
       'while its post values land on the project, which every clip in the edit is seen through',
       `${preset.bloomBefore} -> ${preset.bloomAfter}`);
     check(preset.report.shared === 2,

@@ -3,7 +3,6 @@
 // output rate interpolates the capture instead of repeating it.
 
 import { existsSync, readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -62,14 +61,14 @@ const MUTATIONS = {
       + 'Section 8b is the catch',
   },
   // The cache goes back to one constant however many clips share a take, which is what capped a
-  // four-clip pre-roll at a quarter of what it computed. Must redden section 8's first two rows.
+  // four-clip pre-roll at a quarter of what it computed. Must redden section 8's cache rows.
   'cache-is-a-constant': { file: 'web/main.js', edits: [[
     'const MAX_SPAN_FRAMES = CACHE_CEILING_FRAMES - CACHE_HEADROOM;',
     'const MAX_SPAN_FRAMES = CACHE_FRAMES - 16;',
   ]],
     fails: 'a take\'s cache back to one constant however many clips share it, which caps a '
       + 'four-clip pre-roll at 41 of the 60 frames it computed and an eight-clip one at 20. '
-      + 'Section 8\'s first two rows are the catch, and it fires seven in all',
+      + 'Section 8\'s cache rows are the catch, and it fires nine in all',
   },
   // A take outside the current plan keeps the demand and decoded frames of the last plan that
   // named it. Must redden section 8a's two release rows.
@@ -355,8 +354,10 @@ const pct = (xs, p) => {
 };
 const ms = (x) => `${x.toFixed(2)} ms`;
 
+let assertions = 0;
 let failures = 0;
 const check = (ok, label, detail = '') => {
+  assertions++;
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `   ${detail}` : ''}`);
   if (!ok) failures++;
 };
@@ -1266,23 +1267,35 @@ console.log('\n== 4b. 60 fps out of a capture whose median gap is 64ms ==');
 
 console.log('\n== 5. a look change while paused rebuilds the image and the estimate ==');
 {
-  // `#stage` rather than `canvas`: step 5 put the camera path and the top-down on
-  // a second canvas over this one, deliberately outside the rendered frame, and a
-  // bare tag selector now matches both. This is the same element it always was.
   const canvas = page.locator('#stage');
-  const image = async () => createHash('sha256').update(await canvas.screenshot()).digest('hex').slice(0, 16);
+  // Hash decoded stage pixels. Hashing the PNG itself includes its encoding, while reading the
+  // WebGL buffer after presentation can return stale bytes because the buffer is not preserved.
+  const image = async () => {
+    const shot = await canvas.screenshot();
+    return page.evaluate(`(async (dataUrl) => {
+      const img = new Image();
+      img.src = dataUrl;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const context = canvas.getContext('2d');
+      context.drawImage(img, 0, 0);
+      return globalThis.__tl.sha(context.getImageData(0, 0, img.width, img.height).data);
+    })(${JSON.stringify(`data:image/png;base64,${shot.toString('base64')}`)})`);
+  };
   const planned = () => page.evaluate('globalThis.__kinect.timeline.transport().preroll()');
   const chip = async () => {
     const plan = await planned();
     return `${plan.frames} frames / ${plan.sec.toFixed(2)} s (surface ${plan.surface}, trails ${plan.trails})`;
   };
-  const settle = () => page.evaluate('globalThis.__kinect.timeline.settled()');
   const renders = () => page.evaluate('globalThis.__kinect.timeline.counters.renders');
-  const slide = (id, value) => page.evaluate(`(() => {
+  const slide = (id, value) => page.evaluate(`(async () => {
     const el = document.getElementById(${JSON.stringify(id)});
     el.value = ${JSON.stringify(String(value))};
     el.dispatchEvent(new Event('input'));
     el.dispatchEvent(new Event('change'));
+    await globalThis.__kinect.timeline.settled();
   })()`);
 
   // The speed slider needs its own, because its travel is logarithmic and its `value`
@@ -1291,13 +1304,14 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
   // nobody asked for. So the rate goes through the page's own mapping, and the rate
   // that came out is checked against the rate that went in rather than assumed.
   const slideRate = async (rate) => {
-    await page.evaluate(`(() => {
+    const landed = await page.evaluate(`(async () => {
       const el = document.getElementById('tRate');
       el.value = String(__kinect.editor.rateSlider.toValue(${rate}));
       el.dispatchEvent(new Event('input'));
       el.dispatchEvent(new Event('change'));
+      await globalThis.__kinect.timeline.settled();
+      return globalThis.__kinect.timeline.retime.rate;
     })()`);
-    const landed = await page.evaluate('__kinect.timeline.retime.rate');
     if (Math.abs(landed - rate) > 1e-6) {
       throw new Error(`asked the speed slider for ${rate}x and the page went to ${landed}x`);
     }
@@ -1306,15 +1320,17 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
   await page.evaluate(`(async () => {
     await globalThis.__tl.configure(${JSON.stringify({ look: RGB_LOOK, rate: 1, fps: 30 })});
     await globalThis.__kinect.timeline.transport().seek(8.0);
+    await globalThis.__kinect.timeline.settled();
   })()`);
-  await settle();
   const neutralImage = await image();
   const neutralChip = await chip();
 
   // (a) One registry write, and the image follows it.
   const beforeDepth = await renders();
-  await page.evaluate("globalThis.__kinect.params.set('readDepth', 1)");
-  await settle();
+  await page.evaluate(`(async () => {
+    globalThis.__kinect.params.set('readDepth', 1);
+    await globalThis.__kinect.timeline.settled();
+  })()`);
   const depthRenders = (await renders()) - beforeDepth;
   const depthImage = await image();
   check(depthRenders > 0,
@@ -1323,11 +1339,15 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
   check(depthImage !== neutralImage, 'and the rebuilt image is a different one');
 
   // (b) A whole look at once, which is the reported reproduction exactly.
-  await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(RGB_LOOK)})`);
-  await settle();
+  await page.evaluate(`(async () => {
+    globalThis.__kinect.applyPreset(${JSON.stringify(RGB_LOOK)});
+    await globalThis.__kinect.timeline.settled();
+  })()`);
   const beforeBlackwall = await renders();
-  await page.evaluate(`globalThis.__kinect.applyPreset(${JSON.stringify(BLACKWALL_LOOK)})`);
-  await settle();
+  await page.evaluate(`(async () => {
+    globalThis.__kinect.applyPreset(${JSON.stringify(BLACKWALL_LOOK)});
+    await globalThis.__kinect.timeline.settled();
+  })()`);
   const blackwallRenders = (await renders()) - beforeBlackwall;
   const blackwallImage = await image();
   const blackwallChip = await chip();
@@ -1350,9 +1370,7 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
   // and back was what used to correct both surfaces, so if the repaint really
   // happened it has already done everything the nudge would do.
   await slideRate(1.2);
-  await settle();
   await slideRate(1);
-  await settle();
   const nudgedImage = await image();
   const nudgedChip = await chip();
   check(nudgedImage === blackwallImage && nudgedChip === blackwallChip,
@@ -1365,7 +1383,6 @@ console.log('\n== 5. a look change while paused rebuilds the image and the estim
   await page.locator('#panelTabLook').click();
   const beforeWake = await renders();
   await slide('wake', 2500);
-  await settle();
   const wakeRenders = (await renders()) - beforeWake;
   const wakeImage = await image();
   const wakeChip = await chip();
@@ -1621,9 +1638,15 @@ const SECOND_TAKE = LIBRARY_TAKES.find((t) => t.id !== TAKE && t.openable) ?? nu
 const MULTI = `(() => {
   const k = globalThis.__kinect;
   const tl = globalThis.__tl;
+  const primary = ${JSON.stringify(PRIMARY_TAKE
+    ? { id: PRIMARY_TAKE.id, hash: PRIMARY_TAKE.hash }
+    : null)};
   globalThis.__mc = {
     /** One serialised retime, built through the shipped door so its handles are the real ones. */
     retimeFor(keys) {
+      // The setter writes the selected clip, while the serialised fixture is copied from the
+      // first clip. Make those the same clip before asking the shipped door to build the curve.
+      k.timeline.select(k.timeline.clips()[0].id);
       k.keyframes.setRetime({ rate: 1, keys: keys.map(([t, value]) => ({ t, value })) });
       return JSON.parse(JSON.stringify(k.library.serialiseProjectBody().clips[0].retime));
     },
@@ -1648,15 +1671,21 @@ const MULTI = `(() => {
         id: c.id,
         start: c.start,
         length: c.length,
-        take: c.take ? { ...c.take } : (c.second && second ? { ...second } : one.take),
+        take: c.take ? { ...c.take }
+          : (c.second && second ? { ...second } : (primary ? { ...primary } : one.take)),
         retime: this.retimeFor(c.keys),
         // This clip's own look, written into the document rather than applied afterwards - the
         // loader is the door a per-clip look actually comes through.
         params: { ...one.params, ...scoped(look, 'clip'), ...scoped(c.look ?? {}, 'clip') },
+        tracks: {},
       }));
       await k.library.loadProject('multi-clip fixture', {
         ...base,
-        look: { ...base.look, params: { ...base.look.params, ...scoped(look, 'project') } },
+        look: {
+          ...base.look,
+          params: { ...base.look.params, ...scoped(look, 'project') },
+          tracks: {},
+        },
         clips: built,
       });
       await k.timeline.settled();
@@ -1693,6 +1722,8 @@ const MULTI = `(() => {
         showing: k.timeline.showingAt(t.programSec),
         takes: k.timeline.takes(),
         frame: t.frame,
+        spans: t.planSeek(targetSec, frames === null ? undefined : frames).spans
+          .map((span) => ({ id: span.clip.id, from: span.from, to: span.to })),
       };
     },
   };
@@ -2016,6 +2047,9 @@ console.log('\n== 7. more than one clip: the composite, the cut, and what a clip
       seek,
       showingAtSeek: k.timeline.showingAt(${WARM_SEEK_SEC}),
       clip: k.timeline.clips()[0],
+      fps: t.outputFps,
+      look: { fade: k.params.get('fade'), wake: k.params.get('wake') },
+      state: k.stateStats(),
     };
   }`);
   const warmPlayed = await page.evaluate("globalThis.__mc.warmArm('playback', 'warmPlayed', null)");
@@ -2027,10 +2061,16 @@ console.log('\n== 7. more than one clip: the composite, the cut, and what a clip
     + `planned ${warmSeeked.seek.plan.surface} elapsed warm frames and rendered `
     + `${warmSeeked.seek.frames}; played vs seeked ${show(warmSame)}, played vs no elapsed warm `
     + `${show(warmApart)}`);
+  console.log(`  at ${warmSeeked.fps} fps the clip reports ${warmSeeked.clip.warmFrames} warm frames; `
+    + `the arm reads fade ${warmSeeked.look.fade}ms plus wake ${warmSeeked.look.wake}ms; its surface `
+    + `reports ${warmSeeked.state.ghostsDrawn}% ghosting, `
+    + `against ${warmControl.state.ghostsDrawn}% with elapsed warming omitted`);
   check(warmSeeked.showingAtSeek.length === 1
-    && warmSeeked.showingAtSeek[0].showing === 'warming',
+    && warmSeeked.showingAtSeek[0].showing === 'warming'
+    && warmSeeked.clip.take?.id === TAKE,
   'the seek starts while the later clip is warming but still invisible',
-  warmSeeked.showingAtSeek.map((clip) => `${clip.id} ${clip.showing}`).join(', '));
+  `${warmSeeked.showingAtSeek.map((clip) => `${clip.id} ${clip.showing}`).join(', ')}, `
+    + `on ${warmSeeked.clip.take?.id ?? 'no take'}`);
   check(warmSeeked.seek.plan.surface > 0
     && warmSeeked.seek.frames >= warmSeeked.seek.plan.surface,
   'the seek plan includes the elapsed part of that warm window',
@@ -2159,20 +2199,34 @@ console.log('\n== 8. the frame cache is sized by the clips asking for it ==');
     await page.evaluate(
       `globalThis.__mc.load(${JSON.stringify(stackOf(n))}, null, ${JSON.stringify(STACK_LOOK)})`,
     );
+    const curves = await page.evaluate(`__kinect.library.serialiseProjectBody().clips.map((clip) => ({
+      id: clip.id,
+      keys: clip.retime.keys.map((key) => [key.t, key.value]),
+    }))`);
     const shot = await page.evaluate(
       `globalThis.__mc.arm('seek', ${STACK_TARGET_SEC}, 0, 'stack${n}', null)`,
     );
-    stacked.push({ n, shot });
+    stacked.push({ n, shot, curves });
     const s = shot.seek;
     console.log(`  ${String(n).padStart(2)} clip(s): pre-roll ${s.plan.frames} asked `
       + `(surface ${s.plan.surface}, trails ${s.plan.trails}), ${s.frames} `
       + `rendered${s.capped ? ` - CAPPED ${s.shortfall} short` : ''}; the take is asked for `
       + `${s.bound.frames} frames by ${s.bound.clips} clip(s), holds ${shot.clips[0].capacity}, `
       + `and has ${shot.clips[0].cached} decoded`);
+    if (n === CLIP_CEILING) {
+      console.log(`     spans ${shot.spans.map((span) => `${span.id}:${span.from}-${span.to}`).join(' ')}`);
+    }
   }
 
   const one = stacked.find((a) => a.n === 1);
   const most = stacked[stacked.length - 1];
+  console.log(`  the widest arm's retime endpoints: ${most.curves
+    .map((curve) => `${curve.id}:${curve.keys.map((key) => key[1]).join('-')}`).join(' ')}`);
+
+  check(most.shot.clips.every((clip) => clip.take?.id === TAKE)
+    && new Set(most.shot.clips.map((clip) => clip.applied)).size === CLIP_CEILING,
+  'the stacked fixture stays on its named take and reaches a different source frame through every retime it authored',
+  most.shot.clips.map((clip) => `${clip.id}:${clip.take?.id ?? 'none'}@${clip.applied}`).join(' '));
 
   check(stacked.every(({ shot }) => shot.seek.frames === shot.seek.plan.frames),
     'every arm rendered the whole pre-roll it computed, however many clips of one take asked '
@@ -2340,6 +2394,8 @@ if (errors.length) console.log(`\n[timeline] page errors:\n  ${errors.join('\n  
 check(errors.length === 0, 'the page logged no errors');
 
 await browser.close();
-console.log(`\n[timeline] ${failures === 0 ? 'PASS' : `FAIL (${failures})`}`);
+console.log(`\n[timeline] ${failures === 0
+  ? `PASS (${assertions} assertions)`
+  : `FAIL (${failures}/${assertions} assertions failed)`}`);
 if (MUTATE && MUTATIONS[MUTATE]?.fails) console.log(`[timeline] it should redden: ${MUTATIONS[MUTATE].fails}`);
 process.exit(failures === 0 ? 0 : 1);
