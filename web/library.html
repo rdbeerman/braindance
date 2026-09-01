@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0A0C10" />
 <title>Braindance · Media library</title>
 <link rel="icon" href="data:," />
 <link rel="stylesheet" href="/nav.css" />
@@ -12,7 +13,7 @@
      way the viewer restates it - two copies of a palette is two things to keep in
      step, and a third file naming them again is a third. */
   :root {
-    --paper: #05070a;
+    --paper: #0A0C10;
     --paper-1: #0d1014;
     --paper-2: #151920;
     --paper-3: #1e232b;
@@ -39,9 +40,9 @@
     --scrim: rgba(0, 0, 0, 0.68);
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink);
-    font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: clip; }
-  body { display: flex; flex-direction: column; }
+  html, body { height: 100%; margin: 0; background: #0A0C10; color: var(--ink);
+    font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { display: flex; flex-direction: column; min-height: 100vh; }
 
   /* Which machine you are on. The library spans both, so "here" has to be named or
      the local/node column is unreadable. */
