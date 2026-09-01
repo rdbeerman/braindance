@@ -6591,6 +6591,8 @@ const rawRateFromSlider = (v) => (
 );
 /** Whether a slider position is inside the detent, the band being a number of pixels. */
 const insideDetent = (v) => {
+  // 92 is the stylesheet's width, and the reading in use whenever the slider is hidden with
+  // its chip: `timingChanged` gets here with no clip selected, where the rect is empty.
   const width = ui.rate.getBoundingClientRect().width || 92;
   return Math.abs(Number(v) - sliderFromRate(1)) <= DETENT_PX / Math.max(1, width);
 };

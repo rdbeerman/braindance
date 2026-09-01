@@ -896,10 +896,9 @@
     display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   }
   #appStatusSlot #appStatus { flex: 0 0 auto; }
-  /* Speed control and mark button next to clocks. */
-  .tspeed { display: flex; align-items: center; gap: 8px; flex: none; }
-  .tspeed .tchip { display: inline-flex; align-items: center; gap: 7px; }
-  /* The mark button beside the speed slider. Matches Pencil design exactly. */
+  /* The speed slider, its readout and its keyframe, inside the clip chip. */
+  .tspeed { display: inline-flex; align-items: center; gap: 7px; }
+  /* The mark button beside the clocks. Matches Pencil design exactly. */
   .tmark {
     width: 26px; height: 26px; flex: none;
     display: grid; place-items: center;
@@ -1528,34 +1527,31 @@
         <div class="tclock"><small>playback</small><output id="tProgram">00:00.000</output></div>
         <div class="tclock derived"><small>source</small><output id="tSource">00:00.000</output></div>
       </div>
-      <!-- Speed control and mark button, positioned next to clocks -->
-      <div class="tspeed">
-        <!-- The slider's coordinate is not the rate, and the range here is deliberately
-             0..1 rather than 0.1..4. Program length goes as 1/rate, so a control linear
-             in rate spends most of its travel where the ruler barely moves: one 0.05 step
-             at the bottom of the old range changed the clip's length by a third and the
-             same step at the top changed it by one percent. The bounds live in `main.js`
-             beside the mapping that reads this, so there is one copy of them. `value` is
-             written from `retime.rate` at boot for the same reason - a position spelled
-             out here would be a second statement of where 1.00x sits. -->
-        <!-- The diamond belongs beside the slider it keys, which is the same shape the
-             camera chip to the right uses for the same job. Without it the slider sets
-             one rate for the whole clip and nothing can author a speed change over time:
-             `paintRateKey` and the add/delete behind it were still here after the rework
-             took the button away, so the retime curve remained a thing the document could
-             hold and the surface could not make. -->
-        <label class="tchip">speed<input id="tRate" type="range" min="0" max="1" step="any"><b id="tRateOut">1.00&times;</b>
-          <button class="kf" id="tRateKey" type="button" aria-label="Retime keyframe"><i></i></button></label>
-        <button class="tmark" id="tMark" type="button" aria-label="Mark here">
-          <svg width="10" height="12" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M1 1l8 0 0 7-4 3-4-3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
-      </div>
+      <button class="tmark" id="tMark" type="button" aria-label="Mark here">
+        <svg width="10" height="12" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1 1l8 0 0 7-4 3-4-3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </button>
       <div class="tchips">
-        <!-- Clip controls when a clip row is selected. The buttons are created in JS
-             and appended here; the span is empty in the markup. -->
-        <span class="tchip off" id="tClipOptions">clip</span>
+        <!-- Clip controls when a clip row is selected. The speed slider is in the markup;
+             the command buttons are created in JS and appended after it. -->
+        <span class="tchip off" id="tClipOptions">clip
+          <!-- The slider's coordinate is not the rate, and the range here is deliberately
+               0..1 rather than 0.1..4. Program length goes as 1/rate, so a control linear
+               in rate spends most of its travel where the ruler barely moves: one 0.05 step
+               at the bottom of the old range changed the clip's length by a third and the
+               same step at the top changed it by one percent. The bounds live in `main.js`
+               beside the mapping that reads this, so there is one copy of them. `value` is
+               written from `retime.rate` at boot for the same reason - a position spelled
+               out here would be a second statement of where 1.00x sits. -->
+          <!-- The diamond belongs beside the slider it keys, which is the same shape the
+               camera chip to the right uses for the same job. Without it the slider sets
+               one rate for the whole clip and nothing can author a speed change over time:
+               `paintRateKey` and the add/delete behind it were still here after the rework
+               took the button away, so the retime curve remained a thing the document could
+               hold and the surface could not make. -->
+          <label class="tspeed">speed<input id="tRate" type="range" min="0" max="1" step="any"><b id="tRateOut">1.00&times;</b>
+            <button class="kf" id="tRateKey" type="button" aria-label="Retime keyframe"><i></i></button></label></span>
         <!-- Applies to whichever key is selected in a lane, except `ends`, which is
              about the track's two outer keys however you got here - see EASE_PRESETS.
              They cover what a handle drag is usually reaching for, and a drag is still
