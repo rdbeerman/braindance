@@ -6205,6 +6205,15 @@ ui.lanes.addEventListener('scroll', () => {
   ui.railLanes.scrollTop = ui.lanes.scrollTop;
 });
 
+// The rail has overflow:hidden so wheel events don't scroll it; forward them to the lanes.
+ui.rail.addEventListener('wheel', (e) => {
+  if (ui.lanes.scrollHeight <= ui.lanes.clientHeight) return;
+  const delta = e.deltaY * (e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 22 : 1);
+  if (Math.abs(delta) < Math.abs(e.deltaX)) return;
+  e.preventDefault();
+  ui.lanes.scrollTop += delta;
+}, { passive: false });
+
 /** The splitter. `resize()` is throttled to an animation frame, not run per pointer event. */
 let gripDrag = null;
 let gripFrame = 0;
