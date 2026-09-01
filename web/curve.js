@@ -1,46 +1,18 @@
-// The scalar curve maths the keyframe tracks are evaluated through, split out of `main.js`
-// because it is the part of the editor that is only arithmetic - no renderer, no DOM, no
-// three.js - and so the first thing here a test can import and call directly.
-
-// The handles of a linear segment, named rather than written out at the four places a key is
-// made, because a key created with anything else silently eases. Linearity is a property of the
-// points and not of their count, so these stay right after a side has grown: any interior point
-// with x equal to y is the identity ease at any degree.
 const EASE_OUT_LINEAR = [[1 / 3, 1 / 3]];
 const EASE_IN_LINEAR = [[2 / 3, 2 / 3]];
 
-/**
- * A handle copied deeply enough that nothing shares a control point with it.
- *
- * A shallow `[...h]` was right while a handle was two numbers and is silently wrong
- * now that it is a list of pairs: the copy would hold the *same* pair objects, so
- * dragging a handle on a key would move the same handle in the undo snapshot the copy
- * was taken for. That is the failure mode this exists to name - it is not a
- * convenience, it is the one line standing between an edit and the history it is
- * supposed to be undoable against.
- */
+// Deep copy so edits do not reach into undo snapshots.
 const copyHandle = (h) => h.map((p) => [p[0], p[1]]);
 
-// How many control points one side of a segment may hold. A ceiling rather than a preference:
-// de Casteljau is quadratic in the point count and a high-degree Bezier loses its locality, so
-// past about here another handle stops being a control anybody can aim.
 const SEGMENT_POINT_CEILING = 4;
 
-/**
- * One control ordinate of a segment's timing curve, by index over the whole list. The ends are
- * pinned at (0,0) and (1,1) and are implied rather than stored. `a` is the `easeOut` of the key
- * being left and `b` the `easeIn` of the key being arrived at, read through here rather than
- * concatenated because this runs per track per frame and the arrays would be garbage.
- */
+/** One control ordinate of a segment's timing curve, by index over the whole list. */
 const ctrl = (a, b, k, axis) => {
   if (k === 0) return 0;
   if (k > a.length + b.length) return 1;
   return k <= a.length ? a[k - 1][axis] : b[k - 1 - a.length][axis];
 };
 
-// The de Casteljau working buffers, module-scoped and reused for the reason above. Two of them
-// because `bezSlopeAxis` needs its own while a value is being computed beside it. Sized to the
-// ceiling twice over plus the two implied ends, so nothing here ever grows one.
 const work = new Float64Array(2 * SEGMENT_POINT_CEILING + 2);
 const dwork = new Float64Array(2 * SEGMENT_POINT_CEILING + 2);
 
@@ -54,11 +26,7 @@ function bezAxis(a, b, axis, u) {
   return work[0];
 }
 
-/**
- * The same coordinate's derivative with respect to `u`. A Bezier's derivative is a Bezier one
- * degree down over the scaled differences of the control points, which is why this is the same
- * loop over a different filling rather than a formula per degree.
- */
+/** The same coordinate's derivative with respect to `u`. */
 function bezSlopeAxis(a, b, axis, u) {
   const n = 1 + a.length + b.length;
   for (let i = 0; i < n; i++) {
@@ -70,12 +38,7 @@ function bezSlopeAxis(a, b, axis, u) {
   return dwork[0];
 }
 
-/**
- * The Bezier parameter at which the curve's x reaches `x`. Newton first because it converges
- * in two or three steps over most of the range, then bisection, because Newton stalls exactly
- * where an ease handle is interesting: a hold at the start of a segment is a near-zero
- * derivative, and dividing by it walks off the curve.
- */
+/** The Bezier parameter at which the curve's x reaches `x`. */
 function easeParam(a, b, x) {
   if (x <= 0) return 0;
   if (x >= 1) return 1;
@@ -106,15 +69,7 @@ function easeAt(a, b, x) {
   return bezAxis(a, b, 1, easeParam(a, b, x));
 }
 
-/**
- * The same segment with one more control point on `side`, and the *identical* curve.
- *
- * Bezier degree elevation is exact, which is the whole reason a control for adding a point can
- * be offered at all: the point appears, every other point shifts to keep the curve where it
- * was, and not a rendered frame changes. Which side gets the extra one is the caller's press.
- * Removing a point gets no such function, because a degree-n curve is not generally a
- * degree-(n-1) curve and the shape following the handle is the honest behaviour.
- */
+/** The same segment with one more control point on `side`, and the identical curve. */
 function elevate(a, b, side) {
   const n = 1 + a.length + b.length;
   const raised = [];
@@ -131,9 +86,7 @@ function easeSlopeAt(a, b, x) {
   const u = easeParam(a, b, x);
   const dx = bezSlopeAxis(a, b, 0, u);
   if (dx > 1e-6) return bezSlopeAxis(a, b, 1, u) / dx;
-  // A vertical tangent is a legitimate handle placement and the analytic ratio is infinite
-  // there. Measured over a small window instead - large, finite and in the right direction.
-  // It used to report zero, which would unmute the audio gate exactly where it has to mute.
+  // Vertical tangent: measure over a small window.
   const h = 1e-4;
   const lo = Math.max(0, x - h);
   const hi = Math.min(1, x + h);
@@ -153,9 +106,6 @@ function keyBefore(keys, t) {
   return lo;
 }
 
-// Outside the keys a look track holds its end values and the retime curve keeps going: a look
-// with one bloom key is a constant bloom, while a retime that flattened past its last key
-// would freeze the program and make the take's tail unreachable.
 const HOLD_ENDS = 'hold';
 const EXTEND_ENDS = 'extend';
 
@@ -175,8 +125,6 @@ function scalarAt(keys, t, ends) {
   const a = keys[i];
   const b = keys[i + 1];
   const span = b.t - a.t;
-  // Coincident keys are a legal transient while one is dragged onto another, and the later
-  // value is what a step would give.
   if (span <= 0) return b.value;
   return a.value + (b.value - a.value) * easeAt(a.easeOut, b.easeIn, (t - a.t) / span);
 }
@@ -206,10 +154,6 @@ function stepAt(keys, t) {
   return keys[i < 0 ? 0 : i].value;
 }
 
-// Catmull-Rom in its Hermite form, with tangents divided by the *time* between the
-// neighbouring keys rather than by an assumed even spacing. The uniform formula reads the
-// parameter as an index, so a tight pair and a wide one get the same tangent and the camera
-// lurches out of the tight one.
 function hermite(p0, p1, m0, m1, span, u) {
   const u2 = u * u;
   const u3 = u2 * u;
@@ -220,12 +164,7 @@ function hermite(p0, p1, m0, m1, span, u) {
   return h00 * p0 + h10 * span * m0 + h01 * p1 + h11 * span * m1;
 }
 
-/**
- * The tangent at key `i`, in metres per program second. At the ends the missing neighbour is
- * the end key mirrored one segment *outside* the path rather than sitting on top of itself:
- * with the duplicate at the same instant the end tangent comes out twice what uniform
- * Catmull-Rom gives, and the two forms have to agree exactly on evenly spaced keys.
- */
+/** The tangent at key `i`, in metres per program second. */
 function tangentAt(keys, i, axis) {
   const n = keys.length;
   const at = (k) => (k < 0
@@ -241,20 +180,7 @@ function tangentAt(keys, i, axis) {
 }
 
 
-/**
- * Whether a handle is one this evaluator can be asked to render, and why not if not.
- *
- * A document is a caller like any other and was the one caller taken on trust. Both refusals
- * are about silence: a point outside the segment pulls the curve past an end it is pinned to,
- * and y outside its bound sends `hermite` past the key on an axis that is already a fraction.
- *
- * Ordering of the abscissae is deliberately not asked here - it is sufficient for a fold and
- * never necessary, and `foldRefusal` below asks the real invariant with both handles in hand.
- * The y bound is a parameter because a look scalar may legitimately overshoot where a pose and
- * the retime may not, and `web/main.js` owns that table.
- *
- * Returns null when there is nothing wrong, and a sentence naming the term when there is.
- */
+/** Whether a handle is one this evaluator can be asked to render, and why not if not. */
 function handleRefusal(points, loY, hiY) {
   for (const [x, y] of points) {
     if (!(x >= 0 && x <= 1)) {
@@ -269,25 +195,11 @@ function handleRefusal(points, loY, hiY) {
   return null;
 }
 
-/**
- * Whether a segment's timing curve folds - whether x(u) ever runs backwards - and a sentence
- * naming where when it does.
- *
- * Asked of the composed segment, because a polygon that ascends within each side can still
- * descend across the join, and asked of the *curve* rather than the control polygon, because
- * ordered control x is sufficient for monotonicity and never necessary. A fold is worth
- * refusing because it fails silently: the bisection still terminates and the take renders
- * deterministically at the wrong times. Answered exactly by de Casteljau subdivision rather
- * than by sampling, which would make the refusal a fact about the sample count.
- */
+/** Whether a segment's timing curve folds, and a sentence naming where when it does. */
 function foldRefusal(a, b) {
   const n = 1 + a.length + b.length;
   const d = [];
   for (let i = 0; i < n; i++) d.push(n * (ctrl(a, b, i + 1, 0) - ctrl(a, b, i, 0)));
-  // Both tests carry one tolerance and it is doing two jobs. A legitimate tangent - dx/du
-  // touching zero - can land a machine epsilon below it, so the endpoint test must not read
-  // that as a fold; and the hull test needs the same allowance or it cannot terminate cheaply,
-  // measured at 1.4s for one call on a segment sitting exactly on the boundary.
   const witness = (coef, lo, hi, depth) => {
     if (coef.every((c) => c >= -1e-9)) return null;
     if (coef[0] < -1e-9) return lo;
@@ -312,15 +224,7 @@ function foldRefusal(a, b) {
     + 'terminates and the move renders at the wrong times rather than failing';
 }
 
-/**
- * How far a control point's x may actually move toward `to` before the segment folds.
- *
- * The neighbour span the drag already applies is an ordering rule, which is sufficient only
- * when the polygon starts ordered - and the crossed polygons `elevate` produces do not. Six
- * in-span drags from a twice-elevated crossed pair reach a genuine fold. Slides to the
- * boundary rather than refusing, because a drag that stops early reads as the curve resisting
- * where a pointer event that throws reads as the editor breaking.
- */
+/** How far a control point's x may move toward `to` before the segment folds. */
 function foldFreeX(a, b, side, index, from, to) {
   const probe = (x) => {
     const list = (side === 'easeOut' ? a : b).map((p) => [p[0], p[1]]);
@@ -338,6 +242,38 @@ function foldFreeX(a, b, side, index, from, to) {
   return good;
 }
 
+/** The source second a clip's own program second maps to. */
+function retimeSourceSecAt({ rate, keys }, programSec) {
+  if (keys.length === 0) return programSec * rate;
+  if (keys.length === 1) return keys[0].value + (programSec - keys[0].t) * rate;
+  return scalarAt(keys, programSec, EXTEND_ENDS);
+}
+
+/** The program position a source position sits at, which is `retimeSourceSecAt` run backwards. */
+function retimeProgramSecAt(curve, sourceSec) {
+  const { rate, keys } = curve;
+  if (keys.length === 0) return sourceSec / rate;
+  if (keys.length === 1) return keys[0].t + (sourceSec - keys[0].value) / rate;
+  if (sourceSec <= keys[0].value) {
+    const slope = segmentSlope(keys, 0, 0);
+    return slope > 0 ? keys[0].t - (keys[0].value - sourceSec) / slope : keys[0].t;
+  }
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (keys[i + 1].value < sourceSec) continue;
+    let lo = keys[i].t;
+    let hi = keys[i + 1].t;
+    for (let k = 0; k < 50; k++) {
+      const mid = (lo + hi) / 2;
+      if (retimeSourceSecAt(curve, mid) < sourceSec) lo = mid;
+      else hi = mid;
+    }
+    return hi;
+  }
+  const last = keys[keys.length - 1];
+  const slope = segmentSlope(keys, keys.length - 2, 1);
+  return slope > 0 ? last.t + (sourceSec - last.value) / slope : last.t;
+}
+
 export {
   handleRefusal,
   foldRefusal,
@@ -353,7 +289,8 @@ export {
   HOLD_ENDS,
   EXTEND_ENDS,
   scalarAt,
-  segmentSlope,
+  retimeSourceSecAt,
+  retimeProgramSecAt,
   scalarSlopeAt,
   stepAt,
   hermite,

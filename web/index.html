@@ -8,6 +8,9 @@
 <!-- Before the page's own rules on purpose: nav.css owns how the chips look and the
      page owns where they sit, so a placement rule here has to win the tie. -->
 <link rel="stylesheet" href="/nav.css" />
+<!-- The media picker builds its own dialog and brings its own rules, so the three surfaces that
+     open it draw one thing rather than three that drift. -->
+<link rel="stylesheet" href="/take-picker.css" />
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
   :root {
@@ -321,11 +324,6 @@
     border: 1px solid var(--line-3); border-radius: 0; background: transparent; }
   .check input[type=checkbox]:checked { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 2px var(--paper-1); }
 
-  /* Clear of the panel rather than under it. The panel is 252px at 16px from the
-     left and scrolls to the full window height, so a hint sharing that column sat
-     underneath the last control on any window tall enough to fill it. */
-  #hint { position: fixed; bottom: 10px; left: 318px; color: var(--dim); z-index: 10; font-size: 11px; }
-
   #camNote, #recNote, #recSpace, #monNote, #recRange, #viewNote, #progNote {
     color: var(--dim); font-size: 12px; line-height: 1.45; opacity: 0.75; margin-top: 2px;
   }
@@ -365,8 +363,9 @@
   body:not(.editing) #menuLookImport,
   body:not(.editing) #menuLookExport { display: none; }
   /* Hide separators that end up orphaned after the items above are hidden. The Output
-     menu keeps only OBS, so its separator goes; the File menu keeps only Save as, which
-     leaves its separator with nothing below it; and the View menu loses its middle
+     menu keeps only OBS, so its separator goes; the File menu keeps only Rename project
+     and Duplicate project, both greyed because the recorder holds none, which leaves its
+     separator with nothing below it; and the View menu loses its middle
      section entirely, leaving Default camera position and Stats for nerds with no
      separator. */
   body:not(.editing) #fileMenu .menu-separator,
@@ -437,7 +436,7 @@
      only decides which declared groups are on screen. */
   #panelTabs {
     flex: none;
-    height: 30px;
+    height: 43px;
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     border-bottom: 1px solid var(--line);
@@ -560,9 +559,21 @@
   .dialog-action:hover:not(:disabled) { filter: brightness(1.08); }
   .dialog-action:disabled,
   .dialog-secondary:disabled { opacity: 0.38; cursor: default; }
+  /* The banner a refused write leaves standing. `--warn` rather than `--red`: nothing is
+     broken and nothing is lost, the writing has stopped, and a red bar over a working editor
+     reads as a crash. Above the dialogs' backdrop is deliberately not wanted - a modal is a
+     thing the operator opened and this is not more urgent than what they are doing in it. */
+  .diverged { position: fixed; top: 48px; left: 50%; transform: translateX(-50%);
+    z-index: 30; width: min(520px, calc(100vw - 32px)); padding: 14px 16px;
+    border: 1px solid var(--warn); background: var(--paper-2);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+  .diverged b { display: block; color: var(--warn); font-weight: 600; font-size: 12px; }
+  .diverged span { display: block; margin-top: 3px; color: var(--dim); font-size: 11px; }
+  .diverged p { margin: 9px 0 12px; color: var(--ink); font-size: 11px; line-height: 1.5; }
   #exportDialog { width: min(480px, calc(100vw - 32px)); }
   #obsDialog { width: min(480px, calc(100vw - 32px)); }
   #projectDialog { width: min(480px, calc(100vw - 32px)); }
+  #renameDialog { width: min(440px, calc(100vw - 32px)); }
   /* Effect picker sidebar - appears to the right of the main panel. */
   #effectRackPanel {
     position: fixed; top: 38px; left: 302px; width: min(260px, calc(100vw - 32px));
@@ -659,7 +670,6 @@
     background: var(--paper-1); border-top: 1px solid var(--line);
   }
   #timeline[hidden] { display: none; }
-  body.editing #hint { display: none; }
   body.editing #panel { height: calc(100vh - var(--timeline-h) - var(--tlanes-h) - 38px); }
 
   /* ── the collapsed panel ───────────────────────────────────────────────────
@@ -708,9 +718,6 @@
     height: auto;
     bottom: calc(var(--timeline-h) + var(--tlanes-h));
   }
-  /* The hint names a mouse - drag, scroll, right-drag - and sits at `left: 318px`,
-     which is inside the cloud once the panel is not 302px wide any more. */
-  body.panelcollapsed #hint { display: none; }
   /* The two that act on the take are the recorder's, and the editor does not have them.
      `body.editing #panelTabRecord` above takes the whole Record tab off that surface, so
      the panel there offers no `record` and no `mark` at all - and the dock is the panel's
@@ -746,7 +753,6 @@
      leave behind still saying `display: none` about an element the shared sheet had
      renamed. */
   body.program-out #panel,
-  body.program-out #hint,
   body.program-out #timeline { display: none; }
   body.program-out { background: #000; overflow: hidden; }
   #programOutReadout {
@@ -828,7 +834,8 @@
      because a row of live buttons that write nothing is the same dead affordance the
      handle on a flat segment was. */
   .tease button { padding: 1px 5px; }
-  .tease.off { opacity: 0.45; }
+  /* The dynamic controls: clip options and key options, hidden when their element is not selected. */
+  #tClipOptions.off, #tEase.off { display: none; }
   .tchip b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
   .tchip input[type=range] { width: 92px; flex: none; }
   .tchip select {
@@ -849,8 +856,6 @@
      `Export` sat hard left, 278px from the right edge the other two dialogs' actions sit
      on. Measured at 1512px wide. */
   #tNote:empty { display: none; }
-  #tResume { border: none; background: none; padding: 0; }
-  #tResumeOpen { padding: 5px 10px; }
   /* One missing effect, one entry: its sentence and the control that lets a render go
      without it, kept together so two of them cannot read as one. `inline-flex` rather
      than `block` for the same reason the chip around it is one - the button has to sit
@@ -891,10 +896,9 @@
     display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   }
   #appStatusSlot #appStatus { flex: 0 0 auto; }
-  /* Speed control and mark button next to clocks. */
-  .tspeed { display: flex; align-items: center; gap: 8px; flex: none; }
-  .tspeed .tchip { display: inline-flex; align-items: center; gap: 7px; }
-  /* The mark button beside the speed slider. Matches Pencil design exactly. */
+  /* The speed slider, its readout and its keyframe, inside the clip chip. */
+  .tspeed { display: inline-flex; align-items: center; gap: 7px; }
+  /* The mark button beside the clocks. Matches Pencil design exactly. */
   .tmark {
     width: 26px; height: 26px; flex: none;
     display: grid; place-items: center;
@@ -1203,14 +1207,17 @@
   .tclipedge.head::after { left: 3px; }
   .tclipedge.tail::after { right: 3px; }
   .tclip.sel .tclipedge::after { background: var(--accent); }
-  /* The head of the stack: the two commands that add and remove a clip. */
-  .tlane.tclipbar { display: flex; align-items: center; gap: 6px; padding-left: 4px; }
   .tclipcmd {
     font: inherit; font-size: 10px; color: var(--dim); background: none;
     border: 1px solid var(--line-2); border-radius: 3px; padding: 2px 6px; cursor: pointer;
   }
   .tclipcmd:hover:not(:disabled) { color: var(--ink); border-color: var(--accent); }
   .tclipcmd:disabled { opacity: 0.4; cursor: default; }
+  .tcol.rail .trow.clip-add-row { padding: 3px 8px; }
+  .tclipcmd.tclipadd {
+    flex: 1 1 auto; width: 100%; height: 28px; padding: 0; border-radius: 3px;
+    font-size: 20px; line-height: 26px;
+  }
   /* A command that is a mode rather than an action says which mode is armed. Without this the
      only thing on screen saying so is the shape of the handles in the viewport. */
   .tclipcmd[aria-pressed=true] { color: var(--bg); background: var(--accent);
@@ -1219,16 +1226,6 @@
   .tclipcmd[data-kf=some] { color: var(--accent); border-color: var(--accent); }
   .tclipcmd[data-kf=here] { color: var(--bg); background: var(--accent);
     border-color: var(--accent); }
-  /* The take list inside the add-clip dialog. */
-  .cplist { display: flex; flex-direction: column; gap: 2px; max-height: 280px;
-    overflow-y: auto; min-width: 0; }
-  .cpoption {
-    display: flex; gap: 8px; align-items: baseline; text-align: left; font: inherit;
-    background: none; border: 1px solid transparent; border-radius: 3px; padding: 4px 6px;
-    color: var(--ink); cursor: pointer;
-  }
-  .cpoption:hover, .cpoption:focus-visible { background: var(--accent-low); border-color: var(--accent); }
-  .cpoption small { color: var(--dim); font-size: 11px; }
   .tkey {
     position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px;
     background: var(--dim); transform: rotate(45deg); cursor: grab; z-index: 5;
@@ -1267,8 +1264,14 @@
       <div class="appmenu">
         <button class="appmenu-trigger" id="fileMenuButton" type="button" aria-expanded="false" aria-controls="fileMenu">File</button>
         <div class="appmenu-popover" id="fileMenu" role="menu" hidden>
-          <a class="menu-command" id="toLibrary" href="/gallery" role="menuitem"><span>Open</span><kbd>&#8984;O</kbd></a>
-          <button class="menu-command" id="menuSaveProject" type="button" role="menuitem"><span>Save as</span><kbd>&#8679;&#8984;S</kbd></button>
+          <a class="menu-command" id="toLibrary" href="/projects" role="menuitem"><span>Open</span><kbd>&#8984;O</kbd></a>
+          <!-- Nothing here saves the edit, because it saves itself. What survives the save item
+               are the two acts wanted from inside a cut: giving a name to the `Untitled 4`
+               somebody has been working on for an hour, and forking it to try something.
+               Deleting is on the projects page and deliberately not here - auto-save would
+               write the file straight back the moment anything was touched. -->
+          <button class="menu-command" id="menuRenameProject" type="button" role="menuitem"><span>Rename project&hellip;</span><kbd></kbd></button>
+          <button class="menu-command" id="menuDuplicateProject" type="button" role="menuitem"><span>Duplicate project</span><kbd></kbd></button>
           <div class="menu-separator"></div>
           <!-- The two things about the edit that a deliverable is not allowed to decide:
                the shape the stage is letterboxed to and the rate the frames come out at.
@@ -1316,16 +1319,9 @@
          is bare in the ordinary case, and `title` carries the whole sentence because the
          slot ellipsises and a refusal is exactly the text worth reading to the end.
 
-         `#tResume` is the auto-save offer, and an offer nobody sees is the same as no
-         offer - which is what it became when the chip's row went away and left
-         `offerWorkingDocument` returning at its first line, the editor opening the take
-         after a crash and silently withholding the only path back to the unsaved edit.
-         `openTake` is the only caller that can decide it, because deciding needs the
-         take's hash.
-
          `#tMissing` is the effects this document names that this build has not got. It
-         is the fourth thing in the slot and it belongs here for the reason `#tResume`
-         does: it is a statement about the session, and it is the only place the person
+         is the third thing in the slot and it belongs here because it is a statement
+         about the session rather than about the playhead: it is the only place the person
          at the screen is told that part of the clip is being carried rather than drawn.
          Empty it hides itself the way the note does, so an ordinary document leaves the
          bar exactly as bare as it was; `paintMissingEffects` fills it, one line per
@@ -1348,11 +1344,22 @@
               aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span>
         <b id="tExportingCount"></b>
       </span>
-      <span class="tchip" id="tResume" hidden><b id="tResumeWhen"></b><button id="tResumeOpen" type="button">restore autosave</button></span>
       <span class="tchip warn" id="tMissing" hidden></span>
       <span id="appStatus"></span>
     </div>
   </header>
+
+  <!-- The one message in this program that is not allowed to scroll away. Every other refusal
+       lands in `#tNote`, which the next `say` rubs out - right for a sentence about the change
+       you just made, and wrong for this one, because this tab has stopped writing and the fact
+       that it has stopped is true until somebody acts on it. Fixed rather than in the layout so
+       the canvas underneath is the size it was; over the stage rather than beside it because a
+       banner you can miss is a banner that lets an hour of work go nowhere. -->
+  <div class="diverged" id="tDiverged" role="alert" hidden>
+    <b>Somebody else has this project open.</b>
+    <span id="tDivergedWhen"></span>
+    <button class="dialog-action" id="tDivergedCopy" type="button">Duplicate project</button>
+  </div>
 
   <div id="panel">
     <div id="panelHead">
@@ -1502,8 +1509,6 @@
     <div class="effect-rack-list" id="effectRackList" aria-label="Installed effects"></div>
   </aside>
 
-  <div id="hint">drag to orbit · scroll to zoom · right-drag to pan · <b>R</b> record · <b>M</b> mark · <b>H</b> hides panel</div>
-
   <section id="timeline" hidden aria-label="Timeline">
     <!-- `tabindex` because the role is a promise. A functional `separator` that only a
          pointer can move tells assistive technology there is a control here and then
@@ -1519,34 +1524,34 @@
     <div class="tbar transport">
       <button id="tPlay" class="tplay" type="button" aria-label="Play">&#9654;</button>
       <div class="tclocks">
-        <div class="tclock"><small>program</small><output id="tProgram">00:00.000</output></div>
+        <div class="tclock"><small>playback</small><output id="tProgram">00:00.000</output></div>
         <div class="tclock derived"><small>source</small><output id="tSource">00:00.000</output></div>
       </div>
-      <!-- Speed control and mark button, positioned next to clocks -->
-      <div class="tspeed">
-        <!-- The slider's coordinate is not the rate, and the range here is deliberately
-             0..1 rather than 0.1..4. Program length goes as 1/rate, so a control linear
-             in rate spends most of its travel where the ruler barely moves: one 0.05 step
-             at the bottom of the old range changed the clip's length by a third and the
-             same step at the top changed it by one percent. The bounds live in `main.js`
-             beside the mapping that reads this, so there is one copy of them. `value` is
-             written from `retime.rate` at boot for the same reason - a position spelled
-             out here would be a second statement of where 1.00x sits. -->
-        <!-- The diamond belongs beside the slider it keys, which is the same shape the
-             camera chip to the right uses for the same job. Without it the slider sets
-             one rate for the whole clip and nothing can author a speed change over time:
-             `paintRateKey` and the add/delete behind it were still here after the rework
-             took the button away, so the retime curve remained a thing the document could
-             hold and the surface could not make. -->
-        <label class="tchip">speed<input id="tRate" type="range" min="0" max="1" step="any"><b id="tRateOut">1.00&times;</b>
-          <button class="kf" id="tRateKey" type="button" aria-label="Retime keyframe"><i></i></button></label>
-        <button class="tmark" id="tMark" type="button" aria-label="Mark here">
-          <svg width="10" height="12" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M1 1l8 0 0 7-4 3-4-3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
-      </div>
+      <button class="tmark" id="tMark" type="button" aria-label="Mark here">
+        <svg width="10" height="12" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1 1l8 0 0 7-4 3-4-3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </button>
       <div class="tchips">
+        <!-- Clip controls when a clip row is selected. The speed slider is in the markup;
+             the command buttons are created in JS and appended after it. -->
+        <span class="tchip off" id="tClipOptions">clip
+          <!-- The slider's coordinate is not the rate, and the range here is deliberately
+               0..1 rather than 0.1..4. Program length goes as 1/rate, so a control linear
+               in rate spends most of its travel where the ruler barely moves: one 0.05 step
+               at the bottom of the old range changed the clip's length by a third and the
+               same step at the top changed it by one percent. The bounds live in `main.js`
+               beside the mapping that reads this, so there is one copy of them. `value` is
+               written from `retime.rate` at boot for the same reason - a position spelled
+               out here would be a second statement of where 1.00x sits. -->
+          <!-- The diamond belongs beside the slider it keys, which is the same shape the
+               camera chip to the right uses for the same job. Without it the slider sets
+               one rate for the whole clip and nothing can author a speed change over time:
+               `paintRateKey` and the add/delete behind it were still here after the rework
+               took the button away, so the retime curve remained a thing the document could
+               hold and the surface could not make. -->
+          <label class="tspeed">speed<input id="tRate" type="range" min="0" max="1" step="any"><b id="tRateOut">1.00&times;</b>
+            <button class="kf" id="tRateKey" type="button" aria-label="Retime keyframe"><i></i></button></label></span>
         <!-- Applies to whichever key is selected in a lane, except `ends`, which is
              about the track's two outer keys however you got here - see EASE_PRESETS.
              They cover what a handle drag is usually reaching for, and a drag is still
@@ -1682,9 +1687,6 @@
       <label for="tFps">Frame rate</label>
       <select id="tFps"></select>
     </div>
-    <p id="projectNote">The shape and the rate belong to the edit, so changing either is
-      undoable and every deliverable made from this clip inherits it. Resolution and format
-      are per-deliverable and live in Export.</p>
     <div class="dialog-actions">
       <!-- The spacer the other two dialogs get from their status note, and not a `.note`
            of its own, because a `.note` is a place a message lands and this dialog has no
@@ -1694,6 +1696,29 @@
            against, so it is named for the job it does. -->
       <span class="dialog-spacer"></span>
       <button class="dialog-action" id="projectDone" type="button">done</button>
+    </div>
+  </dialog>
+
+  <!-- A name is typed, so it is a modal rather than a `window.prompt`: the refusal has to be
+       readable while it is being typed, and a prompt can only say no after the fact.
+       `documentNameRefusal` is `web/format.js`'s, which `server/library.js` imports too - the
+       server's copy is the gate and this one greys the button out early. -->
+  <dialog id="renameDialog" aria-labelledby="renameTitle">
+    <div class="dialog-head">
+      <h2 id="renameTitle">Rename project</h2>
+      <button class="dialog-close" id="renameClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="dialog-field" id="renameField">
+      <label for="renameName">Name</label>
+      <div class="dialog-input-row">
+        <input id="renameName" type="text" autocomplete="off" spellcheck="false" />
+      </div>
+    </div>
+    <p class="note" id="renameNote"></p>
+    <div class="dialog-actions">
+      <span class="dialog-spacer"></span>
+      <button class="dialog-secondary" id="renameCancel" type="button">cancel</button>
+      <button class="dialog-action" id="renameGo" type="button">Rename</button>
     </div>
   </dialog>
 
@@ -1821,7 +1846,6 @@
       <span class="dialog-label">Webcam source</span>
       <div class="dialog-copy"><input id="obsWebcamUrl" type="text" readonly><button class="dialog-secondary" id="obsCopyWebcam" type="button">copy</button></div>
     </div>
-    <p id="obsNote">The browser source renders the program camera. The webcam URL serves the Kinect colour camera directly.</p>
     <div class="dialog-actions">
       <!-- The dot is lit off the server's own subscriber list rather than off the fact
            that this dialog is open. The literal it replaces said `ready` on a machine
@@ -1858,38 +1882,12 @@
        written here is the furniture the generator hangs them on. -->
   <dialog id="presetPick" aria-labelledby="ppTitle">
     <h2 id="ppTitle">Save this look</h2>
-    <p>A preset carries the values you tick and nothing else, so a clip it is applied to
-      keeps everything left out. The five reading weights tick and untick together,
-      because a look naming some of them renders as a blend nobody authored.</p>
-    <p>Applying one is not all on one clip. The cloud values land on the selected clip;
-      the post chain - bloom, trails, crush and the rest of the grade - is the project's,
-      so those land once and every other clip in the edit is seen through them.</p>
     <input id="ppName" type="text" autocomplete="off" spellcheck="false" aria-label="Preset name" />
     <div id="ppGroups"></div>
     <div class="ppacts">
       <span id="ppCount"></span>
       <button type="button" id="ppCancel">cancel</button>
       <button type="button" class="go" id="ppGo">save</button>
-    </div>
-  </dialog>
-
-  <!-- Which take a new clip is cut from. The gallery is the surface that browses footage and
-       this is not a second one: it lists what `/library/takes` says is here, which is the same
-       route the project loader resolves a document's footage through, and choosing an entry is
-       the whole interaction. -->
-  <dialog id="clipPick" aria-labelledby="cpTitle">
-    <div class="dialog-head">
-      <h2 id="cpTitle">Add a clip</h2>
-      <button class="dialog-close" id="cpClose" type="button" aria-label="Close">&times;</button>
-    </div>
-    <div class="dialog-field">
-      <span class="dialog-label">Take</span>
-      <div class="cplist" id="cpList" role="listbox" aria-label="Takes"></div>
-    </div>
-    <p class="note" id="cpNote">The clip lands at the playhead, on a row of its own.</p>
-    <div class="dialog-actions">
-      <span class="dialog-spacer"></span>
-      <button class="dialog-action" id="cpCancel" type="button">cancel</button>
     </div>
   </dialog>
 

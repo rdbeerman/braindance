@@ -82,12 +82,14 @@ whenever the editor opens, because the transport is built fresh each time and a 
 one take is not a fact about the next one.
 
 **Clips are the rows at the head of the lane stack**, one box each from where a clip starts to
-where it ends, above the curves that animate them. `+ add clip` opens the library's takes and the
-one you choose lands at the playhead on a row of its own; `delete clip` removes the selected one,
-and so does `Delete` — there is a button as well as a key because the Pi's touchscreen has
-neither a Delete key nor a drag affordance to discover. Click a box to select that clip, drag it
-along the strip to move it, and drag either edge to trim it. The edit refuses to delete its last
-clip, because a project carries at least one.
+where it ends, above the curves that animate them. The full-width `+` below the last clip opens
+the media library's takes even when no row is selected. The first one you choose lands at the
+playhead on a row of its own. With no selection, it copies the first clip's look; otherwise it
+copies the selected clip's. `delete clip` removes the selected one, and so does `Delete`. There is
+a button as well as a key because the Pi's touchscreen has neither a Delete key nor a drag affordance to
+discover. Click a box to select that clip, drag it along the strip to move it, and drag either
+edge to trim it. The edit refuses to delete its last clip, because a project carries at least
+one.
 
 **The two edges do different things.** The right edge moves where the edit stops using the take,
 which is the clip's own `length`. The left edge is a head trim: the clip starts later in the take,
@@ -520,6 +522,15 @@ out at, and both are undoable document state. **Output > Export** holds the reso
 format, the output name and a readout of the trim the press will take, and all of those
 belong to a deliverable — one of several files you might make from the edit.
 
+**Nothing on either menu saves the edit, because it saves itself.** Every change that lands on
+the undo stack is written to the project's own file, so there is no save entry and no shortcut for
+one. The file the edit lives in is a third question and `File` answers it too: `Rename project`
+opens a modal, because a name is typed, and `Duplicate project` stamps a copy and leaves you
+editing the copy rather than the original — which is what forking an idea means once there is no
+save to withhold. Deleting a project is on the projects page and deliberately not here, since
+autosave would write the file straight back the moment you touched anything. `Cmd/Ctrl+O` goes to
+the projects page.
+
 **The shape is the edit's because the camera was keyed against a frame.** A 65:24 shot
 reopened at 16:9 is a different shot with the same keys, which is the class of silent
 reinterpretation the point-size rebase already taught this repo to refuse. The resolution is
@@ -614,7 +625,7 @@ envelope from a version it does not read, naming the version: version 2 carries 
 captures where version 1 carried a single string, and this repo ships no conversion.
 
 The editor has no entry that comes up on no footage — `/edit` with neither a take nor a project
-redirects to the gallery — so the worker brings the page up on the first clip's take and lets
+redirects to the projects page — so the worker brings the page up on the first clip's take and lets
 the project open the rest. That bootstrap is the one thing here still resolving a hash to an id.
 
 **A queue call that did not work is never read as a store with nothing in it.** The worker asks

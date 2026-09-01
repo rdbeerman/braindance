@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { PROJECT_VERSION } from '../web/format.js';
+import { CLIP_CEILING, PROJECT_VERSION } from '../web/format.js';
 // The server's own validator, imported rather than re-stated: `validateExport` is what both the
 // socket's `begin` and `POST /jobs` call, so a list of codec names retyped here would be a third
 // copy that can drift from both.
@@ -142,6 +142,36 @@ const MUTATIONS = {
     edits: [['  const start = timeline ? timeline.programSec : 0;', '  const start = 0;']],
     fails: 'a clip landing at the head of the edit rather than under the playhead. Two rows: the '
       + 'placement, and the row that says the mark arm has a placement to be about at all',
+  },
+
+  'add-clip-needs-selection': {
+    file: 'web/main.js',
+    edits: [[
+      '  ui.addClip.disabled = clips.length + pendingClipAdds >= CLIP_CEILING;',
+      '  ui.addClip.disabled = !selected || clips.length + pendingClipAdds >= CLIP_CEILING;',
+    ]],
+    fails: 'the stack add control becoming disabled when no clip row is selected',
+  },
+
+  'add-clip-uses-hidden-selection': {
+    file: 'web/main.js',
+    edits: [[
+      '  const initiating = selectedClipRow() ?? clips[0];',
+      '  const initiating = selectedClipRow() ?? selectedClip;',
+    ]],
+    fails: 'an add with no selection copying the hidden last selection instead of the first clip',
+  },
+
+  'add-clip-stays-with-selected-clip-commands': {
+    file: 'web/main.js',
+    edits: [[
+      "  rows.push({ owner: 'clip-add', label: '', kind: 'clip-add', height: CLIP_ADD_H });",
+      '',
+    ], [
+      'ui.clipOptions.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
+      'ui.clipOptions.append(ui.addClip, ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
+    ]],
+    fails: 'the plus control returning to the dynamic controls area beside commands that need a selected clip',
   },
 
   'add-clip-skips-post-open-export-guard': {
@@ -436,11 +466,14 @@ const MUTATIONS = {
   'commit-ignores-null-baseline': {
     file: 'web/main.js',
     edits: [['    if (this.baseline === null) return false;\n', '']],
-    fails: 'the recovery slot of the take that *was* open, spent by a take that never opened. '
-      + 'The `!EDITING` guard beside it is about the surface and cannot see this: `begin()` '
-      + 'is the last thing `openTake` does, so a failed open leaves `/edit` interactive with '
-      + 'a null baseline. Reddens exactly two rows in section 13 - the press being recorded, '
-      + 'and what it destroyed - so read the rows',
+    fails: 'a press on a live control of a take that never opened, recorded as an edit. The '
+      + '`!EDITING` guard beside it is about the surface and cannot see this: `begin()` is the '
+      + 'last thing `openTake` does, so a failed open leaves `/edit` interactive with a null '
+      + 'baseline. Reddens **one** row in section 13, the press being recorded. It said two '
+      + 'until the working document went: the second was the recovery slot the press destroyed, '
+      + 'and there is no slot to spend now, so the surviving half is what it is asked to hold. '
+      + 'Measured on the rewritten section - 739 assertions, 3 failed, two of them the standing '
+      + 'pair this file declares',
   },
 
   // Must redden the two pre-roll rows and leave the space-bar rows above them green: the key was
@@ -594,15 +627,13 @@ const MUTATIONS = {
     edits: [
       ['  refusePresetBody(name, body);\n', ''],
       [
-        '  const saved = await res.json();\n'
-        + '  if (saved.error) throw new Error(saved.error);\n'
+        "  const saved = await writeDocumentAtCurrentRev('presets', name, { body });\n"
         + '  if (generation !== documentGeneration || (target && !clips.includes(target))) {\n'
         + '    return { ...saved, applied: false };\n'
         + '  }\n'
         + '  const applied = applyStoredPreset({ name: saved.name, rev: saved.rev, body }, target);\n'
         + '  return { ...saved, applied: applied !== null };',
-        '  const saved = await res.json();\n'
-        + '  if (saved.error) throw new Error(saved.error);\n'
+        "  const saved = await writeDocumentAtCurrentRev('presets', name, { body });\n"
         + '  refusePresetBody(name, body);\n'
         + '  if (generation !== documentGeneration || (target && !clips.includes(target))) {\n'
         + '    return { ...saved, applied: false };\n'
@@ -640,23 +671,23 @@ const MUTATIONS = {
     ]],
   },
 
-  // Must redden: section 13's "no offer for a working document belonging to different footage".
-  'offer-ignores-take-hash': {
-    file: 'web/main.js',
-    edits: [[
-      '  if (String(footageOf(working.body)) !== String(open)) return;',
-      '  if (String(footageOf(working.body).length) !== String(open.length)) return;',
-    ]],
-  },
-
-  // Must redden only the row about a broken neighbour.
-  'resume-fetches-the-moving-name': {
-    file: 'web/main.js',
-    edits: [[
-      '    await loadProjectNamed(WORKING_PROJECT, accepted);',
-      '    await loadProjectNamed(WORKING_PROJECT);',
-    ]],
-  },
+  // Four controls stood here and they are removed rather than re-anchored, because their subject
+  // is gone: there is no hidden working document and no chip offering it back, so each of them
+  // named a mechanism this build does not have. What each guaranteed is recorded in
+  // `docs/proof-tools.md` beside the section that drove them, because a control removed in
+  // silence is a guarantee removed in silence.
+  //
+  // `offer-ignores-take-hash`         - the offer joined on the take's content hash and not on
+  //                                     its id, so a renamed id could not resurrect an edit cut
+  //                                     on different footage.
+  // `resume-fetches-the-moving-name`  - pressing the chip restored the document that had been
+  //                                     offered rather than re-reading the name, which the
+  //                                     auto-save moves under it between the offer and the press.
+  // `resume-restores-without-keeping` - a restore that could not be written back threw rather
+  //                                     than leaving the screen and the file disagreeing.
+  // `resume-waits-for-every-list`     - a neighbouring listing that refused did not hide the
+  //                                     offer, since only the projects listing is what it is
+  //                                     made of.
 
   'project-load-keeps-renamed-take-id': {
     file: 'web/main.js',
@@ -669,29 +700,28 @@ const MUTATIONS = {
       + 'bytes but leaves the clip fetching and marking through the name that no longer exists',
   },
 
-  // Must redden only the row that reads the store after the press.
-  'resume-races-the-autosave': { file: 'web/main.js', edits: [[
-    'const kept = await writeWorking(accepted);',
-    "const kept = await fetch(`/projects/${WORKING_PROJECT}`, {\n"
-    + "      method: 'PUT',\n      headers: { 'Content-Type': 'application/json' },\n"
-    + '      body: JSON.stringify(accepted),\n    });',
-  ]] },
-
-  'resume-restores-without-keeping': {
+  // The successor to `resume-races-the-autosave`, which was about a write going through the
+  // ordered writer rather than through a bare fetch. Auto-save is still serialised, and what the
+  // ordering now has to carry is the revision: read it where the call is made and every write in
+  // a burst names the revision the first of them replaced, so the second is refused as somebody
+  // else's work and the tab stops writing over its own shoulder.
+  'autosave-reads-the-revision-outside-the-queue': {
     file: 'web/main.js',
     edits: [[
-      '    const kept = await writeWorking(accepted);\n'
-      + "    if (!kept.ok) throw new Error(`restored on screen, but the auto-save could not be rewritten: ${(await kept.text().catch(() => '')).slice(0, 80)}`);\n",
-      '',
+      'function writeOpenProject(body) {\n'
+      + '  return queueProjectWrite(async () => {\n'
+      + '    const res = await fetch(\n'
+      + '      `/projects/${encodeURIComponent(openedProjectName)}?rev=${encodeURIComponent(openedProjectRev)}`,',
+      'function writeOpenProject(body) {\n'
+      + '  const revAtCall = openedProjectRev;\n'
+      + '  return queueProjectWrite(async () => {\n'
+      + '    const res = await fetch(\n'
+      + '      `/projects/${encodeURIComponent(openedProjectName)}?rev=${encodeURIComponent(revAtCall)}`,',
     ]],
-  },
-
-  'resume-waits-for-every-list': {
-    file: 'web/main.js',
-    edits: [[
-      '  if (listed.projects) offerWorkingDocument(listed.projects);',
-      '  if (!unavailable.length) offerWorkingDocument(listed.projects);',
-    ]],
+    fails: 'the burst row in section 13 - two commits in one turn, where the second carries the '
+      + 'revision the first replaced and is refused against its own predecessor. The refusal row '
+      + 'beside it goes red the other way, because the banner then stands over a divergence '
+      + 'nobody else caused',
   },
 
   // Must redden the AltGr row and leave the plain ctrl+alt row beside it green.
@@ -942,8 +972,8 @@ const MUTATIONS = {
   'fit-outlives-a-restored-project': {
     file: 'web/main.js',
     edits: [[
-      '  (REQUESTED_PROJECT ? loadProjectNamed(REQUESTED_PROJECT) : openTake(REQUESTED_TAKE))',
-      '  (REQUESTED_PROJECT ? loadProjectNamed(REQUESTED_PROJECT) : openTake(REQUESTED_TAKE))\n'
+      '  door.open()',
+      '  door.open()\n'
       + '    .then(() => fitCropToTake(openTakeId(), params.get(\'near\'), params.get(\'far\')).catch(() => {}))',
     ]],
     fails: 'and a document\'s own box, which the entry point protects by structure: the fit '
@@ -1327,6 +1357,21 @@ const MUTATIONS = {
     fails: 'the clip handles writing and rebuilding the lane stack from the pointer event rather '
       + 'than arming a redraw the animation loop pumps. Reddens the two rebuild rows of 22b: '
       + '30 rebuilds for 30 moves, against the 34-for-one this program has shipped',
+  },
+  'gizmo-drag-keeps-orbit-ownership': {
+    file: 'web/main.js',
+    edits: [[
+      "    if (e.value) {\n"
+        + '      // Orbit sees the shared pointerdown first; the gizmo owns this gesture from here.\n'
+        + '      orbiting = false;\n'
+        + '      orbitSettling = false;\n'
+        + '      orbitRedrawWanted = false;\n'
+        + '      return;\n'
+        + '    }',
+      '    if (e.value) return;',
+    ]],
+    fails: 'the move handles leaving the orbit gesture armed after claiming the pointer. '
+      + 'Section 22b reddens the before-release render row',
   },
   'gizmo-runs-through-the-look': {
     file: 'web/main.js',
@@ -2031,6 +2076,29 @@ async function loadPlaywright() {
 
 // --------------------------------------------------------------------- reporting
 
+/**
+ * The rows that are red on this tree for reasons that are not the build's, by label.
+ *
+ * This exists because the mutation verdict below used to compare the failure count against zero.
+ * With any standing red, every `--mutate` run reported `caught, as required (2 assertions fired)`
+ * whether the control reddened anything or not - measured on `commit-ignores-null-baseline`, which
+ * reddens nothing and was recorded as caught off these two rows. A suite with a standing failure
+ * is a false-positive generator for its own catch verdict, and the only thing that separates the
+ * two populations is knowing which rows were already red.
+ *
+ * `docs/proof-tools.md` carries the case: both track the length of the take rather than the load
+ * on the machine, red on the 243.3s `fixture-1g` and green on a 91.2s one. So a declared row
+ * coming back green is reported rather than failed - on a shorter fixture that is the honest
+ * reading and not a stale entry - and the report is loud, because an exemption nobody looks at
+ * twice is what this table would otherwise become.
+ */
+const STANDING_RED = new Map([
+  ['and never falls back to a rebuild, which is what resized the drawing buffer',
+    'flips with the take\'s length; red on the 243.3s fixture-1g, green on a 91.2s one'],
+  ['and a double click on a key removes it',
+    'flips with the take\'s length; red on the 243.3s fixture-1g, green on a 91.2s one'],
+]);
+
 let failures = 0;
 let checks = 0;
 const fired = [];
@@ -2072,10 +2140,15 @@ const DRIVER_RULES = [
     match: (row) => inGroup(row, '#presetPick'),
   },
   {
-    key: 'clippick',
-    what: 'a control in the dialog a clip is cut from',
-    by: 'section 22 opens it from the clip bar, reads what it offers, and picks a take',
-    match: (row) => inGroup(row, '#clipPick'),
+    // Ahead of `shelldialogs`, because ordering is precedence here and this dialog is driven
+    // somewhere else: section 1 walks a page opened on a take, where Rename is greyed and the
+    // modal cannot be opened at all. A rule crediting a section that could not reach it would be
+    // a claim nothing joins to a press.
+    key: 'renamedialog',
+    what: 'a control in the modal a project is renamed through',
+    by: 'section 13 opens it from the File menu on a page that holds a project, types the name '
+      + 'it already has and reads the refusal, then types a new one and follows the file',
+    match: (row) => inGroup(row, '#renameDialog'),
   },
   {
     key: 'shelldialogs',
@@ -2174,6 +2247,38 @@ const DRIVER_RULES = [
 /** Whether a swept control sits inside any of these ancestors. */
 // Hoisted above the rules, because they call it and a `const` read before its own
 // declaration is a TDZ error.
+
+// This tool's own document writes, each carrying the revision the store is at: every change
+// to a document names the one it was made against, and these are creates and cleanups
+// against a store this run owns.
+async function writeProjectDoc(name, init) {
+  const at = `${URL_BASE}/projects/${encodeURIComponent(name)}`;
+  const read = await fetch(at);
+  const held = read.ok ? (await read.json().catch(() => null))?.rev : null;
+  return fetch(`${at}?rev=${encodeURIComponent(held ?? 'absent')}`, init);
+}
+
+async function writePresetDoc(name, init) {
+  const at = `${URL_BASE}/presets/${encodeURIComponent(name)}`;
+  const read = await fetch(at);
+  const held = read.ok ? (await read.json().catch(() => null))?.rev : null;
+  return fetch(`${at}?rev=${encodeURIComponent(held ?? 'absent')}`, init);
+}
+
+async function armDocumentWrites(target) {
+  await target.addInitScript(() => {
+    globalThis.__ecWrite = async (at, init) => {
+      // Off the listing, so a name with no file behind it does not answer a 404 this run then
+      // has to explain to its own page-error sweep.
+      const kind = at.split('/')[1];
+      // `/projects` is the page; the listing under it is `/projects/all`.
+      const listed = await (await fetch(kind === 'projects' ? '/projects/all' : `/${kind}`)).json();
+      const held = (listed[kind] ?? []).find((doc) => at.endsWith(encodeURIComponent(doc.name)))?.rev;
+      return fetch(`${at}?rev=${encodeURIComponent(held ?? 'absent')}`, init);
+    };
+  });
+}
+
 function inGroup(row, ...groups) {
   return groups.some((g) => row.groups.includes(g));
 }
@@ -2205,7 +2310,6 @@ const DRIVER_IDS = {
   tPresetExport: 'section 9 - exports the look and reads the file the browser wrote',
   tPresetImport: 'section 9 - opens the picker the file input is the other half of',
   tPresetFile: 'section 9 - a file is set on it and the look it names arrives',
-  tResumeOpen: 'section 13 - plants an autosave, presses it, and reads the restored document back',
   toMenu: 'section 1 - reads the href it navigates to, beside the library link',
   tDeliverable: 'section 6 - plants a long name in it and reads back which one the picker is left on',
   tDeliverableNew: 'section 1 - presses it and reads the prompt it opens, the way Save as is driven',
@@ -2317,6 +2421,7 @@ async function openEditor() {
   });
   const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, acceptDownloads: true });
   await context.addInitScript(PICKER_STUB);
+  await armDocumentWrites(context);
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (err) => errors.push(String(err)));
@@ -2401,7 +2506,8 @@ const range = () => page.evaluate('__kinect.editor.clipRange()');
 const lanes = () => page.evaluate('__kinect.keyframes.lanes()');
 // The lanes that carry keys. The stack also holds the clip bar and a row per clip, which are
 // structure rather than animation and are counted by section 22 instead.
-const keyedLanes = async () => (await lanes()).filter((l) => l.kind !== 'clips' && l.kind !== 'clip');
+const keyedLanes = async () => (await lanes())
+  .filter((l) => l.kind !== 'clips' && l.kind !== 'clip' && l.kind !== 'clip-add');
 const keyCount = async (owner) => ((await lanes()).find((l) => l.owner === owner)?.keys ?? 0);
 const text = (sel) => page.locator(sel).textContent();
 /** Focus somewhere with no claim on the keyboard, so the window handler gets the key. */
@@ -2799,7 +2905,7 @@ try {
       groups: ['#appBar', '#panel', '#panelTabs', '#lookPresetGroup', '#cameraGroup', '#navRow',
         '#recordGroup', '#recLookGroup', '#sensorGroup', '#monitorGroup',
         '#programOutGroup', '#presetPick', '#projectDialog', '#exportDialog', '#obsDialog',
-        '#clipPick',
+        '#renameDialog',
         '#effectRackPanel', '#panelDock', '.appmenu']
         .filter((g) => el.closest(g)),
       kf: el.classList.contains('kf'),
@@ -2950,7 +3056,7 @@ try {
   check(nav.present && !nav.inBody,
     'and it is outside the scrolling inspector rather than merely near its top',
     `in the scrolling body: ${nav.inBody}`);
-  check(nav.present && nav.surface === 'Editor' && nav.hrefs.join(' ') === '/ /gallery',
+  check(nav.present && nav.surface === 'Editor' && nav.hrefs.join(' ') === '/ /projects',
     'and it names the surface while both exits remain real URLs in the markup',
     `${nav.surface}: ${nav.hrefs.join(' ')}`);
   await page.evaluate(`(() => {
@@ -2984,13 +3090,19 @@ try {
     open: !document.getElementById('fileMenu').hidden,
     items: [...document.querySelectorAll('#fileMenu [role=menuitem]')].map((el) => el.textContent.trim()),
   }))()`);
-  check(fileMenu.open && fileMenu.items.length === 3,
-    'File opens from the fixed bar and offers the three designed commands', fileMenu.items.join(' | '));
-  let savePrompt = '';
-  page.once('dialog', async (dialog) => { savePrompt = dialog.message(); await dialog.dismiss(); });
-  await page.locator('#menuSaveProject').click();
-  await new Promise((r) => setTimeout(r, 100));
-  check(savePrompt.startsWith('save this edit as'), 'Save as reaches the existing project writer', savePrompt || 'no prompt');
+  check(fileMenu.open && fileMenu.items.length === 4,
+    'File opens from the fixed bar and offers the four designed commands', fileMenu.items.join(' | '));
+  const documentItems = await page.evaluate(`(() => ({
+    rename: document.getElementById('menuRenameProject').disabled,
+    duplicate: document.getElementById('menuDuplicateProject').disabled,
+    why: document.getElementById('menuRenameProject').title,
+    modal: Boolean(document.getElementById('renameDialog')),
+  }))()`);
+  check(documentItems.rename && documentItems.duplicate && documentItems.modal
+    && /holds no project/.test(documentItems.why),
+  'Rename and Duplicate are greyed on a page opened by a take, because it holds no document to act on',
+  `rename ${documentItems.rename}, duplicate ${documentItems.duplicate}, "${documentItems.why}"`);
+  await page.keyboard.press('Escape');
 
   await page.locator('#outputMenuButton').click();
   await page.locator('#menuExport').click();
@@ -3100,7 +3212,7 @@ try {
     const doorCodec = offered.find((codec) => codec !== afterPress.codec);
     const doorBody = JSON.stringify({ ...liveDeliverable, name: codecDoor, codec: doorCodec });
     await page.evaluate(`(async () => {
-      const res = await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(codecDoor)}), {
+      const res = await __ecWrite('/deliverables/' + encodeURIComponent(${JSON.stringify(codecDoor)}), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: ${JSON.stringify(doorBody)},
@@ -3140,7 +3252,7 @@ try {
       if (segment) segment.click();
     })()`);
     const codecCleanup = await page.evaluate(`(async () => {
-      const res = await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(codecDoor)}), {
+      const res = await __ecWrite('/deliverables/' + encodeURIComponent(${JSON.stringify(codecDoor)}), {
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },
       });
       return res.ok;
@@ -3156,7 +3268,7 @@ try {
     el.value = 'round-trip-probe';
     el.dispatchEvent(new Event('input', { bubbles: true }));
     const inDocument = k.library.activeDeliverable()?.name ?? null;
-    const put = await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}), {
+    const put = await __ecWrite('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}), {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(k.library.activeDeliverable()),
     });
@@ -3190,7 +3302,7 @@ try {
     document.getElementById('tDeliverable').value = '';
     // The header is not decoration on a DELETE here - this server answers 415 without it,
     // and a rejected cleanup leaves the document behind and reddens the page-errors row.
-    await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}), {
+    await __ecWrite('/deliverables/' + encodeURIComponent(${JSON.stringify(nameDoc)}), {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' },
     });
   })()`);
@@ -5016,7 +5128,7 @@ try {
   }
 
   const putDeliverable = (name, body) => page.evaluate(`(async () => {
-    const res = await fetch('/deliverables/' + encodeURIComponent(${JSON.stringify(name)}), {
+    const res = await __ecWrite('/deliverables/' + encodeURIComponent(${JSON.stringify(name)}), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(${JSON.stringify(body)}),
@@ -5166,7 +5278,7 @@ try {
       // The content type is required on every write route, delete included - the origin
       // rule refuses a request that does not declare one, which is a 200 carrying an
       // error rather than a network failure, so a cleanup without it fails silently.
-      await fetch('/deliverables/' + n, {
+      await __ecWrite('/deliverables/' + n, {
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -5424,7 +5536,7 @@ try {
       }
       return doc;
     })()`);
-    await fetch(`${URL_BASE}/projects/${encodeURIComponent(PLANTED)}`, {
+    await writeProjectDoc(PLANTED, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(planted),
@@ -5451,7 +5563,7 @@ try {
       `${withProject.join(', ')} then ${settledPlanes.join(', ')} against the project's `
       + `-6.5, 6.5, -6.5, 6.5 and the fit's ${atOpen.planes.map((v) => v.toFixed(2)).join(', ')}`);
     await both.close();
-    await fetch(`${URL_BASE}/projects/${encodeURIComponent(PLANTED)}`, { method: 'DELETE' }).catch(() => {});
+    await writeProjectDoc(PLANTED, { method: 'DELETE', headers: { 'Content-Type': 'application/json' } }).catch(() => {});
 
     await fresh.page.locator('#panelTabFraming').click();
     await fresh.page.locator('#cropReset').click();
@@ -6499,7 +6611,8 @@ try {
       if (!probe.ok) continue;
       // The content type is required even here: `/presets/:name` is a mutating route and the
       // write guard refuses a request that does not declare JSON, DELETE included.
-      const res = await fetch(`${URL_BASE}/presets/${n}`, {
+      const rev = (await probe.json().catch(() => null))?.rev ?? 'absent';
+      const res = await fetch(`${URL_BASE}/presets/${n}?rev=${encodeURIComponent(rev)}`, {
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },
       }).catch((err) => ({ ok: false, status: err.message }));
       check(res.ok, `and the fixture ${n} this run created was removed again`,
@@ -6943,19 +7056,18 @@ try {
     await cleanupPresets();
   }
 
-  console.log('\n[13] the note carries its whole sentence, a ruler tick seeks, and the auto-save is offered back');
+  console.log('\n[13] the note carries its whole sentence, a ruler tick seeks, and one project is a file two tabs can reach');
   {
     const OTHER = 'editor-check-other-footage';
-    const WORKING = '__working__';
     const putDoc = async (name, body) => {
-      const res = await fetch(`${URL_BASE}/projects/${encodeURIComponent(name)}`, {
+      const res = await writeProjectDoc(name, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       return res.json();
     };
-    const dropDoc = (name) => fetch(`${URL_BASE}/projects/${encodeURIComponent(name)}`, {
+    const dropDoc = (name) => writeProjectDoc(name, {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' },
     }).catch(() => {});
 
@@ -6963,9 +7075,9 @@ try {
     // purpose and both refusals reach the console.
     let errorsBefore = errors.length;
     // Waits for the open to have finished, not for the transport to exist: `timeline` is assigned
-    // less than halfway through `openTake`, before the library is listed and before the resume
-    // offer is decided, and `settled()` does not close the gap because a transport with nothing
-    // queued is idle in exactly that window.
+    // less than halfway through `openTake`, before the library is listed and before the crop is
+    // fitted, and `settled()` does not close the gap because a transport with nothing queued is
+    // idle in exactly that window.
     const reopen = async () => {
       await page.reload({ waitUntil: 'load' });
       await page.waitForFunction('globalThis.__kinect?.library?.opened() === true', null, { timeout: 30000 });
@@ -6973,178 +7085,76 @@ try {
     };
 
     // ---- what a fresh open of this take actually gives
-    // The documents below have to differ from the clip a fresh open produces, and building them by
-    // toggling `outputSize` on whatever twelve sections of edits had left on screen lands on the
-    // fresh value roughly half the time - which turns the offer's silence into a pass for
-    // the wrong reason.
-    await dropDoc(WORKING);
+    // Read off a reopened page rather than off whatever twelve sections of edits left on screen,
+    // because every document this block plants is built out of it.
     await reopen();
     const fresh = await page.evaluate('__kinect.keyframes.project()');
     const openHash = await page.evaluate('__kinect.library.takeHash()');
     const openId = await page.evaluate('__kinect.library.takeId()');
     check(typeof openHash === 'string' && openHash.length > 20,
-      'the open take has a content hash, which is what the resume offer joins on', String(openHash).slice(0, 24));
-    const offerState = () => page.evaluate(`(() => {
-      const chip = document.getElementById('tResume');
-      return {
-        shown: !chip.hidden && chip.getBoundingClientRect().width > 0,
-        when: document.getElementById('tResumeWhen').textContent,
-        button: Boolean(document.getElementById('tResumeOpen')),
-      };
-    })()`);
+      'the open take has a content hash, which is what a document\'s clips name their footage by',
+      String(openHash).slice(0, 24));
 
-    const noDocument = await offerState();
-    check(!noDocument.shown,
-      'a take opened with no working document beside it offers nothing, which is what makes the rows below about the document',
-      `chip ${noDocument.shown ? 'shown' : 'hidden'}, "${noDocument.when}"`);
-
-    // `differ` changes one field away from the value a fresh open gives, and the row below
-    // asserts that it did - the offer is deliberately silent when the two agree, so a document
-    // that accidentally matched would test the wrong branch.
-    const shapeOf = (doc) => (doc?.aspect ?? []).join(':') || 'none';
-    // The footage a document is cut on rides inside its clips, so the stamp goes there.
-    const workingBody = (stamp, differ = true) => {
-      const body = JSON.parse(JSON.stringify(fresh));
-      if (differ) body.aspect = shapeOf(fresh) === '4:3' ? [16, 9] : [4, 3];
-      body.clips[0].take = stamp;
-      return body;
-    };
+    // A document cut on footage this machine has not got, for the loader row further down.
     const foreignHash = `sha256:${'0'.repeat(64)}`;
-
-    // ---- reload one: the offer is made, and then the note has to carry a refusal
-    const differing = workingBody({ id: openId, hash: openHash });
-    check(shapeOf(differing) !== shapeOf(fresh),
-      'the document about to be planted differs from what a fresh open puts on screen, or there is nothing for the offer to be about',
-      `${shapeOf(differing)} against ${shapeOf(fresh)}`);
-    await putDoc(WORKING, differing);
     const otherFootage = JSON.parse(JSON.stringify(fresh));
     otherFootage.clips[0].take = { id: 'some-other-take', hash: foreignHash };
     await putDoc(OTHER, otherFootage);
-    await reopen();
 
-    const offered = await offerState();
-    check(offered.shown && offered.button && /autosaved/.test(offered.when),
-      'a working document stamped with this take\'s hash is offered back when it differs from the clip on screen',
-      `chip ${offered.shown ? 'shown' : 'hidden'}, "${offered.when}"`);
-    // Asked of the list rather than of the chip: read off the chip it would pass on a hidden one,
-    // which is the answer a red row above produces, so it would agree with any failure instead
-    // of ruling one out.
-    const listedWorking = await page.evaluate(`(async () => {
-      const list = (await (await fetch('/projects')).json()).projects ?? [];
-      const w = list.find((d) => d.name === '${WORKING}');
-      return { there: Boolean(w), stamped: w?.body?.clips?.[0]?.take?.hash ?? null };
-    })()`);
-    check(listedWorking.there && listedWorking.stamped === openHash,
-      'and the library listed the working document carrying this take\'s hash, so the row above is about the offer rather than about a store that answered nothing',
-      `${listedWorking.there ? 'listed' : 'absent'}, stamped ${String(listedWorking.stamped).slice(0, 24)}`);
-
-    await page.click('#tResumeOpen');
-    await settle();
-    const restored = await page.evaluate('__kinect.keyframes.project()');
-    check(shapeOf(restored) === shapeOf(differing),
-      'and pressing it restores the autosaved document onto the open take, without leaving the page for a URL that would drop the take',
-      `${shapeOf(restored)} against the autosave's ${shapeOf(differing)} and the fresh clip's ${shapeOf(fresh)}`);
-    // And the offer survives the store moving under it: `__working__` rewrites itself on every
-    // edit, so between the chip appearing and somebody pressing it the document it was offering
-    // can already be gone.
-    await putDoc(WORKING, differing);
-    await reopen();
-    const offeredBeforeMove = await offerState();
-    // Three distinguishable values: the clip a fresh open gives, the document the chip is
-    // offering, and what the name holds by the time it is pressed.
-    const moved = workingBody({ id: openId, hash: openHash }, false);
-    await putDoc(WORKING, moved);
-    check(offeredBeforeMove.shown && shapeOf(moved) !== shapeOf(differing),
-      'the offer is on screen and then the document behind its name is replaced by a different one, which is what an edit made while the chip is up does to it',
-      `chip ${offeredBeforeMove.shown ? 'shown' : 'hidden'}, offered ${shapeOf(differing)} against the store's new ${shapeOf(moved)}`);
-    await page.click('#tResumeOpen');
-    await settle();
-    const restoredAfterMove = await page.evaluate('__kinect.keyframes.project()');
-    check(shapeOf(restoredAfterMove) === shapeOf(differing),
-      'and pressing it restores the document that was offered rather than whatever the name holds by then, since the work it was advertising is the work being recovered',
-      `${shapeOf(restoredAfterMove)} against the offered ${shapeOf(differing)} and the store's ${shapeOf(moved)}`);
-
-    const storedAfterRestore = await page.evaluate(`(async () => {
-      const doc = await (await fetch('/projects/${WORKING}')).json();
-      return doc.body?.aspect ?? null;
-    })()`);
-    check(shapeOf({ aspect: storedAfterRestore }) === shapeOf(differing),
-      'and the auto-save is rewritten with what was restored, so a reload after the recovery loads the recovered work rather than the edit that had overwritten it',
-      `stored ${shapeOf({ aspect: storedAfterRestore })} against the restored ${shapeOf(differing)} and the ${shapeOf(moved)} it had been overwritten with`);
-
-    const afterRestore = await offerState();
-    check(!afterRestore.shown,
-      'and the offer withdraws once it has been taken, since restoring what is already on screen is a button that does nothing',
-      `chip ${afterRestore.shown ? 'still shown' : 'hidden'}`);
-
-    // And it is the last write, not merely a later one: the auto-save is fire-and-forget and
-    // `DocumentStore.write` gives every write its own numbered scratch file before renaming, so
-    // the one on disk is whichever `rename` finished last.
-    await putDoc(WORKING, differing);
-    await reopen();
-    const armedOffer = await offerState();
-    let workingPuts = 0;
-    await page.route('**/projects/__working__', async (route) => {
-      if (route.request().method() !== 'PUT') { await route.continue(); return; }
-      workingPuts++;
-      if (workingPuts === 1) await new Promise((done) => { setTimeout(done, 3000); });
-      await route.continue();
-    });
-    // Any control that commits will do, so it is found rather than named - a row keyed to one
-    // parameter's id goes quiet the day that parameter is renamed.
-    const toggled = await page.evaluate(`(() => {
-      const steps = __kinect.params.names('look')
-        .filter((n) => __kinect.params.spec(n).kind === 'step');
-      for (const name of steps) {
-        const box = document.getElementById(name);
-        if (!box || box.type !== 'checkbox' || !box.closest('#panelBody')) continue;
-        box.checked = !box.checked;
-        box.dispatchEvent(new Event('change', { bubbles: true }));
-        return box.id;
-      }
-      return null;
-    })()`);
-    for (let i = 0; i < 12 && workingPuts === 0; i++) {
-      await new Promise((done) => { setTimeout(done, 100); });
-    }
-    check(toggled !== null && workingPuts === 1 && armedOffer.shown,
-      'an edit\'s auto-save is on the wire and the offer is up, which is the pair the row below needs rather than a press with nothing to race',
-      `toggled ${toggled ?? 'nothing - no committing control was found'}, ${workingPuts} auto-save in flight, chip ${armedOffer.shown ? 'shown' : 'hidden'}`);
-    await page.click('#tResumeOpen');
-    // Past the three-second hold and the write that follows it, so both have landed.
-    await new Promise((done) => { setTimeout(done, 6000); });
-    await page.unroute('**/projects/__working__');
-    const storedAfterRace = await page.evaluate(`(async () => {
-      const doc = await (await fetch('/projects/${WORKING}')).json();
-      return doc.body?.aspect ?? null;
-    })()`);
-    check(shapeOf({ aspect: storedAfterRace }) === shapeOf(differing),
-      'and the recovery is written after the auto-saves already in flight, so an edit still on the wire cannot land behind it and put back the document the operator just recovered from',
-      `stored ${shapeOf({ aspect: storedAfterRace })} against the restored ${shapeOf(differing)}`);
-
-    await putDoc(WORKING, workingBody({ id: openId, hash: openHash }));
     await page.route('**/presets', (route) => route.fulfill({
       status: 500, contentType: 'application/json', body: '{"error":"the presets directory is not there"}',
     }));
     await reopen();
     const brokenNote = await page.evaluate("document.getElementById('tNote').textContent");
-    const offeredAnyway = await offerState();
     await page.unroute('**/presets');
     check(/library unavailable/.test(brokenNote) && /presets/.test(brokenNote),
-      'a presets list that refuses is reported by name, which is what makes the row below about the gate rather than about a request that quietly worked',
+      'a presets list that refuses is reported by name rather than swallowed, so a page that came '
+      + 'up missing half of what it needs says which half',
       `note "${brokenNote.slice(0, 100)}"`);
-    check(offeredAnyway.shown && offeredAnyway.button,
-      'and the autosave is offered anyway, because the projects list is the only one the offer is made of and a broken neighbour is not a reason to hide the work',
-      `chip ${offeredAnyway.shown ? 'shown' : 'hidden'}, "${offeredAnyway.when}"`);
     await reopen();
 
-    const projectControls = await page.evaluate(`(() => ({
-      picker: Boolean(document.getElementById('tProject')),
-      open: Boolean(document.getElementById('tProjectOpen')),
-    }))()`);
-    check(!projectControls.picker && !projectControls.open,
-      'the saved-project controls left with the timeline information bar rather than surviving as an unreachable fragment',
-      `picker=${projectControls.picker}, open=${projectControls.open}`);
+    // The saved-project picker left with the timeline information bar and the recovery chip left
+    // with the working document, and project UI exists again - a projects page, a rename modal and
+    // a File menu that acts on the open document. So the claim is no longer "no fragment of any of
+    // it remains": it is that what remains is reachable and what went is gone. `docs/proof-tools.md`
+    // carries why the old assertion was written and what replaced it.
+    const projectControls = await page.evaluate(`(() => {
+      const at = (id) => document.getElementById(id);
+      const box = (el) => (el ? el.getBoundingClientRect() : null);
+      return {
+        // The pair the old row named, plus the chip and its button: a picker in the strip and an
+        // offer to restore a hidden document are the two shapes that were removed for good.
+        gone: ['tProject', 'tProjectOpen', 'tResume', 'tResumeWhen', 'tResumeOpen']
+          .filter((id) => at(id) !== null),
+        // What replaced them, and the claim is reachability rather than presence: a menu item in
+        // the document nobody can press is the unreachable fragment the old row was about.
+        rename: (() => {
+          const el = at('menuRenameProject');
+          const r = box(el);
+          return el === null ? null : { there: true, wide: r.width > 0 && r.height > 0, disabled: el.disabled };
+        })(),
+        duplicate: at('menuDuplicateProject') === null ? null : { there: true, disabled: at('menuDuplicateProject').disabled },
+        modal: at('renameDialog') === null ? null : { there: true, open: at('renameDialog').open },
+        // The banner is in the document and hidden, which is the state a page nobody has refused
+        // is in - and it is what the rows below make appear.
+        diverged: at('tDiverged') === null ? null : { there: true, hidden: at('tDiverged').hidden },
+      };
+    })()`);
+    check(projectControls.gone.length === 0,
+      'the saved-project picker and the recovery chip are gone rather than surviving as unreachable '
+      + 'fragments, which is what the timeline information bar and the working document took with them',
+      projectControls.gone.length ? `still in the document: ${projectControls.gone.join(', ')}` : 'none of the five');
+    check(projectControls.rename?.there === true && projectControls.duplicate?.there === true
+      && projectControls.modal?.there === true && projectControls.diverged?.hidden === true,
+      'and the project controls that replaced them are here: Rename and Duplicate in the File menu, '
+      + 'the modal a name is typed into, and the banner a refused write raises, hidden until one is',
+      `rename ${JSON.stringify(projectControls.rename)}, duplicate ${JSON.stringify(projectControls.duplicate)}, `
+      + `modal ${JSON.stringify(projectControls.modal)}, banner ${JSON.stringify(projectControls.diverged)}`);
+    check(projectControls.rename?.disabled === true && projectControls.duplicate?.disabled === true,
+      'and both are greyed on this page, because it was opened on a take and holds no document to '
+      + 'act on - which is the same fact the rows below are about from the other side',
+      `rename disabled ${projectControls.rename?.disabled}, duplicate ${projectControls.duplicate?.disabled}`);
+
     const foreignRefusal = await page.evaluate(`(async () => {
       try {
         await __kinect.library.loadProject(${JSON.stringify(OTHER)});
@@ -7161,25 +7171,251 @@ try {
     // can redden that sweep.
     errorsBefore = errors.length;
 
-    // ---- reload two: different footage under the same name
-    // The id is deliberately the take's own: a rename frees an id and a later take can be renamed
-    // into it, so this is the document an id comparison accepts and a hash comparison refuses.
-    await putDoc(WORKING, workingBody({ id: openId, hash: foreignHash }));
-    await reopen();
-    const wrongFootage = await offerState();
-    check(!wrongFootage.shown,
-      'a working document carrying this take\'s id and different footage\'s hash is not offered',
-      `chip ${wrongFootage.shown ? 'shown' : 'hidden'}, "${wrongFootage.when}"`);
+    // ---- one file, two writers, and what the loser is left holding
+    //
+    // The subject this block used to have is deleted: there is no hidden working document and no
+    // chip offering it back. What replaced it is the revision rule, and it needs a page that holds
+    // a document - this one was opened on a take, so it has no file to auto-save into at all.
+    //
+    // The second page is opened in this run's own context and through `serveMutation`, because a
+    // bare `newPage` takes the tree's own source and would put two builds inside one measurement.
+    {
+      const NAME = `editor-check-rev-${process.pid}`;
+      const seed = JSON.parse(JSON.stringify(fresh));
+      seed.clips = [seed.clips[0]];
+      await putDoc(NAME, seed);
 
-    // ---- reload three: the same document that is already on screen
-    await putDoc(WORKING, workingBody({ id: openId, hash: openHash }, false));
-    await reopen();
-    const sameAsScreen = await offerState();
-    check(!sameAsScreen.shown,
-      'and neither is one that matches the clip on screen, since restoring what is already there is not an offer',
-      `chip ${sameAsScreen.shown ? 'shown' : 'hidden'}, "${sameAsScreen.when}"`);
+      const revErrors = [];
+      const revPage = await page.context().newPage();
+      revPage.on('pageerror', (err) => revErrors.push(String(err)));
+      revPage.on('console', (msg) => { if (msg.type() === 'error') revErrors.push(msg.text()); });
+      await revPage.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }));
+      const revMutant = await serveMutation(revPage, EDITOR_PATH);
+      await revPage.goto(`${URL_BASE}${EDITOR_PATH}?project=${encodeURIComponent(NAME)}`, { waitUntil: 'load' });
+      await revPage.waitForFunction('!!globalThis.__kinect', null, { timeout: 30000 });
+      await revPage.waitForFunction('globalThis.__kinect.takeOpened()', null, { timeout: 40000 });
+      await revPage.evaluate('__kinect.timeline.settled()');
+      // Read rather than asserted on: a page that took the tree's own build would make every row
+      // below a measurement of the unmutated program under a mutated run's name.
+      if (MUTATE && revMutant.served() === 0) {
+        throw new Error(`${MUTATE} was staged for ${mutation.file} at ${revMutant.path} and the `
+          + 'project page never requested it');
+      }
 
-    await dropDoc(WORKING);
+      const storedOn = async (name) => (await fetch(`${URL_BASE}/projects/${encodeURIComponent(name)}`)).json();
+      const pointSizeIn = (doc) => doc?.body?.clips?.[0]?.params?.pointSize ?? null;
+      // Waits for the store to reach a value rather than for a fixed time, and gives up rather
+      // than throwing: a row about a write that must not happen wants the same window spent and
+      // then a reading, so both kinds of row here are written against one wait.
+      const storeReaches = async (name, want, ms = 8000) => {
+        const deadline = Date.now() + ms;
+        let doc = await storedOn(name);
+        while (pointSizeIn(doc) !== want && Date.now() < deadline) {
+          await new Promise((done) => { setTimeout(done, 100); });
+          doc = await storedOn(name);
+        }
+        return doc;
+      };
+      const commitTo = (value) => revPage.evaluate(`(() => {
+        const k = globalThis.__kinect;
+        k.params.set('pointSize', ${value});
+        return k.keyframes.undo.commit();
+      })()`);
+      const bannerState = () => revPage.evaluate(`(() => {
+        const el = document.getElementById('tDiverged');
+        return {
+          shown: !el.hidden && el.getBoundingClientRect().width > 0,
+          title: el.title,
+          when: document.getElementById('tDivergedWhen').textContent,
+          copy: !document.getElementById('tDivergedCopy').disabled,
+          note: document.getElementById('tNote').textContent,
+        };
+      })()`);
+      // The falsification control, and it comes first because every row below it is about a write
+      // being refused: on a build that never writes at all, a refusal is indistinguishable from
+      // silence and the whole block passes.
+      await commitTo(31.5);
+      const wrote = await storeReaches(NAME, 31.5);
+      check(pointSizeIn(wrote) === 31.5,
+        'a commit on a page opened on a project writes that project, which is what makes every '
+        + 'refusal below an absence rather than a build that was never writing',
+        `stored pointSize ${pointSizeIn(wrote)}`);
+
+      // Two commits inside one page-side task, so the second is queued behind a write whose answer
+      // has not arrived. The revision has to be read inside the queued task or the second names the
+      // one the first replaced and is refused against its own predecessor.
+      await revPage.evaluate(`(() => {
+        const k = globalThis.__kinect;
+        k.params.set('pointSize', 32.5);
+        k.keyframes.undo.commit();
+        k.params.set('pointSize', 33.5);
+        k.keyframes.undo.commit();
+      })()`);
+      const burst = await storeReaches(NAME, 33.5);
+      const afterBurst = await bannerState();
+      check(pointSizeIn(burst) === 33.5,
+        'and two commits in one burst both land, because the revision each write carries is read '
+        + 'inside the queue rather than at the call - where both would name the one the first replaced',
+        `stored pointSize ${pointSizeIn(burst)} against the second commit's 33.5`);
+      check(!afterBurst.shown,
+        'and nothing was refused, so the banner stays down over a tab that is the only writer',
+        afterBurst.shown ? `banner up saying "${afterBurst.title}"` : 'banner down');
+
+      // ---- the second writer, which is what a projects page makes ordinary
+      const held = await storedOn(NAME);
+      const elsewhere = JSON.parse(JSON.stringify(held.body));
+      elsewhere.clips[0].params.pointSize = 61.5;
+      const moved = await writeProjectDoc(NAME, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(elsewhere),
+      }).then((res) => res.json());
+      check(moved.rev !== undefined && moved.rev !== held.rev,
+        'somebody else writes the same project and the file moves, which is the state this tab is '
+        + 'about to write into rather than a refusal staged by hand',
+        `${String(held.rev).slice(7, 19)} to ${String(moved.rev).slice(7, 19)}`);
+
+      let writesAfter = 0;
+      await revPage.route(`**/projects/${NAME}*`, async (route) => {
+        if (route.request().method() === 'PUT') writesAfter++;
+        await route.continue();
+      });
+      await commitTo(41.5);
+      // A shorter window than the rows above, because this one is waiting for a write that must
+      // not land: it is spent and then read either way, and the value it waits for never arrives.
+      const afterRefusal = await storeReaches(NAME, 41.5, 3000);
+      const refusedState = await bannerState();
+      check(refusedState.shown,
+        'this tab\'s next change is refused and the banner is up, and it is standing rather than '
+        + 'said once - the tab has stopped, so a sentence that scrolled away is silent data loss',
+        refusedState.shown ? `"${refusedState.when}"` : 'nothing on screen');
+      check(refusedState.title !== '' && !/auto-save failed/i.test(`${refusedState.title} ${refusedState.when} ${refusedState.note}`),
+        'and it carries the store\'s own sentence rather than the words auto-save failed, because a '
+        + 'refused write means somebody else has this project open',
+        `title ${JSON.stringify(refusedState.title.slice(0, 90))}`);
+      check(pointSizeIn(afterRefusal) === 61.5,
+        'and the file still holds what the other writer put there, so the refusal kept their work '
+        + 'rather than this tab\'s last read of it',
+        `stored pointSize ${pointSizeIn(afterRefusal)}`);
+
+      const keptOnScreen = await revPage.evaluate(`(() => {
+        const k = globalThis.__kinect;
+        const now = k.params.get('pointSize');
+        const popped = k.keyframes.undo.pop();
+        return { now, popped, back: k.params.get('pointSize') };
+      })()`);
+      check(keptOnScreen.now === 41.5 && keptOnScreen.popped === true && keptOnScreen.back === 33.5,
+        'while the change that was refused is still on screen and still undoable, which is the loser '
+        + 'keeping its work rather than being rolled back to what the file holds',
+        `on screen ${keptOnScreen.now}, undo returned ${keptOnScreen.popped} and left ${keptOnScreen.back}`);
+
+      const writesBeforeStop = writesAfter;
+      await commitTo(42.5);
+      await storeReaches(NAME, 42.5, 3000);
+      check(writesAfter === writesBeforeStop,
+        'and it has stopped writing rather than retrying, because the other tab holds the revision '
+        + 'this one is at and a retry carrying it can never land',
+        `${writesAfter - writesBeforeStop} write(s) went out after the refusal`);
+
+      // ---- Duplicate is the one-click recovery, and it is in the banner rather than two clicks away
+      const namesBefore = await revPage.evaluate('(async () => ((await (await fetch("/projects/all")).json()).projects ?? []).map((d) => d.name))()');
+      await revPage.locator('#tDivergedCopy').click();
+      await revPage.waitForFunction('document.getElementById("tDiverged").hidden === true', null, { timeout: 20000 })
+        .catch(() => { /* the row below says so */ });
+      const recovered = await bannerState();
+      const namesAfter = await revPage.evaluate('(async () => ((await (await fetch("/projects/all")).json()).projects ?? []).map((d) => d.name))()');
+      const minted = namesAfter.filter((n) => !namesBefore.includes(n));
+      check(!recovered.shown && minted.length === 1,
+        'pressing Duplicate on the banner mints a copy and clears it, which always succeeds because '
+        + 'a create names no revision anybody else can have moved',
+        `banner ${recovered.shown ? 'still up' : 'down'}, minted ${JSON.stringify(minted)}`);
+      const copy = minted.length === 1 ? await storeReaches(minted[0], 42.5) : null;
+      check(pointSizeIn(copy) === 42.5,
+        'and the copy carries the work the refusal would otherwise have stranded, including the '
+        + 'change made after this tab had stopped writing',
+        `copy holds ${pointSizeIn(copy)} against the 42.5 on screen`);
+      await commitTo(43.5);
+      const copyAgain = minted.length === 1 ? await storeReaches(minted[0], 43.5) : null;
+      check(pointSizeIn(copyAgain) === 43.5,
+        'and the tab is writing again, into the copy rather than into the file it was refused',
+        `copy holds ${pointSizeIn(copyAgain)}`);
+      const original = await storedOn(NAME);
+      check(pointSizeIn(original) === 61.5,
+        'while the original is untouched and still holds the other writer\'s work',
+        `original holds ${pointSizeIn(original)}`);
+
+      // ---- Rename, which is the other half of what survived `Save project`
+      // Driven here rather than credited to section 1: the modal needs a page that holds a
+      // document, and the page section 1 walks was opened on a take, where the item is greyed. A
+      // rule claiming a dialog the tool never opens is a credit nobody joined to a press.
+      const renamed = `${minted[0]} renamed`;
+      await revPage.locator('#fileMenuButton').click();
+      await revPage.locator('#menuRenameProject').click();
+      const modalOpen = await revPage.evaluate(`(() => ({
+        open: document.getElementById('renameDialog').open,
+        holds: document.getElementById('renameName').value,
+        go: !document.getElementById('renameGo').disabled,
+        note: document.getElementById('renameNote').textContent,
+      }))()`);
+      check(modalOpen.open && modalOpen.holds === minted[0],
+        'Rename opens a modal holding the name the project is under, because a name is typed and '
+        + 'the one to change is the one it has',
+        `open ${modalOpen.open}, holds "${modalOpen.holds}" against "${minted[0]}"`);
+      // The refusal is said while it is being typed rather than after the press, and the same
+      // name back is one of the two things it refuses.
+      await revPage.evaluate(`(() => {
+        const el = document.getElementById('renameName');
+        el.value = ${JSON.stringify(minted[0])};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      const sameName = await revPage.evaluate(`(() => ({
+        go: document.getElementById('renameGo').disabled,
+        note: document.getElementById('renameNote').textContent,
+      }))()`);
+      check(sameName.go === true && /already its name/.test(sameName.note),
+        'and typing the name it already has is refused while it is typed rather than after the press',
+        `go ${sameName.go ? 'disabled' : 'enabled'}, "${sameName.note}"`);
+      await revPage.evaluate(`(() => {
+        const el = document.getElementById('renameName');
+        el.value = ${JSON.stringify(renamed)};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      })()`);
+      await revPage.locator('#renameGo').click();
+      await revPage.waitForFunction((want) => new URL(location.href).searchParams.get('project') === want,
+        renamed, { timeout: 20000 }).catch(() => { /* the row below says so */ });
+      const afterRename = await revPage.evaluate('(async () => ((await (await fetch("/projects/all")).json()).projects ?? []).map((d) => d.name))()');
+      check(new URL(revPage.url()).searchParams.get('project') === renamed
+        && afterRename.includes(renamed) && !afterRename.includes(minted[0]),
+        'and the rename moves the file and the URL together, so the page it would be reopened at '
+        + 'is the name it is now under rather than one nothing answers to',
+        `${revPage.url()} - the store holds ${JSON.stringify(afterRename)}`);
+      // The rename goes through the same queue as the auto-save, so the write after it has to
+      // land under the new name at the revision the rename handed back.
+      await commitTo(44.5);
+      const afterRenameDoc = await storeReaches(renamed, 44.5);
+      check(pointSizeIn(afterRenameDoc) === 44.5,
+        'and the auto-save follows it: the next change lands under the new name at the revision '
+        + 'the rename answered with, rather than against the file it just moved',
+        `${renamed} holds ${pointSizeIn(afterRenameDoc)}`);
+      // The refused write is a 409 and Chrome reports it, so this block plants an entry in the
+      // channel its own sweep reads. It is drained rather than filtered out, and the drain
+      // asserts: a filter would go on covering whatever the page said next that happened to
+      // match, and a build that stopped refusing would take the exemption with it in silence.
+      const conflicts = revErrors.filter((e) => /409|Conflict/.test(String(e)));
+      const rest = revErrors.filter((e) => !/409|Conflict/.test(String(e)));
+      check(conflicts.length === 1,
+        'exactly one refusal reached the console, which is the write this block provoked and not '
+        + 'a tab that went on retrying into a file it cannot have',
+        `${conflicts.length} drained: ${conflicts.map((e) => String(e).slice(0, 60)).join(' | ') || 'nothing'}`);
+      check(rest.length === 0,
+        'and the project page raised no other page error across any of it',
+        rest.slice(0, 2).join(' | '));
+
+      await revPage.close();
+      // The renamed copy and not the name it was minted under: a cleanup that names the old one
+      // leaves a document behind for whoever reads this store next.
+      for (const name of [NAME, renamed]) await dropDoc(name);
+    }
     await dropDoc(OTHER);
 
     // ---- the ruler's marks are controls
@@ -7459,13 +7695,13 @@ try {
     check(errors.length === errorsBefore, 'none of it raises a page error',
       errors.slice(errorsBefore, errorsBefore + 2).join(' | '));
 
-    // ---- a take that fails to open must not be able to spend the recovery slot
-    // The one door into `__working__` that is not an edit, and it is open on a page that is
-    // deliberately still standing: `openTake` throws on a take this build refuses, the page stays
-    // up to say why, and `history.baseline` is still null because `begin()` is the last
-    // thing the open does.
-    await putDoc(WORKING, workingBody({ id: openId, hash: openHash }, false));
-    const slotBefore = await (await fetch(`${URL_BASE}/projects/${WORKING}`)).json();
+    // ---- a take that fails to open writes nothing anywhere
+    // This used to be about the recovery slot, which is deleted: there is no hidden name for a
+    // failed open to spend. The live half of the claim survives and is stronger without it - the
+    // page is deliberately still standing, `openTake` threw, `history.baseline` is still null
+    // because `begin()` is the last thing the open does, and a page holding no document has no
+    // file to write into at all. So the store is read whole rather than one name being watched.
+    const storeBefore = await (await fetch(`${URL_BASE}/projects/all`)).json();
     await page.goto(`${URL_BASE}${EDITOR_PATH}?take=take-that-does-not-exist`, { waitUntil: 'load' });
     // Waited for by the state that decides, not by a timeout: the open has to have got far enough
     // to have failed, and `takeOpened` reading false on a page that has not started yet
@@ -7491,31 +7727,26 @@ try {
       `panel ${failedOpen.panel}, crop ${JSON.stringify(failedOpen.crop)}`);
 
     await page.click('#crop');
-    // The auto-save is fire-and-forget, so the write it would make is a round trip
-    // away from the press.
-    const slotAfter = await page.evaluate(`(async () => {
-      for (let i = 0; i < 40; i++) {
-        const res = await fetch('/projects/${WORKING}');
-        const doc = await res.json();
-        if (doc.rev !== ${JSON.stringify(slotBefore.rev)}) return doc;
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      return await (await fetch('/projects/${WORKING}')).json();
-    })()`);
+    // The auto-save is fire-and-forget, so the write it would make is a round trip away from the
+    // press: the window is spent before the store is read, or an absence is only a reading of how
+    // fast this file asked.
+    await new Promise((done) => { setTimeout(done, 1500); });
+    const storeAfter = await (await fetch(`${URL_BASE}/projects/all`)).json();
+    const nameRev = (listing) => (listing.projects ?? []).map((d) => `${d.name}=${String(d.rev).slice(7, 15)}`).sort().join(' ');
     check(await page.evaluate('__kinect.undoDepth()') === 0,
       'a press on a live control of a take that never opened is not recorded as an edit, because there is no baseline for it to be an edit against',
       `undo depth ${await page.evaluate('__kinect.undoDepth()')}`);
-    check(slotAfter.rev === slotBefore.rev
-      && slotAfter.body?.clips?.[0]?.take?.hash === openHash
-      && slotAfter.body?.clips?.[0]?.take?.id === openId,
-      'and the recovery slot still holds the document of the take that was open before, rather than one naming no take at all',
-      `stamped ${JSON.stringify(slotAfter.body?.clips?.[0]?.take)}, rev ${slotAfter.rev === slotBefore.rev ? 'unchanged' : 'rewritten'}`);
+    check(nameRev(storeAfter) === nameRev(storeBefore),
+      'and it wrote nothing anywhere: a page whose open failed holds no document, so there is no '
+      + 'file for the press to reach and no hidden name for it to invent one under',
+      nameRev(storeAfter) === nameRev(storeBefore)
+        ? `${(storeAfter.projects ?? []).length} project(s), none of them moved`
+        : `${nameRev(storeBefore)} became ${nameRev(storeAfter)}`);
     // Back onto the take the rest of this run is about. `reopen` reloads whatever is in the address
     // bar, which is the take that does not exist, so this is a `goto`.
     await page.goto(`${URL_BASE}${EDITOR_PATH}?take=${encodeURIComponent(TAKE)}`, { waitUntil: 'load' });
     await page.waitForFunction('globalThis.__kinect?.library?.opened() === true', null, { timeout: 30000 });
     await settle();
-    await dropDoc(WORKING);
 
     const mine = errors.slice(errorsBefore);
     check(mine.length > 0 && mine.every((e) => /take-that-does-not-exist|404/.test(String(e))),
@@ -8788,7 +9019,7 @@ try {
         // and reports it - and a row asking whether focus is off the body then passes on a
         // caret that is exactly on it. Measured: the drops-focus control came back NOT
         // CAUGHT at 415 assertions and none failed while this line coalesced. The suite
-        // notes carry the same trap costing the gallery two red rows about nothing.
+        // notes carry the same trap costing the library two red rows about nothing.
         focus: document.activeElement?.classList?.contains('pickeroption')
           ? document.activeElement.dataset.name
           : (document.activeElement?.id || document.activeElement?.tagName || 'nothing'),
@@ -8837,7 +9068,7 @@ try {
 
     const PLANTED = `ec${process.pid}-picker`;
     const seed = await (await fetch(`${URL_BASE}/presets/${encodeURIComponent(shut.names[0])}`)).json();
-    await fetch(`${URL_BASE}/presets/${encodeURIComponent(PLANTED)}`, {
+    await writePresetDoc(PLANTED, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ version: seed.version, values: seed.values }),
@@ -9513,7 +9744,7 @@ try {
       const k = globalThis.__kinect;
       return {
         clips: k.timeline.clips().map((c) => ({ id: c.id, take: c.take && c.take.id,
-          start: c.start, length: c.length, selected: c.selected })),
+          start: c.start, end: c.end, length: c.length, selected: c.selected })),
         selection: k.editor.clipSelection(),
         rows: k.keyframes.lanes().map((l) => l.owner),
         boxes: [...document.querySelectorAll('.tclip')].length,
@@ -9707,7 +9938,8 @@ try {
             .then((doc) => __kinect.library.applyStoredPreset(doc));
         })()`);
         await page.locator('#tAddClip').click();
-        await page.locator(`.cpoption[data-take="${raceTake.id}"]`).click();
+        await page.locator(`#takePicker .tp-tile[data-take="${raceTake.id}"] .tp-meta`).click();
+        await page.locator('#takePicker .tp-act.go').click();
         const began = Date.now();
         while (presetRequests !== 1 || sourceRequests !== 1) {
           if (Date.now() - began > 15000) throw new Error(
@@ -9953,15 +10185,16 @@ try {
       try {
         await page.evaluate('__kinect.timeline.transport().play()');
         await page.waitForFunction('__kinect.timeline.transport().playing', null, { timeout: 15000 });
-        await page.locator('#tAddClip').click();
-        await page.waitForSelector(`.cpoption[data-take="${movingAddTake.id}"]`, { timeout: 15000 });
-        await page.evaluate((id) => {
-          document.querySelector(`.cpoption[data-take="${CSS.escape(id)}"]`)
+        await page.evaluate(() => {
+          document.getElementById('tAddClip')
             .addEventListener('click', () => {
               globalThis.__editorMovingAddPressedAt = __kinect.timeline.transport().programSec;
             }, { capture: true, once: true });
-        }, movingAddTake.id);
-        await page.locator(`.cpoption[data-take="${movingAddTake.id}"]`).click();
+        });
+        await page.locator('#tAddClip').click();
+        await page.waitForSelector(`#takePicker .tp-tile[data-take="${movingAddTake.id}"]`, { timeout: 15000 });
+        await page.locator(`#takePicker .tp-tile[data-take="${movingAddTake.id}"] .tp-meta`).click();
+        await page.locator('#takePicker .tp-act.go').click();
         const began = Date.now();
         while (movingSourceRequests !== 1) {
           if (Date.now() - began > 15000) throw new Error(
@@ -10040,14 +10273,15 @@ try {
       await globalThis.__kinect.timeline.settled();
     })()`);
     await page.locator('#tAddClip').click();
-    await page.waitForSelector(`.cpoption[data-take="${pickId}"]`, { timeout: 15000 });
+    await page.waitForSelector(`#takePicker .tp-tile[data-take="${pickId}"]`, { timeout: 15000 });
     const offered = await page.evaluate(
-      '[...document.querySelectorAll(".cpoption")].map((o) => o.dataset.take)',
+      '[...document.querySelectorAll("#takePicker .tp-tile")].map((o) => o.dataset.take)',
     );
     check(offered.includes(pickId),
       'the picker offers the library\'s takes, which is what a clip is cut from',
       offered.join(', '));
-    await page.locator(`.cpoption[data-take="${pickId}"]`).click();
+    await page.locator(`#takePicker .tp-tile[data-take="${pickId}"] .tp-meta`).click();
+    await page.locator('#takePicker .tp-act.go').click();
     await page.waitForFunction(() => globalThis.__kinect.timeline.clips().length === 2,
       null, { timeout: 25000 });
     await settle();
@@ -10073,6 +10307,95 @@ try {
       `${one.undo} to ${two.undo}`);
     check(two.deleteDisabled === false,
       'and delete is offered now that there is a clip to lose', `disabled ${two.deleteDisabled}`);
+
+    // ---- several takes in one press, laid end to end in pick order
+    // The generalisation of the add above rather than a second path, so the fixture has to be able
+    // to tell the two orders apart: the takes are picked in the reverse of the order the picker
+    // lists them, or a build that ignored pick order and used its own listing would pass every row
+    // here. Two rather than one because one is the case already driven above.
+    {
+      const spare = offered.filter((id) => id !== pickId);
+      check(spare.length >= 2,
+        'the picker offers at least two takes beside the one added above, which is what a pick order '
+        + 'can be a fact about rather than a list of one',
+        offered.join(', '));
+      if (spare.length >= 2) {
+        // Reversed against the listing, so `[second, first]` is what a build reading its own order
+        // back would get wrong.
+        const order = [spare[1], spare[0]];
+        const playhead = 6.5;
+        await page.evaluate(`(async () => {
+          globalThis.__kinect.timeline.transport().pause();
+          await globalThis.__kinect.timeline.transport().seek(${playhead});
+          await globalThis.__kinect.timeline.settled();
+        })()`);
+        const before = await read();
+        const twoClipDoc = await page.evaluate('__kinect.library.serialiseProjectBody()');
+        await page.locator('#tAddClip').click();
+        await page.waitForSelector(`#takePicker .tp-tile[data-take="${order[0]}"]`, { timeout: 15000 });
+        const room = await page.evaluate('document.querySelector("#takePicker .tp-room").textContent');
+        for (const id of order) {
+          await page.locator(`#takePicker .tp-tile[data-take="${id}"] .tp-meta`).click();
+        }
+        // Read the numbered tiles before the dialog closes, then compare them with the rows added.
+        const picker = await page.evaluate(`(() => ({
+          pressed: [...document.querySelectorAll('#takePicker .tp-tile')]
+            .filter((t) => t.getAttribute('aria-pressed') === 'true')
+            .map((t) => ({ take: t.dataset.take, at: t.querySelector('.tp-order').textContent })),
+        }))()`);
+        await page.locator('#takePicker .tp-act.go').click();
+        await page.waitForFunction((want) => globalThis.__kinect.timeline.clips().length === want,
+          before.clips.length + 2, { timeout: 30000 });
+        await settle();
+        const many = await read();
+        const fresh = many.clips.slice(before.clips.length);
+
+        check(new RegExp(`${CLIP_CEILING - before.clips.length}`).test(room),
+          'the picker says how much room this edit has left, which is the ceiling less what it '
+          + 'already holds rather than a number written down twice',
+          `"${room}" against ${CLIP_CEILING} - ${before.clips.length} clips`);
+        // Read by the number on each chip and not by the order the tiles came back in: a
+        // `querySelectorAll` answers in document order, which is the picker's listing and is
+        // deliberately not the pick order here - so the sequence has to be rebuilt from the
+        // numbers, which is what the chips are.
+        const numbered = [...picker.pressed].sort((a, b) => Number(a.at) - Number(b.at));
+        check(numbered.map((p) => p.take).join(' ') === order.join(' '),
+          'and it numbers the picked tiles in the order they were pressed, which is the reading a '
+          + 'build laying them in its own order gets wrong before anything is added',
+          `${picker.pressed.map((p) => `${p.take}#${p.at}`).join(' ')} reads as ${numbered.map((p) => p.take).join(' ')}`
+          + ` against the pick order ${order.join(' ')}`);
+        check(fresh.map((c) => c.take).join(' ') === order.join(' '),
+          'confirming adds every picked take as a clip, in pick order rather than in the order the '
+          + 'picker happened to list them',
+          `${fresh.map((c) => c.take).join(' ')} against the pick order ${order.join(' ')}`);
+        check(near(fresh[0]?.start ?? -1, playhead, 1 / 30),
+          'the first of them lands at the playhead, exactly where one take on its own does',
+          `${(fresh[0]?.start ?? -1).toFixed(3)}s against a playhead at ${playhead}s`);
+        check(fresh.length === 2 && near(fresh[1].start, fresh[0].end, 1 / 30),
+          'and the rest are laid end to end behind it rather than stacked on the same second',
+          `${fresh.map((c) => `${c.start.toFixed(2)}..${c.end.toFixed(2)}`).join(' then ')}`);
+        check(many.rows.includes(`clip:${fresh[0].id}`) && many.rows.includes(`clip:${fresh[1].id}`)
+          && many.boxes === many.clips.length,
+          'each of them on a row of its own, so the strip is the edit rather than the last add',
+          `${many.boxes} boxes over ${many.clips.length} clips: ${many.rows.join(', ')}`);
+        // Read rather than asserted at a number: `addClipsFromTakes` commits per clip, so the
+        // depth this moves by is a fact about that loop and a row pinning it would be asserting
+        // the implementation rather than the behaviour.
+        console.log(`  ...   ${fresh.length} clips added in one press cost ${many.undo - before.undo} `
+          + 'undo step(s), and the ceiling refusal itself is not driven here: this library holds '
+          + `${offered.length} takes against a ceiling of ${CLIP_CEILING}, so no pick can cross it`);
+
+        // Back to the two clips the rows after this one are written against, through the
+        // document rather than by deleting: `restoreProject` is the door those rows already use.
+        await page.evaluate(({ project, selection }) => {
+          __kinect.timeline.transport().pause();
+          __kinect.library.restoreProject(project);
+          __kinect.editor.selectClipRow(selection);
+          __kinect.keyframes.undo.begin();
+        }, { project: twoClipDoc, selection: two.selection });
+        await settle();
+      }
+    }
 
     // The selection, by clicking a row.
     const boxAt = async (i) => {
@@ -10848,14 +11171,17 @@ try {
     const dragged = await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
       const before = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
+      // OrbitControls receives the shared pointerdown before TransformControls claims the axis.
+      k.controls.dispatchEvent({ type: 'start' });
       k.editor.gizmoDrag(true);
       const orbitDuring = k.editor.orbitEnabled();
       for (let i = 1; i <= ${MOVES}; i++) k.editor.moveGizmo([i * 0.02, 0, 0]);
-      const midDrag = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
       // Two animation frames, which is where the write is allowed to happen.
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const midDrag = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
       const pumped = k.params.get('transform').position[0];
       k.editor.gizmoDrag(false);
+      k.controls.dispatchEvent({ type: 'end' });
       await k.timeline.settled();
       const after = { rebuilds: k.timeline.counters.laneRebuilds, renders: k.timeline.counters.renders };
       return {
@@ -10885,6 +11211,10 @@ try {
       'and no pointer move rebuilt the lane stack: the drag arms a redraw and the animation loop '
       + 'is the only thing allowed to start one',
       `${dragged.duringRebuilds} rebuilds across ${MOVES} moves`);
+    check(dragged.duringRenders > 0,
+      'and the changed picture is rendered while the pointer is still down rather than waiting '
+      + 'for release',
+      `${dragged.duringRenders} renders before release`);
     check(dragged.rebuilds <= 2,
       'and the whole gesture costs one rebuild rather than one per move, which is the 34-for-one '
       + 'this program has already shipped once',
@@ -10999,13 +11329,6 @@ try {
       'and the apply says how many of them were the shared half, so the operator is told rather '
       + 'than left to find out',
       `${preset.report.shared} of ${preset.report.written} written`);
-    const copy = await page.evaluate(
-      "[...document.querySelectorAll('#presetPick p')].map((p) => p.textContent).join(' ')",
-    );
-    check(/project/i.test(copy) && /every other clip/i.test(copy),
-      'and the dialog that saves one says the same thing in words, on the surface a person reads',
-      copy.replace(/\s+/g, ' ').slice(0, 160));
-
     // Framing belongs to the shot. Drive the crop and both preset choices through the controls a
     // person uses, then ask the file door and the save dialog for the same boundary.
     const choosePreset = async (name) => {
@@ -11133,7 +11456,7 @@ try {
     const removePreset = async (name) => {
       const probe = await fetch(`${URL_BASE}/presets/${encodeURIComponent(name)}`);
       if (!probe.ok) return;
-      const res = await fetch(`${URL_BASE}/presets/${encodeURIComponent(name)}`, {
+      const res = await writePresetDoc(name, {
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },
       });
       check(res.ok, `and the target-race fixture ${name} was removed again`, `DELETE answered ${res.status}`);
@@ -11156,8 +11479,8 @@ try {
       version: PROJECT_VERSION,
       values: { pointSize: 46.7 },
     }, null, 2)}\n`);
-    await page.route(`**/presets/${importTargetName}`, holdImport);
-    await page.route(`**/presets/${saveTargetName}`, holdSave);
+    await page.route(`**/presets/${importTargetName}*`, holdImport);
+    await page.route(`**/presets/${saveTargetName}*`, holdSave);
     try {
       await page.locator('.paneltab[data-panel-tab="look"]').click();
       await settle();
@@ -11243,8 +11566,8 @@ try {
     } finally {
       releaseImport();
       releaseSave();
-      await page.unroute(`**/presets/${importTargetName}`, holdImport);
-      await page.unroute(`**/presets/${saveTargetName}`, holdSave);
+      await page.unroute(`**/presets/${importTargetName}*`, holdImport);
+      await page.unroute(`**/presets/${saveTargetName}*`, holdSave);
       await page.waitForFunction('!__kinect.library.presetGestureRunning()', null, { timeout: 15000 }).catch(() => {});
       await removePreset(importTargetName);
       await removePreset(saveTargetName);
@@ -11260,7 +11583,7 @@ try {
     const PROBE = '__editor-check-selection__';
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
-      const res = await fetch('/projects/${PROBE}', {
+      const res = await __ecWrite('/projects/${PROBE}', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(k.library.serialiseProjectBody()),
@@ -11289,7 +11612,7 @@ try {
       `selection ${loaded.selection}, ${loaded.greyed} greyed`);
     // The content type goes on the DELETE: the document routes answer 415 without one, and a
     // swallowed refusal leaves the probe in `projects/` for the next reader to wonder about.
-    await fetch(`${URL_BASE}/projects/${PROBE}`, {
+    await writeProjectDoc(PROBE, {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' },
     }).catch(() => {});
     await page.evaluate(`__kinect.editor.selectClipRow('gz2')`);
@@ -11348,9 +11671,16 @@ try {
       time: __kinect.timeline.transport().programSec,
       gizmoMode: __kinect.editor.gizmo().mode,
       sourceClock: document.getElementById('tSource').textContent,
-      clipCommands: ['tAddClip', 'tDeleteClip', 'tMoveClip', 'tRotateClip', 'tKeyClip',
+      addClip: (() => {
+        const button = document.getElementById('tAddClip');
+        return { disabled: button.disabled, text: button.textContent,
+          parent: button.parentElement?.className ?? '' };
+      })(),
+      clipCommands: ['tDeleteClip', 'tMoveClip', 'tRotateClip', 'tKeyClip',
         'tRate', 'tRateKey', 'tPreset', 'tPresetSave', 'tPresetExport', 'tPresetImport',
         'tMark', 'camSensor', 'cropFit'].map((id) => [id, document.getElementById(id)?.disabled]),
+      rateInClipOptions: document.getElementById('tRate').closest('#tClipOptions') !== null,
+      clipOptionsDisplay: getComputedStyle(document.getElementById('tClipOptions')).display,
     }))()`);
     console.log(`  a press ${emptyLane.gap.toFixed(0)}px left of the clip's box: `
       + `selection ${off.selection}, ${greyedBefore} greyed rows before it and ${off.greyed} after`);
@@ -11376,9 +11706,18 @@ try {
       + 'a gesture onto the hidden selection',
     `crop shown ${off.cropShown}, ${off.cropHandles} handles, faint ${off.cropOutside}, `
       + `${off.markTicks} ruler and ${off.miniMarks} overview mark ticks`);
+    check(off.addClip.disabled === false && off.addClip.text === '+'
+      && off.addClip.parent.includes('clip-add-row'),
+    'while the full-width plus below the clip rows stays enabled, because adding belongs to the '
+      + 'edit and not to one selected clip',
+    `text ${JSON.stringify(off.addClip.text)}, disabled ${off.addClip.disabled}, `
+      + `parent ${JSON.stringify(off.addClip.parent)}`);
     check(off.clipCommands.every(([, disabled]) => disabled === true),
-      'and every command that needs a clip is disabled until a row is selected',
+      'and every command that does need a clip is disabled until a row is selected',
       off.clipCommands.map(([id, disabled]) => `${id}:${disabled}`).join(' '));
+    check(off.rateInClipOptions && off.clipOptionsDisplay === 'none',
+      'and the speed slider lives in the clip chip, which leaves the strip with the selection',
+      `in clip chip ${off.rateInClipOptions}, chip display ${off.clipOptionsDisplay}`);
 
     // Press where the crop handle was, rather than only reading that its list is empty. This is
     // the stale visible furniture from the reported fault, driven through the real pointer path.
@@ -11443,11 +11782,66 @@ try {
     `time ${off.time} -> ${hiddenNavigation.time}, gizmo ${off.gizmoMode} -> `
       + `${hiddenNavigation.gizmoMode}, note "${hiddenNavigation.note}"`);
 
+    const addWithoutSelectionRestore = await page.evaluate(`(() => {
+      const k = __kinect;
+      const body = k.library.serialiseProjectBody();
+      body.clips[0].params.pointSize = 17.3;
+      body.clips.find((clip) => clip.id === 'gz2').params.pointSize = 31.5;
+      k.library.restoreProject(body);
+      return { body, count: body.clips.length, first: body.clips[0].id };
+    })()`);
+    await settle();
+    if (off.addClip.disabled === false) {
+      await page.locator('#tAddClip').click();
+      await page.waitForSelector(`#takePicker .tp-tile[data-take="${pickId}"]`, { timeout: 15000 });
+      await page.locator(`#takePicker .tp-tile[data-take="${pickId}"] .tp-meta`).click();
+      await page.locator('#takePicker .tp-act.go').click();
+      await page.waitForFunction(
+        (count) => __kinect.timeline.clips().length === count + 1,
+        addWithoutSelectionRestore.count,
+        { timeout: 25000 },
+      );
+      await settle();
+      const addedWithoutSelection = await page.evaluate((first) => {
+        const body = __kinect.library.serialiseProjectBody();
+        const selected = __kinect.editor.clipSelection();
+        return {
+          count: body.clips.length,
+          selected,
+          pointSize: body.clips.find((clip) => clip.id === selected)?.params.pointSize ?? null,
+          firstPointSize: body.clips.find((clip) => clip.id === first)?.params.pointSize ?? null,
+          hiddenPointSize: body.clips.find((clip) => clip.id === 'gz2')?.params.pointSize ?? null,
+        };
+      }, addWithoutSelectionRestore.first);
+      check(addedWithoutSelection.count === addWithoutSelectionRestore.count + 1
+        && addedWithoutSelection.selected !== null,
+      'the plus opens the picker with no clip selected and the chosen take lands as a selected clip',
+      `${addWithoutSelectionRestore.count} -> ${addedWithoutSelection.count} clips, `
+        + `selection ${addedWithoutSelection.selected}`);
+      check(addedWithoutSelection.firstPointSize === 17.3
+        && addedWithoutSelection.hiddenPointSize === 31.5
+        && addedWithoutSelection.pointSize === addedWithoutSelection.firstPointSize,
+      'and with no selection the new clip copies the first clip rather than the hidden last selection',
+      `new ${addedWithoutSelection.pointSize}, first ${addedWithoutSelection.firstPointSize}, `
+        + `hidden ${addedWithoutSelection.hiddenPointSize}`);
+    }
+    await page.evaluate((body) => {
+      __kinect.library.restoreProject(body);
+      __kinect.editor.deselectClipRow();
+      __kinect.keyframes.undo.begin();
+    }, addWithoutSelectionRestore.body);
+    await settle();
+
     await page.evaluate(`__kinect.editor.selectClipRow('gz2')`);
     await settle();
     check(await page.evaluate('__kinect.editor.scopeOff()') === 0,
       'and selecting a clip again brings the whole panel back',
       `${await page.evaluate('__kinect.editor.scopeOff()')} rows still greyed`);
+    const chipBack = await page.evaluate(
+      `getComputedStyle(document.getElementById('tClipOptions')).display`);
+    check(chipBack !== 'none',
+      'and the clip chip is back once a row is selected again',
+      `chip display ${chipBack}`);
     check(await page.evaluate('__kinect.cropBoxShown()') === true,
       'and the crop box can return once a clip is selected again');
     await page.locator('#cropBox').click();
@@ -11533,14 +11927,31 @@ if (untested) {
 console.log(`\n[editor] ${checks} assertions, ${failures} failed`);
 if (NO_RENDER) console.log('[editor] --no-render: the real export and the saved copy were not driven');
 
+// The declared standing reds, split off the fired set so the verdict below is about this run's
+// mutation rather than about rows that are red either way.
+const standingFired = fired.filter((label) => STANDING_RED.has(label));
+const newlyFired = fired.filter((label) => !STANDING_RED.has(label));
+const standingGreen = [...STANDING_RED.keys()].filter((label) => !fired.includes(label));
+for (const label of standingGreen) {
+  console.log(`[editor] declared standing red is GREEN on this run: "${label}"`);
+  console.log(`           declared because ${STANDING_RED.get(label)} - if it stays green here, `
+    + 'take the entry out rather than leaving a row nothing is standing for');
+}
+
 if (MUTATE) {
-if (MUTATIONS[MUTATE]?.fails) console.log(`[editor] it should redden: ${MUTATIONS[MUTATE].fails}`);
-  if (failures === 0) {
-    console.log(`[editor] NOT CAUGHT - ${MUTATE} passed every assertion, so nothing here tests it`);
+  if (MUTATIONS[MUTATE]?.fails) console.log(`[editor] it should redden: ${MUTATIONS[MUTATE].fails}`);
+  if (standingFired.length) {
+    console.log(`[editor] ${standingFired.length} of those ${failures} are red on this tree either way, `
+      + 'so they are not this mutation being caught:');
+    for (const label of standingFired) console.log(`           ${label}`);
+  }
+  if (newlyFired.length === 0) {
+    console.log(`[editor] NOT CAUGHT - ${MUTATE} reddened nothing this tree was not already red on, `
+      + 'so nothing here tests it');
     process.exit(1);
   }
-  console.log(`[editor] caught ${MUTATE}, as required (${failures} assertions fired)`);
-  for (const label of fired) console.log(`           ${label}`);
+  console.log(`[editor] caught ${MUTATE}, as required (${newlyFired.length} assertions fired beyond the standing set)`);
+  for (const label of newlyFired) console.log(`           ${label}`);
   process.exit(1);
 }
 if (failures) { console.log('[editor] FAIL'); process.exit(1); }

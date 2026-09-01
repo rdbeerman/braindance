@@ -1,5 +1,5 @@
 // A take is a file. Start opens one, stop closes it and scans it, and that identity - take is file
-// is gallery entry is hash - is what the project model, the frame API and the library assume. One
+// is library entry is hash - is what the project model, the frame API and the library assume. One
 // take is one continuous stream, one hello, monotonic stamps; a grabber restart splits it.
 
 import { createWriteStream, openSync, readdirSync } from 'node:fs';
@@ -101,7 +101,7 @@ export class Recorder {
       dropped: take?.dropped ?? 0,
       buffered: take ? take.stream.writableLength : 0,
       cannotRecord: this.cannotRecord(),
-      // A longer window than `recording`: a gallery tile may not offer Download or Remove until
+      // A longer window than `recording`: a library tile may not offer Download or Remove until
       // the index and the hash exist. An id, so a surface can compare it against what it drew.
       writingId: take?.id ?? this.finalizing?.id ?? null,
     };
@@ -143,7 +143,7 @@ export class Recorder {
     if (this.take) return;
 
     // `wx`, so a take never appends to or truncates a file already there: two takes in one file
-    // share a hash and a gallery entry. A taken name just means the next name.
+    // share a hash and a library entry. A taken name just means the next name.
     let take = null;
     let floor = 0;
     for (let attempt = 0; attempt < MAX_NAME_ATTEMPTS && !take; attempt++) {
@@ -188,7 +188,7 @@ export class Recorder {
       }
     });
     // The take's own wall clock: the sensor says hello once per grabber process, so every take in
-    // a session used to carry one identical stamp and the gallery sorted on it.
+    // a session used to carry one identical stamp and the library sorted on it.
     const startedAt = Date.now();
     const stamped = stampHello(helloPayload, startedAt);
     const helloMessage = encodeMessage(TYPE_HELLO, stamped);
@@ -245,7 +245,7 @@ export class Recorder {
     take.inFlight.push(take.accepted);
   }
 
-  // The scan writes the sidecar index and the content hash, which is what makes the take a gallery
+  // The scan writes the sidecar index and the content hash, which is what makes the take a library
   // entry, so a take is not finished until it has one.
   async close(reason) {
     const take = this.take;
@@ -272,7 +272,7 @@ export class Recorder {
       index = await buildIndex(take.path);
     } finally {
       // In a `finally`, or an index build that threw leaves this process claiming a file it had
-      // stopped working on, with the gallery refusing Open and Remove until a restart.
+      // stopped working on, with the library refusing to open or remove it until a restart.
       this.finalizing = null;
     }
     console.log(

@@ -310,7 +310,7 @@ Server mutations were always staged. Page mutations were fulfilled by a Playwrig
 interception matched on a URL, and that shape has a specific failure: **a page is reached at
 the URL `PAGES` names it by, not at its filename**. `web/library.html` has no URL of its own —
 `server/index.js` 404s any `.html` under `web/` on purpose, so a page has exactly one address —
-and it is served at `/gallery`, so an interception written as `**/library.html` matches
+and it is served at `/library`, so an interception written as `**/library.html` matches
 nothing, the unmutated page loads, and the run is recorded as the check having missed a bug it
 was never shown. That is the match-exactly-once failure arriving through the *delivery* rather
 than through the anchor, where nothing refused it.
@@ -332,10 +332,11 @@ direction is the point: a suite that fails one row on a mutation run reads as a 
 mutation that never arrived has to be the harness declining to run.
 
 Measured when the mechanisms were collapsed: 19 of the 20 page mutations delivered, each
-named with the URL and the byte count, `gallery-has-no-way-back` among them at `/gallery`,
-which is the case the interception existed for. The twentieth is `marks-ignore-retime`, which
-could not be constructed at all — its anchor matched twice in `web/main.js` and the
-match-exactly-once refusal stopped it, a stale anchor that predated this and was tracked in #28.
+named with the URL and the byte count, `library-has-no-way-to-the-menu` among them at
+`/library`, which is the case the interception existed for. The twentieth is
+`marks-ignore-retime`, which could not be constructed at all — its anchor matched twice in
+`web/main.js` and the match-exactly-once refusal stopped it, a stale anchor that predated this
+and was tracked in #28.
 That is closed and the fix is worth knowing, because it is not the one a reader would guess: the
 duplicate is still there in `web/main.js`, once at four spaces of indentation and once at six,
 and `c757210` re-anchored the entry onto a leading newline and four spaces, which by that alone
@@ -685,6 +686,30 @@ fixes — a tool with no crash handler still exits non-zero on a throw with noth
 **Measured after both fixes: 75 assertions, 0 failed, twice**, against a server on 8505 with the
 sample capture, `stage 640x360` on both runs.
 
+**It refused before its first assertion on this rig for a while, along with `keyframe-check`, at
+`626x352` — a third signature of that guard after `338x190` and `533x300`, and the cause is the
+iteration count rather than anything about the build.** The strip is a proportion of the window
+rather than a fixed height, so `360 + strip + shell` is a **fixed point** the resize loop has to
+converge on: the strip grows every time the viewport does, and each pass closes about two thirds
+of what is left. Probed from a 640x464 viewport, the drawing buffer walks 270x152, 510x287,
+594x334, 624x351, 635x357, 638x359 and reaches 640x360 on the seventh pass. Both tools allowed
+three, stopped around 626x352, and threw. **Twelve passes now, and both reach `stage 640x360`.**
+
+That it was never a regression was measured before it was fixed: four runs against the tree
+carrying the projects page and one against a `git archive HEAD` tree, served on its own port from
+its own checkout, all produced the identical `626x352`, and a probe reading the furniture on both
+builds returns the same numbers at both viewports — strip 252, bar 38, stage 110, buffer 196x110
+at 640x400; strip 339, stage 273, buffer 485x273 at 640x650.
+
+**With the stage right, `keyframe-check` reads 166 assertions and 5 failed, and those five are not
+this branch's either.** All five are section 6g's clip-drag block declining to run — `did not run:
+program 5s does not hit-test back to the clip box`, which is a guarded refusal rather than a wrong
+reading, and it is the press-point-in-program-time class this page already records against
+`editor-check`'s deselect rows: 5s of a 243.3s program is 2% along the lane and the clip box is not
+under it. Held to the same instrument across two builds — the patched tool copied into the `HEAD`
+tree and run against a server spawned from it — both come back **161 passed, the same 5 failed,
+with identical readings.**
+
 **Section 7 moved every one of those totals and none of the names.** With it the tool runs 124
 assertions, and the mutations that were counted against 75 redden more because there are now more
 rows about the same thing to redden: `preroll-constant` goes from 8 to **20** and `preroll-none`
@@ -1029,25 +1054,41 @@ archive out of the editor.
 `--mutate open-ignores-format` is the control and it edits one line of `web/format.js`, which is
 the point of it rather than an implementation detail. **There were four doors deciding whether a
 take may be opened and there are two**, which is the change the refusal table made: `openable` in
-`describeTake` and the gallery's badge and dead Open button were three separate comparisons, and
+`describeTake` and the library's badge and dead Open button were three separate comparisons, and
 the last two now quote `openRefusals` instead. What is left is `OPEN_REFUSALS.format`, which
 delegates the sentence, and `openTake` in the editor, which is handed a hello and never a
 manifest — so `format.js` is still where the band lives, and a comparison inlined at either door
 would still pass every row here and drift the first time the band gains a member.
 
-So the assertion the mutation really carries is the *count*: it reddens **8 of 392** — the
-listing's `openable`, the refusal the take carries, the two-table containment row, the gallery's
-badge and its Open button, the menu's sentence, and the editor's note and its refusal to open.
-The count grew when the surfaces stopped deriving, which is the right direction: quoting one
-sentence in five places means a band that stops refusing is visible in five places rather than in
-one. The takes that must stay green stay green — both `no-hello-take` rows, `local-clip`'s
+So the assertion the mutation really carries is the *count*, and it is re-measured rather than
+carried forward: it reddens **8 of 527** — the listing's `openable`, the refusal the take carries,
+the two-table containment row, the library's badge, its `New project from this take` button, the
+sentence in that tile's `⋯` menu, and the editor's note and its refusal to open. The count grew
+when the surfaces stopped deriving, which is the right direction: quoting one sentence in five
+places means a band that stops refusing is visible in five places rather than in one. The takes
+that must stay green stay green — both `no-hello-take` rows, `local-clip`'s
 `dateSource === 'hello'`, and all four generation-zero rows. A mutation that reddened fewer would
 mean the band had quietly become several predicates that agree.
+
+**The count is the same 8 it was and one member of it is a different row, which is why the
+enumeration is what to read and not the total.** This paragraph used to name "the library's badge
+and its Open button, the menu's sentence": the Open button is `New project from this take` now,
+and the *menu* in that list was the main menu's resume sentence, which left with the EDITOR tile
+and could not be replaced by nothing without the count falling to seven. What took its place is
+the tile's own `⋯` menu, which quotes the same refusal — so the band is still visible in the same
+number of places, arrived at by a different set of them. Measured on the tree that carries the
+projects page, against a clean run of 527. The media picker draws the same warning badges and is
+**not** in this set: the take it refuses in this suite is `hello-no-frames`, which carries a
+`short` refusal rather than a `format` one, so this mutation does not reach it.
 
 **Its opposite number is `--mutate openable-recomputes-the-band`**, which puts the band back to
 being a term in `openable` rather than an entry in the table, and it exists because
 `openable` is false either way. Every row asking whether the future-format take opens passes a
-build where the band decides for itself again — measured: 5 of 392, and the three rows that
+build where the band decides for itself again — re-measured beside its opposite number on the tree
+that carries the projects page: **5 of 527**, the refusal the take carries, the two-table
+containment row, the row asking that `openable` is its refusal list being empty, the badge over
+the poster, and the sentence in the tile's `⋯` menu — the same count it had, with the main menu's
+sentence out of it and the tile's menu in, exactly as `open-ignores-format` above. The three rows that
 brought the band into this suite are all still green under it. What reddens is what the take
 *carries*: the refusal itself, the containment row now declaring a `format` nothing produces, the
 badge over the poster and the sentence in the menu. **When a merge collapses two derivations into
@@ -1171,30 +1212,61 @@ block used to plant a trim at a flat `in: 20, out: 40`, which the clip clamp hol
 asserting the clamp instead. They are now read off the measured duration, and the one deliberate
 exception is `editor-check-past`, planted at 1.5x the duration precisely so that it misses.
 
-**Section 13's resume rows are flaky on a loaded machine, and they are written down here for
-the same reason `library-check`'s three are.** The family is the autosave-and-recovery block —
-`and the recovery is written after the auto-saves already in flight`, `a take opened with no
-working document beside it offers nothing, which is what makes the rows below about the
-document`, and `and neither is one that matches the clip on screen`. Measured across twelve
-runs on two builds during one session: **6 red, 6 green, with the precondition row
-(`toggled additive, 1 auto-save in flight, chip shown`) green every time**, so the fixture
-builds and the ordering simply comes out differently. The block waits on a fixed 3000ms hold
-and a fixed 6000ms settle.
+**Section 13 used to carry a family of flaky resume rows, and the rows are retired rather than
+renamed.** They tested the hidden working document and the chip that offered it back, and both of
+those are gone, so a name out of that block is a name nothing in the tool answers to any more.
+What is kept is how the noise was told apart from a defect, because that argument outlives its
+subject. Measured across twelve runs on two builds during one session: **6 red, 6 green, with the
+block's precondition row green every time**, so the fixture built and the ordering simply came out
+differently. It waited on a fixed 3000ms hold and a fixed 6000ms settle.
 
-What identifies it as the rows rather than the change under test is the same evidence
-`library-check`'s entry rests on, in a sharper form: **which member of the family fires
-rotates between windows.** Four different subsets were observed across two builds — the
-recovery-ordering row, the matching-clip row, the no-working-document row, and none at all —
-with the precondition green every time and both final baselines passing all of them. Three
-subsets would already be suggestive; four is the statement, because **an ordering bug picks
-the same row.** A run that reddens only these is a re-run, not a finding.
+What identified it as the rows rather than the change under test is the same evidence
+`library-check`'s entry rests on, in a sharper form: **which member of the family fires rotates
+between windows.** Four different subsets were observed across two builds — three of them a
+single row each, and the fourth none at all — with the precondition green every time and both
+final baselines passing all of them. Three subsets would already be suggestive; four is the
+statement, because **an ordering bug picks the same row.** A family that reddens a different
+member each window is a re-run, not a finding.
 
-One thing makes it worse than ordinary noise here. A polluted `projects/` store is the first
-suspect and the cheapest to rule out, because anything that has been driving the editor by
-hand against the same server leaves real autosaves and deliverables behind it; take the
-re-run against a clean store rather than the one that just failed. The saved-project picker
-left with the timeline information bar, so section 13 now asserts that no fragment of those
-controls remains and drives the auto-save recovery and project loader directly.
+One thing made it worse than ordinary noise, and that part is still live. A polluted `projects/`
+store is the first suspect and the cheapest to rule out, because anything that has been driving
+the editor by hand against the same server leaves real autosaves and deliverables behind it; take
+the re-run against a clean store rather than the one that just failed.
+
+**Four controls went with those rows, and what each of them guaranteed is written down here
+because a control removed in silence is a guarantee removed in silence.**
+`offer-ignores-take-hash` held the offer to joining on the take's content hash rather than on its
+id, so a freed id reused by a later take could not resurrect an edit cut on different footage.
+`resume-fetches-the-moving-name` held the press to restoring the document that had been offered
+rather than re-reading the name, which the auto-save moves under it between the offer and the
+press. `resume-restores-without-keeping` held a restore that could not be written back to throwing,
+rather than leaving the screen and the file disagreeing in silence. And
+`resume-waits-for-every-list` held the offer to being made of the projects listing alone, so a
+neighbouring listing that refused did not hide somebody's work. All four name mechanisms this
+build does not have.
+
+**What section 13 is about now is the revision rule, and it needed a second page.** Every row
+about a write being refused needs a page that holds a document, and the page this tool drives was
+opened on a take — which holds none and writes nothing at all. So the block opens a second page on
+`/edit?project=` in the run's own context and through `serveMutation`, because a bare `newPage`
+takes the tree's own source and would put two builds inside one measurement. The falsification
+control comes first and is a presence, for the reason `boot-check`'s undo section gives in the
+same words: on a build that never writes, a refusal is indistinguishable from silence and every
+row below it passes. Then two commits in one page-side turn must both land, a second writer moves
+the file, this tab's next change is refused, the banner stands, the refused change is still on
+screen and still undoable, the tab stops writing, and Duplicate on the banner mints a copy that
+carries the work. `autosave-reads-the-revision-outside-the-queue` is the control for the first of
+those and the successor to `resume-races-the-autosave`: it hoists the revision read out of the
+queued task, so a burst names the revision its own predecessor replaced.
+
+**And the assertion that no fragment of the saved-project controls remains is rewritten rather
+than worked around.** It was written when the picker left with the timeline information bar, and
+project UI exists again — a projects page, a rename modal, and a File menu that acts on the open
+document — so "no fragment" is no longer the claim to make. What is asserted now is both halves:
+`tProject`, `tProjectOpen`, `tResume`, `tResumeWhen` and `tResumeOpen` are gone, and what replaced
+them is *reachable* rather than merely present, which is what the old row was really about. On a
+page opened by a take, Rename and Duplicate are greyed and say why, which is the same fact the
+rows below it are about from the other side.
 
 **Two `editor-check` sweeps must never run at once, and neither may `web/` be edited under
 one.** This cost two whole measurements in one session. A sweep straddling a `web/main.js`
@@ -1509,10 +1581,10 @@ two. The tool builds a detached input with the same `min`, `max` and `step` and 
 from the registry on both surfaces and the only `EDITING` gate inside the row loop is the
 keyframe diamond, so `/record` and `/edit` build the same 80 controls — measured on both,
 against the 81 the registry declares, the difference being `camera`, which is a pose and has
-no control by design. What separates them is the price of asking: `/edit` with no `?take=`
-redirects to `/gallery`, so the editor needs a capture to boot at all, while `/record` boots
-the full panel against a server with no grabber, no sensor and an empty captures directory.
-That is the state a fresh clone is in.
+no control by design. What separates them is the price of asking: `/edit` with neither a take
+nor a project redirects to the projects page, so the editor needs one of the two to boot at all,
+while `/record` boots the full panel against a server with no grabber, no sensor and an empty
+captures directory. That is the state a fresh clone is in.
 
 **The second claim is the document door, and it is why the tool now stages a capture.** A
 document is adopted whole or not at all, and three shipped faults said otherwise: a clip value
@@ -1547,6 +1619,26 @@ own after `applyProject` returns — so a mutation reinstating the `applyProject
 **NOT CAUGHT** by either navigation, and only the synchronous door can see it. Reading the code
 would have said the two sites were equals; the measurement said one of them had been dead for as
 long as the other was there.
+
+**That claim's subject is a named project now, and moving it broke the poll under it in a way the
+clean run could not show.** It used to read `GET /projects/__working__` until a body appeared,
+which worked because the hidden document did not exist until the auto-save wrote it. A named
+project's file is already there before the commit runs — the create wrote it — so "poll until a
+body appears" is satisfied on the first tick and the arm reads a document the commit never
+touched. Measured when it happened elsewhere in the suite: `the-save-writes-the-undo-stack`,
+correctly re-anchored, came back **NOT CAUGHT** with the control working perfectly and the arm
+unable to see the write. **Hold the poll to the value moving rather than to a body existing** —
+this section waits for the edit it just made to appear in the stored clip, and the same mutation
+then reddens one row with `history` among the stored keys. It is the absence-that-looks-like-the-
+instrument-working shape `docs/instruments.md` opens on, arriving through a fixture that grew a
+file underneath it.
+
+**Two rows beside it are about a page that holds no document at all.** A page opened on a take
+has no file to auto-save into, which used to be carried by `__working__` existing and is carried
+by there being nothing to write to now — so the row lists every project the server holds after
+the commits above and requires the store not to have grown. `take-page-invents-a-name-to-save-under`
+is its control: it puts the hidden name back in one line, and the row reads
+`the store holds ["__working__", …]`.
 
 **Every row in that section is an absence, so the falsification control comes first and is a
 presence:** undo is made to move a value and put it back, read off the value rather than off the
@@ -2025,7 +2117,9 @@ both tools' duration floors.
 
 Written down because the alternative is every later change being suspected of them, which is
 the trap `CLAUDE.md` names: **re-run the baseline in the conditions the failure happened in**,
-and a run nobody took a control for reads as a finding.
+and a run nobody took a control for reads as a finding. **The three measurements below ask about the
+wrong condition, and the correction is at the end of this section**: two of the three rows track
+the length of the take and not the load on the machine.
 
 Measured on `--take fixture-1g --no-render` against a server on 8080 with a warm index, on the
 Mac, with the tree at `7cb273d` and no local modifications — taken by copying the working
@@ -2087,6 +2181,47 @@ set did not. That is the comparison worth making — a total that moves with a d
 it, beside a red set that is identical in identity *and* in reading. It still says nothing
 about whether the three are a regression or the rig; what it says is that nothing since has
 touched them, and the clean control on an idle machine is still owed.
+
+**Six runs this session settled it, and the variable is not the one three measurements above were
+holding still.** `1 fallbacks` and `3 keys left` came back red in four runs against a 243.3s
+`fixture-1g` and green in two runs against a 91.2s one, at loads that overlap in both
+directions — red at load 42 and again at load 8, green at load 13 and again at load 8. So the
+clean control on an idle machine those paragraphs keep asking for would not have answered
+anything: run on the long take it is a fifth red run, and the load it controls for is the term
+that does not move the verdict. What put duration on the list at all was a different family in
+the same suite — the deselect rows, whose mechanism *was* found, and it is a press point written
+in program time; `docs/instruments.md` carries it.
+
+**`fixture-1g` is a name and not a length, which is how a term that large stayed invisible for
+three measurements.** `npm run fixtures` builds it as eight loops of the 30.362s sample, which is
+the 243.3s take; `make-fixture.js` run bare loops 32 times and `--minutes` is a third door, so two
+checkouts hold two takes of that name and no run here has ever printed which. The 91.2s one is
+three loops of the same sample, which the arithmetic gives rather than a build log. **Report a
+take's duration beside its name whenever a row's verdict is being attributed** — the name is what
+the invocation carries and the length is what the row is measured against.
+
+**What this is not is a mechanism, and the gap is worth stating at its real size.** Two green runs
+on one shorter take against four red ones on the longer is six observations and no explanation of
+what either row does with the extra length, so the claim this page can carry is that on this rig
+the fixture's duration predicts the verdict where the load does not, and nothing about why. A run
+reddening only these two is a re-run against a shorter take before it is a finding.
+
+**And the three rows this section groups are not one phenomenon.** Section 5's `dragged from
+0.3333 to 0.3333, against a neighbour at 0.1667` was green in all six of those runs, the 243.3s
+ones included — green on the very fixture that reddens the two beside it. They were grouped
+because they came back red together three times, and a grouping that does not hold is how
+somebody ends up looking for one cause behind three symptoms. What the page has now is two rows
+that flip with the take's length, and a third that was red three times on this rig and is not any
+more, with nothing recorded about what moved it.
+
+**Measured again on the tree that carries the projects page: `739 assertions, 2 failed`**, on four
+takes at full render against a server on 8511 with `--take fixture-1g`, which is the 243.3s eight-
+loop fixture — the same two rows, with the same two readings, `1 fallbacks` and `3 keys left`. The
+total moved from 530 because section 13's rewrite and the multi-select block added rows, which is
+the comparison worth making: a total that moves with a diff that explains it, beside a red set
+identical in identity *and* in reading. Load average during that run was 136, which does not
+weaken the reading in the direction anybody would worry about — a contended machine is where this
+file records extra rows appearing, and none did.
 
 ## `cpp-check`, and why one configuration would not have been a check
 
@@ -2284,9 +2419,9 @@ does not say so is wrong in both directions.
 **The total is not written down here any more, and that is deliberate.** This sentence used to
 carry one — "317 of 319" — and it was stale by twenty-eight the day it was next read, because
 the total moves whenever a section is added and nothing was walking it. The number to compare a
-run against is the one a baseline on the same tree prints: **365 assertions on darwin against
-the real 138MB sample**, measured on the merge that brought section 4f alongside the capture
-format's band, which is the figure to re-measure rather than to trust. It went from 352 to 365
-in that merge alone — five rows from one branch and thirteen from the other, neither of which
-knew about the other — and that is the rate a total in prose goes stale at when two sections
-land in the same week.
+run against is the one a baseline on the same tree prints: **527 assertions on darwin against
+the real 138MB sample**, measured on the tree that carries the projects page, which is the figure
+to re-measure rather than to trust. It read 365 on the merge that brought section 4f alongside the
+capture format's band, and 352 before that — five rows from one branch and thirteen from the
+other, neither of which knew about the other — and that is the rate a total in prose goes stale at
+when two sections land in the same week.

@@ -42,7 +42,7 @@ const MUTATIONS = {
   'one-spelling-for-every-module': {
     file: 'web/library.js',
     edits: [
-      ["import { DEPTH_H, DEPTH_W, VALID_ID } from '/format.js';", "import { DEPTH_H, DEPTH_W, VALID_ID } from './format.js';"],
+      ["import { VALID_ID } from '/format.js';", "import { VALID_ID } from './format.js';"],
       ["import { pollRecordState } from '/record-poll.js';", "import { pollRecordState } from './record-poll.js';"],
     ],
   },
@@ -58,7 +58,7 @@ const MUTATIONS = {
   // exports is exempt, so a plant aimed at one of those comes back excused.
   'imported-object-written-across-the-boundary': {
     file: 'web/main.js',
-    edits: [["const WORKING_PROJECT = '__working__';", "const WORKING_PROJECT = '__working__';\nscalarAt.cache = new Map();"]],
+    edits: [['let openedProjectName = null;', 'let openedProjectName = null;\nscalarAt.cache = new Map();']],
   },
 
   'state-crosses-as-a-live-let': {
@@ -85,7 +85,7 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [
       ["import { pollRecordState } from './record-poll.js';", "import { pollRecordState } from './record-poll.js';\nimport * as recordPoll from './record-poll.js';"],
-      ["const WORKING_PROJECT = '__working__';", "const WORKING_PROJECT = '__working__';\nrecordPoll.pollRecordState.cache = new Map();"],
+      ['let openedProjectName = null;', 'let openedProjectName = null;\nrecordPoll.pollRecordState.cache = new Map();'],
     ],
   },
 
@@ -93,15 +93,18 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [
       ["import { pollRecordState } from './record-poll.js';", "import { pollRecordState as poll } from './record-poll.js';"],
-      ["const WORKING_PROJECT = '__working__';", "const WORKING_PROJECT = '__working__';\npoll.cache = new Map();"],
+      ['let openedProjectName = null;', 'let openedProjectName = null;\npoll.cache = new Map();'],
     ],
   },
 
+  // Re-anchored when the EDITOR tile went and took `LAST_OPENED` with it. The subject is the rule
+  // that a page cannot write into an imported binding, and the anchor is only a stable top-level
+  // line to hang the plant on - it has to be top level, because an `import` cannot be anywhere else.
   'write-from-a-page': {
     file: 'web/menu.html',
     edits: [[
-      "const LAST_OPENED = 'kinect.lastOpened';",
-      "const LAST_OPENED = 'kinect.lastOpened';\nimport { pollRecordState } from '/record-poll.js';\npollRecordState.cache = new Map();",
+      "const tiles = [...document.querySelectorAll('.entry')];",
+      "const tiles = [...document.querySelectorAll('.entry')];\nimport { pollRecordState } from '/record-poll.js';\npollRecordState.cache = new Map();",
     ]],
   },
 

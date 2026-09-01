@@ -1,4 +1,4 @@
-// Proves the gallery and the library: one manifest over a directory of takes, one library
+// Proves the library page and its store: one manifest over a directory of takes, one library
 // spanning two machines joined by content hash, a project that survives a round trip through
 // a file, and the two removals doing what their names say.
 //
@@ -242,23 +242,30 @@ const MUTATIONS = {
   ]] },
   // `preset-through-setmode` was here and is deleted rather than re-anchored, because the bug
   // it planted can no longer be written.
-  'write-overwrites-builtin': { file: 'server/library.js', edits: [[
-    `    const path = this.pathFor(name);
-    // Captured here, on the same tick as the increment.`,
+  // Two edits because `path` is a const outside the queue closure now, and the redirect has to
+  // land inside the serialised section. `const path = this.pathFor(name)` is in `remove` too, so
+  // the first anchor carries the two lines below it to stay unique.
+  'write-overwrites-builtin': { file: 'server/library.js', edits: [
+    [`    const path = this.pathFor(name);
+    return this.#serialise([name], async () => {
+      await this.#heldToRev(name, rev, 'write');`,
     `    let path = this.pathFor(name);
-    if (this.builtinDir) {
-      const shipped = join(this.builtinDir, \`\${name}.json\`);
-      try { await stat(shipped); path = shipped; } catch { /* not a shipped name */ }
-    }
-    // Captured here, on the same tick as the increment.`,
-  ]] },
+    return this.#serialise([name], async () => {
+      await this.#heldToRev(name, rev, 'write');`],
+    [`      await mkdir(this.dir, { recursive: true });`,
+    `      if (this.builtinDir) {
+        const shipped = join(this.builtinDir, \`\${name}.json\`);
+        try { await stat(shipped); path = shipped; } catch { /* not a shipped name */ }
+      }
+      await mkdir(this.dir, { recursive: true });`],
+  ] },
   // Marks are drawn at their source fraction rather than through the retime curve, which is
   // identical at rate 1 with no keys and wrong everywhere else.
   'marks-ignore-retime': { file: 'web/main.js', edits: [[
     '\n    const program = programSecOfSource(mark.sourceMs / 1000);\n',
     '\n    const program = mark.sourceMs / 1000;\n',
   ]] },
-  // The gallery skims a remote take at full resolution, promising a smoothness the
+  // The library skims a remote take at full resolution, promising a smoothness the
   // link does not have.
   'writes-take-any-method': { file: 'server/index.js', edits: [
     ['    if (!reading && r.write) {', '    if (r.write) {'],
@@ -345,12 +352,12 @@ const MUTATIONS = {
     ],
   },
 
-  // The gallery's poll loses its change gate, so every tick calls `refresh()`.
+  // The library's poll loses its change gate, so every tick calls `refresh()`.
   'poll-refreshes-every-tick': { file: 'web/library.js', edits: [[
     '  if (!changed) return;\n', '',
   ]] },
 
-  // The gallery's poll goes back to watching only the recorder on the machine serving the page.
+  // The library's poll goes back to watching only the recorder on the machine serving the page.
   'pulse-ignores-the-node': { file: 'server/index.js', edits: [[
     '    node: node ? await node.recordState() : null,\n', '',
   ]] },
@@ -373,7 +380,7 @@ const MUTATIONS = {
     'return this.take?.path ?? null;',
   ]] },
 
-  // The gallery's poll goes back to a first tick that cannot disagree with anything.
+  // The library's poll goes back to a first tick that cannot disagree with anything.
   'poll-first-tick-is-blind': { file: 'web/library.js', edits: [[
     '}, believedFromLibrary());', '});',
   ]] },
@@ -388,15 +395,15 @@ const MUTATIONS = {
   // The bound goes back onto the first listing, where a cold library is slow for a legitimate
   // reason and fifteen seconds is not enough to build 200 indexes.
   'first-load-bounded': { file: 'web/library.js', edits: [[
-    'try {\n  await refresh();\n} catch (err) {\n  say(`the library could not be read',
-    'try {\n  await refresh({ bound: true });\n} catch (err) {\n  say(`the library could not be read',
+    'try {\n  await refresh();\n} catch (err) {\n  say(`the media library could not be read',
+    'try {\n  await refresh({ bound: true });\n} catch (err) {\n  say(`the media library could not be read',
   ]] },
 
   // The first listing goes back to being unguarded, so anything it throws ends module
   // evaluation before the poll is started and before the page has a hook to drive.
   'first-load-strands-the-page': { file: 'web/library.js', edits: [[
     'try {\n  await refresh();\n} catch (err) {\n'
-    + '  say(`the library could not be read: ${err.message}`);\n  paint();\n}',
+    + '  say(`the media library could not be read: ${err.message}`);\n  paint();\n}',
     'await refresh();',
   ]] },
 
@@ -404,7 +411,7 @@ const MUTATIONS = {
   // it was until a JSON refusal was found walking straight past the catch above.
   'listing-takes-a-refusal-as-a-library': { file: 'web/library.js', edits: [[
     '  if (!res.ok || !Array.isArray(body?.takes)) {\n'
-    + '    throw new Error(body?.error ?? `the library could not be listed: HTTP ${res.status}`);\n'
+    + '    throw new Error(body?.error ?? `the media library could not be listed: HTTP ${res.status}`);\n'
     + '  }\n',
     '',
   ]] },
@@ -427,17 +434,17 @@ const MUTATIONS = {
       + 'leaves the two build-gate rows green',
   },
 
-  // The gallery goes back to ending a press only on `pointerup`, which is how it shipped: the
+  // The library goes back to ending a press only on `pointerup`, which is how it shipped: the
   // editor handles `pointercancel` in nine places and this page handled it in zero.
   'press-survives-a-cancelled-gesture': { file: 'web/library.js', edits: [[
     "  skimEl.addEventListener('pointercancel', () => { pressX = null; dragged = false; });\n",
     '',
   ]],
     fails: 'a press the browser took back, ended - the editor handles `pointercancel` in nine '
-      + 'places and the gallery handled it in none. The tap row after it stays green',
+      + 'places and the library handled it in none. The tap row after it stays green',
   },
 
-  // The gallery goes back to assigning whatever listing comes back last.
+  // The library goes back to assigning whatever listing comes back last.
   'refresh-paints-a-stale-listing': { file: 'web/library.js', edits: [[
     '  if (mine !== refreshGeneration) return newestRefresh;\n',
     '',
@@ -706,7 +713,7 @@ const MUTATIONS = {
       + 'still keeps now the migration is gone: older, later, and a version field that is not '
       + 'a number at all',
   },
-  'skim-ignores-state': { file: 'web/library.js', edits: [[
+  'skim-ignores-state': { file: 'web/take-draw.js', edits: [[
     'const DIVISOR = { local: 1, both: 1, remote: 4 };',
     'const DIVISOR = { local: 1, both: 1, remote: 1 };',
   ]] },
@@ -726,7 +733,7 @@ const MUTATIONS = {
   ]] },
   // The poster's height goes back into JavaScript, assigned once from the width it measured
   // on the first fit.
-  'poster-height-in-js': { file: 'web/library.js', edits: [[
+  'poster-height-in-js': { file: 'web/take-draw.js', edits: [[
     `  const fit = () => {
     const r = surface.getBoundingClientRect();`,
     `  const fit = () => {
@@ -738,14 +745,16 @@ const MUTATIONS = {
     const r = surface.getBoundingClientRect();`,
   ]] },
   // A depth sample goes back to covering exactly one pixel however large the canvas is.
-  'viewer-splat-one': { file: 'web/library.js', edits: [[
+  'viewer-splat-one': { file: 'web/take-draw.js', edits: [[
     '  const splat = Math.max(1, Math.round(scale / fxFull));',
     '  const splat = 1;',
   ]] },
-  // The way out of the gallery goes away again.
-  'gallery-has-no-way-back': { file: 'web/library.html', edits: [[
-    '    <a class="appback" id="toMenu" href="/"><span class="arrow">&lt;</span><span aria-current="page">Gallery</span></a>',
-    '    <!-- mutation: no way back -->',
+  // The way out to the menu goes away again. Aimed at `toMenu` alone and not at the whole bar:
+  // the surface links beside it lead to the other page rather than out, so removing them would
+  // redden a different claim than the one this control is named for.
+  'library-has-no-way-to-the-menu': { file: 'web/library.html', edits: [[
+    '  <a class="appback" id="toMenu" href="/"><span class="arrow">&lt;</span><span>Menu</span></a>',
+    '  <!-- mutation: no way back -->',
   ]] },
   // The falsification control for the enumeration, and the only mutation here that is not a
   // bug being put back.
@@ -793,7 +802,7 @@ const MUTATIONS = {
   // The path is dropped from the arguments, so the file manager is started on nothing - a route
   // that answers 200 having done something that is not what it says.
   'reveal-drops-the-path': { file: 'server/library.js', edits: [REVEAL_EDIT] },
-  // The gallery goes back to composing its own refusal.
+  // The library page goes back to composing its own refusal.
   'open-decides-its-own-reason': { file: 'web/library.js', edits: [[
     "const cannotOpen = (take) => take.openRefusals[0]?.why ?? '';",
     'const cannotOpen = (take) => {\n'
@@ -803,14 +812,24 @@ const MUTATIONS = {
       + "  return '';\n"
       + '};',
   ]] },
-  // The menu goes back to naming both causes at once.
-  'menu-decides-its-own-reason': { file: 'web/menu.html', edits: [[
-    '  if (!take.openable) {\n'
-      + '    const why = take.openRefusals.map((r) => r.why).join(\'; \');\n'
-      + '    return gallery(`${take.id} cannot be opened: ${why}`);\n'
-      + '  }',
-    '  if (!take.openable) return gallery(`${take.id} cannot be opened: no sensor hello, or under two frames`);',
-  ]] },
+  // The media picker goes back to naming the causes it knows about, which is the same fault the
+  // library's half of this pair guards. It moved here from `web/menu.html` when the EDITOR tile
+  // went: the menu stopped composing a refusal sentence at all, and the picker started - it draws
+  // the library's warning badges now, so it is the second surface that has to quote the server
+  // rather than write its own copy. The class is every surface that badges a refusal, and it has
+  // two members again.
+  'picker-decides-its-own-reason': { file: 'web/take-picker.js', edits: [[
+    "  return take.openRefusals[0]?.why ?? '';",
+    '  if (take.recording === true) return warningsOf(take)[0].why;\n'
+      + "  if (take.hasHello === false) return 'this take carries no sensor hello, so its intrinsics are unknown';\n"
+      + "  if (take.frames !== null && take.frames < 2) return 'a take needs two frames to bracket a position';\n"
+      + "  return '';",
+  ]],
+    fails: 'the picker\'s note quoting the server, in the refusal section: the picker is opened '
+      + 'from /projects, the tile of a take the server refuses is pressed, and the sentence on '
+      + '.tp-note is held against the one the library put on its own button. Reddens that row '
+      + 'alone - the badge row beside it reads the chip\'s title, which this edit does not touch',
+  },
   // A refusal the server declares and no page can badge.
   'refusal-without-a-badge': { file: 'server/library.js', edits: [[
     'export const OPEN_REFUSALS = {\n',
@@ -944,7 +963,7 @@ function mutatedSource(name) {
 const mutation = MUTATE ? mutatedSource(MUTATE) : null;
 const pageMutation = mutation && mutation.file.startsWith('web/') ? mutation : null;
 // The URL a page file is served at, which is not its filename.
-const PAGE_URLS = { 'library.html': '/gallery', 'menu.html': '/' };
+const PAGE_URLS = { 'library.html': '/library', 'menu.html': '/', 'projects.html': '/projects' };
 const urlForPageFile = (file) => PAGE_URLS[file] ?? `/${file}`;
 const serverMutation = mutation && mutation.file.startsWith('server/') ? mutation : null;
 // A mutation of one of the twelve documents the picker offers, which is the third kind of file
@@ -1199,11 +1218,11 @@ function buildFixture() {
   // written rather than found.
   writeWideningTake(macCaps, 'widening-take', 24);
 
-  // The shapes the gallery has to survive rather than the shapes it likes.
+  // The shapes the library has to survive rather than the shapes it likes.
   writeTake(macCaps, 'truncated-take', { frames: 6, truncate: true, startedAt: false });
   writeTake(macCaps, 'no-hello-take', { frames: 6, withHello: false });
   writeTake(macCaps, 'one-frame-take', { frames: 1 });
-  // A hello, and no whole frame - the one shape that could tell the gallery's two openability
+  // A hello, and no whole frame - the one shape that could tell the library's two openability
   // sentences apart, and the take nobody planted.
   writeTake(macCaps, 'hello-no-frames', { frames: 1, truncate: true });
   writeBadLengthTake(macCaps, 'bad-length-take');
@@ -1492,6 +1511,30 @@ const post = (url, body, method = 'POST') => getJson(url, {
   method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}),
 });
 
+// Every document write carries the revision it was made against, and a write carrying none at all
+// is refused - so a fixture staged without one is a section that never runs. The revision is read
+// off the listing rather than off the name, because a read of a name with no file behind it is a
+// 404 this run then has to explain, and `absent` is what a create claims.
+const revOf = async (base, kind, name) => {
+  const listed = await getJson(`${base}/${kind === 'projects' ? 'projects/all' : kind}`);
+  return (listed[kind] ?? []).find((doc) => doc.name === name)?.rev ?? 'absent';
+};
+const writeDoc = async (base, kind, name, body, method = 'PUT') => {
+  const rev = await revOf(base, kind, name);
+  return getJson(`${base}/${kind}/${encodeURIComponent(name)}?rev=${encodeURIComponent(rev)}`, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    ...(body === null ? {} : { body: JSON.stringify(body) }),
+  });
+};
+// The same read, for the page-side writes that fetch relative to their own origin.
+const REV_IN_PAGE_INSTALL = () => {
+  globalThis.__rev = async (kind, name) => {
+    const listed = await (await fetch(kind === 'projects' ? '/projects/all' : `/${kind}`)).json();
+    return (listed[kind] ?? []).find((doc) => doc.name === name)?.rev ?? 'absent';
+  };
+};
+
 
 async function loadPlaywright() {
   const require = createRequire(import.meta.url);
@@ -1533,13 +1576,20 @@ async function retryOnContextLoss(label, work) {
   throw new Error('unreachable');
 }
 
-// The three pages, named once each rather than at the eight call sites below.
+// The four pages, named once each rather than at the call sites below. Each spelling has to be
+// the URL `PAGES` serves it at and not its filename, because a page mutation is delivered by
+// fetching the page's own URL - `PAGE_URLS` above is the same fact written for the delivery.
 const recorderPage = (base) => `${base}/record`;
 const editorPage = (base, take) => `${base}/edit?take=${encodeURIComponent(take)}`;
-const galleryPage = (base) => `${base}/gallery`;
+const libraryPage = (base) => `${base}/library`;
+const projectsPage = (base) => `${base}/projects`;
 
 async function openPage(browser, url, viewport = { width: 1100, height: 760 }) {
   const page = await browser.newPage({ viewport });
+  // Installed on every page this file opens rather than at the four sites that write a document,
+  // because a write missing its revision is refused and a fixture that never landed is a section
+  // that never ran.
+  await page.addInitScript(REV_IN_PAGE_INSTALL);
   const errors = [];
   page.on('pageerror', (err) => errors.push(String(err)));
   page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
@@ -1890,13 +1940,13 @@ async function runChecks() {
       const mixedUrl = await startServer(root, ['--captures', macCaps, '--name', 'mac', '--node', old.url,
         '--node-name', 'old-node', '--presets', join(WORK, 'presets'), '--projects', join(WORK, 'projects'),
         '--builtin-presets', join(WORK, 'builtin-presets')], MAC_PORT + 1);
-      const { page, errors } = await openPage(browser, galleryPage(mixedUrl));
+      const { page, errors } = await openPage(browser, libraryPage(mixedUrl));
       // Waited for behind a catch, because this is the arm the mutation kills.
       const painted = await page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 })
         .then(() => true).catch(() => false);
       const tiles = painted ? await page.evaluate('globalThis.__library.tiles()') : [];
       check(painted && tiles.length > 0 && errors.length === 0,
-        'the gallery beside an older node still draws this machine\'s own takes, with no page error',
+        'the library beside an older node still draws this machine\'s own takes, with no page error',
         `${painted ? `${tiles.length} tiles` : 'the page never finished painting'}, ${errors.length} errors: ${errors.join(' | ')}`);
       check(tiles.length > 0 && tiles.every((t) => t.state !== 'remote'),
         'and nothing from that node is on the shelf, because a shelf missing some of them silently is the worse answer',
@@ -1919,7 +1969,7 @@ async function runChecks() {
         const aheadUrl = await startServer(root, ['--captures', macCaps, '--name', 'mac', '--node', ahead.url,
           '--node-name', 'new-node', '--presets', join(WORK, 'presets'), '--projects', join(WORK, 'projects'),
           '--builtin-presets', join(WORK, 'builtin-presets')], MAC_PORT + 8);
-        const { page: aheadPage, errors: aheadErrors } = await openPage(browser, galleryPage(aheadUrl));
+        const { page: aheadPage, errors: aheadErrors } = await openPage(browser, libraryPage(aheadUrl));
         const alive = await aheadPage.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 })
           .then(() => true).catch(() => false);
         const aheadTiles = alive ? await aheadPage.evaluate('globalThis.__library.tiles()') : [];
@@ -2244,9 +2294,9 @@ async function runChecks() {
     const listed = (await getJson(`${recUrl}/library/takes`)).takes;
     const byFile = Object.fromEntries(listed.map((t) => [t.file, t]));
     check(scanned.every((t) => byFile[t.file]?.frames === EMITTED && byFile[t.file]?.dateSource === 'hello'),
-      'and each closed take is a gallery entry, scanned, hashed and dated off its own hello');
+      'and each closed take is a library entry, scanned, hashed and dated off its own hello');
     check(new Set(scanned.map((t) => byFile[t.file]?.hash)).size === scanned.length,
-      'every take has its own hash, so nothing shares a gallery entry',
+      'every take has its own hash, so nothing shares a library entry',
       scanned.map((t) => String(byFile[t.file]?.hash).slice(7, 15)).join(' '));
     for (const p of servers.filter((s) => s.port === MAC_PORT + 4)) p.child.kill('SIGKILL');
   }
@@ -2437,7 +2487,7 @@ async function runChecks() {
 
   console.log('\n[library] the tiles: states, marks, buttons and the skim');
   {
-    const { page, errors } = await openPage(browser, galleryPage(macUrl));
+    const { page, errors } = await openPage(browser, libraryPage(macUrl));
     await page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     const tiles = await page.evaluate('globalThis.__library.tiles()');
     const byId = Object.fromEntries(tiles.map((t) => [t.hash, t]));
@@ -2446,29 +2496,34 @@ async function runChecks() {
 
     // Skimming is a pointer affordance and the library also runs on a touch panel.
     const labels = (t) => t.acts.map((a) => a.label);
+    const items = (t) => t.acts.map((a) => a.item);
+    const newProjectOn = (id) => one(id).acts.find((a) => a.item === 'new-project');
     check(tiles.every((t) => t.acts.length >= 2),
       `every tile carries its actions without hover (${tiles.length} tiles)`);
     check(tiles.filter((t) => t.state === 'remote').every((t) => labels(t).includes('Download')),
       'a remote tile offers Download');
-    check(tiles.filter((t) => t.state === 'local').every((t) => labels(t).includes('Open')),
-      'a local tile offers Open');
+    // Found by `item` and not by `label`: the act that mints a document is `new-project` and its
+    // copy has already moved once, from `Open` - which said nothing about which of the two things
+    // it did. A row keyed to the words goes quiet the next time somebody rewords a button.
+    check(tiles.filter((t) => t.state === 'local').every((t) => items(t).includes('new-project')),
+      'a local tile offers New project from this take');
     check(tiles.every((t) => labels(t).includes('Delete')), 'every tile offers Delete');
     check(tiles.filter((t) => t.state !== 'both').every((t) => !labels(t).includes('Reclaim')),
       'and Reclaim appears only where a second copy exists');
 
-    check(one('no-hello-take').acts.find((a) => a.label === 'Open')?.disabled === true,
-      'the Open on a take with no hello is disabled rather than a throw waiting to happen');
-    check(one('local-clip').acts.find((a) => a.label === 'Open')?.disabled === false,
-      'and an ordinary take opens');
-    check(one('future-format-take').acts.find((a) => a.label === 'Open')?.disabled === true,
-      'the Open on a take from a format this build cannot read is disabled the same way');
-    check(one('generation-zero-take').acts.find((a) => a.label === 'Open')?.disabled === false,
-      'while a take that declares no format at all still opens');
+    check(newProjectOn('no-hello-take')?.disabled === true,
+      'New project on a take with no hello is disabled rather than a throw waiting to happen');
+    check(newProjectOn('local-clip')?.disabled === false,
+      'and an ordinary take can be made into one');
+    check(newProjectOn('future-format-take')?.disabled === true,
+      'New project on a take from a format this build cannot read is disabled the same way');
+    check(newProjectOn('generation-zero-take')?.disabled === false,
+      'while a take that declares no format at all still offers it');
 
     // One take, one reason, whichever surface is asking.
     const refused = one('hello-no-frames');
     const badgeWhy = refused.badges.find((b) => b.key === 'short')?.why ?? '';
-    const buttonWhy = refused.acts.find((a) => a.label === 'Open')?.why ?? '';
+    const buttonWhy = refused.acts.find((a) => a.item === 'new-project')?.why ?? '';
     check(badgeWhy !== '' && badgeWhy === buttonWhy,
       'a take with a hello and no whole frame is refused in one sentence, the same on its badge and on its button',
       `badge ${JSON.stringify(badgeWhy)} vs button ${JSON.stringify(buttonWhy)}`);
@@ -2476,23 +2531,51 @@ async function runChecks() {
       'and it is the sentence about the frame it does not have rather than the one about bracketing a position',
       JSON.stringify(buttonWhy));
 
-    const refusedHash = one('hello-no-frames').hash;
+    // The second surface that badges a refusal, and the reason there has to be one is in
+    // `docs/instruments.md`: the refusal moved to the server so that one take gets one sentence
+    // everywhere, and a control mutating a single surface left the other one's hard-coded copy
+    // uncaught. The menu used to be that second surface and no longer composes a sentence at all;
+    // the media picker draws the library's warning badges now, so the class has two members again
+    // and this is the member's row. Driven through `/projects`, because the picker is built when
+    // it opens and removed when it closes - there is nothing in the markup at rest to read.
     {
-      const { page: menu, errors: menuErrors } = await openPage(browser, `${macUrl}/`);
-      await menu.evaluate(`localStorage.setItem('kinect.lastOpened', ${JSON.stringify(JSON.stringify({
-        takeHash: refusedHash, takeId: 'hello-no-frames', project: null,
-      }))})`);
-      await menu.reload({ waitUntil: 'domcontentloaded' });
-      await menu.waitForFunction('globalThis.__menu !== undefined', null, { timeout: 20000 });
-      const resume = await menu.evaluate('globalThis.__menu.resume()');
-      check(resume.href === '/gallery' && (resume.reason ?? '').includes(buttonWhy),
-        'the menu refuses the same take in the same sentence the gallery put on its button',
-        `menu ${JSON.stringify(resume.reason)} against button ${JSON.stringify(buttonWhy)}`);
-      check(!/no sensor hello, or under two frames/.test(resume.reason ?? ''),
+      const { page: picker, errors: pickerErrors } = await openPage(browser, projectsPage(macUrl));
+      await picker.waitForFunction('globalThis.__projects !== undefined', null, { timeout: 20000 });
+      await picker.evaluate('globalThis.__projects.newProject()');
+      await picker.waitForSelector('#takePicker .tp-tile[data-take="hello-no-frames"]', { timeout: 20000 });
+      const pickerSays = await picker.evaluate(`(() => {
+        const tile = document.querySelector('#takePicker .tp-tile[data-take="hello-no-frames"]');
+        tile.querySelector('.tp-meta').click();
+        return {
+          note: document.querySelector('#takePicker .tp-note').textContent,
+          pressed: tile.getAttribute('aria-pressed'),
+          disabled: tile.getAttribute('aria-disabled'),
+          flags: [...tile.querySelectorAll('.tp-flag')].map((f) => ({ key: f.dataset.flag, why: f.title })),
+          go: document.querySelector('#takePicker .tp-act.go').disabled,
+        };
+      })()`);
+      check(pickerSays.note === buttonWhy,
+        'the media picker refuses the same take in the same sentence the library put on its button, '
+        + 'word for word rather than in a copy of its own',
+        `picker ${JSON.stringify(pickerSays.note)} against button ${JSON.stringify(buttonWhy)}`);
+      check(!/no sensor hello, or under two frames/.test(pickerSays.note ?? ''),
         'and not in a sentence naming both causes over a take that has one of them',
-        JSON.stringify(resume.reason));
-      check(menuErrors.length === 0, 'and the menu raises no page error resolving it', menuErrors.join(' | '));
-      await menu.close();
+        JSON.stringify(pickerSays.note));
+      check(pickerSays.pressed === 'false' && pickerSays.disabled === 'true' && pickerSays.go === true,
+        'and the press said why instead of picking it, so the sentence above is a refusal rather '
+        + 'than a note beside a take that went in anyway',
+        `pressed ${pickerSays.pressed}, disabled ${pickerSays.disabled}, confirm ${pickerSays.go ? 'off' : 'on'}`);
+      // The badge over the poster is the other half of the same rule: the chip's own title is the
+      // server's sentence, so a build that quoted the server on the note and composed its own on
+      // the badge fails here rather than passing on the row above.
+      const badged = pickerSays.flags.find((f) => f.key === 'short');
+      check(badged !== undefined && badged.why === badgeWhy,
+        'and the warning chip over its poster carries the same sentence, which is the badge half '
+        + 'of the rule rather than the note half',
+        badged === undefined ? `flags ${JSON.stringify(pickerSays.flags.map((f) => f.key))}`
+          : `chip ${JSON.stringify(badged.why)} against badge ${JSON.stringify(badgeWhy)}`);
+      check(pickerErrors.length === 0, 'and the picker raises no page error drawing it', pickerErrors.join(' | '));
+      await picker.close();
     }
 
     // Every refusal the server can send has a badge on the page.
@@ -2601,7 +2684,7 @@ async function runChecks() {
       return a ? { tag: a.tagName, href: a.getAttribute('href'), text: a.textContent.trim() } : null;
     })()`);
     check(back?.tag === 'A' && back.href === '/',
-      'the gallery has a way back to the menu, and it is a real URL rather than a button that navigates',
+      'the library has a way back to the menu, and it is a real URL rather than a button that navigates',
       JSON.stringify(back));
     if (back) {
       await page.click('#toMenu');
@@ -2611,26 +2694,57 @@ async function runChecks() {
     } else {
       check(false, 'and following it arrives at the menu', 'there is no anchor to follow');
     }
-    await page.goto(galleryPage(macUrl), { waitUntil: 'domcontentloaded' });
+    await page.goto(libraryPage(macUrl), { waitUntil: 'domcontentloaded' });
     await page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
 
-    // The surface name moved into the real back control.
-    const galleryShell = await page.evaluate(`(() => {
+    // The bar carries the way out and the way across, and they are different claims: `toMenu`
+    // leaves for the menu, and the two `.surface` anchors are the pair of pages this one is one
+    // of. Read off the markup on both pages rather than on one, because a header written per page
+    // rather than shared is exactly a page that names itself right and its neighbour wrong.
+    const barOn = (where) => where.evaluate(`(() => {
       const bar = document.getElementById('appBar');
       const back = document.getElementById('toMenu');
-      const active = document.querySelector('.tab[aria-pressed="true"]');
+      const surfaces = [...document.querySelectorAll('#navRow .surface')];
       if (!bar || !back) return null;
       const r = bar.getBoundingClientRect();
       return {
         top: Math.round(r.top), height: Math.round(r.height),
         arrow: back.querySelector('.arrow')?.textContent.trim() ?? null,
         label: back.querySelector('span:last-child')?.textContent.trim() ?? null,
-        active: active?.dataset.filter ?? null,
+        surfaces: surfaces.map((a) => ({
+          id: a.id, href: a.getAttribute('href'), text: a.textContent.trim(),
+          current: a.getAttribute('aria-current'),
+        })),
       };
     })()`);
-    check(galleryShell?.top === 0 && galleryShell.height === 38
-      && galleryShell.arrow === '<' && galleryShell.label === 'Gallery',
-      'the gallery names itself in a fixed application bar at the top edge', JSON.stringify(galleryShell));
+    const libraryShell = await barOn(page);
+    check(libraryShell?.top === 0 && libraryShell.height === 38
+      && libraryShell.arrow === '<' && libraryShell.label === 'Menu',
+      'the way out of the library is the menu and it says so, in a fixed application bar at the top edge',
+      JSON.stringify(libraryShell));
+    const surfacesOn = (shell) => (shell?.surfaces ?? []).map((s) => `${s.id}=${s.href}`).join(' ');
+    check(surfacesOn(libraryShell) === 'toProjects=/projects toLibrary=/library',
+      'and beside it the two surfaces are named as real URLs rather than as a control that navigates',
+      surfacesOn(libraryShell) || 'no surface anchors');
+    check(libraryShell?.surfaces.find((s) => s.id === 'toLibrary')?.current === 'page'
+      && libraryShell.surfaces.find((s) => s.id === 'toProjects')?.current === null,
+      'with the page you are on marked and the one you are not left unmarked, which is the only thing '
+      + 'in the bar that differs between the two surfaces',
+      (libraryShell?.surfaces ?? []).map((s) => `${s.id}:${s.current ?? 'none'}`).join(' '));
+    // Followed rather than read: the control sweep below credits these two to this row, and a
+    // credit nothing joins to a press is a sentence somebody wrote once.
+    await page.click('#toProjects');
+    await page.waitForFunction('globalThis.__projects !== undefined', null, { timeout: 20000 })
+      .catch(() => { /* the row below says so */ });
+    const acrossShell = await barOn(page);
+    check(new URL(page.url()).pathname === '/projects'
+      && acrossShell?.surfaces.find((s) => s.id === 'toProjects')?.current === 'page'
+      && acrossShell.surfaces.find((s) => s.id === 'toLibrary')?.current === null,
+      'and following the other one arrives at that page with the mark moved, so the bar is one '
+      + 'header on both surfaces rather than a copy per page that agrees today',
+      `${page.url()} - ${(acrossShell?.surfaces ?? []).map((s) => `${s.id}:${s.current ?? 'none'}`).join(' ')}`);
+    await page.click('#toLibrary');
+    await page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     const wasAt = page.url();
     await page.click('.tab[data-filter="all"]');
     await new Promise((done) => { setTimeout(done, 300); });
@@ -2715,7 +2829,13 @@ async function runChecks() {
         menuBoxes.push(`${t.id}(${t.state}) ${m.clipped.above > 0 ? `${m.clipped.above}px above` : `${m.clipped.below}px below`}`
           + ` of ${m.clipped.height}px, room ${m.room.above}/${m.room.below}, ${m.placed}`);
       }
-      await page.mouse.click(4, 4);
+      // Escape, which is the page's own way out of a menu, rather than a press at a corner that
+      // used to be empty. It was `page.mouse.click(4, 4)`: the shared header made `#toMenu` a
+      // direct child of `.appbar`, so `align-self: stretch` now reaches it against a 38px bar
+      // where it used to be centred inside `#navRow` and left the top few pixels dead. The click
+      // navigated to the menu and the run died `Execution context was destroyed` with the rows
+      // below unasked. A dismissal aimed at whitespace is aimed at whatever moves into it.
+      await page.keyboard.press('Escape');
     }
     check(menuBoxes.length === 0,
       'and every tile\'s menu opens inside the grid rather than under its edge, whichever row the tile is in',
@@ -2736,12 +2856,30 @@ async function runChecks() {
     check(!zeroTile.flags.includes('format'),
       'while a take that declares no format carries no such badge, so the badge is about the generation and not about the key being absent',
       zeroTile.flags.join(' ') || 'no badges');
-    await page.mouse.click(4, 4);
+    await page.keyboard.press('Escape');
     const oneFrameTile = one('one-frame-take');
     check(oneFrameTile.flags.includes('short'),
       'while the one-frame take still carries the badge, so the row above is about the wording rather than about the badge going away',
       oneFrameTile.flags.join(' '));
-    await page.mouse.click(4, 4);
+    // The row below is about a tap in empty space, so the point is hit-tested rather than
+    // guessed: (4, 4) was empty until the shared header stretched `#toMenu` to the full height of
+    // the bar, and a tap that navigates closes the menu for the wrong reason and takes the run
+    // with it. `elementFromPoint` at the press coordinate is what separates the two.
+    await page.evaluate(`globalThis.__library.openMenu(${JSON.stringify(clipHash2)})`);
+    const empty = await page.evaluate(`(() => {
+      // Down the right-hand gutter, which is page background at every viewport this file uses.
+      for (let y = 60; y < innerHeight - 8; y += 20) {
+        const hit = document.elementFromPoint(innerWidth - 6, y);
+        if (hit && !hit.closest('#appBar') && !hit.closest('.tile') && !hit.closest('dialog')) {
+          return { x: innerWidth - 6, y, what: hit.id || hit.className || hit.tagName };
+        }
+      }
+      return null;
+    })()`);
+    check(empty !== null, 'there is a point on this page that belongs to neither the bar nor a tile, '
+      + 'which is what the row below has to press for its claim to be about a tap in empty space',
+      empty === null ? 'every probed point belonged to the bar or to a tile' : `(${empty.x}, ${empty.y}) is ${empty.what}`);
+    if (empty) await page.mouse.click(empty.x, empty.y);
     check(await page.evaluate('globalThis.__library.menuOpen()') === 0,
       'a tap anywhere else closes it');
 
@@ -2911,8 +3049,8 @@ async function runChecks() {
     await page.evaluate(`globalThis.__library.viewer.open(${JSON.stringify(clipHash2)})`);
     await page.evaluate('globalThis.__library.viewer.drawn(1)');
     const DRIVERS = new Set([
-      'toMenu', 'all', 'local', 'remote', 'both',
-      'open', 'download', 'delete', 'more',
+      'toMenu', 'toProjects', 'toLibrary', 'all', 'local', 'remote', 'both',
+      'new-project', 'download', 'delete', 'more',
       'rename', 'reveal', 'reclaim',
       'vMore', 'vClose', 'mark',
       'cCancel', 'cGo', 'rCancel', 'rGo', 'rName',
@@ -2920,17 +3058,17 @@ async function runChecks() {
     const rendered = await page.evaluate('globalThis.__library.controls()');
     const unswept = rendered.filter((c) => !DRIVERS.has(c.key));
     check(unswept.length === 0,
-      `every interactive control the gallery renders has a driver in this file (${rendered.length} controls)`,
+      `every interactive control the library renders has a driver in this file (${rendered.length} controls)`,
       unswept.length ? `no driver for ${[...new Set(unswept.map((c) => `${c.where}:${c.key}`))].join(' ')}`
         : [...new Set(rendered.map((c) => c.key))].join(' '));
     const present = new Set(rendered.map((c) => c.key));
     const missing = [...DRIVERS].filter((k) => !present.has(k));
     check(missing.length === 0,
-      'and every control this file names is one the gallery still renders',
+      'and every control this file names is one the library still renders',
       missing.join(' ') || `${present.size} distinct controls on screen`);
     await page.evaluate('globalThis.__library.viewer.close()');
 
-    check(errors.length === 0, 'the gallery raises no page errors', errors.slice(0, 2).join(' | '));
+    check(errors.length === 0, 'the library raises no page errors', errors.slice(0, 2).join(' | '));
     await page.close();
   }
 
@@ -2970,15 +3108,15 @@ async function runChecks() {
 
   {
     const emptyUrl = await startServer(root, ['--captures', join(WORK, 'empty-captures'), '--name', 'fresh'], MAC_PORT + 3);
-    const { page, errors } = await openPage(browser, galleryPage(emptyUrl));
+    const { page, errors } = await openPage(browser, libraryPage(emptyUrl));
     await page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     const line = await page.evaluate('globalThis.__library.emptyLine()');
-    check(/No takes here yet/.test(line ?? ''), 'an empty library says so rather than rendering nothing',
+    check(/^No takes\.$/.test(line ?? ''), 'an empty media library says so rather than rendering nothing',
       String(line));
     // A library with nothing in it says so whichever tab is selected.
     await page.evaluate('globalThis.__library.filter("local")');
     const filtered = await page.evaluate('globalThis.__library.emptyLine()');
-    check(/No takes here yet/.test(filtered ?? ''),
+    check(/^No takes\.$/.test(filtered ?? ''),
       'and it keeps saying so under a filter rather than blaming the filter',
       String(filtered));
     check(errors.length === 0, 'and an empty library raises no page errors', errors.slice(0, 2).join(' | '));
@@ -3176,6 +3314,96 @@ async function runChecks() {
     for (const p of servers.filter((sv) => sv.port === MAC_PORT + 14)) p.child.kill('SIGKILL');
   }
 
+  console.log('\n[library] the projects page lists the edits, and says which of them are dark');
+  {
+    // The page a project is opened from, which this file had no coverage of at all - and a page
+    // `PAGE_URLS` does not name has its mutations delivered nowhere, so the first row here is the
+    // one that makes every later mutation of `projects.html` mean anything.
+    const PRESENT = 'projects-page-present';
+    const DARK = 'projects-page-dark';
+    const localHash = (await getJson(`${macUrl}/library/takes`)).takes.find((t) => t.id === 'local-clip').hash;
+    // Built off a document the editor wrote rather than composed here: `checkProject` demands a
+    // weight for every reading and `READINGS` is built at run time out of the installed effect
+    // manifests, so a body this file authored would be refused by the loader for reasons that
+    // have nothing to do with the page.
+    const seed = await (async () => {
+      const { page: mint, errors: mintErrors } = await openPage(browser, editorPage(macUrl, 'local-clip'), { width: 640, height: 400 });
+      await mint.waitForFunction('globalThis.__kinect?.library?.opened() === true', null, { timeout: 40000 });
+      const body = await mint.evaluate('globalThis.__kinect.library.serialiseProjectBody()');
+      check(mintErrors.length === 0, 'a document written by the editor is what the rows below are drawn from',
+        mintErrors.slice(0, 2).join(' | ') || `${body.clips.length} clip, cut on ${body.clips[0]?.take?.id}`);
+      await mint.close();
+      return body;
+    })();
+    const one = JSON.parse(JSON.stringify(seed));
+    one.clips = [{ ...one.clips[0], start: 0 }];
+    one.clips[0].take = { id: 'local-clip', hash: localHash };
+    const gone = JSON.parse(JSON.stringify(one));
+    // Both clips carry their own length, and the missing one has to: `spanOf` falls back to the
+    // take's duration, which is precisely what a machine that has not got the take cannot read.
+    // So a dark clip with `length: null` occupies no width and the hole it costs is invisible -
+    // the design's "its width says how much of the edit the hole costs" holds for a clip that
+    // names its own length and cannot hold for one that does not. Measured, not reasoned: a
+    // fixture built without these lengths drew one segment where the row expects two.
+    gone.clips = [
+      { ...JSON.parse(JSON.stringify(one.clips[0])), id: 'here', start: 0, length: 4 },
+      {
+        ...JSON.parse(JSON.stringify(one.clips[0])),
+        id: 'nowhere',
+        start: 4,
+        length: 6,
+        take: { id: 'reclaimed-take', hash: `sha256:${'a'.repeat(64)}` },
+      },
+    ];
+    await writeDoc(macUrl, 'projects', PRESENT, one);
+    await writeDoc(macUrl, 'projects', DARK, gone);
+
+    const { page, errors } = await openPage(browser, projectsPage(macUrl));
+    await page.waitForFunction('globalThis.__projects !== undefined', null, { timeout: 20000 });
+    await page.waitForFunction(
+      `globalThis.__projects.rows().some((r) => r.name === ${JSON.stringify(DARK)})`,
+      null, { timeout: 20000 },
+    ).catch(() => { /* the row below says so */ });
+    const rows = await page.evaluate('globalThis.__projects.rows()');
+    const named = (n) => rows.find((r) => r.name === n);
+    check(named(PRESENT) !== undefined && named(DARK) !== undefined,
+      'the page is served at /projects and lists what the store holds, which is what makes an '
+      + 'interception of projects.html land somewhere rather than nowhere',
+      rows.map((r) => r.name).join(', ') || 'the listing was empty');
+    // Newest written first, and nothing is stored to know it: the dark one was written second.
+    check(rows[0]?.name === DARK,
+      'and it is ordered by when each project was last written, newest first',
+      rows.map((r) => r.name).join(' then '));
+    check(named(PRESENT)?.missing === 0 && named(PRESENT)?.clips === 1,
+      'a project whose footage is here says nothing about missing takes',
+      `${named(PRESENT)?.clips} clip, ${named(PRESENT)?.missing} missing`);
+    check(named(DARK)?.missing === 1 && /reclaimed-take/.test(named(DARK)?.dark ?? ''),
+      'and one whose footage is not here says so on its own row, naming the take it wants',
+      `${named(DARK)?.missing} missing, "${named(DARK)?.dark ?? 'nothing said'}"`);
+    check(/library/i.test(named(DARK)?.darkAct ?? ''),
+      'and the control on it goes to the library rather than fetching, because the download and '
+      + 'the two-machine state live there and a second copy of them here is the duplicated path',
+      String(named(DARK)?.darkAct));
+    // The span the missing clip covers is drawn as a hole rather than skipped, so its width is
+    // how much of the edit the hole costs.
+    const holes = (named(DARK)?.segments ?? []).filter((s) => s.dark);
+    check(holes.length === 1 && holes[0].clip === 'nowhere' && parseFloat(holes[0].width) > 55,
+      'and the span it covers is drawn at the width it costs rather than closed up - 6s of a 10s '
+      + 'edit, so the block is more than half the bar rather than merely present',
+      JSON.stringify(named(DARK)?.segments ?? []));
+    // Printed rather than asserted, because it is a limit and not a claim: the width of a dark
+    // clip that carries no length of its own cannot be derived from the document, so that hole is
+    // drawn at no width at all. The row above uses a fixture that names its lengths.
+    console.log(`  ...   a dark clip with a length of its own draws ${holes.length} block of `
+      + `${holes[0]?.width ?? 'no width'}; one without a length draws none, because its span is the `
+      + 'take\'s duration and the take is what is missing');
+    check(errors.length === 0, 'the projects page raises no page error drawing either of them',
+      errors.slice(0, 2).join(' | '));
+    await page.close();
+    await writeDoc(macUrl, 'projects', PRESENT, null, 'DELETE');
+    await writeDoc(macUrl, 'projects', DARK, null, 'DELETE');
+  }
+
   console.log('\n[library] a project survives a round trip through a file');
   {
     {
@@ -3193,7 +3421,7 @@ async function runChecks() {
       const cutOnto = async (name, take) => takePage.evaluate(`(async () => {
         const body = globalThis.__kinect.library.serialiseProjectBody();
         body.clips[0].take = ${JSON.stringify(take)};
-        await fetch('/projects/${name}', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        await fetch('/projects/${name}?rev=' + await globalThis.__rev('projects', '${name}'), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         try { await globalThis.__kinect.library.loadProject('${name}'); return 'ACCEPTED'; }
         catch (e) { return e.message; }
       })()`);
@@ -3217,7 +3445,7 @@ async function runChecks() {
       const own = await takePage.evaluate(`(async () => {
         const k = globalThis.__kinect;
         const body = k.library.serialiseProjectBody();
-        await fetch('/projects/own-footage', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        await fetch('/projects/own-footage?rev=' + await globalThis.__rev('projects', 'own-footage'), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         try { await k.library.loadProject('own-footage'); return 'ACCEPTED'; } catch (e) { return e.message; }
       })()`);
       check(own === 'ACCEPTED', 'and a project built on this take loads, seek and all', String(own).slice(0, 80));
@@ -3269,7 +3497,7 @@ async function runChecks() {
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
       const body = k.library.serialiseProjectBody();
-      const res = await fetch('/projects/round-trip', {
+      const res = await fetch('/projects/round-trip?rev=' + await globalThis.__rev('projects', 'round-trip'), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       return res.json();
@@ -3344,7 +3572,7 @@ async function runChecks() {
         out.missing = k.library.missingEffects();
       } catch (e) { out.loaded = false; out.loadError = String(e.message ?? e); return out; }
       const body = k.library.serialiseProjectBody();
-      out.put = (await fetch('/projects/parked-round-trip', {
+      out.put = (await fetch('/projects/parked-round-trip?rev=' + await globalThis.__rev('projects', 'parked-round-trip'), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })).status;
       // And straight back in, so what the rows below compare is a document that has been
@@ -3626,7 +3854,7 @@ async function runChecks() {
       const k = globalThis.__kinect;
       k.params.apply({ readRgb: 0, 'blackwall.amount': 1 });
       k.params.apply(${JSON.stringify(TUNED)});
-      const res = await fetch('/presets/hand-tuned', {
+      const res = await fetch('/presets/hand-tuned?rev=' + await globalThis.__rev('presets', 'hand-tuned'), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(k.library.presetFromCurrentLook()),
       });
@@ -3681,7 +3909,7 @@ async function runChecks() {
 
     // The copy is what keeps a project self-contained.
     await page.evaluate(`(async () => {
-      await fetch('/presets/hand-tuned', {
+      await fetch('/presets/hand-tuned?rev=' + await globalThis.__rev('presets', 'hand-tuned'), {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ version: ${PROJECT_VERSION}, values: { bloom: 0, pointSize: 9 } }),
       });
@@ -3765,7 +3993,7 @@ async function runChecks() {
     const builtinPath = join(WORK, 'builtin-presets/blackwall.json');
     const bytesBefore = readFileSync(builtinPath, 'utf8');
     const forkBody = { version: PROJECT_VERSION, requires: shipped.requires, values: { ...shipped.values, bloom: 0.95 } };
-    await post(`${macUrl}/presets/blackwall`, forkBody, 'PUT');
+    await writeDoc(macUrl, 'presets', 'blackwall', forkBody);
     check(readFileSync(builtinPath, 'utf8') === bytesBefore,
       'saving over a shipped look leaves the shipped file byte-identical',
       `${bytesBefore.length} bytes`);
@@ -3777,7 +4005,7 @@ async function runChecks() {
       'and reading the name now answers the fork, not the look it was forked from',
       `builtin=${afterFork.builtin} bloom=${afterFork.body.values.bloom}`);
 
-    await post(`${macUrl}/presets/blackwall`, null, 'DELETE');
+    await writeDoc(macUrl, 'presets', 'blackwall', null, 'DELETE');
     const afterRemove = await getJson(`${macUrl}/presets/blackwall`);
     check(afterRemove.builtin === true && afterRemove.body.values.bloom === shipped.values.bloom,
       'and removing the fork brings the shipped look back',
@@ -4210,7 +4438,9 @@ async function runChecks() {
       projects: snapshotDir(shootProjects),
       presets: snapshotDir(shootPresets),
       deliverables: snapshotDir(shootDeliverables),
-      projectRevs: (await getJson(`${shootUrl}/projects`)).projects?.map((d) => `${d.name}=${d.rev}`) ?? null,
+      // `/projects` is the page; the listing under it is `/projects/all`, so a read of the bare
+      // namespace here answered with HTML and the snapshot died parsing it.
+      projectRevs: (await getJson(`${shootUrl}/projects/all`)).projects?.map((d) => `${d.name}=${d.rev}`) ?? null,
       presetRevs: (await getJson(`${shootUrl}/presets`)).presets?.map((d) => `${d.name}=${d.rev}`) ?? null,
       deliverableRevs: (await getJson(`${shootUrl}/deliverables`)).deliverables?.map((d) => `${d.name}=${d.rev}`) ?? null,
       recorder: await getJson(`${shootUrl}/record/state`).then((s) => `${s.recording}:${s.takeId}:${s.dropped}`),
@@ -4293,7 +4523,7 @@ async function runChecks() {
       readdirSync(guardDir).join(' '));
 
     const FUTURE = PROJECT_VERSION + 1;
-    const future = await post(`${guardUrl}/projects/from-the-future`, { version: FUTURE, tracks: {}, futureField: 'kept' });
+    const future = await writeDoc(guardUrl, 'projects', 'from-the-future', { version: FUTURE, tracks: {}, futureField: 'kept' });
     check(new RegExp(`version ${FUTURE}`).test(future.error ?? ''),
       'a document from a future format version is refused rather than restamped as this one',
       (future.error ?? 'ACCEPTED').slice(0, 80));
@@ -4665,7 +4895,7 @@ async function runChecks() {
     check(existsSync(join(liveDir, `${open.takeId}.knct`)), 'and the file is still there');
 
     {
-      const { page, errors } = await openPage(browser, galleryPage(url));
+      const { page, errors } = await openPage(browser, libraryPage(url));
       await page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
       const tile = await page.evaluate(`(() => {
         const el = document.querySelector('.tile[data-recording="true"]');
@@ -4697,7 +4927,7 @@ async function runChecks() {
       check(/still being written/.test(tile?.note ?? '') && (tile?.flags ?? []).includes('recording'),
         'with the reason on the poster as a badge and spelled out in the menu, which is a tap rather than a hover',
         (tile?.note ?? '').slice(0, 80));
-      check(errors.length === 0, 'the gallery raises no page errors while a take is being written',
+      check(errors.length === 0, 'the library raises no page errors while a take is being written',
         errors.slice(0, 2).join(' | '));
       await page.close();
     }
@@ -4705,7 +4935,7 @@ async function runChecks() {
     const stopped = (await post(`${url}/record/stop`)).stopped;
     const afterStop = (await getJson(`${url}/library/takes`)).takes.find((t) => t.id === open.takeId);
     check(existsSync(join(liveDir, `${open.takeId}.idx`)) && stopped?.hash?.startsWith('sha256:'),
-      'and once it closes it is scanned exactly once, which is what makes it a gallery entry',
+      'and once it closes it is scanned exactly once, which is what makes it a library entry',
       `${stopped?.frames} frames, ${String(stopped?.hash).slice(7, 19)}`);
     check(afterStop?.recording === false && afterStop.hash === stopped?.hash && afterStop.frames === stopped?.frames,
       'the listing then carries the hash and the frame count the scan produced');
@@ -4907,7 +5137,7 @@ async function runChecks() {
     for (const p of servers.filter((sv) => sv.port === MAC_PORT + 13)) p.child.kill('SIGKILL');
   }
 
-  console.log('\n[library] the gallery follows the recorder rather than the moment it was loaded');
+  console.log('\n[library] the library page follows the recorder rather than the moment it was loaded');
   {
     let shooting = null;
     for (let i = 0; i < 40; i++) {
@@ -4919,7 +5149,7 @@ async function runChecks() {
       'a take is genuinely open, which is what makes the tile below a tile that is lying rather than one that is right',
       String(shooting?.takeId));
 
-    const { page, errors } = await openPage(browser, galleryPage(liveUrl));
+    const { page, errors } = await openPage(browser, libraryPage(liveUrl));
     await page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     let polls = 0;
     page.on('request', (req) => { if (req.url().endsWith('/record/state')) polls++; });
@@ -4931,7 +5161,7 @@ async function runChecks() {
     const before = await flagsOf(shooting.takeId);
     check(before?.flags?.includes('recording') === true,
       'the tile of the take being written says so, and its Open is refused behind that',
-      `flags ${before?.flags?.join(',')}, Open ${before?.acts?.find((a) => a.label === 'Open')?.disabled ? 'disabled' : 'enabled'}`);
+      `flags ${before?.flags?.join(',')}, Open ${before?.acts?.find((a) => a.item === 'new-project')?.disabled ? 'disabled' : 'enabled'}`);
 
     // A property on the node itself, because that is what a repaint destroys.
     await page.evaluate("document.querySelector('.tile').__quietProbe = 'planted'");
@@ -4949,15 +5179,15 @@ async function runChecks() {
       'and a tick in which the recorder did not move replaces no tile - the menu an operator has open and the skim under their pointer both survive it',
       quiet.probe === 'planted' ? `${quiet.tiles} tiles, the same nodes` : 'the grid was rebuilt');
 
-    // The same gallery on the machine it is actually used from, which is not this one.
-    const linkedDir = join(WORK, 'linked-gallery');
+    // The same page on the machine it is actually used from, which is not this one.
+    const linkedDir = join(WORK, 'linked-library');
     rmSync(linkedDir, { recursive: true, force: true });
     mkdirSync(linkedDir, { recursive: true });
     const linkedUrl = await startServer(root, [
       '--captures', linkedDir, '--name', 'mac-editing',
       '--node', liveUrl, '--node-name', 'shooting-live',
     ], MAC_PORT + 12);
-    const linked = await openPage(browser, galleryPage(linkedUrl));
+    const linked = await openPage(browser, libraryPage(linkedUrl));
     await linked.page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     let linkedPolls = 0;
     linked.page.on('request', (req) => { if (req.url().endsWith('/record/state')) linkedPolls++; });
@@ -4968,7 +5198,7 @@ async function runChecks() {
     const actLabels = (t) => (t?.acts ?? []).map((a) => `${a.label}${a.disabled ? ' (off)' : ''}`).join(' ') || '(none)';
     const remoteBefore = await linkedFlags(shooting.takeId);
     check(remoteBefore?.flags?.includes('recording') === true
-      && remoteBefore?.acts?.find((a) => a.label === 'Open')?.disabled === true,
+      && remoteBefore?.acts?.find((a) => a.item === 'new-project')?.disabled === true,
       'a station with no sensor of its own draws the node\'s open take into its grid, says it is being written, and refuses every action behind that',
       `flags ${remoteBefore?.flags?.join(',') ?? '(no tile)'}, acts ${actLabels(remoteBefore)}`);
     const linkedOwn = await getJson(`${linkedUrl}/record/state`);
@@ -5019,7 +5249,7 @@ async function runChecks() {
       && remoteAfter?.acts?.find((a) => a.label === 'Download')?.disabled === false,
       'and it follows the node\'s recorder rather than its own, so the finished take stops being refused and becomes downloadable without anybody reloading',
       `flags ${remoteAfter?.flags?.join(',') || '(none)'}, acts ${actLabels(remoteAfter)}`);
-    check(linked.errors.length === 0, 'and the linked gallery raises no page error while it follows',
+    check(linked.errors.length === 0, 'and the linked library raises no page error while it follows',
       linked.errors.slice(0, 2).join(' | '));
     await linked.page.close();
     for (const p of servers.filter((sv) => sv.port === MAC_PORT + 12)) p.child.kill('SIGKILL');
@@ -5028,7 +5258,7 @@ async function runChecks() {
     check(after?.flags?.includes('recording') === false,
       'and a tick in which the recorder stopped repaints, so the tile stops claiming a finished take is still being written',
       `flags ${after?.flags?.join(',') || '(none)'}`);
-    check(after?.acts?.find((a) => a.label === 'Open')?.disabled === false,
+    check(after?.acts?.find((a) => a.item === 'new-project')?.disabled === false,
       'and its Open, Download, Rename and Remove come back without anybody reloading the page',
       after?.acts?.map((a) => `${a.label}${a.disabled ? ' (off)' : ''}`).join(' '));
     const probeAfter = await page.evaluate("document.querySelector('.tile')?.__quietProbe ?? null");
@@ -5036,7 +5266,7 @@ async function runChecks() {
       'which is a genuine repaint rather than a tile edited in place, since the nodes the tick found are gone',
       String(probeAfter));
 
-    check(errors.length === 0, 'and the gallery raises no page error while it follows', errors.slice(0, 2).join(' | '));
+    check(errors.length === 0, 'and the library raises no page error while it follows', errors.slice(0, 2).join(' | '));
     await page.close();
 
     // A node that did not answer is not a node with nothing on it.
@@ -5045,7 +5275,7 @@ async function runChecks() {
       // Inside the reserved span, and that is the whole reason for the offset.
       '--node', `http://127.0.0.1:${MAC_PORT + 16}`, '--node-name', 'a-node-that-is-not-there',
     ], MAC_PORT + 11);
-    const dark = await openPage(browser, galleryPage(blindNodeUrl));
+    const dark = await openPage(browser, libraryPage(blindNodeUrl));
     await dark.page.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     const darkState = await dark.page.evaluate('globalThis.__library.state()');
     const darkTiles = await dark.page.evaluate('globalThis.__library.tiles()');
@@ -5066,11 +5296,11 @@ async function runChecks() {
     check(/cannot be reached/.test(why) && why.includes('a-node-that-is-not-there'),
       'and it says which node it could not reach, so the refusal is a fact about the link rather than a control that went dead',
       `"${why.slice(0, 90)}"`);
-    check(dark.errors.length === 0, 'and that gallery raises no page error', dark.errors.slice(0, 2).join(' | '));
+    check(dark.errors.length === 0, 'and that library raises no page error', dark.errors.slice(0, 2).join(' | '));
     await dark.page.close();
     for (const p2 of servers.filter((sv) => sv.port === MAC_PORT + 11)) p2.child.kill('SIGKILL');
 
-    // The gap between the listing a gallery paints and the first tick it compares against.
+    // The gap between the listing the page paints and the first tick it compares against.
     const second = await post(`${liveUrl}/record/start`);
     let shootingAgain = null;
     for (let i = 0; i < 40; i++) {
@@ -5092,14 +5322,14 @@ async function runChecks() {
       if (releaseTicks) { await route.continue(); return; }
       heldTicks.push(route);
     });
-    await blind.goto(galleryPage(liveUrl), { waitUntil: 'domcontentloaded' });
+    await blind.goto(libraryPage(liveUrl), { waitUntil: 'domcontentloaded' });
     await blind.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     const paintedMidWrite = await blind.evaluate(`(() => {
       const t = globalThis.__library.tiles().find((x) => x.id === ${JSON.stringify(shootingAgain?.takeId)});
       return t ? t.flags.includes('recording') : null;
     })()`);
     check(paintedMidWrite === true && heldTicks.length > 0,
-      'the page painted that take as being written and every tick it has asked for is held at the edge, which is the state the gap leaves a real gallery in',
+      'the page painted that take as being written and every tick it has asked for is held at the edge, which is the state the gap leaves a real library in',
       `painted mid-write ${paintedMidWrite}, ${heldTicks.length} /record/state held`);
     await post(`${liveUrl}/record/stop`);
     const restedAfter = await getJson(`${liveUrl}/record/state`);
@@ -5110,7 +5340,7 @@ async function runChecks() {
     for (const route of heldTicks) await route.continue().catch(() => {});
     const cameBack = await blind.waitForFunction(
       `(() => { const t = globalThis.__library.tiles().find((x) => x.id === ${JSON.stringify(shootingAgain?.takeId)});
-        return t && !t.flags.includes('recording') && t.acts.find((a) => a.label === 'Open')?.disabled === false; })()`,
+        return t && !t.flags.includes('recording') && t.acts.find((a) => a.item === 'new-project')?.disabled === false; })()`,
       null, { timeout: 25000 },
     ).then(() => true).catch(() => false);
     const blindTile = await blind.evaluate(`(() => {
@@ -5123,7 +5353,7 @@ async function runChecks() {
     check(blindErrors.length === 0, 'and that page raises no error while it catches up', blindErrors.slice(0, 2).join(' | '));
     await blind.close();
 
-    // A refresh that fails is a transition the gallery has not seen yet.
+    // A refresh that fails is a transition the library has not seen yet.
     const third = await post(`${liveUrl}/record/start`);
     let shootingThird = null;
     for (let i = 0; i < 40; i++) {
@@ -5147,7 +5377,7 @@ async function runChecks() {
       if (listings === 2) { refused++; await route.abort('connectionfailed'); return; }
       await route.continue();
     });
-    await flaky.goto(galleryPage(liveUrl), { waitUntil: 'domcontentloaded' });
+    await flaky.goto(libraryPage(liveUrl), { waitUntil: 'domcontentloaded' });
     await flaky.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     const flakyPainted = await flaky.evaluate(`(() => {
       const t = globalThis.__library.tiles().find((x) => x.id === ${JSON.stringify(shootingThird?.takeId)});
@@ -5159,7 +5389,7 @@ async function runChecks() {
     await post(`${liveUrl}/record/stop`);
     const caughtUp = await flaky.waitForFunction(
       `(() => { const t = globalThis.__library.tiles().find((x) => x.id === ${JSON.stringify(shootingThird?.takeId)});
-        return t && !t.flags.includes('recording') && t.acts.find((a) => a.label === 'Open')?.disabled === false; })()`,
+        return t && !t.flags.includes('recording') && t.acts.find((a) => a.item === 'new-project')?.disabled === false; })()`,
       null, { timeout: 30000 },
     ).then(() => true).catch(() => false);
     check(refused === 1,
@@ -5170,7 +5400,7 @@ async function runChecks() {
       return t ? { flags: t.flags, acts: t.acts.map((a) => a.label + (a.disabled ? ' (off)' : '')) } : null;
     })()`);
     check(caughtUp,
-      'and the gallery comes back from it on a later tick, because a refresh that failed leaves the transition unseen rather than spending it',
+      'and the library comes back from it on a later tick, because a refresh that failed leaves the transition unseen rather than spending it',
       flakyTile === null ? 'no tile for that take' : `flags ${flakyTile.flags.join(',') || '(none)'}, acts ${flakyTile.acts.join(' ')}`);
     await flaky.close();
 
@@ -5199,7 +5429,7 @@ async function runChecks() {
       heldAt.push(Date.now());
     });
     await hung.route('**/record/state', async (route) => { ticksSeen++; await route.continue(); });
-    await hung.goto(galleryPage(liveUrl), { waitUntil: 'domcontentloaded' });
+    await hung.goto(libraryPage(liveUrl), { waitUntil: 'domcontentloaded' });
     await hung.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     await post(`${liveUrl}/record/stop`);
     await new Promise((done) => { setTimeout(done, 11000); });
@@ -5238,7 +5468,7 @@ async function runChecks() {
       if (raceListings === 2) { heldOld.push(route); return; }
       await route.continue();
     });
-    await racer.goto(galleryPage(macUrl), { waitUntil: 'domcontentloaded' });
+    await racer.goto(libraryPage(macUrl), { waitUntil: 'domcontentloaded' });
     await racer.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     const older = racer.evaluate('__library.refresh()').catch(() => {});
     for (let i = 0; i < 40 && heldOld.length === 0; i++) await new Promise((d) => { setTimeout(d, 50); });
@@ -5274,7 +5504,7 @@ async function runChecks() {
         body: '{"error":"the linked node dropped out mid-listing"}',
       });
     });
-    await chained.goto(galleryPage(macUrl), { waitUntil: 'domcontentloaded' });
+    await chained.goto(libraryPage(macUrl), { waitUntil: 'domcontentloaded' });
     await chained.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 });
     const olderOutcome = chained.evaluate(
       '__library.refresh().then(() => "resolved", (err) => `rejected: ${err.message}`)');
@@ -5329,7 +5559,7 @@ async function runChecks() {
       if (coldListings === 1) await new Promise((done) => { setTimeout(done, 18000); });
       await route.continue();
     });
-    await cold.goto(galleryPage(liveUrl), { waitUntil: 'domcontentloaded' });
+    await cold.goto(libraryPage(liveUrl), { waitUntil: 'domcontentloaded' });
     let coldInstalled = true;
     await cold.waitForFunction('globalThis.__library !== undefined', null, { timeout: 30000 })
       .catch(() => { coldInstalled = false; });
@@ -5346,7 +5576,7 @@ async function runChecks() {
       if (brokenListings === 1) { await route.fulfill({ status: 500, body: 'the library is unavailable' }); return; }
       await route.continue();
     });
-    await broken.goto(galleryPage(liveUrl), { waitUntil: 'domcontentloaded' });
+    await broken.goto(libraryPage(liveUrl), { waitUntil: 'domcontentloaded' });
     let brokenInstalled = true;
     await broken.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 })
       .catch(() => { brokenInstalled = false; });
@@ -5376,7 +5606,7 @@ async function runChecks() {
       }
       await route.continue();
     });
-    await refusedPage.goto(galleryPage(liveUrl), { waitUntil: 'domcontentloaded' });
+    await refusedPage.goto(libraryPage(liveUrl), { waitUntil: 'domcontentloaded' });
     let refusedInstalled = true;
     await refusedPage.waitForFunction('globalThis.__library !== undefined', null, { timeout: 20000 })
       .catch(() => { refusedInstalled = false; });

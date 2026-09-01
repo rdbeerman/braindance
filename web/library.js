@@ -2,10 +2,9 @@
 // scrubs it through the same frame API the editor reads. Nothing is stored - no proxy, no
 // rendered poster - and a tile's height is CSS, which `library.html` enforces.
 
-import { DEPTH_H, DEPTH_W, VALID_ID } from '/format.js';
+import { VALID_ID } from '/format.js';
 import { pollRecordState } from '/record-poll.js';
-
-const DIVISOR = { local: 1, both: 1, remote: 4 };
+import { createSkim, divisorFor, paintMarks } from './take-draw.js';
 
 const grid = document.getElementById('grid');
 const dlg = document.getElementById('confirm');
@@ -99,168 +98,6 @@ function warningsOf(take) {
 const cannotOpen = (take) => take.openRefusals[0]?.why ?? '';
 
 
-// One frame of a take, drawn to a 2D canvas. Depth rather than the colour JPEG, because
-// `--no-color` records none. Never sizes the backing store - the box is CSS.
-function drawFrame(canvas, take, payload, divisor) {
-  const W = canvas.width;
-  const H = canvas.height;
-  if (!W || !H) return;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#04060a';
-  ctx.fillRect(0, 0, W, H);
-  if (!payload) return;
-
-  const view = new DataView(payload);
-  const depthBytes = view.getUint32(0, true);
-  const gw = Math.ceil(DEPTH_W / divisor);
-  const gh = Math.ceil(DEPTH_H / divisor);
-  if (depthBytes !== gw * gh * 2) return;
-  const depth = new Uint16Array(payload, 16, depthBytes / 2);
-
-  const fx = (take.hello?.fx ?? 366) / divisor;
-  const fy = (take.hello?.fy ?? 366) / divisor;
-  const cx = (take.hello?.cx ?? DEPTH_W / 2) / divisor;
-  const cy = (take.hello?.cy ?? DEPTH_H / 2) / divisor;
-
-  const scale = H * 1.15;
-  const ox = W / 2;
-  const oy = H * 0.42;
-  const img = ctx.createImageData(W, H);
-  const px = img.data;
-  // From the sensor's own focal length and never the decimated one, so a coarse frame is
-  // visibly sparser rather than splatted up to look local.
-  const fxFull = take.hello?.fx ?? 366;
-  const splat = Math.max(1, Math.round(scale / fxFull));
-  for (let y = 0; y < gh; y++) {
-    for (let x = 0; x < gw; x++) {
-      const mm = depth[y * gw + x];
-      if (mm === 0) continue;
-      const z = mm / 1000;
-      if (z < 0.4 || z > 6) continue;
-      // The negation on x is the mirror correction: the sensor's frames arrive flipped.
-      const wx = (-(x - cx) * z) / fx;
-      const wy = -((y - cy) * z) / fy;
-      const sx = Math.round(ox + (wx * scale) / z);
-      const sy = Math.round(oy - (wy * scale) / z);
-      if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
-      const v = Math.max(24, Math.round(255 * Math.max(0, (5 - z) / 5)));
-      for (let dy = 0; dy < splat; dy++) {
-        const py = sy + dy;
-        if (py >= H) break;
-        for (let dx = 0; dx < splat; dx++) {
-          const qx = sx + dx;
-          if (qx >= W) break;
-          const i = (py * W + qx) * 4;
-          px[i] = v; px[i + 1] = v; px[i + 2] = Math.min(255, v + 12); px[i + 3] = 255;
-        }
-      }
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-}
-
-// A scrubbable surface over one take, for the tile's poster and the viewer's stage.
-// Positions are frame indices and not fractions, so the viewer's arrows step one frame.
-function createSkim({ take, divisor, canvas, surface, bar, onDraw }) {
-  // Zero is a real answer and not clamped: frame 0 of a take with no whole frame is a 404.
-  const frames = Math.max(0, take.frames ?? 0);
-  const last = Math.max(0, frames - 1);
-  const pos = bar.querySelector('.pos');
-  const done = bar.querySelector('.done');
-  let wanted = 0;
-  let showing = -1;
-  let busy = false;
-  // Set by `release` and checked past every await: the viewer swaps takes on one canvas, so
-  // a pump suspended in `frameAt` would draw the old take's frame under the new take's name.
-  let released = false;
-  // Kept so a resize can redraw the frame on screen; a window drag is a stream of resizes.
-  let payload = null;
-
-  const frameAt = async (n) => {
-    const url = take.state === 'remote'
-      ? `/library/remote-frame/${encodeURIComponent(take.id)}/${n}?decimate=${divisor}`
-      : `/capture/${encodeURIComponent(take.id)}/frame/${n}?decimate=${divisor}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`${res.status}`);
-    return res.arrayBuffer();
-  };
-
-  const pump = async () => {
-    if (released) return;
-    if (frames === 0) {
-      drawFrame(canvas, take, null, divisor);
-      onDraw?.(0);
-      return;
-    }
-    if (busy) return;
-    busy = true;
-    try {
-      while (true) {
-        const n = wanted;
-        let got = null;
-        try {
-          got = await frameAt(n);
-        } catch { /* a take deleted mid-skim draws nothing rather than throwing */ }
-        // The await above is where the viewer changes takes, so this may be the old take's.
-        if (released) return;
-        payload = got;
-        showing = n;
-        drawFrame(canvas, take, got, divisor);
-        onDraw?.(n);
-        if (n === wanted) break;
-      }
-    } finally {
-      busy = false;
-    }
-  };
-
-  const api = {
-    get frames() { return frames; },
-    get index() { return wanted; },
-    get seconds() { return (last === 0 ? 0 : wanted / last) * take.durationSec; },
-
-    setIndex(n) {
-      wanted = Math.max(0, Math.min(last, Math.round(n)));
-      const at = last === 0 ? 0 : wanted / last;
-      pos.style.left = `${at * 100}%`;
-      done.style.width = `${at * 100}%`;
-      onDraw?.(wanted, true);
-      pump();
-      return wanted;
-    },
-    setT(t) { return api.setIndex(Math.max(0, Math.min(1, t)) * last); },
-    step(by) { return api.setIndex(wanted + by); },
-    fromX(clientX, el) {
-      const r = el.getBoundingClientRect();
-      return api.setT((clientX - r.left) / r.width);
-    },
-    repaint() { drawFrame(canvas, take, payload, divisor); },
-    get showing() { return showing; },
-  };
-
-  // A ResizeObserver, not a window `resize`: the grid reflowing its columns also resizes the
-  // tile, and a canvas resized is a canvas cleared.
-  const dpr = () => Math.min(devicePixelRatio || 1, 2);
-  const fit = () => {
-    const r = surface.getBoundingClientRect();
-    const w = Math.max(1, Math.round(r.width * dpr()));
-    const h = Math.max(1, Math.round(r.height * dpr()));
-    if (canvas.width === w && canvas.height === h) return;
-    canvas.width = w;
-    canvas.height = h;
-    api.repaint();
-  };
-  const ro = new ResizeObserver(fit);
-  ro.observe(surface);
-  fit();
-  api.release = () => {
-    released = true;
-    ro.disconnect();
-  };
-  return api;
-}
-
-
 /** A button, built rather than interpolated, because a label is not markup either. */
 function addButton(row, label, cls, onClick, { disabled = false, why = '', item = null } = {}) {
   const b = document.createElement('button');
@@ -330,12 +167,15 @@ function availability(take) {
     });
   } else {
     acts.push({
-      item: 'open',
-      label: 'Open',
+      // A control that mints a document is a different act from one that shows you footage, and
+      // one word covering both is how a list fills with projects somebody only meant to look at.
+      // Looking is the viewer above; this makes something.
+      item: 'new-project',
+      label: 'New project from this take',
       cls: 'act primary',
       enabled: Boolean(take.openable),
       why: cannotOpen(take),
-      run: () => { location.href = `/edit?take=${encodeURIComponent(take.id)}`; },
+      run: () => { location.href = `/edit?new=${encodeURIComponent(take.id)}`; },
     });
   }
   acts.push({
@@ -349,9 +189,19 @@ function availability(take) {
   return { acts, menu: menuItemsFor(take) };
 }
 
+/**
+ * Runs a tile action, catching what it throws on the way out as well as what it rejects with.
+ * `Promise.resolve(run())` does not catch a synchronous throw, so an action that died on a
+ * field a take was missing left the button doing nothing and saying nothing about why - and a
+ * take off a node's manifest is exactly where a field goes missing.
+ */
+function runAct(act, hostFor) {
+  (async () => act.run(hostFor()))().catch((err) => say(`${act.label.toLowerCase()} could not run: ${err.message}`));
+}
+
 function paintActs(row, take, hostFor) {
   for (const a of availability(take).acts) {
-    addButton(row, a.label, a.cls, () => a.run(hostFor()), {
+    addButton(row, a.label, a.cls, () => runAct(a, hostFor), {
       disabled: !a.enabled,
       why: a.why,
       item: a.item,
@@ -455,7 +305,7 @@ function buildMenu(host, toggle, take, hostFor) {
   for (const entry of entries) {
     const b = addButton(menu, entry.label, 'mi', () => {
       closeMenus();
-      Promise.resolve(entry.run(hostFor())).catch(() => {});
+      runAct(entry, hostFor);
     }, { disabled: !entry.enabled, why: entry.why, item: entry.item });
     b.dataset.item = entry.item;
     b.role = 'menuitem';
@@ -530,25 +380,6 @@ function paintFlags(host, take) {
   }
 }
 
-function paintMarks(bar, take, onPick = null) {
-  for (const old of bar.querySelectorAll('.mk')) old.remove();
-  const durationMs = Math.max(1, take.durationSec * 1000);
-  for (const m of take.marks ?? []) {
-    // Through the DOM and not a template: a mark's label is text from outside this page.
-    const tick = document.createElement(onPick ? 'button' : 'span');
-    tick.className = 'mk';
-    const at = Math.max(0, Math.min(1, m.sourceMs / durationMs));
-    tick.style.left = `${at * 100}%`;
-    tick.title = `${m.label ?? m.id} · ${(m.sourceMs / 1000).toFixed(2)}s`;
-    if (onPick) {
-      tick.type = 'button';
-      tick.dataset.act = 'mark';
-      tick.addEventListener('click', (e) => { e.stopPropagation(); onPick(at); });
-    }
-    bar.appendChild(tick);
-  }
-}
-
 function buildTile(take) {
   const tile = document.createElement('article');
   tile.className = 'tile';
@@ -560,7 +391,7 @@ function buildTile(take) {
   // Deliberately unscanned: hashing a growing file contends with the recorder's own disk.
   const shooting = take.recording === true;
   tile.dataset.recording = String(shooting);
-  const divisor = DIVISOR[take.state] ?? 1;
+  const divisor = divisorFor(take);
 
   tile.innerHTML = `
     <div class="skim"><canvas></canvas><span class="t">00:00</span>
@@ -605,12 +436,10 @@ function buildTile(take) {
   if (shooting) return tile;
 
   const skim = createSkim({
-    take,
-    divisor,
     canvas: tile.querySelector('canvas'),
     surface: skimEl,
     bar: barEl,
-    onDraw: (n, requested = false) => {
+    onDraw: (n, requested) => {
       if (requested) {
         label.textContent = mmss(skim.seconds);
         return;
@@ -619,6 +448,7 @@ function buildTile(take) {
       tile.dataset.draws = String(Number(tile.dataset.draws ?? 0) + 1);
     },
   });
+  skim.show(take);
   tile.__skim = skim;
 
   // Moving across the poster scrubs, a press that goes nowhere opens the viewer; four pixels
@@ -649,7 +479,7 @@ function buildTile(take) {
   // put a native activation on the pointer path.
   skimEl.tabIndex = 0;
   skimEl.setAttribute('role', 'button');
-  skimEl.setAttribute('aria-label', `Open ${take.id}`);
+  skimEl.setAttribute('aria-label', `View ${take.id}`);
   skimEl.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
@@ -734,15 +564,11 @@ function askDelete(tile, take) {
   document.getElementById('cTitle').textContent = alsoOnNode ? 'Two copies exist' : 'Delete take';
   // The id goes in as text: this is the confirm in front of the only irreversible action.
   const body = document.getElementById('cBody');
-  body.innerHTML =
-    `<b class="tid"></b> · ${mmss(take.durationSec)} · ${gb(take.bytes)}`
-    + (countOf(take.marks?.length) ? ` · ${countOf(take.marks.length)} marks` : ' · no marks')
-    + `<br>on ${take.state === 'remote' ? library.node?.name : alsoOnNode ? `this ${library.here} and ${library.node?.name}` : `this ${library.here}`}.`;
+  body.innerHTML = '<b class="tid"></b>';
   body.querySelector('.tid').textContent = take.id;
   document.getElementById('cWarn').textContent = alsoOnNode
-    ? `Delete removes the last copy, and this take has two - so it is refused while ${library.node?.name} still holds one. `
-      + 'Reclaim removes the copy over there, after re-hashing the one here.'
-    : 'This is the only copy. Deleting it cannot be undone, and any project built on it loses its footage.';
+    ? `Delete is disabled: two copies exist. Reclaim the copy on ${library.node?.name} first.`
+    : 'This is the only copy. Cannot be undone. Projects using it will lose footage.';
   const go = document.getElementById('cGo');
   go.textContent = 'Delete';
   go.disabled = alsoOnNode;
@@ -756,11 +582,9 @@ function askReclaim(tile, take) {
   document.getElementById('cGo').disabled = false;
   document.getElementById('cTitle').textContent = `Reclaim on ${library.node?.name}`;
   const rBody = document.getElementById('cBody');
-  rBody.innerHTML =
-    `Free <b>${gb(take.bytes)}</b> on ${library.node?.name} by removing its copy of <b class="tid"></b>. `
-    + `The copy here is re-hashed before anything is removed, and stays.`;
+  rBody.innerHTML = '<b class="tid"></b>';
   rBody.querySelector('.tid').textContent = take.id;
-  document.getElementById('cWarn').textContent = '';
+  document.getElementById('cWarn').textContent = 'Removes the node copy after this copy is verified.';
   document.getElementById('cGo').textContent = 'Reclaim';
   confirmAction = () => run(tile, `reclaiming ${take.id}`,
     () => post(`/library/reclaim/${encodeURIComponent(take.id)}`)).catch(() => {});
@@ -781,10 +605,6 @@ let renaming = null;
  */
 function askRename(tile, take) {
   renaming = { tile, take };
-  const body = document.getElementById('nBody');
-  body.innerHTML = `Renaming <b class="tid"></b> · ${gb(take.bytes)} · ${countOf(take.frames)} frames.<br>`
-    + 'The take keeps its content hash, so every project built on it still finds its footage.';
-  body.querySelector('.tid').textContent = take.id;
   renameInput.value = take.id;
   validateRename();
   renameDlg.showModal();
@@ -804,9 +624,8 @@ function validateRename() {
   else if (!VALID_ID.test(typed)) {
     why = 'letters, digits, dots, dashes and underscores only, starting with a letter, a digit or an underscore';
   } else if (typed === renaming.take.id) why = 'that is already its name';
-  else if (clash) why = `${typed} is taken by another take in this library`;
-  renameWhy.textContent = why || `${renaming.take.id}.knct becomes ${typed}.knct, marks and index with it`;
-  renameWhy.classList.toggle('ok', !why);
+  else if (clash) why = `${typed} is taken by another take in this media library`;
+  renameWhy.textContent = why;
   renameInput.classList.toggle('bad', Boolean(why) && Boolean(typed));
   renameGo.disabled = Boolean(why);
   return !why;
@@ -853,8 +672,7 @@ function openViewer(key) {
   // Where the operator was, kept across a rebuild: `paint` re-opens the viewer on every
   // refresh, so the `setIndex(0)` below sent them back to the first frame.
   const resumeAt = viewing && viewing.key === (take.hash ?? take.id) ? viewing.skim.index : 0;
-  if (viewing) viewing.skim.release();
-  const divisor = DIVISOR[take.state] ?? 1;
+  const divisor = divisorFor(take);
 
   document.getElementById('vName').textContent = take.id;
   const state = document.getElementById('vState');
@@ -876,17 +694,19 @@ function openViewer(key) {
   }));
   vNote.textContent = warningsOf(take).map((w) => w.why).join(' · ');
 
-  const skim = createSkim({
-    take,
-    divisor,
+  // One skim for as long as the dialog is open, given each take in turn: the arrow keys and
+  // every refresh change the take on this canvas rather than opening a second viewer. The
+  // take reaches `onDraw` as an argument because the callback outlives the call that made it.
+  const skim = viewing?.skim ?? createSkim({
     canvas: vCanvas,
     surface: vStage,
     bar: vBar,
-    onDraw: (n, requested = false) => {
-      vTime.textContent = `${mmss(skim.seconds)} / ${mmss(take.durationSec)}`;
+    onDraw: (n, requested, drawn) => {
+      vTime.textContent = `${mmss(skim.seconds)} / ${mmss(drawn?.durationSec ?? 0)}`;
       if (!requested) viewer.dataset.draws = String(Number(viewer.dataset.draws ?? 0) + 1);
     },
   });
+  skim.show(take);
   viewing = { key: take.hash ?? take.id, take, skim };
   paintMarks(vBar, take, (at) => skim.setT(at));
 
@@ -981,7 +801,7 @@ function paint() {
     const empty = document.createElement('div');
     empty.className = 'empty';
     empty.textContent = library.takes.length === 0
-      ? 'No takes here yet. Record one, or link a capture node with --node.'
+      ? 'No takes.'
       : `No takes are ${filter}.`;
     grid.appendChild(empty);
   }
@@ -992,10 +812,10 @@ function paint() {
     `<b>${library.takes.length}</b> take${library.takes.length === 1 ? '' : 's'} · <b>${mmss(total)}</b>`;
   const node = library.node;
   document.getElementById('where').innerHTML = node
-    ? `<span class="dot${node.reachable ? '' : ' off'}"></span>on <b>${library.here}</b> · node <b>${node.name}</b> ${node.reachable ? 'linked' : 'unreachable'} · reconciled by hash`
-    : `<span class="dot"></span>on <b>${library.here}</b> · no node linked`;
+    ? `<span class="dot${node.reachable ? '' : ' off'}"></span><b>${library.here}</b> · <b>${node.name}</b> ${node.reachable ? '' : 'unreachable'}`
+    : `<span class="dot"></span><b>${library.here}</b>`;
   const space = document.getElementById('space');
-  space.textContent = `${library.storage.label} left at current settings`;
+  space.textContent = `${library.storage.label} available`;
   space.classList.toggle('low', library.storage.secondsLeft < 15 * 60);
 
   for (const tab of document.querySelectorAll('.tab')) {
@@ -1011,7 +831,7 @@ function paint() {
     if (still) openViewer(viewing.key);
     else {
       viewer.close();
-      say('that take is no longer in the library');
+      say('that take is no longer in the media library');
     }
   }
 }
@@ -1041,7 +861,7 @@ async function refreshNow(mine, bound) {
   // Checked before it replaces the last library that worked: the server's refusals are JSON,
   // so `paint` reads `storage.label` off one and throws out of the top-level catch.
   if (!res.ok || !Array.isArray(body?.takes)) {
-    throw new Error(body?.error ?? `the library could not be listed: HTTP ${res.status}`);
+    throw new Error(body?.error ?? `the media library could not be listed: HTTP ${res.status}`);
   }
   if (mine !== refreshGeneration) return newestRefresh;
   library = body;
@@ -1068,7 +888,7 @@ for (const tab of document.querySelectorAll('.tab')) {
 try {
   await refresh();
 } catch (err) {
-  say(`the library could not be read: ${err.message}`);
+  say(`the media library could not be read: ${err.message}`);
   paint();
 }
 
@@ -1079,7 +899,7 @@ pollRecordState(async (state, changed) => {
   try {
     await refresh({ bound: true });
   } catch (err) {
-    say(`the library could not be reread: ${err.message}`);
+    say(`the media library could not be reread: ${err.message}`);
     throw err;
   }
 }, believedFromLibrary());

@@ -424,6 +424,25 @@ The general shape: **whenever a suite has a standing failure, its own catch verd
 positive generator, and a baseline run is the only thing that separates the two populations.**
 Run the tool once unmutated first and note which rows are red, then read every mutation run
 against that list rather than against zero.
+
+**That paragraph asked the reader to do it and the tool went on comparing against zero, which is
+the version of this failure that survives being written down.** Two rows track the length of the
+take rather than the build, so on the 243.3s `fixture-1g` every `--mutate` run of `editor-check`
+printed `caught, as required (2 assertions fired)` whichever rows fired — measured on
+`commit-ignores-null-baseline`, which was recorded as caught off exactly those two and reddened
+nothing of its own. **A rule stated in prose is a rule the next run does not inherit**, which this
+page says about a floor two sections up and is just as true of a verdict.
+
+So the standing set is declared in the tool as a table of row labels with the reason each stands,
+the verdict is computed over the fired set minus that table, and the line says which of the reds
+were red either way. Two properties keep the table from becoming the standing exemption this page
+warns about everywhere else. A declared row that comes back **green** is reported loudly rather
+than failed, because these two flip with the fixture's duration and failing would cry wolf on a
+short take — and the report says to delete the entry if it stays green. And the table is
+denominated in row labels, so a row that is renamed stops matching and reappears in the verdict
+rather than staying quietly excused. Measured after the change: `commit-ignores-null-baseline`
+reads `739 assertions, 3 failed`, `2 of those 3 are red on this tree either way`, and
+`caught ... (1 assertions fired beyond the standing set)` naming the row it is about.
 ### A generator reports what it meant to do, and only an oracle reports what it did
 
 Moving the invocation list's prose into the tools' `MUTATIONS` tables was three scripted passes,
@@ -1203,7 +1222,7 @@ the same code over it.**
 
 ### A row comparing two tables must compare the declarations, not the instances
 
-The gallery badges each refusal the server can send, and the two lists are genuinely separate — the
+The library badges each refusal the server can send, and the two lists are genuinely separate — the
 sentence is the server's, the badge over a 228px poster is the page's — so a key added to one and
 not the other is the failure. The row's first spelling read the server's side by flattening the
 refusals the fixture takes happened to carry. That covers a key exactly as far as some fixture
@@ -1248,6 +1267,21 @@ directory-shaped URL the page requests, so the mutated menu would have been fulf
 that are not the menu. It matches on the pathname now. **A claim that names more than one surface is
 not controlled until each surface has a mutation of its own, and the second control is usually what
 discovers that the delivery only ever worked for the first.**
+
+**The class then lost a member and gained one, and moving the control rather than deleting it is
+the whole of the lesson's second episode.** The menu stopped composing a refusal sentence at all
+when the EDITOR tile went, so `menu-decides-its-own-reason` had nothing left to mutate — and the
+media picker started drawing the same warning badges, which makes it the second surface now.
+Deleting the control would have shrunk the class to one member on a change that added one, so it
+moved to `web/take-picker.js` as `picker-decides-its-own-reason`. It arrived pointed at a surface
+no section opened, carrying a `fails:` line that said so, which is this entry's own delivery hole
+wearing a different coat: an anchor that matches, a mutation that is delivered, and nothing that
+reads the sentence it rewrites. The row that closes it opens the picker from `/projects`, presses
+the tile of a take the server refuses, and holds `.tp-note` against the sentence the library put on
+its own button. Measured: 527 assertions, **1 failed**, that row alone, reading `a take needs two
+frames to bracket a position` against the server's `the scan found no whole frame in this take`.
+The badge row beside it stays green, because the mutation edits `cannotPick` and the chip's title
+comes from `warningsOf`.
 
 ### A positive arm built from the interesting shape misses the ordinary one
 
@@ -2302,7 +2336,7 @@ resize between them because the two ways a tile changed size showed up under dif
 conditions — the warnings at every width, the poster only after something resized.
 
 **Arithmetic about where a thing should go is not a measurement of where it went, and a
-proof tool can hold the second where it cannot hold the first.** The gallery's ⋯ menu picks
+proof tool can hold the second where it cannot hold the first.** The library's ⋯ menu picks
 its side from the room above and below the button inside the scrolling grid, and the tile in
 the top row had its first item clipped away — the tallest menu, on the take whose three
 warnings most needed reading. Fixing the branch was not enough: a tile in a row below the
@@ -2315,14 +2349,14 @@ measured after placement and shifted by whatever is left over now, and the row a
 passes on a menu nobody can see**, because the items are in the document either way.
 
 **A thing that draws one pixel per sample is dense at one size and threadbare at another.**
-The gallery's viewer is the same projection as its tile at four times the area, and the
+The library's viewer is the same projection as its tile at four times the area, and the
 scale follows the height — so the gap between neighbouring depth samples on screen follows
 it too, and a take that reads solid on its 228px tile came up a faint dot screen. The
 spacing is exactly `scale / fx` pixels and not a proxy for it, because the depth cancels out
 of the unprojection, so the sample size is derived rather than tuned. Taken from the
 sensor's own focal length and never the decimated one: dividing by the divisor as well would
 give a coarse remote frame four-times-larger samples and make it look identical to a local
-one, erasing a signal the gallery carries on purpose. Measured: local 76.4 against remote
+one, erasing a signal the library carries on purpose. Measured: local 76.4 against remote
 22.8, so a decimated skim is still visibly what it is, and the **tile's own poster is
 bit-identical** to what it always drew — same mean, same signature — because the size floors
 at one where the tile already covers.
@@ -3383,7 +3417,7 @@ server holding the recorder, where "this machine's recorder" and "the recorder t
 take" are the same process. On an editing station — `--node`, no sensor — they are not, and the
 poll watched a flag that never moves while the grid it gates was drawn from both libraries. The
 section passed every row on a build where the feature did nothing on the machine it is used
-from. The fix is a second gallery in the same section, served by a station whose captures
+from. The fix is a second library page in the same section, served by a station whose captures
 directory is empty and whose `--node` is the recording server, so every take in that grid is
 the node's and a row about the remote tile cannot be answered by a local one. **When a feature
 spans two machines, staging both of them on one is not a simplification of the fixture, it is a
@@ -4221,6 +4255,28 @@ the 45-degree row clears the ceiling at 1.71 against 4.48 times 0.4, which is **
 0.400** — under four and a half percent of margin, on a row that was red a commit ago for a
 reason nobody has diagnosed. It is green and it is not settled, and the difference between those
 two is the sentence this file exists to keep making.
+
+### A press point computed from a duration is a press point the fixture's length moves
+
+The third way a long-red row misleads, and this one is a defect in the check rather than a
+property of what it reads. `editor-check`'s deselect rows press the empty head of a clip's own
+lane, and the width of that whitespace is written in program time rather than in pixels: the clip
+starts at 4s, so the gap is whatever 4s of the take comes to and the press goes at its midpoint.
+The lane's width covers the whole take, so 4s is **22.6px on a 243.3s take against 58.7px on a
+91.2s one**, which puts the press at 11.3px against 29.4px. The in-point marker's grab zone
+reaches 12px inward over exactly that whitespace, so the long take lands the press inside the
+marker by seven tenths of a pixel and the gesture the row meant to make never happens. Nothing
+about the build differs between the two runs.
+
+**A check whose press point is computed from a duration is a check whose result depends on the
+fixture's length**, and that is worse than an ordinary miscalibration because of what it looks
+like from outside. A row that comes and goes with no diff to blame gets read as the machine under
+load, which is the explanation this file hands out to pointer rows more than to any other kind —
+and both stories predict the same thing, so the load reading survives every re-run that happens
+to keep the same fixture. The way to tell them apart is to change the fixture rather than the
+load: two takes of different lengths at the same load say in one pass what a dozen re-runs at one
+length cannot. **Press an offset measured off the element the gesture has to land on**, so the
+target holds still while the fixture grows.
 
 ## An assertion that reads back what the edit was allowed to move
 

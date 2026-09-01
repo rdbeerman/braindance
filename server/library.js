@@ -15,7 +15,7 @@ export { VALID_ID };
 // A node's hash reaches a filename, so it is held to this before it can be joined to a path.
 export const VALID_HASH = /^sha256:[0-9a-f]{64}$/;
 
-import { PROJECT_VERSION, VALID_ID, captureFormatRefusal } from '../web/format.js';
+import { PROJECT_VERSION, VALID_ID, captureFormatRefusal, documentNameRefusal } from '../web/format.js';
 import { POLLED_NODE_FIELDS } from '../web/record-poll.js';
 
 export { PROJECT_VERSION };
@@ -299,7 +299,7 @@ export class NodeLink {
       const missing = POLLED_NODE_FIELDS.filter((f) => body[f] === undefined);
       this.buildRefusal = missing.length === 0 ? null
         : 'it is running an older build whose recorder state carries no '
-          + `${missing.join(', ')} - the gallery cannot follow a recorder it cannot ask, `
+          + `${missing.join(', ')} - the library cannot follow a recorder it cannot ask, `
           + 'so its takes are not listed here. Upgrade the node to this build.';
       if (this.buildRefusal) {
         return { name: this.name, reachable: false, recording: false, takeId: null, writingId: null };
@@ -726,7 +726,15 @@ export async function listJsonNames(dir, { required = false, what = 'directory' 
   }
 }
 
+/** The revision of a name nothing is filed under: what a write says when it expects to create. */
+export const ABSENT_REV = 'absent';
+
+const revOf = (text) => `sha256:${createHash('sha256').update(text).digest('hex')}`;
+
 export class DocumentStore {
+  // Serialises writes to each name, so the revision check and the write it guards are atomic.
+  #inFlight = new Map();
+
   /** `builtinDir` is read and never written, which is what makes saving over a built-in fork it. */
   constructor(dir, kind, version = PROJECT_VERSION, builtinDir = null) {
     this.dir = dir;
@@ -734,11 +742,43 @@ export class DocumentStore {
     this.version = version;
     this.builtinDir = builtinDir;
     this.writes = 0;
+    this.reservedBy = new Map();
   }
 
+  /** Takes names away from this store, each against the route that took it. */
+  reserve(taken) {
+    for (const [name, why] of taken) this.reservedBy.set(name, why);
+  }
+
+  /** Queues a change behind every change already queued on any name it touches. */
+  #serialise(names, run) {
+    const held = [...new Set(names)].sort();
+    const mine = Promise.all(held.map((n) => this.#inFlight.get(n) ?? Promise.resolve())).then(run);
+    // Swallows failures so one refusal does not block the queue.
+    const settled = mine.then(() => {}, () => {});
+    for (const n of held) this.#inFlight.set(n, settled);
+    settled.then(() => {
+      for (const n of held) if (this.#inFlight.get(n) === settled) this.#inFlight.delete(n);
+    });
+    return mine;
+  }
+
+  /** Where a document is filed. Checks both the name rule and that the path stays in this store. */
   pathFor(name) {
-    if (!VALID_ID.test(name)) throw new Error(`unusable ${this.kind} name ${JSON.stringify(name)}`);
-    return join(this.dir, `${name}.json`);
+    const refused = documentNameRefusal(this.kind, name);
+    if (refused) throw new Error(refused);
+    if (this.reservedBy.has(name)) {
+      throw new Error(
+        `${name} cannot be a ${this.kind} name: ${this.reservedBy.get(name)} is a route of this `
+        + `server, so a ${this.kind} filed under it would be written here and read back as the route`,
+      );
+    }
+    const root = resolve(this.dir);
+    const path = join(this.dir, `${name}.json`);
+    if (resolve(path) !== join(root, basename(path))) {
+      throw new Error(`refusing to file a ${this.kind} outside ${root}`);
+    }
+    return path;
   }
 
   async readPathFor(name) {
@@ -773,7 +813,7 @@ export class DocumentStore {
         const st = await stat(path);
         out.push({
           name: basename(file, '.json'),
-          rev: `sha256:${createHash('sha256').update(text).digest('hex')}`,
+          rev: revOf(text),
           bytes: st.size,
           savedAt: st.mtimeMs,
           builtin,
@@ -787,15 +827,52 @@ export class DocumentStore {
   async read(name) {
     const { path, builtin } = await this.readPathFor(name);
     const text = await readFile(path, 'utf8');
-    return { name, rev: `sha256:${createHash('sha256').update(text).digest('hex')}`, builtin, body: JSON.parse(text) };
+    return { name, rev: revOf(text), builtin, body: JSON.parse(text) };
   }
 
-  /**
-   * Writes a document, after checking this build can interpret it. A version that is present and is
-   * not this one is refused, never restamped: spreading `PROJECT_VERSION` over a v2 document kept
-   * every v2 field under a v1 stamp, and the loader never saw a wrong version.
-   */
-  async write(name, body) {
+  /** The revision a read of this name would return right now, or `absent` when nothing is filed. */
+  async currentRev(name) {
+    const { path } = await this.readPathFor(name);
+    try {
+      return revOf(await readFile(path, 'utf8'));
+    } catch (err) {
+      if (err?.code === 'ENOENT') return ABSENT_REV;
+      throw err;
+    }
+  }
+
+  /** Refuses when the revision a change was made against has moved. */
+  async #heldToRev(name, rev, act) {
+    if (typeof rev !== 'string' || rev === '') {
+      throw new Error(
+        `this ${act} of the ${this.kind} ${name} names no revision it was made against: every change `
+        + `here says which revision it read, so a ${this.kind} open in two places is answered by the `
+        + 'file rather than by whichever wrote last',
+      );
+    }
+    const current = await this.currentRev(name);
+    if (rev === current) return current;
+    const moved = (message) => Object.assign(new Error(message), { stale: true, rev: current });
+    if (current === ABSENT_REV) {
+      throw moved(
+        `there is no ${this.kind} named ${name} any more: this ${act} was made against ${rev} and the `
+        + 'file is gone, so somebody else removed or renamed it',
+      );
+    }
+    if (rev === ABSENT_REV) {
+      throw moved(
+        `there is already a ${this.kind} named ${name}: this ${act} expected the name to be free, so `
+        + 'it would have replaced work somebody else has open',
+      );
+    }
+    throw moved(
+      `${name} is at ${current} here, not the ${rev} this ${act} was made against: somebody else has `
+      + `this ${this.kind} open and this ${act} did not land`,
+    );
+  }
+
+  /** Writes a document, after checking the version and the revision. */
+  async write(name, body, rev) {
     if (body?.version !== undefined && body.version !== this.version) {
       throw new Error(
         `this ${this.kind} says version ${JSON.stringify(body.version)}, and this build writes `
@@ -804,25 +881,55 @@ export class DocumentStore {
       );
     }
     const path = this.pathFor(name);
-    // Captured here, on the same tick as the increment. Reading `this.writes` again
-    // Reading `this.writes` again below would read it across an await, and two writers would then
-    // compute the same scratch name.
-    const seq = ++this.writes;
-    await mkdir(this.dir, { recursive: true });
-    const text = `${JSON.stringify({ ...body, version: this.version }, null, 2)}\n`;
-    // The scratch name carries the write's own number: a fixed `.tmp` is shared by two overlapping
-    // writes, and the first rename moves it out from under the second.
-    const scratch = `${path}.${seq}.tmp`;
-    await writeFile(scratch, text);
-    await rename(scratch, path);
-    return { name, rev: `sha256:${createHash('sha256').update(text).digest('hex')}`, bytes: text.length };
+    return this.#serialise([name], async () => {
+      await this.#heldToRev(name, rev, 'write');
+      await mkdir(this.dir, { recursive: true });
+      const text = `${JSON.stringify({ ...body, version: this.version }, null, 2)}\n`;
+      const seq = ++this.writes;
+      const scratch = join(this.dir, `.write-${seq}.tmp`);
+      await writeFile(scratch, text);
+      try {
+        await rename(scratch, path);
+      } finally {
+        await unlink(scratch).catch(() => {});
+      }
+      return { name, rev: revOf(text), bytes: text.length };
+    });
   }
 
-  async remove(name) {
+  async remove(name, rev) {
     const path = this.pathFor(name);
-    this.writes++;
-    await unlink(path);
-    return { removed: name };
+    return this.#serialise([name], async () => {
+      await this.#heldToRev(name, rev, 'delete');
+      this.writes++;
+      await unlink(path);
+      return { removed: name };
+    });
+  }
+
+  /** Moves a document to a new name, holding both names for the whole move. */
+  async rename(name, to, rev) {
+    const fromPath = this.pathFor(name);
+    const toPath = this.pathFor(to);
+    if (resolve(fromPath) === resolve(toPath)) {
+      throw new Error(`${name} is already its name, so there is nothing to rename`);
+    }
+    return this.#serialise([name, to], async () => {
+      const { builtin } = await this.readPathFor(name);
+      if (builtin) {
+        throw new Error(
+          `${name} is a ${this.kind} this build ships, and a shipped one is read and never moved: `
+          + `save it as ${to} to fork it, which leaves the shipped one where it is`,
+        );
+      }
+      await this.#heldToRev(name, rev, 'rename');
+      if (await this.currentRev(to) !== ABSENT_REV) {
+        throw new Error(`${to} is taken: there is already a ${this.kind} filed under that name`);
+      }
+      this.writes++;
+      await rename(fromPath, toPath);
+      return { renamed: name, name: to, rev: revOf(await readFile(toPath, 'utf8')) };
+    });
   }
 }
 

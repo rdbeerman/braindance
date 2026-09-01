@@ -57,6 +57,9 @@ const OTHER_TAKE = 'bootother';
 /** The two poisoned documents: the unreachable snapshot on top of the stack, and one below it. */
 const POISON_TOP = 'bootpoisontop';
 const POISON_UNDER = 'bootpoisonunder';
+// The named project the auto-save section below is about. There is no hidden working document any
+// more, so a page has a file to write into only when it was opened on one.
+const SAVED_PROJECT = 'bootprobesaved';
 
 // `reset-before-the-panel-generator` is the shipped fault itself, put back by lifting
 // `buildPanel()` from above the value walk to below it. It has to boot: a mutation that throws
@@ -145,7 +148,7 @@ const MUTATIONS = {
   // landing in a slot with no source is filtered out of before it gets there. Must redden four
   // rows, measured: the two carrying the claim, one per shape, and the two beside them that
   // redden because the document this one accepted took their fixture away - the edit grows a clip
-  // pointed at the live stream, and the gallery page comes up on a look it should never have
+  // pointed at the live stream, and the editor comes up on a look it should never have
   // applied. The recorder's own null-take row must stay green.
   'document-door-takes-a-clip-with-no-take': {
     file: 'web/main.js',
@@ -171,11 +174,29 @@ const MUTATIONS = {
   // by a `serialiseProject` that wrapped `serialiseProjectBody` and did nothing else, and that
   // wrapper is gone. This is the write the row reads back off the server, so the fault is planted
   // where the claim is measured.
+  // The hidden name put back: a page holding no document invents one and saves into it, which is
+  // exactly what `__working__` was. Aimed at the guard rather than at the door, because a page
+  // that mints a real project on the way in is a different feature and would redden the whole
+  // file rather than the one row this claim is made of.
+  'take-page-invents-a-name-to-save-under': {
+    file: 'web/main.js',
+    edits: [[
+      '    if (openedProjectName !== null && !projectDiverged) {\n'
+      + '      const savedBody = serialiseProjectBody();\n',
+      '    if (!projectDiverged) {\n'
+      + "      if (openedProjectName === null) { openedProjectName = '__working__'; openedProjectRev = 'absent'; }\n"
+      + '      const savedBody = serialiseProjectBody();\n',
+    ]],
+    fails: 'the row that lists the store after a page opened on a take has committed, and that '
+      + 'row alone: the listing comes back holding __working__, where a build with no hidden '
+      + 'name to invent leaves it empty',
+  },
+
   'the-save-writes-the-undo-stack': {
     file: 'web/main.js',
     edits: [[
-      '    const workingBody = serialiseProjectBody();\n',
-      '    const workingBody = { ...serialiseProjectBody(),\n'
+      '    const savedBody = serialiseProjectBody();\n',
+      '    const savedBody = { ...serialiseProjectBody(),\n'
         + '      history: { stack: [...history.stack], baseline: history.baseline } };\n',
     ]],
     fails: 'the undo stack written back into the project file, which is the half of the shipped '
@@ -945,7 +966,9 @@ async function main() {
       const k = globalThis.__kinect;
       const doc = k.library.serialiseProjectBody();
       doc.clips[0].params.pointSize = 41.5;
-      const put = await fetch('/projects/${NULL_TAKE_PROJECT}', {
+      // rev=absent is the claim this write makes: no file at this name yet. A write carrying no
+      // revision at all is refused, so a fixture staged without one is a section that never runs.
+      const put = await fetch('/projects/${NULL_TAKE_PROJECT}?rev=absent', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...doc, clips: [{ ...doc.clips[0], take: null }] }),
@@ -982,17 +1005,17 @@ async function main() {
       JSON.stringify(staged.clips));
   }
 
-  console.log('\n[boot] and a document opened from the gallery cannot bring the editor up on it');
+  console.log('\n[boot] and a document opened from the projects page cannot bring the editor up on it');
   {
     // The second shape: the same document arriving through the query string, where the clip it
     // refuses is the one the editor is about to paint itself around. This is the page-killing
     // half - `paintOpenTake` reads `clip.take.id` - and the look row is what says the document was
     // written before it died rather than refused at the door.
-    const gallery = await openPage(`/edit?project=${NULL_TAKE_PROJECT}`);
+    const opened2 = await openPage(`/edit?project=${NULL_TAKE_PROJECT}`);
     // Waited on the prefix both answers share rather than on the one under test, so the row below
     // is the verdict and this is only the wait for the page to have given one.
-    const spoke = await settle(gallery.page, gallery.errors, new RegExp(`project ${NULL_TAKE_PROJECT}: .`));
-    const said = await gallery.page.evaluate(`(() => {
+    const spoke = await settle(opened2.page, opened2.errors, new RegExp(`project ${NULL_TAKE_PROJECT}: .`));
+    const said = await opened2.page.evaluate(`(() => {
       const k = globalThis.__kinect;
       return {
         editing: document.body.classList.contains('editing'),
@@ -1008,7 +1031,7 @@ async function main() {
       'and nothing of the document was applied: the look is where the registry starts, not where '
       + 'the refused document said',
       `pointSize ${said.pointSize} against the default ${said.def}, and the document names 41.5`);
-    await gallery.page.close();
+    await opened2.page.close();
   }
 
   console.log('\n[boot] a take the format door refused is not left open behind it');
@@ -1061,27 +1084,7 @@ async function main() {
       const moved = k.params.get('pointSize');
       const popped = k.keyframes.undo.pop();
       const back = k.params.get('pointSize');
-      // The autosave is what the shipped save path writes, so it is asked rather than a
-      // serialiser this file picked: the working document is written by 'commit' above, and read
-      // back off the server so the bytes under test are the stored ones. 'JSON.stringify' drops
-      // an undefined value, so a build writing 'history: undefined' would look identical to one
-      // that writes nothing at all if this were read out of the page.
-      let stored = null;
-      const deadline = Date.now() + 10000;
-      while (Date.now() < deadline) {
-        const res = await fetch('/projects/__working__');
-        if (res.ok) {
-          const doc = await res.json();
-          if (doc.body) { stored = doc.body; break; }
-        }
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      return {
-        was, moved, popped, back,
-        depth: k.keyframes.undo.depth(),
-        stored: stored === null ? null : Object.keys(stored),
-        hasHistory: stored === null ? null : Object.hasOwn(stored, 'history'),
-      };
+      return { was, moved, popped, back, depth: k.keyframes.undo.depth() };
     })()`);
 
     check(session.moved === 41.5 && session.was !== 41.5,
@@ -1090,14 +1093,88 @@ async function main() {
     check(session.popped === true && session.back === session.was,
       'and undo puts it back inside the session, read off the value rather than off the depth',
       `pop returned ${session.popped}, the value reads ${session.back} against ${session.was}`);
-    check(session.stored !== null && session.stored.length > 5,
-      'the autosave the commit fired reached the server, so the row below is about a document '
-      + 'that exists',
-      session.stored === null ? 'the working document never appeared' : `${session.stored.length} keys stored`);
-    check(session.hasHistory === false,
+
+    // This page was opened on a take, so it holds no document and has no file to write into. That
+    // used to be carried by `__working__` existing; it is carried by there being nothing to write
+    // to now, which is a claim about the store rather than about the page - so it is read by
+    // listing every project this server holds and requiring the commits above to have added none.
+    const wroteNothing = await opened.page.evaluate(`(async () => {
+      const listed = await (await fetch('/projects/all')).json();
+      return (listed.projects ?? []).map((d) => d.name);
+    })()`);
+    check(!wroteNothing.includes(SAVED_PROJECT) && wroteNothing.every((n) => n !== '__working__'),
+      'a page opened on a take writes nothing at all, because it holds no document to write into '
+      + 'and there is no hidden name for it to invent one under',
+      `the store holds ${wroteNothing.length ? JSON.stringify(wroteNothing) : 'nothing'}`);
+
+    // The `history` claim, on the file a page that does hold a document writes. The document is
+    // this page's own edit rather than one this file composed, so the bytes under test are what
+    // the shipped serialiser produces; the page below is opened on it by name, which is the only
+    // way a page has a file to auto-save into now.
+    // One clip, named rather than inherited, for the reason the poisoned section below gives in
+    // the same words: this page is shared with the sections above, and a document built out of
+    // whatever they left standing makes this section's fixture theirs. Measured rather than
+    // guarded against in the abstract - inherited whole, `document-door-takes-a-clip-with-no-take`
+    // leaves a second clip naming no take in the edit, and these rows went red describing a
+    // fixture that mutation had taken away rather than a claim of their own.
+    const staged = await opened.page.evaluate(`(async () => {
+      const held = globalThis.__kinect.library.serialiseProjectBody();
+      const body = { ...held, clips: [held.clips[0]] };
+      const res = await fetch('/projects/${SAVED_PROJECT}?rev=absent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return { ok: res.ok, hadHistory: Object.hasOwn(body, 'history') };
+    })()`);
+    check(staged.ok && staged.hadHistory === false,
+      `${SAVED_PROJECT} was written, so the page below has a project to be opened on`,
+      staged.ok ? 'stored' : 'the PUT was refused');
+
+    const inProject = await openPage(`/edit?project=${SAVED_PROJECT}`);
+    await inProject.page.waitForFunction('globalThis.__kinect.library.opened() === true', null, { timeout: 30000 })
+      .catch(() => { /* the rows below say so */ });
+    const saved = await inProject.page.evaluate(`(async () => {
+      const k = globalThis.__kinect;
+      const was = k.params.get('pointSize');
+      k.params.set('pointSize', 41.5);
+      k.keyframes.undo.commit();
+      // The auto-save is what the shipped save path writes, so it is asked rather than a
+      // serialiser this file picked, and it is read back off the server so the bytes under test
+      // are the stored ones. 'JSON.stringify' drops an undefined value, so a build writing
+      // 'history: undefined' would look identical to one that writes nothing at all if this were
+      // read out of the page.
+      let stored = null;
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const res = await fetch('/projects/${SAVED_PROJECT}');
+        if (res.ok) {
+          const doc = await res.json();
+          if (doc.body && doc.body.clips?.[0]?.params?.pointSize === 41.5) { stored = doc.body; break; }
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return {
+        was,
+        stored: stored === null ? null : Object.keys(stored),
+        hasHistory: stored === null ? null : Object.hasOwn(stored, 'history'),
+        depth: k.keyframes.undo.depth(),
+      };
+    })()`);
+    check(saved.stored !== null && saved.stored.length > 5,
+      'a commit on a page opened on a project writes that project, so the row below is about a '
+      + 'document that exists and carries the edit that provoked it',
+      saved.stored === null ? `nothing carrying the edit reached /projects/${SAVED_PROJECT}`
+        : `${saved.stored.length} keys stored`);
+    check(saved.hasHistory === false,
       'and the stored bytes carry no undo history: the stack is the session\'s and the file is '
       + 'the document\'s',
-      `stored keys ${JSON.stringify(session.stored)}`);
+      `stored keys ${JSON.stringify(saved.stored)}`);
+    check(saved.depth > 0 && inProject.errors.length === 0,
+      'while the stack the file does not carry is on screen, which is what makes the row above an '
+      + 'absence in the file rather than an absence everywhere',
+      `depth ${saved.depth}${inProject.errors.length ? `, ${inProject.errors[0].slice(0, 90)}` : ''}`);
+    await inProject.page.close();
   }
 
   console.log('\n[boot] a file that carries an undo stack does not arm one');
@@ -1125,7 +1202,7 @@ async function main() {
       second.start = 0;
       const two = JSON.stringify({ ...body, clips: [body.clips[0], second] });
       const put = async (name, stack) => {
-        const res = await fetch('/projects/' + name, {
+        const res = await fetch('/projects/' + name + '?rev=absent', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...body, history: { stack, baseline: one } }),

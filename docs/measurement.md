@@ -199,7 +199,7 @@ own command — resolve listeners by port through `ss`.
 
 ## A route's cost is per item, so measure it against a library the size of a shoot
 
-The gallery's poll had to pick between the cheap question and the true one:
+The library's poll had to pick between the cheap question and the true one:
 `/record/state`, which is memory the process already holds, and `/library/all`, which is
 what the grid is actually drawn from. "The listing is more expensive" is the kind of
 reasoning this repo does not accept on its own, so it was measured.

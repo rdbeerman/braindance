@@ -11,7 +11,7 @@ needs a capture, and none ships in the repository.
 
 What you can work on with nothing but a checkout:
 
-- The browser side — the viewer, the timeline editor, the gallery — against a capture you record
+- The browser side — the viewer, the timeline editor, the library — against a capture you record
   yourself, or against the fixture generator if you have one capture to loop.
 - The server's pure logic: the wire format, the index, the job queue, the origin guard. Several
   proof tools drive these with no sensor at all.

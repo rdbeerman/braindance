@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0A0C10" />
+<title>Braindance · Projects</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="/nav.css" />
+<link rel="stylesheet" href="/take-picker.css" />
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+  /* The system defined in web/index.html, restated in this file's own names the way
+     library.html restates it. A fourth file naming them again is a fourth thing to keep in
+     step, and the reason it is still done this way is in library.html's copy of this note. */
+  :root {
+    --paper: #0A0C10;
+    --paper-1: #0d1014;
+    --paper-2: #151920;
+    --paper-3: #1e232b;
+    --well: #04060a;
+    --ink: #e8ecf1;
+    --dim: #8b94a1;
+    /* The same value as index.html, menu.html and library.html, and it has to stay the same:
+       nav.css reads var(--faint) without declaring it, so one page raised on its own makes the
+       same nav item legible on one surface and not the next. */
+    --faint: #828c99;
+    --line: rgba(255, 255, 255, 0.1);
+    --line-2: rgba(255, 255, 255, 0.2);
+    --line-3: rgba(255, 255, 255, 0.34);
+    --accent: #5ad1c4;
+    --accent-low: rgba(90, 209, 196, 0.14);
+    --on-accent: #04231f;
+    --rec: #ff3b4e;
+    --rec-low: rgba(255, 59, 78, 0.16);
+    --on-rec: #17000a;
+    --warn: #f0b04a;
+    --warn-low: rgba(240, 176, 74, 0.16);
+    --scrim: rgba(0, 0, 0, 0.68);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #0A0C10; color: var(--ink);
+    font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { display: flex; flex-direction: column; min-height: 100vh; }
+
+  .appstatus { display: flex; align-items: center; gap: 14px; }
+  .appstatus .sum { color: var(--dim); font-size: 9px; font-variant-numeric: tabular-nums; }
+  .appstatus .sum b { color: var(--ink); font-weight: 500; }
+
+  .tabs { flex: none; min-height: 48px; display: flex; align-items: center; gap: 8px;
+    margin-top: 38px; padding: 8px 12px; background: var(--paper); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+
+  /* A list and not a grid: a project's picture is a proxy for an edit rather than an index
+     entry for one take, so the facts beside it are what the eye reads first and they want a
+     line each rather than a column. */
+  .list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
+    gap: 8px; padding: 12px; align-content: start; }
+
+  /* No overflow:hidden, for the reason library.html gives about its tile: the ⋯ menu opens
+     inside the row's own footprint and a scroll container's intrinsic height would exclude it. */
+  .row { position: relative; display: flex; align-items: stretch; gap: 12px;
+    border: 1px solid var(--line); background: var(--paper-1); cursor: pointer; }
+  .row:hover { border-color: var(--line-2); }
+  .row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+  .pic { flex: none; width: 176px; display: flex; flex-direction: column; }
+  /* The ratio on the container with the canvas out of flow, which is the construction
+     library.html arrived at after the JavaScript-measured height failed on every resize. */
+  .skim { position: relative; flex: none; aspect-ratio: 16 / 9; overflow: hidden;
+    background: var(--well); cursor: ew-resize; touch-action: pan-y; }
+  .skim canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  .skim .t { position: absolute; top: 6px; right: 7px; font-size: 9px; color: var(--dim);
+    font-variant-numeric: tabular-nums; pointer-events: none; background: var(--paper);
+    padding: 1px 4px; border-radius: 3px; }
+  /* Over the picture, because a clip whose footage is gone draws nothing at all and an empty
+     black box says the page is broken rather than that the footage is elsewhere. */
+  .skim .hole { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; padding: 0 12px; text-align: center;
+    color: var(--warn); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+    pointer-events: none; }
+
+  /* This bar measures the edit and not one take, which is why the skim is built with no bar of
+     its own: `createSkim` would fill it from the position within whichever capture it is
+     drawing, and the whole point here is that the capture changes partway along. */
+  .bar { position: relative; height: 16px; flex: none; background: var(--paper-2);
+    cursor: ew-resize; touch-action: pan-y; }
+  /* One block per clip, laid at its own place in program time. A clip whose take is not here is
+     drawn in the warning colour rather than left out, so the width of the hole is the size of
+     the problem - read without dragging anything. */
+  .bar .seg { position: absolute; top: 0; bottom: 0; background: var(--paper-3);
+    border-left: 1px solid var(--line-2); }
+  .bar .seg.dark { background: var(--warn-low); border-left-color: var(--warn); }
+  .bar .done { position: absolute; top: 0; bottom: 0; left: 0; background: var(--accent-low); }
+  .bar .pos { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink); }
+
+  .meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;
+    padding: 10px 0 10px 2px; }
+  .meta .top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .meta .name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta .when { color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; flex: none; }
+  .meta .facts { display: flex; align-items: center; gap: 10px; font-size: 9px; color: var(--faint);
+    white-space: nowrap; overflow: hidden; }
+  .meta .facts span { overflow: hidden; text-overflow: ellipsis; }
+
+  /* What is missing and where to get it. The control goes to the library and never fetches:
+     download, its progress and the two-machine state live on that page, and a second copy of
+     them here would be the duplicated path this design keeps refusing. */
+  .dark { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 2px; color: var(--warn); font-size: 10px; }
+  .dark:empty { display: none; }
+  .dark .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+  .rowacts { flex: none; display: flex; align-items: flex-start; padding: 10px 10px 10px 0; }
+
+  .act { appearance: none; height: 32px; padding: 0 12px; border: 1px solid var(--line-2);
+    border-radius: 0; background: var(--paper-2); color: var(--ink); font: inherit; font-size: 9px;
+    letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; white-space: nowrap; }
+  .act:hover:not(:disabled) { background: var(--paper-3); border-color: var(--line-3); }
+  .act.primary { border-color: var(--accent); color: var(--accent); background: var(--accent-low); }
+  .act.primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+  .act.more { width: 32px; padding: 0; color: var(--dim); font-size: 14px; line-height: 1; }
+  .act.more[aria-expanded="true"] { border-color: var(--line-3); color: var(--ink); background: var(--paper-3); }
+  .act.small { height: 26px; padding: 0 10px; font-size: 8px; }
+  /* Both disabled rules after the lit ones: `.act.primary` is two classes and beats a bare
+     `.act:disabled`, which is how the library page once shipped a lit button that was disabled. */
+  .act:disabled, .act.primary:disabled {
+    color: var(--faint); background: var(--paper-1); border-color: var(--line); cursor: not-allowed; }
+
+  /* Built into every row and hidden, rather than constructed when ⋯ is pressed: a menu that
+     only exists after a click is a menu a sweep cannot enumerate. Which way it opens is
+     measured when it opens - see `placeMenu`. */
+  .menu { position: absolute; right: 10px; top: 46px; z-index: 3; min-width: 168px;
+    padding: 4px; border: 1px solid var(--line-3); border-radius: 0; background: var(--paper-2);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55); display: flex; flex-direction: column; gap: 2px;
+    overflow-y: auto; overscroll-behavior: contain; }
+  .menu[hidden] { display: none; }
+  .mi { appearance: none; display: block; width: 100%; text-align: left; padding: 7px 9px;
+    border: 0; border-radius: 0; background: transparent; color: var(--ink); font: inherit;
+    font-size: 10px; cursor: pointer; white-space: nowrap; }
+  .mi:hover:not(:disabled) { background: var(--paper-3); }
+  .mi:disabled { color: var(--faint); cursor: not-allowed; }
+  .mi.danger { color: var(--dim); }
+  .mi.danger:hover:not(:disabled) { color: var(--rec); background: var(--rec-low); }
+
+  dialog { border: 1px solid var(--line-2); border-radius: 0; background: var(--paper-1);
+    color: var(--ink); padding: 20px; max-width: 420px; width: calc(100% - 32px);
+    font: 12px/1.5 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  dialog::backdrop { background: var(--scrim); }
+  dialog h2 { margin: 0 0 12px; font-size: 14px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
+  dialog p { margin: 0 0 12px; color: var(--dim); font-size: 11px; }
+  dialog p b { color: var(--ink); font-weight: 500; }
+  dialog .warnline { color: var(--warn); }
+  /* `buttons` and not `row`, which is what a project is: a sweep that walks `.row` should find
+     projects and nothing else. */
+  dialog .buttons { display: flex; gap: 8px; margin-top: 16px; }
+  dialog .buttons .act { flex: 1; height: 42px; font-size: 10px; }
+  dialog .buttons .act.confirm { border-color: var(--rec); color: var(--rec); background: var(--rec-low); }
+  dialog .buttons .act.confirm:hover:not(:disabled) { background: var(--rec); color: var(--on-rec); }
+  dialog .buttons .act.go { border-color: var(--accent); color: var(--accent); background: var(--accent-low); }
+  dialog .buttons .act.go:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+  dialog .buttons .act.go:disabled, dialog .buttons .act.confirm:disabled {
+    border-color: var(--line); color: var(--faint); background: var(--paper-1); }
+
+  #pName { width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--line-2);
+    border-radius: 0; background: var(--well); color: var(--ink); font: inherit; font-size: 12px; }
+  #pName:focus { outline: none; border-color: var(--accent); }
+  #pName.bad { border-color: var(--rec); }
+  #pWhy { margin: 8px 0 0; font-size: 10px; }
+  #pWhy:empty { display: none; }
+
+  .empty { padding: 24px 12px; color: var(--faint); }
+  .empty p { margin: 0 0 8px; max-width: 68ch; line-height: 1.5; }
+  #note { padding: 0 12px 8px; color: var(--warn); font-size: 10px; }
+  #note:empty { display: none; }
+
+  @media (max-width: 620px) {
+    .row { flex-wrap: wrap; }
+    .pic { width: 100%; }
+    .rowacts { padding-left: 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="appbar" id="appBar">
+  <a class="appback" id="toMenu" href="/"><span class="arrow">&lt;</span><span>Menu</span></a>
+  <nav class="surfaces" id="navRow" aria-label="Surface navigation">
+    <a class="surface" id="toProjects" href="/projects" aria-current="page">Projects</a>
+    <a class="surface" id="toLibrary" href="/library">Media library</a>
+  </nav>
+  <div class="appstatus">
+    <span class="sum" id="sum">reading…</span>
+  </div>
+</header>
+
+<div class="tabs" id="tabs">
+  <button class="act primary" type="button" id="newProject">New project</button>
+</div>
+
+<div id="note"></div>
+<main class="list" id="list" aria-label="Projects"></main>
+
+<dialog id="confirm">
+  <h2 id="cTitle">Delete project</h2>
+  <p id="cBody"></p>
+  <p class="warnline" id="cWarn"></p>
+  <div class="buttons">
+    <button class="act" type="button" id="cCancel">Cancel</button>
+    <button class="act confirm" type="button" id="cGo">Delete</button>
+  </div>
+</dialog>
+
+<dialog id="rename">
+  <h2>Rename project</h2>
+  <input id="pName" type="text" autocomplete="off" spellcheck="false" aria-label="New project name" />
+  <p class="warnline" id="pWhy"></p>
+  <div class="buttons">
+    <button class="act" type="button" id="pCancel">Cancel</button>
+    <button class="act go" type="button" id="pGo">Rename</button>
+  </div>
+</dialog>
+
+<script type="module" src="/projects.js"></script>
+</body>
+</html>

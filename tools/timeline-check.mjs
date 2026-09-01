@@ -113,12 +113,7 @@ const MUTATIONS = {
   },
   // Program time stops being scaled into source time.
   'rate-ignored': { file: 'web/main.js', edits: [[
-    `  sourceSecAt(programSec) {
-    const keys = this.keys;
-    if (keys.length === 0) return programSec * this.rate;
-    if (keys.length === 1) return keys[0].value + (programSec - keys[0].t) * this.rate;
-    return scalarAt(keys, programSec, EXTEND_ENDS);
-  },`,
+    '  sourceSecAt(programSec) { return retimeSourceSecAt(this, programSec); },',
     '  sourceSecAt(programSec) { return programSec; },',
   ]] },
   'duplicate-frames': { file: 'web/main.js', edits: [[
@@ -556,7 +551,15 @@ await page.waitForFunction(() => !!globalThis.__kinect.timeline.transport(), nul
 // pre-lane measurement can match. So the open is waited for first, and the loop is left in place
 // for the resize itself.
 await page.waitForFunction(() => globalThis.__kinect.takeOpened(), null, { timeout: 60000 });
-for (let attempt = 0; attempt < 3; attempt++) {
+// Twelve attempts and not three, measured rather than chosen. The strip is a proportion of the
+// window rather than a fixed height, so `360 + strip + shell` is a fixed point this loop has to
+// converge on: the strip grows every time the viewport does, and each pass closes about two
+// thirds of what is left. Probed on this rig from a 640x464 viewport, the buffer walks
+// 270x152, 510x287, 594x334, 624x351, 635x357, 638x359 and reaches 640x360 on the seventh
+// pass. At three it stopped at 626x352 and the guard below threw before the first assertion -
+// on this branch and on a `git archive HEAD` tree alike, so it was never a regression and the
+// only thing wrong was the iteration count.
+for (let attempt = 0; attempt < 12; attempt++) {
   await page.evaluate('globalThis.__kinect.timeline.settled()').catch(() => {});
   const furniture = await page.evaluate(`(() => {
     const strip = document.getElementById('timeline');

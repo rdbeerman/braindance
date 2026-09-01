@@ -124,9 +124,8 @@ const MUTATIONS = {
   ]] },
   // The retime stops being a curve and goes back to a constant slope.
   'retime-ignores-keys': { file: 'web/main.js', edits: [[
-    `    if (keys.length === 1) return keys[0].value + (programSec - keys[0].t) * this.rate;
-    return scalarAt(keys, programSec, EXTEND_ENDS);`,
-    '    return programSec * this.rate;',
+    '  sourceSecAt(programSec) { return retimeSourceSecAt(this, programSec); },',
+    '  sourceSecAt(programSec) { return programSec * this.rate; },',
   ]] },
   // The evaluator announces its writes, so every evaluated frame schedules a seek.
   // Everything a clip owns read and written at program time rather than on the clip's own clock,
@@ -789,7 +788,15 @@ await page.waitForFunction(() => globalThis.__kinect.takeOpened(), null, { timeo
 // Measured, resized, and measured again: the lane stack is built after the transport exists and
 // a strip read before it has its rows is a strip that grows under the viewport that was sized to
 // it, leaving the stage smaller than the figures below are written for.
-for (let attempt = 0; attempt < 3; attempt++) {
+// Twelve attempts and not three, measured rather than chosen. The strip is a proportion of the
+// window rather than a fixed height, so `360 + strip + shell` is a fixed point this loop has to
+// converge on: the strip grows every time the viewport does, and each pass closes about two
+// thirds of what is left. Probed on this rig from a 640x464 viewport, the buffer walks
+// 270x152, 510x287, 594x334, 624x351, 635x357, 638x359 and reaches 640x360 on the seventh
+// pass. At three it stopped at 626x352 and the guard below threw before the first assertion -
+// on this branch and on a `git archive HEAD` tree alike, so it was never a regression and the
+// only thing wrong was the iteration count.
+for (let attempt = 0; attempt < 12; attempt++) {
   await page.evaluate('globalThis.__kinect.timeline.settled()').catch(() => {});
   const furniture = await page.evaluate(`(() => {
     const strip = document.getElementById('timeline');
