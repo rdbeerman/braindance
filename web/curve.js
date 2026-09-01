@@ -242,14 +242,7 @@ function foldFreeX(a, b, side, index, from, to) {
   return good;
 }
 
-// A clip's retime curve, as the `{ rate, keys }` block a project document writes it as. The
-// editor holds the same curve behind an object with a renderer attached, and the projects page
-// holds nothing but the document - so the arithmetic is here and both read it.
-
-/**
- * The source second a clip's own program second maps to. Program time here is measured from the
- * clip's start rather than the project's, which is what every caller has to subtract first.
- */
+/** The source second a clip's own program second maps to. */
 function retimeSourceSecAt({ rate, keys }, programSec) {
   if (keys.length === 0) return programSec * rate;
   if (keys.length === 1) return keys[0].value + (programSec - keys[0].t) * rate;
@@ -267,7 +260,6 @@ function retimeProgramSecAt(curve, sourceSec) {
   }
   for (let i = 0; i < keys.length - 1; i++) {
     if (keys[i + 1].value < sourceSec) continue;
-    // Bisected rather than solved: an eased cubic has no useful closed-form inverse.
     let lo = keys[i].t;
     let hi = keys[i + 1].t;
     for (let k = 0; k < 50; k++) {
