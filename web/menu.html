@@ -32,9 +32,10 @@
     --warn: #f0b04a;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink);
-    font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: clip; }
-  body { display: flex; flex-direction: column; }
+  html { height: 100%; background: var(--paper); }
+  body { min-height: 100%; margin: 0; background: var(--paper); color: var(--ink);
+    font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: clip;
+    display: flex; flex-direction: column; }
 
   .head { flex: none; height: 37px; display: flex; align-items: center;
     padding: 0 15px; background: var(--paper-1); border-bottom: 1px solid var(--line); }
