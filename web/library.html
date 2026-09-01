@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0A0C10" />
 <title>Braindance · Media library</title>
 <link rel="icon" href="data:," />
 <link rel="stylesheet" href="/nav.css" />
@@ -12,7 +13,7 @@
      way the viewer restates it - two copies of a palette is two things to keep in
      step, and a third file naming them again is a third. */
   :root {
-    --paper: #05070a;
+    --paper: #0A0C10;
     --paper-1: #0d1014;
     --paper-2: #151920;
     --paper-3: #1e232b;
@@ -39,9 +40,9 @@
     --scrim: rgba(0, 0, 0, 0.68);
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink);
-    font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: clip; }
-  body { display: flex; flex-direction: column; }
+  html, body { height: 100%; margin: 0; background: #0A0C10; color: var(--ink);
+    font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { display: flex; flex-direction: column; min-height: 100vh; }
 
   /* Which machine you are on. The library spans both, so "here" has to be named or
      the local/node column is unreadable. */
@@ -55,7 +56,7 @@
   .where .dot.off { background: transparent; border: 1px solid var(--warn); }
 
   .tabs { flex: none; min-height: 48px; display: flex; align-items: center; gap: 8px;
-    margin-top: 32px; padding: 8px 12px; background: var(--paper); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+    margin-top: 38px; padding: 8px 12px; background: var(--paper); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   .tab { appearance: none; height: 32px; padding: 0 12px; border: 1px solid var(--line);
     border-radius: 0; background: transparent; color: var(--dim); font: inherit; font-size: 9px;
     letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; white-space: nowrap; }
@@ -343,10 +344,6 @@
 <body>
 
 <header class="appbar" id="appBar">
-  <!-- The same header projects.html carries, and the mark moved with it. It used to sit on
-       the surface name inside this anchor, for the reason index.html still gives at the same
-       place: this anchor goes to the menu, so the page it is current for is not the page it
-       leads to. The two beside it do lead where they mark, so the mark is on the anchor. -->
   <a class="appback" id="toMenu" href="/"><span class="arrow">&lt;</span><span>Menu</span></a>
   <nav class="surfaces" id="navRow" aria-label="Surface navigation">
     <a class="surface" id="toProjects" href="/projects">Projects</a>

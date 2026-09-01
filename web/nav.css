@@ -30,14 +30,6 @@
 .appback:hover { background: var(--paper-2); }
 .appback .arrow { color: var(--dim); }
 
-/* The two surfaces an edit is worked across - the projects and the footage. They were one page
- * until projects got their own, so moving between them has to stay cheap: a project row whose
- * footage is missing has nothing to offer but the library, and the library's `New project from
- * this take` lands you back here.
- *
- * The current page is marked on the anchor, unlike `.appback` above, which carries its mark on
- * the label inside it - that one goes to the menu, so the page it is current for is not the page
- * it leads to. These two lead where they mark. */
 .surfaces { align-self: stretch; display: flex; align-items: stretch; }
 .surface {
   display: inline-flex;
@@ -52,8 +44,6 @@
   white-space: nowrap;
 }
 .surface:hover { color: var(--ink); background: var(--paper-2); }
-/* Lit and underlined, rather than lit alone: the accent bar is what still says which page this
- * is on a display where the two greys are hard to tell apart. */
 .surface[aria-current="page"] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
 .surface:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 

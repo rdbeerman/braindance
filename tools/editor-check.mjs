@@ -168,10 +168,10 @@ const MUTATIONS = {
       "  rows.push({ owner: 'clip-add', label: '', kind: 'clip-add', height: CLIP_ADD_H });",
       '',
     ], [
-      '    lane.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
-      '    lane.append(ui.addClip, ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
+      'ui.clipOptions.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
+      'ui.clipOptions.append(ui.addClip, ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
     ]],
-    fails: 'the plus control returning to the bed beside commands that need a selected clip',
+    fails: 'the plus control returning to the dynamic controls area beside commands that need a selected clip',
   },
 
   'add-clip-skips-post-open-export-guard': {
@@ -11678,6 +11678,8 @@ try {
       clipCommands: ['tDeleteClip', 'tMoveClip', 'tRotateClip', 'tKeyClip',
         'tRate', 'tRateKey', 'tPreset', 'tPresetSave', 'tPresetExport', 'tPresetImport',
         'tMark', 'camSensor', 'cropFit'].map((id) => [id, document.getElementById(id)?.disabled]),
+      rateInClipOptions: document.getElementById('tRate').closest('#tClipOptions') !== null,
+      clipOptionsDisplay: getComputedStyle(document.getElementById('tClipOptions')).display,
     }))()`);
     console.log(`  a press ${emptyLane.gap.toFixed(0)}px left of the clip's box: `
       + `selection ${off.selection}, ${greyedBefore} greyed rows before it and ${off.greyed} after`);
@@ -11712,6 +11714,9 @@ try {
     check(off.clipCommands.every(([, disabled]) => disabled === true),
       'and every command that does need a clip is disabled until a row is selected',
       off.clipCommands.map(([id, disabled]) => `${id}:${disabled}`).join(' '));
+    check(off.rateInClipOptions && off.clipOptionsDisplay === 'none',
+      'and the speed slider lives in the clip chip, which leaves the strip with the selection',
+      `in clip chip ${off.rateInClipOptions}, chip display ${off.clipOptionsDisplay}`);
 
     // Press where the crop handle was, rather than only reading that its list is empty. This is
     // the stale visible furniture from the reported fault, driven through the real pointer path.
@@ -11831,6 +11836,11 @@ try {
     check(await page.evaluate('__kinect.editor.scopeOff()') === 0,
       'and selecting a clip again brings the whole panel back',
       `${await page.evaluate('__kinect.editor.scopeOff()')} rows still greyed`);
+    const chipBack = await page.evaluate(
+      `getComputedStyle(document.getElementById('tClipOptions')).display`);
+    check(chipBack !== 'none',
+      'and the clip chip is back once a row is selected again',
+      `chip display ${chipBack}`);
     check(await page.evaluate('__kinect.cropBoxShown()') === true,
       'and the crop box can return once a clip is selected again');
     await page.locator('#cropBox').click();

@@ -1,20 +1,10 @@
-// The projects page: the list you land on, and the one that says which edit to continue. A row
-// shows a picture of the cut and dragging it walks program time rather than one take's frames,
-// so the capture changes at a cut. The look does not come along - nothing here holds the grade,
-// the effects or the camera, and a project skims as raw geometry.
-
 import { documentNameRefusal } from './format.js';
 import { retimeProgramSecAt, retimeSourceSecAt } from './curve.js';
 import { createSkim } from './take-draw.js';
 import { pickTakes } from './take-picker.js';
 
-// How many clips this build composites. The editor's `CLIP_CEILING` is the gate a document is
-// held to; this is the same number said to the picker so a pick cannot make a project the editor
-// would then refuse.
 const CLIP_CEILING = 8;
 
-// Bounded for the reason `web/library.js` bounds its poll: `/library/all` waits on the capture
-// node, and a node that has gone away would otherwise leave the page reading forever.
 const LISTING_TIMEOUT_MS = 15000;
 
 const listEl = document.getElementById('list');
@@ -22,7 +12,6 @@ const noteEl = document.getElementById('note');
 const dlg = document.getElementById('confirm');
 
 const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.round(s % 60)).padStart(2, '0')}`;
-// The wall clock in the reader's zone; `toISOString` is UTC and reads two hours early.
 const stamp = (ms) => {
   const d = new Date(ms);
   const p = (n) => String(n).padStart(2, '0');
@@ -31,7 +20,6 @@ const stamp = (ms) => {
 
 const say = (text) => { noteEl.textContent = text; };
 
-// Every field `paint` reads, because `paint` runs against this before the first listing lands.
 let projects = [];
 let localTakes = [];
 
@@ -40,15 +28,7 @@ const takeFor = (clip) => (clip.take?.hash
   ? localTakes.find((t) => t.hash === clip.take.hash) ?? null
   : null);
 
-/**
- * How much program time a clip runs for.
- *
- * A trim is the answer where the document states one. Where it does not - which is what
- * `serialiseProjectBody` writes for any clip nobody trimmed - the clip runs for everything its
- * curve affords of the take behind it, so the span is knowable only while the take is here. A
- * missing untrimmed clip is a hole of no width, because the document never recorded how long
- * that clip ran; only the footage did.
- */
+/** How much program time a clip runs for. */
 function spanOf(clip, take) {
   if (clip.length !== null && Number.isFinite(clip.length)) return Math.max(0, clip.length);
   if (!take || !(take.durationSec > 0)) return 0;
@@ -66,13 +46,7 @@ function layout(body) {
 
 const lengthOf = (spans) => spans.reduce((a, s) => Math.max(a, s.start + s.span), 0);
 
-/**
- * The clip covering a program second, or null in a gap between clips.
- *
- * The last one covering it, because clips are stored in start order and this build composites up
- * to eight at once - so where two overlap, the one that came in most recently is the one a proxy
- * shows. A render draws them all; this is a picture of the cut rather than a small render of it.
- */
+/** The clip covering a program second, or null in a gap. Returns the topmost when clips overlap. */
 function clipAt(spans, programSec) {
   for (let i = spans.length - 1; i >= 0; i--) {
     const s = spans[i];
@@ -81,12 +55,7 @@ function clipAt(spans, programSec) {
   return null;
 }
 
-/**
- * The frame of a take a program second lands on. Source seconds become an index through the
- * take's own `frames` and `durationSec`, which is the uniform relation `createSkim`'s `seconds`
- * getter already runs in the other direction - the same approximation the library tile makes,
- * and the right accuracy for a surface that is a proxy rather than a small render.
- */
+/** The frame of a take a program second lands on. */
 function frameAt(span, programSec) {
   const { clip, take } = span;
   const sourceSec = retimeSourceSecAt(clip.retime, programSec - span.start);
@@ -100,11 +69,7 @@ const missingIn = (body) => body.clips
   .filter((clip) => clip.take && !takeFor(clip))
   .map((clip) => clip.take.id);
 
-/**
- * Why this page cannot draw a project, or null. `DocumentStore.list` already drops a file that
- * does not parse, and a file that parses into something that is not an edit is a different case:
- * it is listed, so it is this page's to degrade rather than to throw over the whole list.
- */
+/** Why this page cannot draw a project, or null. */
 function bodyRefusal(body) {
   if (!body || typeof body !== 'object') return 'this file does not hold an object';
   if (!Array.isArray(body.clips)) return 'this file carries no clips array, so it is not an edit';
@@ -145,8 +110,6 @@ function addButton(host, label, cls, onClick, { item = null, title = '' } = {}) 
 function closeMenus(except = null) {
   for (const menu of document.querySelectorAll('.menu:not([hidden])')) {
     if (menu === except) continue;
-    // Focus comes back to the toggle whenever the menu holding it is hidden: hiding an ancestor
-    // of the focused element drops focus to the body.
     const toggle = menu.parentElement.querySelector('[aria-haspopup="menu"]');
     const heldFocus = menu.contains(document.activeElement);
     menu.hidden = true;
@@ -155,8 +118,6 @@ function closeMenus(except = null) {
   }
 }
 
-// On `pointerdown` so a button elsewhere is not pressed twice, and captured so a handler that
-// stops propagation cannot leave a menu open.
 document.addEventListener('pointerdown', (e) => {
   if (e.target.closest('.menu') || e.target.closest('[aria-haspopup="menu"]')) return;
   closeMenus();
@@ -173,11 +134,7 @@ document.addEventListener('keydown', (e) => {
   toggle?.focus();
 }, true);
 
-/**
- * Puts a menu on the side of its button that has room, and caps it at the room there. Measured
- * on open and bounded by the scroll container's box, which is the list: anchoring it below the ⋯
- * is right for most of the list and wrong for the last row, where the container clips it.
- */
+/** Puts a menu on the side of its button that has room. */
 function placeMenu(menu, toggle) {
   const host = menu.offsetParent ?? menu.parentElement;
   const clip = (menu.closest('.list') ?? document.documentElement).getBoundingClientRect();
@@ -210,9 +167,6 @@ function buildMenu(row, toggle, project) {
   for (const entry of items) {
     const b = addButton(menu, entry.label, entry.cls, () => {
       closeMenus();
-      // An async wrapper and not `Promise.resolve(entry.run())`: a synchronous throw out of
-      // `run` escapes the second form entirely, which is a menu item that does nothing and says
-      // nothing about why.
       (async () => entry.run())().catch((err) => say(err.message));
     }, { item: entry.item });
     b.dataset.item = entry.item;
@@ -266,9 +220,6 @@ function buildRow(project) {
     </div>
     <div class="rowacts"></div>`;
 
-  // A project name is text somebody typed and the name rule admits a space: interpolated, it
-  // would be markup. The library page has the same note about a take's id, and the reason it
-  // has it is that `<img src=x onerror=...>.knct` once ran script on this origin.
   const nameEl = row.querySelector('.name');
   nameEl.textContent = project.name;
   nameEl.title = project.name;
@@ -279,7 +230,6 @@ function buildRow(project) {
     const dark = row.querySelector('.dark');
     const what = document.createElement('span');
     what.className = 'what';
-    // Named rather than counted: the person has to know which footage to go and get.
     what.textContent = missing.length === body.clips.length
       ? `No footage here. This project is cut on ${missing.join(', ')}.`
       : `${missing.length} of ${body.clips.length} clips have no footage here: ${missing.join(', ')}.`;
@@ -297,9 +247,6 @@ function buildRow(project) {
   more.title = 'rename, duplicate and delete';
   buildMenu(row, more, project);
 
-  // Opening is the row's own act, so the row is the control. A role rather than a `<button>`,
-  // because the poster inside it is also the scrub surface and a button would put a native
-  // activation on the pointer path.
   row.setAttribute('role', 'button');
   row.setAttribute('aria-label', `Open ${project.name}`);
   row.tabIndex = 0;
@@ -317,11 +264,7 @@ function buildRow(project) {
   return row;
 }
 
-/**
- * A project this page cannot draw, said on its own row. It keeps its name, its date and its
- * menu - deleting or renaming a file this build cannot read is exactly what somebody wants to
- * do about it - and it carries no picture, because there is nothing to place in time.
- */
+/** A project this page cannot draw, said on its own row. */
 function buildUnreadableRow(project, refusal) {
   const row = document.createElement('article');
   row.className = 'row';
@@ -347,11 +290,7 @@ function buildUnreadableRow(project, refusal) {
   return row;
 }
 
-/**
- * The row's picture and its bar. The bar measures the edit rather than a take, which is why the
- * skim is built with no bar at all: `createSkim` fills the one it is given from the position
- * within whichever capture it is drawing, and the capture here changes partway along.
- */
+/** The row's picture and its bar. */
 function attachSkim(row, spans, length) {
   const skimEl = row.querySelector('.skim');
   const barEl = row.querySelector('.bar');
@@ -360,8 +299,6 @@ function attachSkim(row, spans, length) {
   const posEl = barEl.querySelector('.pos');
   const doneEl = barEl.querySelector('.done');
 
-  // One block per clip at its own place in program time, so the width of a hole is how much of
-  // the edit it costs - visible without dragging anything.
   for (const s of spans) {
     if (!(s.span > 0) || !(length > 0)) continue;
     const seg = document.createElement('span');
@@ -377,14 +314,11 @@ function attachSkim(row, spans, length) {
     surface: skimEl,
     onDraw: (n, requested) => {
       if (requested) return;
-      // Counted, because "the picture is drawn" is otherwise unobservable from outside.
       row.dataset.draws = String(Number(row.dataset.draws ?? 0) + 1);
     },
   });
   row.__skim = skim;
 
-  // The take on the canvas right now, so a seek inside one clip does not re-`show` and throw the
-  // frame away. Identity and not the id: two clips of one take share the object.
   let shown = null;
   let at = 0;
 
@@ -402,8 +336,6 @@ function attachSkim(row, spans, length) {
     doneEl.style.width = `${length > 0 ? (at / length) * 100 : 0}%`;
     row.dataset.at = at.toFixed(3);
     row.dataset.showing = take?.id ?? '';
-    // A take that is not here has no frames, so the skim clears the canvas and goes on answering
-    // seeks - which is what makes a hole one behaviour rather than two.
     skim.setIndex(take ? frameAt(hit, at) : 0);
   };
 
@@ -412,9 +344,6 @@ function attachSkim(row, spans, length) {
     seek(((clientX - r.left) / r.width) * length);
   };
 
-  // Moving across the picture scrubs; a press that goes nowhere opens the project. Four pixels
-  // rather than zero because a finger never holds still - the library tile's gesture, arriving
-  // somewhere else.
   let pressX = null;
   let dragged = false;
   skimEl.addEventListener('pointermove', (e) => {
@@ -433,8 +362,6 @@ function attachSkim(row, spans, length) {
     pressX = null;
     if (tap) openProject(row.dataset.name);
   });
-  // A captured pointer can end without a `pointerup` - the browser fires `pointercancel` - and
-  // `pressX` left set makes the next move over this row scrub with no button held.
   skimEl.addEventListener('pointercancel', () => { pressX = null; dragged = false; });
   skimEl.addEventListener('pointerleave', () => { pressX = null; });
   barEl.addEventListener('pointerdown', (e) => fromX(e.clientX, barEl));
@@ -461,23 +388,17 @@ function paint() {
   document.getElementById('sum').innerHTML = `<b>${n}</b> project${n === 1 ? '' : 's'}`;
 }
 
-// Which listing is newest: a refresh on the wire when Delete is pressed can resolve later.
 let refreshGeneration = 0;
 
 async function refresh() {
   const mine = ++refreshGeneration;
   const [listing, library] = await Promise.all([
     jsonOf('/projects/all'),
-    // The library is read for one thing: which take each clip's hash resolves to. A failure here
-    // is not a reason to hide the projects, so it degrades to no local takes - which reads as
-    // every project being dark, and says so on every row rather than showing an empty page.
     jsonOf('/library/all', { signal: AbortSignal.timeout(LISTING_TIMEOUT_MS) })
       .catch(() => ({ takes: [] })),
   ]);
   if (mine !== refreshGeneration) return;
   localTakes = (library.takes ?? []).filter((t) => t.state !== 'remote');
-  // By `savedAt`, newest first, and nothing is stored to know it: the listing carries the file's
-  // mtime and every edit autosaves, so the project at the top is the one last worked on.
   projects = [...(listing.projects ?? [])].sort((a, b) => b.savedAt - a.savedAt);
   paint();
 }
@@ -492,10 +413,7 @@ function nextUntitled(taken) {
   }
 }
 
-/**
- * Finder's rule: `Untitled 4` becomes `Untitled 4 copy`, then `copy 2`, `copy 3`. A copy of a
- * copy keeps the one base rather than growing `copy copy`.
- */
+/** Finder's rule: `Untitled 4` becomes `Untitled 4 copy`, then `copy 2`, `copy 3`. */
 function copyName(name, taken) {
   const already = /^(.*) copy(?: (\d+))?$/.exec(name);
   const base = already ? already[1] : name;
@@ -505,14 +423,7 @@ function copyName(name, taken) {
   }
 }
 
-/**
- * Creates a document under the first free name `pick` offers, and again under the next one if the
- * server says that name is taken.
- *
- * `rev=absent` is what makes this safe rather than the listing being fresh: two tabs both
- * choosing `Untitled 1` are answered by the file, so the loser is told and takes the next name.
- * Bounded, because a create that keeps being refused for some other reason is a loop.
- */
+/** Creates a document under the first free name `pick` offers. */
 async function createUnder(pick, body) {
   const taken = names();
   for (let tries = 0; tries < 12; tries++) {
@@ -525,7 +436,6 @@ async function createUnder(pick, body) {
     const answer = await res.json().catch(() => null);
     if (res.ok && !answer?.error) return name;
     if (res.status !== 409) throw new Error(answer?.error ?? `HTTP ${res.status}`);
-    // The name went while this was being decided. Take it out of the reckoning and try the next.
     taken.add(name);
   }
   throw new Error('twelve names in a row were taken while this copy was being made');
@@ -534,8 +444,6 @@ async function createUnder(pick, body) {
 async function duplicate(project) {
   say('');
   const to = await createUnder((taken) => copyName(project.name, taken), project.body);
-  // Landing in the copy: forking is how somebody declines to keep something once there is no
-  // save to withhold, so the copy is where the next edit is going.
   openProject(to);
 }
 
@@ -554,12 +462,7 @@ function askDelete(project) {
   document.getElementById('cWarn').textContent = 'Footage is kept. This cannot be undone.';
   document.getElementById('cGo').textContent = 'Delete';
   document.getElementById('cGo').disabled = false;
-  // The rev goes with it, so a confirm built against one listing cannot delete a project that
-  // has moved on since it was drawn.
   confirmAction = async () => {
-    // The JSON content type is load-bearing on every route that changes something, DELETE
-    // included: a page you merely visit can send a cross-origin request without asking
-    // permission, but it cannot declare `application/json` while doing it.
     const res = await fetch(`/projects/${encodeURIComponent(project.name)}?rev=${encodeURIComponent(project.rev)}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -578,12 +481,6 @@ const renameWhy = document.getElementById('pWhy');
 const renameGo = document.getElementById('pGo');
 let renaming = null;
 
-/**
- * The rename box, and a modal rather than `window.prompt` because a name is typed and the
- * refusal has to be readable while it is being typed. `documentNameRefusal` comes from
- * `web/format.js`, which `server/library.js` imports too: the server's copy is the gate and this
- * one greys the button out early.
- */
 function askRename(project) {
   renaming = project;
   renameInput.value = project.name;
@@ -619,8 +516,6 @@ async function commitRename() {
   renameDlg.close();
   say('');
   try {
-    // One call rather than create-then-delete, which would leave a window with the project filed
-    // under both names. The rev is the one the listing gave, so a tab that renamed first wins.
     await jsonOf(`/projects/${encodeURIComponent(project.name)}/rename`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -641,10 +536,6 @@ document.getElementById('newProject').addEventListener('click', async () => {
     confirmLabel: 'Make the project',
   });
   if (!takes) return;
-  // The editor mints the document, because the body carries a look block whose parameter list is
-  // the live registry's - this page has no registry and a copy of one would be the second
-  // implementation this repo refuses. So the picked takes travel by id, in pick order, and the
-  // page that can write a valid document writes it.
   location.href = `/edit?new=${takes.map((t) => encodeURIComponent(t.id)).join(',')}`;
 });
 
@@ -656,7 +547,6 @@ try {
   paint();
 }
 
-// Everything a proof tool reads off this page, as the page's own state rather than as a scrape.
 globalThis.__projects = {
   state: () => ({ projects, localTakes }),
   refresh,
@@ -680,7 +570,6 @@ globalThis.__projects = {
     menu: [...el.querySelectorAll('.menu .mi')].map((b) => b.dataset.item),
   })),
 
-  // The take on the canvas right now, which is the whole of what "the skim crosses a cut" means.
   showing: (name) => {
     const el = listEl.querySelector(`.row[data-name="${CSS.escape(name)}"]`);
     return el ? { take: el.dataset.showing, at: Number(el.dataset.at), hole: el.querySelector('.hole').textContent } : null;
@@ -704,7 +593,6 @@ globalThis.__projects = {
     skim.dispatchEvent(new PointerEvent('pointerdown', {
       clientX: r.left + r.width * t, clientY: r.top + r.height / 2, bubbles: true, pointerId: 1,
     }));
-    // The picture only lands after a fetch, so the caller waits on a draw rather than on this.
     return {
       take: el.dataset.showing,
       at: Number(el.dataset.at),
@@ -714,7 +602,6 @@ globalThis.__projects = {
     };
   },
 
-  // Two frames a second apart have almost the same mean, so only the signature sees a change.
   picture(name) {
     const canvas = listEl.querySelector(`.row[data-name="${CSS.escape(name)}"] canvas`);
     if (!canvas) return null;

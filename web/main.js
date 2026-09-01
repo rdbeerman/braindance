@@ -5651,6 +5651,7 @@ const ui = {
   exportSave: document.getElementById('tExportSave'),
   exportTrim: document.getElementById('tExportTrim'),
   ease: document.getElementById('tEase'),
+  clipOptions: document.getElementById('tClipOptions'),
   prevKey: document.getElementById('tPrevKey'),
   nextKey: document.getElementById('tNextKey'),
   deleteKey: document.getElementById('tDeleteKey'),
@@ -5705,6 +5706,9 @@ ui.rotateClip = stripCommand('tRotateClip', 'rotate', 'Turn the selected clip in
 // This is that control: without it the first key on a placement track could not be planted at all
 // and the handles would only ever move a clip once.
 ui.keyClip = stripCommand('tKeyClip', 'key', 'Keyframe the selected clip\'s placement at the playhead');
+
+// Clip commands live in the dynamic controls area.
+ui.clipOptions.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);
 
 /**
  * The clip gizmo: three's own handles, attached to the selected clip's placement group.
@@ -6205,6 +6209,15 @@ ui.lanes.addEventListener('scroll', () => {
   ui.railLanes.scrollTop = ui.lanes.scrollTop;
 });
 
+// The rail has overflow:hidden so wheel events don't scroll it; forward them to the lanes.
+ui.rail.addEventListener('wheel', (e) => {
+  if (ui.lanes.scrollHeight <= ui.lanes.clientHeight) return;
+  const delta = e.deltaY * (e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 22 : 1);
+  if (Math.abs(delta) < Math.abs(e.deltaX)) return;
+  e.preventDefault();
+  ui.lanes.scrollTop += delta;
+}, { passive: false });
+
 /** The splitter. `resize()` is throttled to an animation frame, not run per pointer event. */
 let gripDrag = null;
 let gripFrame = 0;
@@ -6578,6 +6591,8 @@ const rawRateFromSlider = (v) => (
 );
 /** Whether a slider position is inside the detent, the band being a number of pixels. */
 const insideDetent = (v) => {
+  // 92 is the stylesheet's width, and the reading in use whenever the slider is hidden with
+  // its chip: `timingChanged` gets here with no clip selected, where the rect is empty.
   const width = ui.rate.getBoundingClientRect().width || 92;
   return Math.abs(Number(v) - sliderFromRate(1)) <= DETENT_PX / Math.max(1, width);
 };
@@ -6866,8 +6881,7 @@ let selection = null;
 /** The clip the strip has selected, or null. Not `selectedClip`, which is never null. */
 const selectedClipRow = () => clipRow;
 
-// The stack header, one row per clip, and the add row beneath them.
-const CLIP_BAR_H = 26;
+// One row per clip, and the add row beneath them.
 const CLIP_LANE_H = 24;
 const CLIP_ADD_H = 34;
 // The least a clip may be trimmed to, so an edge drag cannot make one that cannot be grabbed.
@@ -6900,8 +6914,6 @@ const clipTrackNames = (clip) => scopeNames('clip')
 
 function laneRows() {
   const rows = [];
-  // The edit's structure at the head of the stack, above the curves that animate it.
-  rows.push({ owner: 'clips', label: 'clips', kind: 'clips', height: CLIP_BAR_H });
   for (const clip of clips) {
     // A clip's own curves nest under its row and fold with it: four clips with a keyed look each
     // is four stacks of lanes, and flat they read as one stack belonging to nobody.
@@ -6981,7 +6993,7 @@ const withLaneClip = (owner, write) => {
 
 // A clip row and the bar above it own no keys, so a lane's key list is empty rather than absent.
 const keysOf = (owner) => {
-  if (owner === 'clips' || owner === 'clip-add' || isClipRow(owner)) return [];
+  if (owner === 'clip-add' || isClipRow(owner)) return [];
   return owner === 'retime' ? retime.keys : (trackOf(owner)?.keys ?? []);
 };
 
@@ -6989,7 +7001,6 @@ const keysOf = (owner) => {
 const clipOf = (owner) => (isClipRow(owner) ? laneClip(owner) : null);
 
 function laneReadout(owner) {
-  if (owner === 'clips') return `${clips.length} of ${CLIP_CEILING}`;
   if (owner === 'clip-add') return '';
   const clip = clipOf(owner);
   // The length rather than the placement: where a clip sits is what its box already says, and
@@ -7135,12 +7146,6 @@ function placeClipBox(box, clip) {
 
 function drawLane(lane, row) {
   if (row.kind === 'clip-add') return;
-  if (row.kind === 'clips') {
-    // These commands act on a selected clip. Add has its own row below the clip stack.
-    lane.classList.add('tclipbar');
-    lane.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);
-    return;
-  }
   if (row.kind === 'clip') {
     // A positive box, unlike the trim chrome on the ruler, which draws the region the export
     // leaves out. `#tMiniRange` is the precedent: a clip is a thing that is there.
@@ -8749,19 +8754,27 @@ for (const [button, delta] of [[ui.addPoint, 1], [ui.dropPoint, -1]]) {
   });
 }
 
-// Only meaningful while a key is selected, so the row goes quiet rather than writing nothing.
-function paintEase() {
-  const selected = Boolean(selection && keysOf(selection.owner).includes(selection.key));
+// The dynamic controls area shows one of two chips: clip options when a clip row is selected,
+// key options when a keyframe is selected, nothing when neither is.
+function paintDynamicControls() {
+  const keySelected = Boolean(selection && keysOf(selection.owner).includes(selection.key));
+  const clipSelected = !keySelected && selectedClipRow() !== null;
+  // Clip options.
+  ui.clipOptions.classList.toggle('off', !clipSelected);
+  // Key options.
   const easeState = selectionEaseState();
   const shapeable = Boolean(easeState);
-  ui.ease.classList.toggle('off', !selected);
+  ui.ease.classList.toggle('off', !keySelected);
   for (const btn of ui.ease.querySelectorAll('button[data-ease]')) btn.disabled = !shapeable;
-  ui.deleteKey.disabled = !selected;
+  ui.deleteKey.disabled = !keySelected;
   ui.addPoint.disabled = pointSides(1, easeState).length === 0;
   ui.dropPoint.disabled = pointSides(-1, easeState).length === 0;
   ui.prevKey.disabled = neighbourKeyTime(-1) === null;
   ui.nextKey.disabled = neighbourKeyTime(1) === null;
 }
+
+// Legacy name for callers that only care about the ease state.
+const paintEase = paintDynamicControls;
 
 /** The nearest key strictly before or after the playhead on the selected track, or null. */
 function neighbourKeyTime(direction) {

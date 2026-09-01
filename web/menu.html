@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#0A0C10" />
 <title>Braindance</title>
 <link rel="icon" href="data:," />
 <style>
@@ -11,7 +12,7 @@
      the system and each page carries its own copy of the names it uses, which is the
      convention library.html already set. */
   :root {
-    --paper: #05070a;
+    --paper: #0A0C10;
     --paper-1: #0d1014;
     --paper-2: #151920;
     --paper-3: #1e232b;
@@ -32,17 +33,16 @@
     --warn: #f0b04a;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; background: var(--paper); color: var(--ink);
-    font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: clip; }
-  body { display: flex; flex-direction: column; }
-
+  html, body { height: 100%; margin: 0; background: #0A0C10; color: var(--ink);
+    font: 12px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body { display: flex; flex-direction: column; min-height: 100vh; }
   .head { flex: none; height: 37px; display: flex; align-items: center;
     padding: 0 15px; background: var(--paper-1); border-bottom: 1px solid var(--line); }
   .head h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.14em; }
 
   /* Centred rather than filling, because there are three of them and a grid stretched
      to the viewport puts the labels at the corners of a large display. */
-  .menu { flex: 1; min-height: 0; overflow-y: auto; display: grid; gap: 16px; padding: 24px 24px 27px;
+  .menu { flex: 1; min-height: 0; display: grid; gap: 16px; padding: 24px 24px 27px;
     align-content: center; justify-content: center; grid-template-columns: minmax(0, 638px); }
 
   /* An anchor rather than a button, so the three destinations are real URLs a
