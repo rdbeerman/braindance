@@ -834,7 +834,8 @@
      because a row of live buttons that write nothing is the same dead affordance the
      handle on a flat segment was. */
   .tease button { padding: 1px 5px; }
-  .tease.off { opacity: 0.45; }
+  /* The dynamic controls: clip options and key options, hidden when their element is not selected. */
+  #tClipOptions.off, #tEase.off { display: none; }
   .tchip b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
   .tchip input[type=range] { width: 92px; flex: none; }
   .tchip select {
@@ -1554,6 +1555,9 @@
         </button>
       </div>
       <div class="tchips">
+        <!-- Clip controls when a clip row is selected. The buttons are created in JS
+             and appended here; the span is empty in the markup. -->
+        <span class="tchip off" id="tClipOptions">clip</span>
         <!-- Applies to whichever key is selected in a lane, except `ends`, which is
              about the track's two outer keys however you got here - see EASE_PRESETS.
              They cover what a handle drag is usually reaching for, and a drag is still

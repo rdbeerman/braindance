@@ -5651,6 +5651,7 @@ const ui = {
   exportSave: document.getElementById('tExportSave'),
   exportTrim: document.getElementById('tExportTrim'),
   ease: document.getElementById('tEase'),
+  clipOptions: document.getElementById('tClipOptions'),
   prevKey: document.getElementById('tPrevKey'),
   nextKey: document.getElementById('tNextKey'),
   deleteKey: document.getElementById('tDeleteKey'),
@@ -5705,6 +5706,9 @@ ui.rotateClip = stripCommand('tRotateClip', 'rotate', 'Turn the selected clip in
 // This is that control: without it the first key on a placement track could not be planted at all
 // and the handles would only ever move a clip once.
 ui.keyClip = stripCommand('tKeyClip', 'key', 'Keyframe the selected clip\'s placement at the playhead');
+
+// Clip commands live in the dynamic controls area.
+ui.clipOptions.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);
 
 /**
  * The clip gizmo: three's own handles, attached to the selected clip's placement group.
@@ -7145,9 +7149,8 @@ function placeClipBox(box, clip) {
 function drawLane(lane, row) {
   if (row.kind === 'clip-add') return;
   if (row.kind === 'clips') {
-    // These commands act on a selected clip. Add has its own row below the clip stack.
+    // The clip command buttons moved to the dynamic controls area in the bar.
     lane.classList.add('tclipbar');
-    lane.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);
     return;
   }
   if (row.kind === 'clip') {
@@ -8758,19 +8761,27 @@ for (const [button, delta] of [[ui.addPoint, 1], [ui.dropPoint, -1]]) {
   });
 }
 
-// Only meaningful while a key is selected, so the row goes quiet rather than writing nothing.
-function paintEase() {
-  const selected = Boolean(selection && keysOf(selection.owner).includes(selection.key));
+// The dynamic controls area shows one of two chips: clip options when a clip row is selected,
+// key options when a keyframe is selected, nothing when neither is.
+function paintDynamicControls() {
+  const keySelected = Boolean(selection && keysOf(selection.owner).includes(selection.key));
+  const clipSelected = !keySelected && selectedClipRow() !== null;
+  // Clip options.
+  ui.clipOptions.classList.toggle('off', !clipSelected);
+  // Key options.
   const easeState = selectionEaseState();
   const shapeable = Boolean(easeState);
-  ui.ease.classList.toggle('off', !selected);
+  ui.ease.classList.toggle('off', !keySelected);
   for (const btn of ui.ease.querySelectorAll('button[data-ease]')) btn.disabled = !shapeable;
-  ui.deleteKey.disabled = !selected;
+  ui.deleteKey.disabled = !keySelected;
   ui.addPoint.disabled = pointSides(1, easeState).length === 0;
   ui.dropPoint.disabled = pointSides(-1, easeState).length === 0;
   ui.prevKey.disabled = neighbourKeyTime(-1) === null;
   ui.nextKey.disabled = neighbourKeyTime(1) === null;
 }
+
+// Legacy name for callers that only care about the ease state.
+const paintEase = paintDynamicControls;
 
 /** The nearest key strictly before or after the playhead on the selected track, or null. */
 function neighbourKeyTime(direction) {

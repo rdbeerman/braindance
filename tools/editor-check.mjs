@@ -168,10 +168,10 @@ const MUTATIONS = {
       "  rows.push({ owner: 'clip-add', label: '', kind: 'clip-add', height: CLIP_ADD_H });",
       '',
     ], [
-      '    lane.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
-      '    lane.append(ui.addClip, ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
+      'ui.clipOptions.append(ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
+      'ui.clipOptions.append(ui.addClip, ui.deleteClip, ui.moveClip, ui.rotateClip, ui.keyClip);',
     ]],
-    fails: 'the plus control returning to the bed beside commands that need a selected clip',
+    fails: 'the plus control returning to the dynamic controls area beside commands that need a selected clip',
   },
 
   'add-clip-skips-post-open-export-guard': {
