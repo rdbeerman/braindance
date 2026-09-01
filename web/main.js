@@ -6879,8 +6879,7 @@ let selection = null;
 /** The clip the strip has selected, or null. Not `selectedClip`, which is never null. */
 const selectedClipRow = () => clipRow;
 
-// The stack header, one row per clip, and the add row beneath them.
-const CLIP_BAR_H = 26;
+// One row per clip, and the add row beneath them.
 const CLIP_LANE_H = 24;
 const CLIP_ADD_H = 34;
 // The least a clip may be trimmed to, so an edge drag cannot make one that cannot be grabbed.
@@ -6913,8 +6912,6 @@ const clipTrackNames = (clip) => scopeNames('clip')
 
 function laneRows() {
   const rows = [];
-  // The edit's structure at the head of the stack, above the curves that animate it.
-  rows.push({ owner: 'clips', label: 'clips', kind: 'clips', height: CLIP_BAR_H });
   for (const clip of clips) {
     // A clip's own curves nest under its row and fold with it: four clips with a keyed look each
     // is four stacks of lanes, and flat they read as one stack belonging to nobody.
@@ -6994,7 +6991,7 @@ const withLaneClip = (owner, write) => {
 
 // A clip row and the bar above it own no keys, so a lane's key list is empty rather than absent.
 const keysOf = (owner) => {
-  if (owner === 'clips' || owner === 'clip-add' || isClipRow(owner)) return [];
+  if (owner === 'clip-add' || isClipRow(owner)) return [];
   return owner === 'retime' ? retime.keys : (trackOf(owner)?.keys ?? []);
 };
 
@@ -7002,7 +6999,6 @@ const keysOf = (owner) => {
 const clipOf = (owner) => (isClipRow(owner) ? laneClip(owner) : null);
 
 function laneReadout(owner) {
-  if (owner === 'clips') return `${clips.length} of ${CLIP_CEILING}`;
   if (owner === 'clip-add') return '';
   const clip = clipOf(owner);
   // The length rather than the placement: where a clip sits is what its box already says, and
@@ -7148,11 +7144,6 @@ function placeClipBox(box, clip) {
 
 function drawLane(lane, row) {
   if (row.kind === 'clip-add') return;
-  if (row.kind === 'clips') {
-    // The clip command buttons moved to the dynamic controls area in the bar.
-    lane.classList.add('tclipbar');
-    return;
-  }
   if (row.kind === 'clip') {
     // A positive box, unlike the trim chrome on the ruler, which draws the region the export
     // leaves out. `#tMiniRange` is the precedent: a clip is a thing that is there.
