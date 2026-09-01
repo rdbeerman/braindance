@@ -806,25 +806,17 @@ async function serveEffectRefusal(req, res) {
   return sendJson(res, { setAside, skipped });
 }
 
-// A refused change, in one shape at every door that refuses one. `stale` and the revision the file
-// holds now are for the caller, which has to tell a file that moved from a document this build
-// cannot read: the first is answered by reading it again and the second never can be. The sentence
-// is for the person, and both travel together.
 const sendRefusal = (res, err) => sendJson(res, {
   error: err.message,
   ...(err.stale ? { stale: true, rev: err.rev } : {}),
 }, 409);
 
 async function writeDocument(req, res, store, name, query) {
-  // The revision travels in the query rather than in the body, because the body is the document and
-  // a document's shape says nothing about which one of two tabs wrote it.
   const rev = query?.get('rev') ?? '';
   if (req.method === 'DELETE') {
     try {
       sendJson(res, await store.remove(name, rev));
     } catch (err) {
-      // Removing what is not there is a 404 rather than an uncaught ENOENT with a path in it. Every
-      // other refusal here is the revision rule, and a revision that has moved is a conflict.
       if (err?.code === 'ENOENT') sendJson(res, { error: `no ${store.kind} named ${name}` }, 404);
       else sendRefusal(res, err);
     }
@@ -833,18 +825,12 @@ async function writeDocument(req, res, store, name, query) {
   try {
     sendJson(res, await store.write(name, await readBody(req), rev));
   } catch (err) {
-    // A document this build cannot faithfully interpret, or one whose revision has moved under the
-    // writer, is a refusal with a reason rather than a 500 - see `DocumentStore.write`.
     sendRefusal(res, err);
   }
 }
 
-// One call rather than three, because a client doing this as create-then-copy-then-delete leaves a
-// window with the document filed under both names and a crash in it leaves two forever.
 async function renameDocument(req, res, store, name) {
   const body = await readBody(req);
-  // Trimmed the way `renameTake` trims, because this name was typed: a trailing space is a slip
-  // rather than a request, and the name rule refuses one.
   try {
     sendJson(res, await store.rename(name, String(body.to ?? '').trim(), body.rev));
   } catch (err) {
@@ -1215,12 +1201,8 @@ const ROUTES = [
   // that an effect id is a directory name and `mkdir` is all it takes.
   { path: '/effect-refusals', pattern: /^\/effect-refusals\/?$/, write: { methods: ['POST'], run: serveEffectRefusal } },
 
-  // The listing is at `/projects/all` and not at the bare namespace, mirroring `/library/all`: this
-  // table is matched before `PAGES`, so a route on `/projects` takes the URL away from the page.
-  // Above `/projects/:name`, which matches this path too and is answered second.
   { path: '/projects/all', pattern: /^\/projects\/all$/, read: (req, res) => listDocuments(res, PROJECTS) },
-  // The lookahead is why a project cannot be called `all`: without it this entry matches
-  // `/projects/all` too, and the reservation below would rest on nothing but this table's order.
+  // The lookahead reserves the name `all` from documents.
   {
     path: '/projects/:name',
     pattern: /^\/projects\/(?!all$)([^/]+)$/,
@@ -1301,11 +1283,7 @@ if (RESERVED_BY_ROUTES.join(',') !== [...RESERVED_EFFECT_IDS].sort().join(',')) 
     + 'fetches it, which is a page that does not boot');
 }
 
-// Each namespace that files documents by name gives its store the names its own literal routes take
-// away: a literal segment beside `/:name` outranks it, so a document filed under that name would be
-// written here and read back as the route - the mistake `/effects/refuse` made once. Derived from
-// the table and handed to the store, so a literal added later reserves its name by existing, and
-// only the namespace that has a collision reserves anything.
+// A literal route beside `/:name` reserves its segment from documents.
 const DOCUMENT_STORES = new Map([['projects', PROJECTS], ['presets', PRESETS], ['deliverables', DELIVERABLES]]);
 for (const entry of ROUTES) {
   const namespace = entry.path.match(/^\/([a-z-]+)\/:name$/)?.[1];
@@ -1319,8 +1297,6 @@ for (const entry of ROUTES) {
     .filter((segment) => segment !== undefined)
     .map((segment) => [segment, `/${namespace}/${segment}`]);
   store.reserve(taken);
-  // The store refusing a name is only as good as this entry not matching it first. Held rather than
-  // built from the table, because a pattern derived from the table is the table checking itself.
   for (const [segment] of taken) {
     if (entry.pattern.test(`/${namespace}/${segment}`)) {
       throw new Error(`${entry.path} matches /${namespace}/${segment}, which is a route beside it: the `
@@ -1337,8 +1313,6 @@ const PAGES = {
   '/': 'menu.html',
   '/record': 'index.html',
   '/edit': 'index.html',
-  // The store this page draws is called the library everywhere it is implemented, and `gallery`
-  // named nothing but the URL it was served at.
   '/library': 'library.html',
   '/projects': 'projects.html',
   // The program-out source, which OBS opens as a browser source: the same renderer drawing the

@@ -732,9 +732,7 @@ export const ABSENT_REV = 'absent';
 const revOf = (text) => `sha256:${createHash('sha256').update(text).digest('hex')}`;
 
 export class DocumentStore {
-  // Changes to one name run one at a time, so the revision check and the write it guards cannot be
-  // split by another change in this process. This is the whole of the guarantee: one process owns
-  // these directories, and a second server pointed at the same one would not see this queue at all.
+  // Serialises writes to each name, so the revision check and the write it guards are atomic.
   #inFlight = new Map();
 
   /** `builtinDir` is read and never written, which is what makes saving over a built-in fork it. */
@@ -747,24 +745,16 @@ export class DocumentStore {
     this.reservedBy = new Map();
   }
 
-  /**
-   * Takes names away from this store, each against the route that took it. Handed in rather than
-   * known here, because what a name collides with is the server's business and not the store's.
-   */
+  /** Takes names away from this store, each against the route that took it. */
   reserve(taken) {
     for (const [name, why] of taken) this.reservedBy.set(name, why);
   }
 
-  /**
-   * Queues a change behind every change already queued on any name it touches. A rename holds both
-   * of its names, and holding two cannot deadlock because both tails are set on the tick the change
-   * is queued - there is no window where one is held and the other is not.
-   */
+  /** Queues a change behind every change already queued on any name it touches. */
   #serialise(names, run) {
     const held = [...new Set(names)].sort();
     const mine = Promise.all(held.map((n) => this.#inFlight.get(n) ?? Promise.resolve())).then(run);
-    // What the next writer waits on swallows this one's failure, or one refusal would refuse every
-    // change queued behind it. The caller still gets the rejection, off `mine`.
+    // Swallows failures so one refusal does not block the queue.
     const settled = mine.then(() => {}, () => {});
     for (const n of held) this.#inFlight.set(n, settled);
     settled.then(() => {
@@ -773,11 +763,7 @@ export class DocumentStore {
     return mine;
   }
 
-  /**
-   * Where a document is filed. The name rule lists what may not be in a name and a list can be
-   * short, so the path it produces is checked too: whatever the name was, the file has to be a
-   * direct entry of this store's own directory.
-   */
+  /** Where a document is filed. Checks both the name rule and that the path stays in this store. */
   pathFor(name) {
     const refused = documentNameRefusal(this.kind, name);
     if (refused) throw new Error(refused);
@@ -855,10 +841,7 @@ export class DocumentStore {
     }
   }
 
-  /**
-   * Holds a change to the revision it was made against, and answers with what is on disk now. Two
-   * tabs holding one document are then answered by the file rather than by whichever wrote last.
-   */
+  /** Refuses when the revision a change was made against has moved. */
   async #heldToRev(name, rev, act) {
     if (typeof rev !== 'string' || rev === '') {
       throw new Error(
@@ -869,8 +852,6 @@ export class DocumentStore {
     }
     const current = await this.currentRev(name);
     if (rev === current) return current;
-    // Marked as well as worded: a caller has to tell a file that moved from a document this build
-    // cannot read, because one is answered by reloading and the other never can be.
     const moved = (message) => Object.assign(new Error(message), { stale: true, rev: current });
     if (current === ABSENT_REV) {
       throw moved(
@@ -890,12 +871,7 @@ export class DocumentStore {
     );
   }
 
-  /**
-   * Writes a document, after checking this build can interpret it and that the revision it was made
-   * against is still the one on disk. A version that is present and is not this one is refused,
-   * never restamped: spreading `PROJECT_VERSION` over a v2 document kept every v2 field under a v1
-   * stamp, and the loader never saw a wrong version.
-   */
+  /** Writes a document, after checking the version and the revision. */
   async write(name, body, rev) {
     if (body?.version !== undefined && body.version !== this.version) {
       throw new Error(
@@ -909,16 +885,10 @@ export class DocumentStore {
       await this.#heldToRev(name, rev, 'write');
       await mkdir(this.dir, { recursive: true });
       const text = `${JSON.stringify({ ...body, version: this.version }, null, 2)}\n`;
-      // Beside the document rather than derived from its name, which is allowed to be as long as a
-      // directory entry gets - a scratch built out of it overruns by its own suffix. The write's own
-      // number, because a fixed `.tmp` is shared by two overlapping writes and the first move takes
-      // it out from under the second.
       const seq = ++this.writes;
       const scratch = join(this.dir, `.write-${seq}.tmp`);
       await writeFile(scratch, text);
       try {
-        // The revision check above is what decides whether this replaces anything, and it ran inside
-        // the queue with this name held, so nothing can have appeared under it since.
         await rename(scratch, path);
       } finally {
         await unlink(scratch).catch(() => {});
@@ -930,8 +900,6 @@ export class DocumentStore {
   async remove(name, rev) {
     const path = this.pathFor(name);
     return this.#serialise([name], async () => {
-      // A delete names its revision for the same reason a write does: removing a document somebody
-      // else has open loses their work as completely as overwriting it.
       await this.#heldToRev(name, rev, 'delete');
       this.writes++;
       await unlink(path);
@@ -939,11 +907,7 @@ export class DocumentStore {
     });
   }
 
-  /**
-   * Moves a document to a new name. Both names are held for the whole move, so the destination is
-   * checked and claimed without a window between the two - which is what a create of that same name
-   * would otherwise slip through, destroying the document this rename was carrying.
-   */
+  /** Moves a document to a new name, holding both names for the whole move. */
   async rename(name, to, rev) {
     const fromPath = this.pathFor(name);
     const toPath = this.pathFor(to);
