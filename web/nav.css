@@ -30,6 +30,23 @@
 .appback:hover { background: var(--paper-2); }
 .appback .arrow { color: var(--dim); }
 
+.surfaces { align-self: stretch; display: flex; align-items: stretch; }
+.surface {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border-right: 1px solid var(--line);
+  color: var(--dim);
+  text-decoration: none;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.surface:hover { color: var(--ink); background: var(--paper-2); }
+.surface[aria-current="page"] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.surface:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
 .appmenus { align-self: stretch; display: flex; align-items: stretch; }
 .appmenu { position: relative; display: flex; }
 .appmenu-trigger {
@@ -110,6 +127,7 @@ body.program-out .appbar { display: none; }
 
 @media (max-width: 620px) {
   .appback { min-width: 78px; }
+  .surface { padding-inline: 9px; }
   .appmenu-trigger { min-width: 48px; padding-inline: 7px; }
   .appstatus { max-width: 36vw; }
 }
