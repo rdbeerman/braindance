@@ -1299,6 +1299,35 @@ rules and reddens the 520px and collapsed-panel rows. These are separate mutatio
 single broken sidebar could otherwise redden all three claims without saying which contract the
 instrument observed.
 
+**Section 24's eight controls each take one half of the fly out.** Holding a fly key translates
+the camera and its orbit pivot by the same vector out of `advanceNavigation`, and that is four
+claims rather than one, so each control removes exactly one of them and the section says which row
+answers it.
+
+- **`fly-leaves-the-pivot`** drops the `controls.target` half of the translation. The camera still
+  flies and the row about the view direction stays green; what changes is that the orbit's radius
+  grows instead of the standpoint moving, so a drag afterwards swings the cloud across the frame.
+- **`fly-up-is-the-cameras-up`** swaps `web/fly.js`'s pole for the camera's own local Y. Those are
+  the same vector while the camera is level, which is why the E row poses it at `(0, 2, 0)` looking
+  down at the pivot first and asserts the pitch is real before it flies.
+- **`fly-moves-while-typing`** moves the keydown block above the typing guard, so a `w` in a
+  filename flies the camera while it is being typed.
+- **`fly-survives-blur`** removes the listener that releases every held key when the page loses
+  focus. A key released outside the page never arrives, so the camera then flies until something
+  else stops it.
+- **`fly-ignores-the-program-camera`** takes `controls.enabled` out of the gate, which is the
+  program camera, a gizmo drag, a node drag and the crop drag in one term.
+- **`fly-never-settles`** removes the `orbitSettling` the release arms, so a flight ends on the
+  draft-quality frame the hold was redrawing rather than on an accurate seek.
+- **`fly-rehomes-reset`** calls `saveState()` after the translation. It is `pick-rehomes-reset`'s
+  defect through a second door: Reset stops going anywhere known, which on the Pi's collapsed panel
+  is the only way back.
+- **`fly-ignores-shift`** freezes the multiplier at one.
+
+**Two of the eight plant in `web/fly.js` and the rest in `web/main.js`**, which is the split the
+module exists for. The pole and the multiplier are arithmetic `test/fly.test.mjs` states in
+longhand under bare node, and what is left for a browser to answer is whether the page uses them.
+
 **Whole clip is driven through both user paths.** Section 3 narrows the trim, selects
 **Output > Whole clip**, narrows it again, and presses Option-X. Both must restore
 `{ in: 0, out: null }`; `whole-clip-does-nothing` leaves the history write in place while removing

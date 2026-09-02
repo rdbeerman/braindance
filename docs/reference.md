@@ -54,7 +54,11 @@ halves, and [SECURITY.md](../SECURITY.md) has the threat model.
 
 ## Viewer and timeline controls
 
-Drag to orbit, scroll to zoom, right-drag to pan, `H` hides the panel.
+Drag to orbit, scroll to zoom, right-drag to pan, `H` hides the panel. `W` `A` `S` `D` fly the
+camera, `Q` and `E` take it down and up, and holding shift makes all six three times faster.
+`W` follows the view direction and `Q`/`E` the room's vertical, so a pitched camera still
+climbs straight up. Flying carries the orbit pivot with the camera, so a drag afterwards
+still turns about the same subject rather than about where you set off from.
 
 **The orbit turns about whatever you pressed on.** A left press reads the depth under the
 pointer and moves the pivot along the view axis to that range, so orbiting a subject four metres
@@ -68,9 +72,8 @@ on the smear the eye is aimed at.
 
 The ruler shows a *window* of the clip, because a fifteen-minute take across one screen puts
 a keyframe against gradations forty times coarser than the thing being placed. Scroll to
-zoom about the pointer, `+`/`-` about the playhead, `,`/`.` to pan, `F` to fit the clip, `Z`
-to frame the trim. The overview underneath is always the whole clip: drag its box to pan, click
-to go there.
+zoom about the pointer, `+`/`-` about the playhead, `,`/`.` to pan, `F` to fit the clip. The
+overview underneath is always the whole clip: drag its box to pan, click to go there.
 
 Press `I` and `O` to set the trim at the playhead. Choose **Output > Whole clip**, or press
 Option-X, to restore `{ in: 0, out: null }`. The null end means the range continues to the end

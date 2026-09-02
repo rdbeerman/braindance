@@ -101,6 +101,97 @@ const MUTATIONS = {
     ]],
   },
 
+  // ---- section 24, the fly keys ----
+  // The pivot left behind, so the flight changes the orbit's radius instead of the standpoint.
+  'fly-leaves-the-pivot': {
+    file: 'web/main.js',
+    edits: [[
+      '  freeCamera.position.add(flyMove);\n'
+      + '  // The pivot travels with the camera. `update()` rebuilds the position out of the target, so\n'
+      + '  // moving the camera alone would change the orbit\'s radius instead of where you are standing.\n'
+      + '  controls.target.add(flyMove);',
+      '  freeCamera.position.add(flyMove);',
+    ]],
+    fails: 'the pivot flies with it, so what moves is the standpoint and not the orbit\'s radius',
+  },
+
+  // Q and E off the camera's own vertical rather than the room's, which is right only while the
+  // camera is level and wrong the moment anything is being looked down at.
+  'fly-up-is-the-cameras-up': {
+    file: 'web/fly.js',
+    edits: [[
+      '    if (push.pole) out.addScaledVector(flyAxis.copy(up).normalize(), push.pole);',
+      '    if (push.pole) out.addScaledVector(flyAxis.set(0, 1, 0).applyQuaternion(quaternion), push.pole);',
+    ]],
+    fails: 'E climbs the room\'s vertical rather than the camera\'s, however the camera is aimed',
+  },
+
+  // The fly read before the typing guard, so a name with a w in it flies the camera.
+  'fly-moves-while-typing': {
+    file: 'web/main.js',
+    edits: [
+      [
+        '  // The recorder\'s viewport orbits the same camera, so this sits above the clip guard below.\n'
+        + '  // A repeat is harmless: the set already holds the code.\n'
+        + '  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {\n'
+        + '    e.preventDefault();\n    flyHeld.add(e.code);\n    return;\n  }\n',
+        '',
+      ],
+      [
+        '  flyFast = e.shiftKey;\n  if (isTyping(e.target)) return;',
+        '  flyFast = e.shiftKey;\n'
+        + '  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {\n'
+        + '    e.preventDefault();\n    flyHeld.add(e.code);\n    return;\n  }\n'
+        + '  if (isTyping(e.target)) return;',
+      ],
+    ],
+    fails: 'a fly key does nothing while a control holds the keyboard',
+  },
+
+  // A key released outside the page never arrives, so without this the camera flies for ever.
+  'fly-survives-blur': {
+    file: 'web/main.js',
+    edits: [["addEventListener('blur', clearFlyKeys);\n", '']],
+    fails: 'and losing the page releases the key, so a held fly key stops',
+  },
+
+  // The half of the gate that is the program camera, a gizmo drag and a node drag at once.
+  'fly-ignores-the-program-camera': {
+    file: 'web/main.js',
+    edits: [[
+      'const flying = () => flyHeld.size > 0 && controls.enabled && !exporting;',
+      'const flying = () => flyHeld.size > 0 && !exporting;',
+    ]],
+    fails: 'and nothing flies under the program camera, whose pose is the document\'s',
+  },
+
+  // The release never arms the accurate seek, so the flight ends on a draft-quality frame.
+  'fly-never-settles': {
+    file: 'web/main.js',
+    edits: [['  else if (flyWasHeld) orbitSettling = true;\n', '']],
+    fails: 'and releasing the last key lands the accurate frame',
+  },
+
+  // Reset re-homed on wherever the flight ended, which is the same defect `pick-rehomes-reset`
+  // plants through the pivot: the one control for getting un-lost stops going anywhere known.
+  'fly-rehomes-reset': {
+    file: 'web/main.js',
+    edits: [[
+      '  controls.target.add(flyMove);\n}',
+      '  controls.target.add(flyMove);\n  controls.saveState();\n}',
+    ]],
+    fails: 'and Reset still goes home after a flight rather than to wherever the flight ended',
+  },
+
+  'fly-ignores-shift': {
+    file: 'web/fly.js',
+    edits: [[
+      '  const speed = FLY_SPEED_MPS * (fast ? FLY_FAST : 1);',
+      '  const speed = FLY_SPEED_MPS;',
+    ]],
+    fails: 'holding shift flies faster, by about the three times it claims',
+  },
+
   // ---- section 22, the clip a person adds, selects and deletes ----
   // A head trim that moves the clip and lets the footage travel with it, which is a slip and not
   // a trim. Must redden 'the footage under what is left holds still', alone.
@@ -1413,7 +1504,7 @@ const MUTATIONS = {
     edits: [[
       '  if (!timeline || timeline.playing || exporting) {\n'
       + '    draftWanted = null;\n    orbitRedrawWanted = false;\n    orbitSettling = false;\n'
-      + '    gizmoWriteWanted = false;\n    return;\n  }',
+      + '    flyWasHeld = false;\n    gizmoWriteWanted = false;\n    return;\n  }',
       '  if (!timeline || timeline.playing || exporting) return;',
     ]],
   },
@@ -6355,22 +6446,6 @@ try {
   await settle();
   check((await page.evaluate('__kinect.editor.view.window()')).whole,
     'f fits the whole clip back on the ruler', JSON.stringify(await page.evaluate('__kinect.editor.view.window()')));
-  await page.evaluate('__kinect.timeline.transport().seek(4)');
-  await settle();
-  await focusStage();
-  await page.keyboard.press('i');
-  await page.evaluate('__kinect.timeline.transport().seek(9)');
-  await settle();
-  await page.keyboard.press('o');
-  await page.keyboard.press('z');
-  await settle();
-  const framed = await page.evaluate('__kinect.editor.view.window()');
-  check(framed.startSec < 4 && framed.endSec > 9 && framed.spanSec < framed.duration / 2,
-    'z frames the trimmed range, which is the window an edit is actually made in',
-    `${framed.startSec.toFixed(2)}s..${framed.endSec.toFixed(2)}s around in 4s / out 9s`);
-  await page.evaluate('__kinect.editor.setClipRange(0, null)');
-  await page.evaluate('__kinect.editor.view.fit()');
-  await settle();
 
   console.log('\n[11] the strip is bounded, and the splitter is what bounds it');
   const LANED = ['bloom', 'grain.amount', 'raster.amount', 'rgbsplit.amount', 'glitch.amount', 'trails', 'rim',
@@ -9732,6 +9807,231 @@ try {
       'and a modified left press leaves it alone, because OrbitControls uses that press to pan',
       `${modified.after.target.map((v) => v.toFixed(6)).join(', ')} against `
       + `${modified.before.target.map((v) => v.toFixed(6)).join(', ')}`);
+  }
+
+  // -------------------------------------------------------------------------------------------
+  console.log('\n[24] the fly keys');
+  {
+    await page.evaluate('__kinect.timeline.transport().pause()');
+    await page.evaluate('__kinect.timeline.transport().seek(4.0)');
+    await settle();
+
+    // The damping residual is paid off before every reading, because an orbit still travelling
+    // reads here as flight - `docs/instruments.md`, "A settled flag that could not see the end
+    // of what it was settling".
+    const rest = () => page.evaluate(`(() => {
+      const k = __kinect;
+      const damped = k.controls.enableDamping;
+      k.controls.enableDamping = false;
+      k.controls.update(0);
+      k.controls.enableDamping = damped;
+      const c = k.freeCamera;
+      return {
+        p: c.position.toArray(),
+        up: c.up.clone().normalize().toArray(),
+        fwd: c.getWorldDirection(new (c.position.constructor)()).toArray(),
+        target: k.controls.target.toArray(),
+        offset: k.controls.target.clone().sub(c.position).toArray(),
+        redraws: k.timeline.counters.navigationRedraws,
+        seeks: k.timeline.counters.seeks,
+        autoRotate: k.controls.autoRotate,
+        enabled: k.controls.enabled,
+        free: k.viewCamera() === c,
+      };
+    })()`);
+
+    /**
+     * Hold `keys` for about `ms` and report what the camera did over it. `seeks` is read between
+     * the last frame of the hold and the release, so the release's own seek can be told from a
+     * redraw that fell back to one.
+     */
+    const fly = async (keys, { ms = 400, shift = false, focus = true } = {}) => {
+      if (focus) await focusStage();
+      const before = await rest();
+      const began = Date.now();
+      if (shift) await page.keyboard.down('Shift');
+      for (const key of keys) await page.keyboard.down(key);
+      await new Promise((r) => setTimeout(r, ms));
+      const heldSeeks = await page.evaluate('__kinect.timeline.counters.seeks');
+      for (const key of keys) await page.keyboard.up(key);
+      if (shift) await page.keyboard.up('Shift');
+      const elapsed = (Date.now() - began) / 1000;
+      await settle();
+      const after = await rest();
+      const moved = after.p.map((v, i) => v - before.p[i]);
+      return { before, after, moved, elapsed, heldSeeks, length: Math.hypot(...moved) };
+    };
+
+    const armed = await rest();
+    // The trail is a precondition and not decoration: `redrawNow` falls back to a full seek while
+    // one is up, which would take the seek pair below away without saying so.
+    const trails = await page.evaluate("__kinect.params.get('trails')");
+    check(armed.enabled && armed.free && armed.autoRotate === false && !(trails > 0),
+      'control: the free camera is navigated, its orbit is on, the turntable is off and no trail is up',
+      `enabled ${armed.enabled}, free camera ${armed.free}, autoRotate ${armed.autoRotate}, `
+      + `trails ${trails}`);
+
+    const w = await fly(['w']);
+    const along = w.moved.reduce((n, v, i) => n + v * w.before.fwd[i], 0);
+    const across = Math.hypot(...w.moved.map((v, i) => v - along * w.before.fwd[i]));
+    note('holding W at a parked playhead',
+      `${w.length.toFixed(3)} m over ${w.elapsed.toFixed(2)}s held, `
+      + `${w.after.redraws - w.before.redraws} navigation redraws, `
+      + `${w.heldSeeks - w.before.seeks} seeks during the hold`);
+    check(along > 0.1 && along < 0.8,
+      'holding W flies the camera along the view direction',
+      `${along.toFixed(3)} m along the way it was pointing, over ${w.elapsed.toFixed(2)}s held`);
+    check(w.length > 0 && across < 0.05 * w.length,
+      '  and next to nothing across it, so it flies the view rather than a world axis',
+      `${across.toFixed(4)} m across a ${w.length.toFixed(3)} m flight`);
+
+    const offsetDrift = Math.max(...w.after.offset.map((v, i) => Math.abs(v - w.before.offset[i])));
+    check(offsetDrift < 1e-4,
+      'the pivot flies with it, so what moves is the standpoint and not the orbit\'s radius',
+      `worst axis of target minus position moved ${offsetDrift.toExponential(2)} m over `
+      + `${w.length.toFixed(3)} m of flight`);
+
+    check(w.after.redraws > w.before.redraws,
+      'and the picture was redrawn while it flew, out of the animation loop',
+      `${w.after.redraws - w.before.redraws} navigation redraws over ${w.elapsed.toFixed(2)}s`);
+
+    check(w.heldSeeks === w.before.seeks,
+      'control: a flight redraws and does not seek, so the seek below is the release and not the hold',
+      `${w.heldSeeks - w.before.seeks} seeks over the hold, with trails at ${trails} - a trail or `
+      + 'a live datamosh turns every redraw into a seek and takes this pair away');
+    check(w.after.seeks > w.heldSeeks,
+      'and releasing the last key lands the accurate frame',
+      `${w.after.seeks - w.heldSeeks} seeks after the release, against `
+      + `${w.heldSeeks - w.before.seeks} during the hold`);
+
+    const fast = await fly(['w'], { shift: true });
+    const slowRate = w.length / w.elapsed;
+    const fastRate = fast.length / fast.elapsed;
+    check(slowRate > 0 && fastRate > 1.8 * slowRate,
+      'holding shift flies faster, by about the three times it claims',
+      `${fastRate.toFixed(3)} m per second held against ${slowRate.toFixed(3)}, `
+      + `a ratio of ${(fastRate / Math.max(slowRate, 1e-9)).toFixed(2)} over `
+      + `${fast.length.toFixed(3)} m and ${w.length.toFixed(3)} m`);
+
+    // Pitched hard down, which is the pose that tells the room's vertical from the camera's.
+    const pitched = await page.evaluate(`(() => {
+      const k = __kinect, c = k.freeCamera;
+      const was = { p: c.position.toArray(), t: k.controls.target.toArray() };
+      c.position.set(0, 2, 0);
+      k.controls.target.set(0, 0, -2.2);
+      k.controls.update(0);
+      c.updateMatrixWorld(true);
+      const localY = new (c.position.constructor)(0, 1, 0).applyQuaternion(c.quaternion);
+      return { was, pitch: localY.dot(c.up.clone().normalize()) };
+    })()`);
+    check(pitched.pitch < 0.9,
+      'control: the camera is pitched, so its own vertical is not the room\'s',
+      `the camera's local Y dots the pole at ${pitched.pitch.toFixed(3)}`);
+    const climbed = await fly(['e']);
+    const climb = climbed.moved.reduce((n, v, i) => n + v * climbed.before.up[i], 0)
+      / Math.max(climbed.length, 1e-9);
+    check(climbed.length > 0.05 && climb > 0.99,
+      'E climbs the room\'s vertical rather than the camera\'s, however the camera is aimed',
+      `${climbed.length.toFixed(3)} m, ${climb.toFixed(4)} of it along the pole`);
+    await page.evaluate(`(() => {
+      const k = __kinect, c = k.freeCamera;
+      const was = ${JSON.stringify(pitched.was)};
+      c.position.fromArray(was.p);
+      k.controls.target.fromArray(was.t);
+      k.controls.update(0);
+      c.updateMatrixWorld(true);
+    })()`);
+    await settle();
+
+    // `tRate` and not a text field: the guard is on the tag name, so a slider with the keyboard
+    // is the same case as a name being typed into, and it needs no dialog opened over the stage.
+    await page.evaluate("document.getElementById('tRate').focus()");
+    const focused = await page.evaluate('document.activeElement && document.activeElement.id');
+    const whileTyping = await fly(['w'], { focus: false });
+    check(focused === 'tRate',
+      'control: a panel control holds the keyboard, which is the case the typing guard is about',
+      `the focus is on ${JSON.stringify(focused)}`);
+    check(whileTyping.length < 1e-6,
+      'a fly key does nothing while a control holds the keyboard',
+      `${whileTyping.length.toExponential(2)} m over ${whileTyping.elapsed.toFixed(2)}s held`);
+    await focusStage();
+
+    // A key released outside the page never arrives, so the blur has to be the release.
+    const beforeBlur = await rest();
+    await page.keyboard.down('w');
+    await new Promise((r) => setTimeout(r, 250));
+    const atBlur = await page.evaluate('__kinect.freeCamera.position.toArray()');
+    await page.evaluate("dispatchEvent(new Event('blur'))");
+    await new Promise((r) => setTimeout(r, 300));
+    const settledAfterBlur = await page.evaluate('__kinect.freeCamera.position.toArray()');
+    await new Promise((r) => setTimeout(r, 300));
+    const laterAfterBlur = await page.evaluate('__kinect.freeCamera.position.toArray()');
+    await page.keyboard.up('w');
+    await settle();
+    const flewBeforeBlur = Math.hypot(...atBlur.map((v, i) => v - beforeBlur.p[i]));
+    const flewAfterBlur = Math.hypot(...laterAfterBlur.map((v, i) => v - settledAfterBlur[i]));
+    check(flewBeforeBlur > 0.05,
+      'control: the hold was flying when the window lost the page',
+      `${flewBeforeBlur.toFixed(3)} m over the 250 ms before the blur`);
+    check(flewAfterBlur < 0.01,
+      'and losing the page releases the key, so a held fly key stops',
+      `${flewAfterBlur.toFixed(4)} m over the 300 ms after the blur had settled`);
+
+    const onProgram = await page.evaluate(`(() => {
+      const k = __kinect;
+      k.setViewCamera(k.programCamera);
+      return { enabled: k.controls.enabled, p: k.freeCamera.position.toArray() };
+    })()`);
+    await focusStage();
+    await page.keyboard.down('w');
+    await new Promise((r) => setTimeout(r, 400));
+    const underProgram = await page.evaluate('__kinect.freeCamera.position.toArray()');
+    // Released before the free camera comes back, or the restored gate flies it on the next frame.
+    await page.keyboard.up('w');
+    await page.evaluate('__kinect.setViewCamera(__kinect.freeCamera)');
+    await settle();
+    check(onProgram.enabled === false,
+      'control: the program camera turns the orbit off, which is the gate the fly reads',
+      `controls.enabled is ${onProgram.enabled} under the program camera`);
+    check(Math.hypot(...underProgram.map((v, i) => v - onProgram.p[i])) < 1e-6,
+      'and nothing flies under the program camera, whose pose is the document\'s',
+      `${Math.hypot(...underProgram.map((v, i) => v - onProgram.p[i])).toExponential(2)} m over a 400 ms hold`);
+
+    // Reset first, so "home" is a pose the camera is standing at rather than one it has left.
+    await page.evaluate("document.getElementById('menuCameraReset').click()");
+    await settle();
+    const home = await rest();
+    const flownFromHome = await fly(['w']);
+    await page.evaluate("document.getElementById('menuCameraReset').click()");
+    await settle();
+    const rehomed = await rest();
+    check(flownFromHome.length > 0.1,
+      'control: the camera flew away from home before Reset was pressed',
+      `${flownFromHome.length.toFixed(3)} m`);
+    check(rehomed.p.every((v, i) => Math.abs(v - home.p[i]) < 1e-6)
+      && rehomed.target.every((v, i) => Math.abs(v - home.target[i]) < 1e-6),
+      'and Reset still goes home after a flight rather than to wherever the flight ended',
+      `${rehomed.p.map((v) => v.toFixed(4)).join(', ')} against a home of `
+      + `${home.p.map((v) => v.toFixed(4)).join(', ')}`);
+
+    await page.evaluate('__kinect.editor.setClipRange(4, 9)');
+    await settle();
+    await focusStage();
+    const ruledBefore = await page.evaluate('__kinect.editor.view.window()');
+    await page.keyboard.press('z');
+    await settle();
+    const ruledAfter = await page.evaluate('__kinect.editor.view.window()');
+    check(await page.evaluate('typeof __kinect.editor.view.frame') === 'undefined',
+      'the ruler has no framing call left for a key to reach',
+      `view.frame is ${await page.evaluate('typeof __kinect.editor.view.frame')}`);
+    check(JSON.stringify(ruledBefore) === JSON.stringify(ruledAfter),
+      'and z leaves the ruler alone, with a trim set that it would have framed',
+      `${JSON.stringify(ruledAfter)} with the trim at 4s..9s`);
+    await page.evaluate('__kinect.editor.setClipRange(0, null)');
+    await page.evaluate('__kinect.editor.view.fit()');
+    // Nothing held on the way out, whatever a row above left behind.
+    await page.evaluate("dispatchEvent(new Event('blur'))");
+    await settle();
   }
 
   // -------------------------------------------------------------------------------------------

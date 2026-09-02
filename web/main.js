@@ -17,6 +17,7 @@ import {
   handleRefusal, foldRefusal, foldFreeX, retimeSourceSecAt, retimeProgramSecAt,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
+import { isFlyKey, flyStep } from './fly.js';
 import { verticalFovForFocalLength, focalLengthForVerticalFov } from './lens.js';
 import {
   EXPORT_SIZES, DEFAULT_EXPORT_SIZE, reduceAspect, exportAspects, sizesForAspect,
@@ -4357,8 +4358,35 @@ function renderProgramFrame(t) {
 // Navigation's own clock, kept out of the seam.
 let lastNavTime = 0;
 
+// Which fly keys are down, and whether shift is with them. Written from events and read by the
+// loop, because nothing but the loop may start a redraw.
+const flyHeld = new Set();
+let flyFast = false;
+// Wall clock at the previous fly frame, or 0 when the hold has not started. The free camera is
+// interactive, so it takes real seconds where auto-orbit takes the program delta.
+let flyLastAt = 0;
+const flyMove = new THREE.Vector3();
+
+/** Whether a held fly key may move the camera. One gate for the program camera, a gizmo or
+ *  node drag, and an export - each of those is already a reason the orbit stands down. */
+const flying = () => flyHeld.size > 0 && controls.enabled && !exporting;
+
+/** One frame of flight: the camera and its pivot translate by the same vector. */
+function advanceFly() {
+  if (!flying()) { flyLastAt = 0; return; }
+  const now = performance.now();
+  const dt = flyLastAt === 0 ? 0 : (now - flyLastAt) / 1000;
+  flyLastAt = now;
+  flyStep(flyHeld, flyFast, dt, freeCamera.quaternion, freeCamera.up, flyMove);
+  freeCamera.position.add(flyMove);
+  // The pivot travels with the camera. `update()` rebuilds the position out of the target, so
+  // moving the camera alone would change the orbit's radius instead of where you are standing.
+  controls.target.add(flyMove);
+}
+
 // Auto-orbit gets the program delta, so the same orbit renders the same at any speed.
 function advanceNavigation(t) {
+  advanceFly();
   controls.update(Math.max(0, t - lastNavTime));
   lastNavTime = t;
 }
@@ -6461,12 +6489,16 @@ const SHORTCUTS = 'space play/pause · arrows step a frame, with shift a second 
   + 'home/end · i/o set in/out, with shift jump to them · option-x uses the whole clip · '
   + 'del removes the selected key · '
   + 'm marks, [/] jump to the previous and next mark · '
-  + '+/- zoom the ruler, ,/. pan it, f fits the clip, z frames in..out · '
+  + '+/- zoom the ruler, ,/. pan it, f fits the clip · '
+  + 'wasd fly, q/e down and up, shift faster · '
   + 'g moves and turns the selected clip · '
   + 'cmd-z undoes · h hides the panel';
 
 /** The editor's keyboard, and the guard that has to come with it. */
 addEventListener('keydown', (e) => {
+  // Above the typing guard: shift on its own arrives as a keydown, and releasing it as a keyup
+  // with `shiftKey` already false.
+  flyFast = e.shiftKey;
   if (isTyping(e.target)) return;
   if (e.defaultPrevented) return;
 
@@ -6477,6 +6509,13 @@ addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
     e.preventDefault();
     history.undo();
+    return;
+  }
+  // The recorder's viewport orbits the same camera, so this sits above the clip guard below.
+  // A repeat is harmless: the set already holds the code.
+  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    flyHeld.add(e.code);
     return;
   }
   if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey && !e.altKey && !EDITING && ui.recGo && !ui.recGo.disabled) {
@@ -6575,14 +6614,24 @@ addEventListener('keydown', (e) => {
     case ',': case '<': e.preventDefault(); if (view.panBy(-0.25)) viewChanged(); return;
     case '.': case '>': e.preventDefault(); if (view.panBy(0.25)) viewChanged(); return;
     case 'f': case 'F': e.preventDefault(); if (view.fit()) viewChanged(); return;
-    case 'z': case 'Z':
-      e.preventDefault();
-      if (view.frame(clipIn, clipOut ?? view.duration)) viewChanged();
-      return;
     case '?': e.preventDefault(); say(SHORTCUTS); return;
     default:
   }
 });
+
+/** A key released outside the page never arrives, so losing the page releases everything. */
+function clearFlyKeys() {
+  flyHeld.clear();
+}
+
+// Not behind the typing guard: a key released after the focus moved into an input would
+// otherwise stay held for ever.
+addEventListener('keyup', (e) => {
+  flyFast = e.shiftKey;
+  flyHeld.delete(e.code);
+});
+addEventListener('blur', clearFlyKeys);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearFlyKeys(); });
 
 /** How wide the 1.00x detent is, in pixels of the control it lives on. */
 const DETENT_PX = 3;
@@ -6740,6 +6789,8 @@ let orbiting = false;
 let orbitSettling = false;
 // A flag rather than a position, since reading the transport from a control event is the loop.
 let orbitRedrawWanted = false;
+// Whether a fly key was held on the previous frame, so the release can be seen at all.
+let flyWasHeld = false;
 // Through `onNav`, because the object does not outlive a change of navigation's up.
 onNav('start', () => { orbiting = true; orbitSettling = false; });
 onNav('change', () => {
@@ -6774,9 +6825,16 @@ function pumpParkedDraft() {
     draftWanted = null;
     orbitRedrawWanted = false;
     orbitSettling = false;
+    flyWasHeld = false;
     gizmoWriteWanted = false;
     return;
   }
+  // A hold takes the same two paths a pointer orbit does: a draft-quality redraw per frame, and
+  // one accurate seek on the frame it ends.
+  const flyingNow = flying();
+  if (flyingNow) orbitRedrawWanted = true;
+  else if (flyWasHeld) orbitSettling = true;
+  flyWasHeld = flyingNow;
   // Before the drafts, because the gizmo's write is what the repaint below would be drawing.
   pumpGizmo();
   if (draftWanted !== null) {
