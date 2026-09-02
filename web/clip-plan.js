@@ -73,9 +73,21 @@ export function clipAffordedSec(timing, sourceDurationSec) {
  * still wide enough to grab. The footage under what is left holds still by construction: the
  * in-point moves by exactly the program time the head crossed, read at the clip's speed.
  */
-export function headTrim({ start, sourceStart, speed }, wantStart, holdEnd, minLengthSec) {
+export function headTrim(
+  { start, sourceStart, speed },
+  wantStart,
+  holdEnd,
+  minLengthSec,
+  sourceDurationSec = Infinity,
+) {
   const takeFloor = start - sourceStart / speed;
-  const newStart = Math.max(0, Math.max(takeFloor, Math.min(holdEnd - minLengthSec, wantStart)));
+  // A tail can extend beyond the take and hold its last frame. Keep a head drag out of that held
+  // region, or it can serialise an in-point that the document door must refuse on reload.
+  const takeCeiling = Number.isFinite(sourceDurationSec)
+    ? start + Math.max(0, (sourceDurationSec - sourceStart) / speed - minLengthSec)
+    : Infinity;
+  const newStart = Math.max(0,
+    Math.max(takeFloor, Math.min(holdEnd - minLengthSec, takeCeiling, wantStart)));
   const moved = sourceStart + (newStart - start) * speed;
   // Landed on the head of the take rather than near it: the residue of the subtraction above
   // would otherwise be refused as a negative in-point by the document door.

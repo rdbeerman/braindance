@@ -125,6 +125,19 @@ test('a head trim cannot cross its own out-point, and leaves a clip still wide e
   assert.ok(near(trimmed.trim, 0.2));
 });
 
+test('a head trim cannot move an extended clip past the end of its footage', () => {
+  const trimmed = headTrim(
+    { start: 0, sourceStart: 0, speed: 1 },
+    15,
+    20,
+    0.2,
+    10,
+  );
+  assert.ok(near(trimmed.start, 9.8));
+  assert.ok(near(trimmed.sourceStart, 9.8));
+  assert.ok(near(trimmed.trim, 10.2));
+});
+
 test('a trim and a trim back to the head of the take return the in-point to exactly zero', () => {
   const clip = { start: 0, sourceStart: 0, speed: 1.5 };
   const trimmed = { ...clip, ...headTrim(clip, 6, 40, 0.2) };

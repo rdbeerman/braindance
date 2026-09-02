@@ -339,12 +339,12 @@ named with the URL and the byte count, `library-has-no-way-to-the-menu` among th
 and was tracked in #28.
 That is closed and the fix is worth knowing, because it is not the one a reader would guess: the
 duplicate is still there in `web/main.js`, once at four spaces of indentation and once at six,
-and `c757210` re-anchored the entry onto a leading newline and four spaces, which by that alone
-cannot match the six-space copy inside the
-`miniMarks` map. So the anchor matches exactly once now, which is what `syntax-check`'s anchor
-row reports across all 406 anchors in the suite. Whether the mutation *delivers* has not been
-re-measured — the anchor being constructible is the weaker claim, and only the weaker one is
-stated here.
+and `c757210` first re-anchored the entry onto a leading newline and four spaces. The current
+entry also includes the following `const el = document.createElement('button');` statement,
+which exists only in the ruler loop and not in the `miniMarks` map. So the anchor matches exactly
+once now, which is what `syntax-check`'s anchor row reports across all 661 anchors in the suite.
+Whether the mutation *delivers* has not been re-measured — the anchor being constructible is the
+weaker claim, and only the weaker one is stated here.
 The control for the delivery refusal is to stop staging `web/` files and run a page mutation:
 it names the file, the URL and both byte counts, and exits 2 without printing an assertion.
 
@@ -606,11 +606,11 @@ across the two `main` revisions this branch was rebased over and it reports 0 of
 looks unmoved by `main` itself, which is context for reading the 120 rather than a second
 control, since a null result cannot demonstrate sensitivity.
 
-**`timeline-check` runs 169 assertions, 0 failed.** Section 7 is 54 of them and covers more than
+**`timeline-check` runs 170 assertions, 0 failed.** Section 7 is 71 of them and covers more than
 one clip: the composite, the cut, and what a clip enters holding. Its fixture is five clips over
 two takes, listed in an order that is deliberately not the order of their ids, and every clip in
-it is uncomfortable on purpose - a two-second half-speed head, a head shorter than the look asks
-for, a different `sourceStart` on each, one whose footage starts at source 0, and one placed to
+it is uncomfortable on purpose - a half-speed clip with a deep in-point, a head shorter than the
+look asks for, a different `sourceStart` on each, one whose footage starts at source 0, and one placed to
 stand on the same source frame as another clip of the same take. Four of them overlap at 6.5s,
 which is the budget `tools/layering-ab.mjs` measures against.
 
@@ -701,14 +701,10 @@ its own checkout, all produced the identical `626x352`, and a probe reading the 
 builds returns the same numbers at both viewports — strip 252, bar 38, stage 110, buffer 196x110
 at 640x400; strip 339, stage 273, buffer 485x273 at 640x650.
 
-**With the stage right, `keyframe-check` reads 166 assertions and 5 failed, and those five are not
-this branch's either.** All five are section 6g's clip-drag block declining to run — `did not run:
-program 5s does not hit-test back to the clip box`, which is a guarded refusal rather than a wrong
-reading, and it is the press-point-in-program-time class this page already records against
-`editor-check`'s deselect rows: 5s of a 243.3s program is 2% along the lane and the clip box is not
-under it. Held to the same instrument across two builds — the patched tool copied into the `HEAD`
-tree and run against a server spawned from it — both come back **161 passed, the same 5 failed,
-with identical readings.**
+**With the stage right, `keyframe-check` reads 133 assertions, 0 failed.** Its lane census excludes
+the clip rows and the full-width add row because those are edit structure rather than keyed
+parameters. Counting the add row as a parameter reddens all four section 6 lane-shape rows on a
+correct page, while the DOM and the registry both agree about the three keyed lanes.
 
 **Section 7 moved every one of those totals and none of the names.** With it the tool runs 124
 assertions, and the mutations that were counted against 75 redden more because there are now more
@@ -928,7 +924,7 @@ suspect first on a contended machine now that the boot sleep no longer stands be
 page load and that fetch. Stated rather than measured: that row passed on all six runs behind
 this paragraph, and every one of them was on an idle machine.
 
-**`export-check` has the same shape and a bigger number: 10 of its 66 rows are red on the
+**`export-check` has the same shape and a bigger number: 10 of its 85 rows are red on the
 synthetic sample and none of them is about the build.** Nine are the resolution-invariance
 family — `trails`, `rgbsplit`, `scanlines`, `grain`, `bloom`, `nobloom`, `full`, `regionpush`
 and `regionmask` each asking that 1920x1200 is 960x600 at twice the size — and the tenth is the

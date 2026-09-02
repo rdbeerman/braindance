@@ -1016,9 +1016,9 @@ validates, so `editor-check` section 12 drives the round trip in a browser, with
 
 Documents from before the readings are version 3 and will not open, and there is nothing to
 run: the one-shot conversion this repo used to ship was deleted once every document it could
-act on had already been converted. This build reads version 7 alone — a version 6 document
-carried one take at the top and one undivided look under it rather than a `clips` array, and a
-version 5 document still spelled its parameters bare (`glyphTone` rather than `glyph.tone`) and
-carried no `requires` list, so both are refused the same way a version 3 or 4 one is, and there
-is no conversion for either: every document this project holds was re-authored at 7. A file from
-any older version is refused, naming its own version, and stays refused.
+act on had already been converted. This build reads version 8 alone. Version 8 places footage
+with each clip's `speed` and `sourceStart`; version 7 used a keyframed retime curve. A version 6
+document carried one take at the top and one undivided look under it rather than a `clips` array,
+and a version 5 document still spelled its parameters bare (`glyphTone` rather than
+`glyph.tone`) and carried no `requires` list. A file from any older version is refused, naming
+its own version, and stays refused. This build has no conversion for it.

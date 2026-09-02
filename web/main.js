@@ -2873,7 +2873,7 @@ function checkProject(project) {
     }
     // A trim, and read back as the answer. It is where the edit stops using the take, which is
     // a different fact from how much take there is rather than a second spelling of it; null is
-    // a clip that runs for everything its curve affords.
+    // a clip that runs for everything its footage affords.
     if (clip.length !== null && (!Number.isFinite(clip.length) || clip.length < 0)) {
       throw new Error(`${what} is ${JSON.stringify(clip.length)} long: a length is a number of project seconds at or above zero, or null where the document states none`);
     }
@@ -3946,7 +3946,7 @@ class Clip {
 // The clip array is filled here, having been declared beside the cloud the first one draws with.
 clips.push(new Clip('c1', livePairs, bootCloud, bootLook));
 
-// Bumped by anything that moves where a clip sits or how its curve runs, which is what the warm
+// Bumped by anything that moves a clip's placement, speed or in-point, which is what the warm
 // window above is memoised against.
 let timingGeneration = 0;
 
@@ -4665,7 +4665,7 @@ function reportCappedSeek(seek) {
  * Everything here is one per project rather than one per clip: the output rate is the edit's own
  * coordinate, and `exclusive` serialises the renderer, so two of these would interleave
  * `setRenderTarget` calls. What belongs to one clip - its frames, its walk cursor, how far its
- * curve reaches back - it asks the clip for.
+ * source timing reaches back - it asks the clip for.
  */
 class TimelineTransport {
   constructor() {
@@ -4698,7 +4698,7 @@ class TimelineTransport {
   /** The clip the panel and the lanes are pointed at. */
   get clip() { return selectedClip; }
 
-  /** Program seconds, which is where the last clip stops. Its own curve is what says where. */
+  /** Program seconds, which is where the last clip stops. Each clip's end says where. */
   get duration() {
     let end = 0;
     for (const clip of clips) if (Number.isFinite(clip.end)) end = Math.max(end, clip.end);
@@ -4748,7 +4748,7 @@ class TimelineTransport {
    * The two halves have different owners. Surface memory is per cloud, so the surface half is
    * asked of each clip drawn here. A clip already inside its warm window needs the elapsed part
    * of that window rebuilt too. The project's surface half is the longest of them - one clip's
-   * curve can need three times another's to cover the same span of persistence. The afterimage
+   * timing can need three times another's to cover the same span of persistence. The afterimage
    * is one screen-space buffer over the whole composite, so the trails half is asked once.
    */
   preroll(programSec = this.programSec) {
@@ -4944,7 +4944,7 @@ class TimelineTransport {
     this.askFor(planned.spans);
     for (let attempt = 0; !this.resident(planned.spans); attempt++) {
       if (attempt >= SEEK_REPLANS) {
-        // Overtaken, not broken: the hand that moved the curve has already queued a repaint.
+        // Overtaken, not broken: the hand that moved the clip timing has already queued a repaint.
         this.overtaken++;
         if (this.overtaken > SEEK_OVERTAKEN_LIMIT) {
           this.overtaken = 0;
@@ -7184,8 +7184,8 @@ function lanesMoved() {
 
 /** A clip's timing or the output rate moved, so every position on the ruler did. */
 function timingChanged({ moved = false } = {}) {
-  // Before the guard: the warm window is memoised against this and a recorder-side change to a
-  // curve still moves it, whether or not there is a strip to repaint.
+  // Before the guard: the warm window is memoised against this and a recorder-side timing change
+  // still moves it, whether or not there is a strip to repaint.
   timingGeneration++;
   if (!timeline) return;
   // Re-clamped against a duration this may have changed: the window is stored as fractions.
@@ -7269,8 +7269,8 @@ function paintMarks() {
   if (!timeline || !clipGestureLive()) return;
   const total = view.duration;
   for (const mark of takeMarks) {
-    // Marks are source milliseconds and the ruler is program seconds, so ticks go
-    // through the curve.
+    // Marks are source milliseconds and the ruler is program seconds, so ticks go through the
+    // selected clip's placement, speed and in-point.
     const program = programSecOfSource(mark.sourceMs / 1000);
     const el = document.createElement('button');
     el.type = 'button';
@@ -8414,7 +8414,8 @@ async function addClipsFromTakes(ids, from) {
 
 /** Moves a clip's head to `wantStart` while the footage under the rest of it holds still. */
 function headTrimTo(clip, wantStart, holdEnd) {
-  Object.assign(clip, headTrim(clip, wantStart, holdEnd, MIN_CLIP_SEC));
+  const sourceDuration = clip.source.streaming ? Infinity : clip.source.duration;
+  Object.assign(clip, headTrim(clip, wantStart, holdEnd, MIN_CLIP_SEC, sourceDuration));
 }
 
 /** Removes the selected clip. The last one refuses: an edit with no clip is not a document. */
@@ -11134,7 +11135,7 @@ globalThis.__kinect = {
   editor: {
     /** Which clip row the strip has selected, or null. Session state, never in the document. */
     clipSelection: () => selectedClipRow()?.id ?? null,
-    /** Where a mark ticks in program seconds, through the selected clip's curve and placement. */
+    /** Where a mark ticks in program seconds, through the selected clip's placement, speed and in-point. */
     markProgramSec: (sourceSec) => programSecOfSource(sourceSec),
     clipRange: () => ({ in: clipIn, out: clipOut }),
     setClipRange: (inVal, outVal) => {
@@ -11259,6 +11260,7 @@ globalThis.__kinect = {
         take: clip.take ? { ...clip.take } : null,
         start: clip.start,
         trim: clip.trim,
+        afforded: clip.afforded,
         length: clip.length,
         end: clip.end,
         speed: clip.speed,
