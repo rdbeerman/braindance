@@ -140,7 +140,7 @@ and 640 KiB. The slope through the two loaded points is **1,263 KiB per frame**,
 The ceiling is that figure turned into a frame count: a budget of **768 MB buys 618 frames**, and a
 plan may ask one take for 602 of them. It is generous by the measure it was chosen against - eight
 clips at two and a half seconds of persistence each - and **what still caps is eight clips of one
-take each pre-rolling more than about 2.5 seconds**, or a retime curve slow enough that one clip's
+take each pre-rolling more than about 2.5 seconds**, or a speed slow enough that one clip's
 window alone runs past 602 source frames. A cap reports the arithmetic that produced it:
 `lastSeek.bound` names the take, how many clips are on it, what they asked for and what the
 ceiling is, and the strip says it once per distinct cap.

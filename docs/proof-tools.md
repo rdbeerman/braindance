@@ -41,7 +41,7 @@ node tools/index-check.mjs --stage                        # ... the same run aga
                                                           #   the conditions their failure happened in
 node tools/registry-check.mjs --url http://localhost:8080 # step 3: one registry, sliders as views
 node tools/timeline-check.mjs --url http://localhost:8080 --take fixture-1g # step 4: seek equals playback
-node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, retime curve, undo
+node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, undo
 node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, export, the file
 node tools/library-check.mjs                              # step 7: library, recorder, routes
 node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g # the editor's controls: that they exist, that pressing them changes something
@@ -610,15 +610,15 @@ control, since a null result cannot demonstrate sensitivity.
 one clip: the composite, the cut, and what a clip enters holding. Its fixture is five clips over
 two takes, listed in an order that is deliberately not the order of their ids, and every clip in
 it is uncomfortable on purpose - a two-second half-speed head, a head shorter than the look asks
-for, one entering mid-hold, one whose footage starts at source 0, and one placed to stand on the
-same source frame as another clip of the same take. Four of them overlap at 6.5s, which is the
-budget `tools/layering-ab.mjs` measures against.
+for, a different `sourceStart` on each, one whose footage starts at source 0, and one placed to
+stand on the same source frame as another clip of the same take. Four of them overlap at 6.5s,
+which is the budget `tools/layering-ab.mjs` measures against.
 
 **That fixture names its primary take instead of inheriting the selected clip's take.** A prior
 version copied the first open clip before replacing the clip list. A short live capture selected
-by an earlier section therefore put every later retime on its held final frame and made both the
+by an earlier section therefore put every later clip on its held final frame and made both the
 warm-history control and the growing-cache arm inert. The tool now clears inherited tracks, owns
-the take for every generated clip, and requires the eight retimes to reach eight distinct frames.
+the take for every generated clip, and requires eight placements to reach eight distinct frames.
 
 Six mutations belong to it and each fires: `warm-skipped` **3 rows**, `warm-without-reset` **8**,
 `draw-order-by-array` **3**, `take-not-shared` **2**, `look-broadcast` **6** and
@@ -2308,12 +2308,10 @@ The paragraph above says 9.3fps; `keyframe-check`'s header said 284 frames over 
 section 6d said 49.79s; the file in this tree is 284 frames over **9.42s at 30.03fps**. One
 frame count, four durations, all of them written down as facts.
 
-The damage is not the prose. `timeline-check` targets 12s, `editor-check` seeks to 30s and
-`keyframe-check` retimes through source 20s. On a 9.42s take every one clamps: one row reddens in
-`timeline-check`, ten in `editor-check` and four in `keyframe-check` against a build with nothing
-wrong with it. The quieter half is that two more `keyframe-check` rows *pass*, because the key they
-drag has left the ruler and a gesture that never happened also never slid a key under its
-neighbour. The long fixture makes those fixture failures go away with nothing in `web/` changed.
+The damage is not the prose. `timeline-check` targets 12s and `editor-check` seeks to 30s, and
+`keyframe-check` seeks past the sample as well. On a 9.42s take every one clamps: one row reddens
+in `timeline-check` and ten in `editor-check` against a build with nothing wrong with it. The long
+fixture makes those fixture failures go away with nothing in `web/` changed.
 
 So all three declare a `NEEDS_TAKE_SEC` and exit 2 naming the shortfall, in the same direction and
 for the same reason as `requireMutationDelivered`: a red row reads as a catch, so a fixture

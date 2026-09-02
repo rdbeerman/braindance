@@ -2144,8 +2144,9 @@ A third flaw came out of this on step 5: a mutation replacing the pre-roll's win
 with the tangent it replaced was caught by only one of five probe positions, because four of
 them sat inside a single straight segment of the retime curve where the tangent *is* the
 curve. The probes were moved onto the knees and onto an eased ramp and the same mutation now
-fails four. Ask what the wrong implementation would agree with, and probe somewhere it
-cannot.
+fails four. The live section went when the retime curve was removed, so this record is what
+survives of the finding. Ask what the wrong implementation would agree with, and probe somewhere
+it cannot.
 
 ### A probe can be in the right place and still start one link past the break
 

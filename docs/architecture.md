@@ -14,7 +14,7 @@ A native grabber pulls depth and registered colour from
 [libfreenect2](https://github.com/OpenKinect/libfreenect2), a Node server fans the frames
 out over WebSocket, and a Three.js viewer unprojects them on the GPU using the sensor's own
 intrinsics. On top sit a recorder, a take library that reconciles between two machines, a
-keyframe editor with a retime curve, and a render queue that exports through ffmpeg.
+keyframe editor, and a render queue that exports through ffmpeg.
 
 Depth and colour are captured on separate listeners: the colour camera halves to 15fps in
 dim light while depth stays at 30, and a synced listener would throw away every other depth
@@ -60,9 +60,9 @@ browser is on the server's machine, and is refused for the take being recorded, 
 manager stats, indexes and previews the file the recorder is writing to.
 
 **The editor** keyframes the camera through the recorded volume on its own track and the
-look on others, with a retime curve mapping program time onto source time. Seeking to a
-frame and playing to that frame produce the same image, which `tools/timeline-check.mjs`
-proves.
+look on others, and each clip's `speed` and `sourceStart` map program time onto source time.
+Seeking to a frame and playing to that frame produce the same image, which
+`tools/timeline-check.mjs` proves.
 
 **The render queue** produces video from finished edits, claimed by a worker pinned to the
 renderer class it will draw with. [Get a video out](../README.md#5-get-a-video-out) has the
@@ -345,22 +345,23 @@ deliverable's sidecar records what was skipped rather than rewriting the clip.
 ## Program time is the edit coordinate
 
 Source time is a position inside the capture; program time a position inside the output.
-They advance together at normal speed and diverge under a ramp, a hold or a reverse, so
-every keyframe has to be stamped in one of them. Every track here, including the retime
-curve, is in program seconds - which second they are counted from is a separate question,
-answered under a clip's look below - and rendering is forward-only: `programTime = k / outputFps`,
-evaluate the tracks, `sourceMs = retime(programTime)`, binary-search the index.
+They advance together at 1.00x and diverge at any other speed, so every keyframe has to be
+stamped in one of them. Every track here is in program seconds - which second they are counted
+from is a separate question, answered under a clip's look below - and rendering is forward-only:
+`programTime = k / outputFps`, evaluate the tracks,
+`sourceSec = sourceStart + (programTime - start) * speed`, binary-search the index.
 
-- **Export needs no inverse.** Keying in source time would force export to invert the retime
-  curve, which requires it to stay monotonic, so a hold or a reverse breaks it outright.
+- **Export needs no inverse.** Export walks program time forward and a constant speed maps it
+  onto source time with one multiply. The inverse is a division where anything wants it, so
+  keying in program time costs export nothing.
 - **The camera keeps its own pace when the footage slows**, which is the creative point: a
-  photographer's movement is independent of what they are filming. A ramp leaves the program
-  length alone, so a camera key at program 10s stays there. The speed control changes the selected
-  clip's output length and rescales that clip's local look and placement keys around the curve's
-  rate pivot. Project tracks, camera keys and output cuts keep their authored program seconds.
-- **`fade` and `wake` stay in source time**, because they drive surface memory, which
-  advances per source frame. Dividing by the local retime slope would divide by zero at a
-  hold, snapping every trail off exactly where a freeze should hold it.
+  photographer's movement is independent of what they are filming. The speed control changes the
+  selected clip's output length and rescales that clip's local look and placement keys from the
+  clip's head. Project tracks, camera keys and output cuts keep their authored program seconds,
+  so a camera key at program 10s stays there.
+- **`fade` and `wake` stay in source time**, because they drive surface memory, which advances
+  per source frame. How long a surface remembers is a fact about the footage rather than about
+  the output it is being cut into.
 - **`outputFps` is the project's, not the deliverable's**, and the line above is why: it is
   the denominator of the edit's own coordinate, so two deliverables at two rates would be
   two different edits rather than one edit written out twice. `trails` makes it visible —
@@ -385,13 +386,13 @@ time, so constant motion through index space is visibly variable motion through 
 
 ## Clips, and what a cut costs
 
-A clip owns a source, a cloud, a retime curve, a `start` and a `length`. It covers
+A clip owns a source, a cloud, a `speed`, a `sourceStart`, a `start` and a `length`. It covers
 `[start, start + length)` - half-open, so two clips abutting at a cut do not both draw on the
 frame the cut lands on, with the one exception that the instant an edit ends on belongs to
 whatever ended there rather than to nothing. `length` is the document's own field and it is read
 back as the answer: a trim is where the edit stops using the take, which is a different fact from
-how much take there is rather than a second spelling of it, and null means "everything the curve
-affords". A gap between clips renders an empty composite.
+how much take there is rather than a second spelling of it, and null means "everything the take
+has past its `sourceStart`, at its speed". A gap between clips renders an empty composite.
 
 **Each clip draws through `Group(transform) -> Group(level) -> Points`.** The outer group is where
 the clip sits in the room; the inner one carries the levelling quaternion, which is a clip-scope
@@ -422,14 +423,13 @@ a clip appearing mid-playback would show no fade and no wake on the frame after 
 same instant reached by seeking looks right. For its own surface span before its in-point the clip
 binds its textures and steps its memory with `visible = false`, and the prefetch looks across the
 clip boundary so those frames are resident when the warm starts. The window is bounded by what
-the clip's head affords: the curve extrapolates outside its domain, so the walk stops where source
-time would run before the take began - and it stops where source time stops *moving*, because a
-clip entering mid-hold reaches the frame already bound however far back it is walked. A clip whose
-footage starts at source 0 and one entering mid-hold both enter deterministically cold, and so
-does a seek to that instant, which is why the invariant holds rather than being violated.
+the clip's head affords: the walk stops at the head of the take, which is `sourceStart` seconds of
+footage back. A clip whose footage starts at source 0 has no window at all and enters
+deterministically cold, and so does a seek to that instant, which is why the invariant holds
+rather than being violated.
 
 Pre-roll splits along the same seam. The surface half is per clip, because surface memory is per
-cloud and one clip's curve can need three times another's to cover the same span of persistence,
+cloud and one clip's speed can need three times another's to cover the same span of persistence,
 so the project's is the longest of them. The trails half is one screen-space buffer over the
 composite and is asked once. There is one stall policy and not two: a render waits for every clip
 it touches, drawn or warming, and playback's catch-up budget bounds how far behind the playhead
@@ -456,22 +456,17 @@ exactly as expensive as it was. The ceiling and the span a plan may ask for are 
 forms and cannot be moved apart: a cache smaller than the span a fetch may request evicts what
 that fetch has just put in it.
 
-**A head trim is written into the curve, because that is where an in-point lives.** A clip has no
-source-offset field: with no keys its curve reads `programSec * rate` and states an in-point of
-zero, and with one key at the origin it reads `value + programSec * rate`. So dragging a clip's
-head writes that single key and moves `start` and the trim together, which holds the out-point and
-the footage under the body still. Three places ask whether a curve is still a rate and two of them
-already answered "fewer than two keys" — `sourceSecAt` and `slopeAt`; the speed slider's disable
-was the third and said "any keys at all", so it went quiet on a curve it could still drive. The
-three agree now. A curve of more than one key states far more than an in-point and shifting its
-domain is a different edit, so the head edge refuses it with the reason rather than being an edge
-that silently works on some clips and not others.
+**A head trim writes the clip's `sourceStart`.** Dragging a clip's head moves `start` and the
+trim together, which holds the out-point and the footage under the body still: the same project
+second stands on the same source frame afterwards. `sourceStart` is source seconds at the clip's
+head, so trimming back to the head of the take returns it to exactly 0, and the speed slider goes
+on working through a trim because a trim writes no key and touches no lane.
 
 **Which clip is selected is session state and never in the document**, beside `suppressedEffects`
-rather than in the project. It decides where a look write lands, which curve the retime lane
-draws, and which clip the take's marks are drawn against - but which clip somebody is looking at
-is not part of the edit, and a document recording it would make two people's saves of the same
-work differ over nothing. A reopened project selects nothing.
+rather than in the project. It decides where a look write lands and which clip the take's marks
+are drawn against - but which clip somebody is looking at is not part of the edit, and a document
+recording it would make two people's saves of the same work differ over nothing. A reopened
+project selects nothing.
 
 **Adding and removing a clip is an ordinary undo step**, because clips live in the body
 `history.snapshot()` stringifies. An add copies the selected clip's look, or the first clip's
@@ -549,9 +544,9 @@ field with it rather than moving through the room's. The transpose identity thos
 survives, because it is the 3x3 that matters and a translation is not in it.
 
 Where a look write lands is an explicit indirection - the clip under evaluation, else the selected
-clip - and not a binding repointed for the walk. The selection is the operator's: the panel, the
-lanes and the retime curve are all views of it, so a render that moved it would be mutating what
-somebody is looking at in order to draw a frame. `withClip` is the one door that changes the
+clip - and not a binding repointed for the walk. The selection is the operator's: the panel and
+the lanes are both views of it, so a render that moved it would be mutating what somebody is
+looking at in order to draw a frame. `withClip` is the one door that changes the
 answer, and it moves two things together because neither is enough on its own: the tables decide
 where the value is stored, and the render core's selection decides which uniform table, material
 and levelling group the registry's `apply` reaches.
@@ -615,10 +610,10 @@ body over, so the name, the clip count, the shape and the rate cost nothing to s
 the only thing fetched, and they are drawn by the same depth splat the library's tiles use, which
 is what makes the two pages read as one program. What the finger moves through is program time and
 not one take's frames: the clip covering that second is found by its `start` and `length`, its
-retime curve maps the second into source time, and the skim changes capture at a cut - so the
-bar's length is the edit's length and a cut in the edit is a cut in the skim. The look is the part
-that cannot come along, because nothing on this page holds the grade, the effects or the camera.
-A project skims as raw geometry and reads as a proxy rather than as a small render.
+`speed` and `sourceStart` map the second into source time, and the skim changes capture at a cut -
+so the bar's length is the edit's length and a cut in the edit is a cut in the skim. The look is
+the part that cannot come along, because nothing on this page holds the grade, the effects or
+the camera. A project skims as raw geometry and reads as a proxy rather than as a small render.
 
 **A project whose footage is not on this machine says so on its row, and the control goes to the
 library.** The loader refuses a document naming a take no local capture hashes, and reclaiming one
@@ -685,11 +680,12 @@ same suspicion.
 its clips, so a project missing one take is three clips that resolve and one that does not: the
 span the missing clip covers goes empty, and where that clip carries a length of its own its
 width says how much of the edit the hole costs, beside the row that already names the take. A
-clip nobody trimmed carries no length - `null` there means it runs for everything its curve
-affords, which resolves through the take's own duration - so on the machine that has not got the
-take there is no width to draw, and the row names it rather than measuring it. It
-also leaves one behaviour rather than two - a clip either resolves to a frame or it does not, and
-nothing has to ask whether a project is dark before deciding to answer a drag.
+clip nobody trimmed carries no length - `null` there means it runs for everything the take has
+past its `sourceStart` at its speed, which resolves through the take's own duration - so on the
+machine that has not got the take there is no width to draw, and the row names it rather than
+measuring it. It also leaves one behaviour rather than two - a clip either resolves to a frame
+or it does not, and nothing has to ask whether a project is dark before deciding to answer a
+drag.
 
 **A write carries the revision it was made against, and a stale one is refused.** The store
 already hands a `rev` back on every read and every write, and a projects page makes opening one
