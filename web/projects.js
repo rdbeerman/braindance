@@ -1,5 +1,5 @@
-import { documentNameRefusal } from './format.js';
-import { retimeProgramSecAt, retimeSourceSecAt } from './curve.js';
+import { PROJECT_VERSION, documentNameRefusal, versionRefusal } from './format.js';
+import { clipAffordedSec, clipSourceSecAt } from './clip-plan.js';
 import { createSkim } from './take-draw.js';
 import { pickTakes } from './take-picker.js';
 
@@ -32,8 +32,8 @@ const takeFor = (clip) => (clip.take?.hash
 function spanOf(clip, take) {
   if (clip.length !== null && Number.isFinite(clip.length)) return Math.max(0, clip.length);
   if (!take || !(take.durationSec > 0)) return 0;
-  const afforded = retimeProgramSecAt(clip.retime, take.durationSec);
-  return Number.isFinite(afforded) ? Math.max(0, afforded) : 0;
+  const afforded = clipAffordedSec(clip, take.durationSec);
+  return Number.isFinite(afforded) ? afforded : 0;
 }
 
 /** Each clip with where it sits in program time and what it resolved to, in document order. */
@@ -58,7 +58,7 @@ function clipAt(spans, programSec) {
 /** The frame of a take a program second lands on. */
 function frameAt(span, programSec) {
   const { clip, take } = span;
-  const sourceSec = retimeSourceSecAt(clip.retime, programSec - span.start);
+  const sourceSec = clipSourceSecAt(clip, programSec - span.start);
   if (!Number.isFinite(sourceSec) || !(take.durationSec > 0)) return 0;
   const at = sourceSec / take.durationSec;
   return Math.round(Math.max(0, Math.min(1, at)) * Math.max(0, take.frames - 1));
@@ -72,10 +72,12 @@ const missingIn = (body) => body.clips
 /** Why this page cannot draw a project, or null. */
 function bodyRefusal(body) {
   if (!body || typeof body !== 'object') return 'this file does not hold an object';
+  if (body.version !== PROJECT_VERSION) return versionRefusal('this project', body.version);
   if (!Array.isArray(body.clips)) return 'this file carries no clips array, so it is not an edit';
-  if (body.clips.some((c) => !c || typeof c !== 'object' || !c.retime
-    || !Array.isArray(c.retime.keys) || !Number.isFinite(c.retime.rate))) {
-    return 'a clip in it carries no retime curve, so there is no way to place its footage in time';
+  if (body.clips.some((c) => !c || typeof c !== 'object' || !Number.isFinite(c.speed)
+    || !Number.isFinite(c.sourceStart) || c.sourceStart < 0)) {
+    return 'a clip in it carries no speed and in-point, so there is no way to place its footage '
+      + 'in time';
   }
   return null;
 }

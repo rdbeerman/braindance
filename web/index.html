@@ -792,8 +792,8 @@
   .tclock small { display: block; font-size: 11px; letter-spacing: 0.14em;
     text-transform: uppercase; color: var(--faint); white-space: nowrap; }
   .tclock output { font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-  /* Source time is derived from program time through the retime, never edited,
-     so it reads as a secondary value rather than as a second control. */
+  /* Source time is derived from program time through the clip's speed and in-point,
+     never edited, so it reads as a secondary value rather than as a second control. */
   .tclock.derived output { color: var(--dim); font-size: 14px; }
 
   .tchips { flex: 1; display: flex; gap: 8px; flex-wrap: nowrap; align-items: center;
@@ -1071,8 +1071,8 @@
   /* The take's marks, on the ruler the playhead runs along. They live on the take
      rather than in any project, so every edit of that take shows the same ticks -
      which is the payoff for putting them in a sidecar. Drawn in program time
-     through the retime curve, because the ruler is program time and a mark is
-     source time, and the two only coincide at rate 1 with no keys. */
+     through the clip's speed and in-point, because the ruler is program time and a
+     mark is source time, and the two only coincide on an untrimmed clip at 1.00x. */
   /* The strip stays transparent to the pointer so a scrub that crosses a mark is
      still a scrub, and each tick takes its own events back - the ticks are buttons
      that seek to the mark, and a layer that swallowed nothing would have swallowed
@@ -1084,7 +1084,7 @@
   .tmk svg { display: block; }
   /* A mark the edit never reaches stacks at the right edge rather than being
      dropped: the moment is still in the footage, and a tick nobody can explain is
-     better than a tick that silently vanished when the curve was retimed.
+     better than a tick that silently vanished when the clip's speed changed.
 
      **Above the two interaction states rather than below them, and the order is the
      whole of it.** `.tmk.beyond` and `.tmk:hover` have the same specificity, so
@@ -1542,16 +1542,9 @@
                at the bottom of the old range changed the clip's length by a third and the
                same step at the top changed it by one percent. The bounds live in `main.js`
                beside the mapping that reads this, so there is one copy of them. `value` is
-               written from `retime.rate` at boot for the same reason - a position spelled
+               written from the clip's speed at boot for the same reason - a position spelled
                out here would be a second statement of where 1.00x sits. -->
-          <!-- The diamond belongs beside the slider it keys, which is the same shape the
-               camera chip to the right uses for the same job. Without it the slider sets
-               one rate for the whole clip and nothing can author a speed change over time:
-               `paintRateKey` and the add/delete behind it were still here after the rework
-               took the button away, so the retime curve remained a thing the document could
-               hold and the surface could not make. -->
-          <label class="tspeed">speed<input id="tRate" type="range" min="0" max="1" step="any"><b id="tRateOut">1.00&times;</b>
-            <button class="kf" id="tRateKey" type="button" aria-label="Retime keyframe"><i></i></button></label></span>
+          <label class="tspeed">speed<input id="tRate" type="range" min="0" max="1" step="any"><b id="tRateOut">1.00&times;</b></label></span>
         <!-- Applies to whichever key is selected in a lane, except `ends`, which is
              about the track's two outer keys however you got here - see EASE_PRESETS.
              They cover what a handle drag is usually reaching for, and a drag is still
@@ -1674,7 +1667,7 @@
       <div class="dialog-segments" id="projectAspects"></div>
     </div>
     <!-- A `<select>` and not a segmented row because the four rates are a list that could
-         grow, and because everything that reads this - the `change` handler that retimes
+         grow, and because everything that reads this - the `change` handler that sets the speed
          the open clip, `timingChanged`, and the restore from a saved project - already
          speaks `.value` and `change`. The id is unchanged from when this sat in the export
          dialog: the element moved surfaces, and nothing about what it drives did.
