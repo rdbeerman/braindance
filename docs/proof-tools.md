@@ -1176,9 +1176,12 @@ incoming side wherever it was, so a fixture planted bent and then "fixed" with `
 reads 0, 0.2, 0.4, 0.1, 1 — crossed, and crossed in a way that looks tidy. `ends` is what
 writes a whole polygon, because it writes the departure and the arrival. The second is that a
 synthetic drag has to be aimed at a coordinate the browser will deliver *and* at an element
-that will receive it: `.tcut` is a full-height clip marker parked over the head of the strip by
-section 3, so a handle drag planted at 1s and 5s pressed the marker instead and the handle it
-meant to move never moved. Both failures read identically from the assertion — a handle sitting
+that will receive it: the in and out markers' grab zone used to run the whole column, so a
+handle drag planted at 1s and 5s pressed a marker instead and the handle it meant to move never
+moved. That zone is the ruler row alone now, and `grab-zone-over-the-lanes` is the control that
+holds it there — it puts the zone back over the lanes and reddens section 3's two hit-test rows,
+which ask what a press 8px inward of each line actually reaches. Both failures read identically
+from the assertion — a handle sitting
 where it started — and neither is distinguishable from a clamp doing its job, which is why the
 row asserts the point *landed on its neighbour* rather than that it stayed inside a bound.
 `document.elementFromPoint` at the press coordinate is what separated them, and it is the first

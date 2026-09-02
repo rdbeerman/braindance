@@ -6379,8 +6379,9 @@ for (const handle of [ui.in, ui.out]) {
     if (!timeline) return;
     handle.setPointerCapture(e.pointerId);
     handleDrag = { side, from: e.clientX, moved: false };
-    // Held back rather than let through: the strip below deselects on every press that is not on
-    // a clip, and grabbing a marker is not that press. `pointerup` hands it back if no drag came.
+    // `#tIn` and `#tOut` are siblings of `#tBed` rather than children, so this takes nothing off
+    // the ruler's scrub. What it stops is the bubble to `ui.beds`, which deselects on a press
+    // landing outside a clip - and grabbing a marker is not that press.
     e.stopPropagation();
   });
   handle.addEventListener('pointermove', (e) => {
@@ -6403,15 +6404,9 @@ for (const handle of [ui.in, ui.out]) {
       if (handleDrag?.side !== side) return;
       const dragged = handleDrag.moved;
       handleDrag = null;
-      // A press that never moved is not a trim. The grab zone reaches 12px inward over the lane
-      // whitespace a person presses to come off a clip, so on a long enough program the whole gap
-      // before the first clip is inside it and the deselect could not be made - and a click there
-      // set the in-point to whatever second it landed on. Both stop here: the range is untouched
-      // and the press goes where it was aimed.
-      if (!dragged) {
-        deselectClipRow();
-        return;
-      }
+      // A press that never moved is not a trim, so the range is left where it is. The zone is the
+      // ruler row alone, so a press meant for a lane never arrives here to be handed back.
+      if (!dragged) return;
       const t = programAtPointer(e);
       if (handle === ui.in) {
         setClipInOut({ in: Math.max(0, Math.min(t, clipOut ?? timeline.duration)) });
