@@ -113,6 +113,7 @@ const MUTATIONS = {
       '  freeCamera.position.add(flyMove);',
     ]],
     fails: 'the pivot flies with it, so what moves is the standpoint and not the orbit\'s radius',
+    mustFail: 'the pivot flies with it, so what moves is the standpoint and not the orbit\'s radius',
   },
 
   // Q and E off the camera's own vertical rather than the room's, which is right only while the
@@ -124,6 +125,7 @@ const MUTATIONS = {
       '    if (push.pole) out.addScaledVector(flyAxis.set(0, 1, 0).applyQuaternion(quaternion), push.pole);',
     ]],
     fails: 'E climbs the room\'s vertical rather than the camera\'s, however the camera is aimed',
+    mustFail: 'E climbs the room\'s vertical rather than the camera\'s, however the camera is aimed',
   },
 
   // The fly read before the typing guard, so a name with a w in it flies the camera.
@@ -134,18 +136,19 @@ const MUTATIONS = {
         '  // The recorder\'s viewport orbits the same camera, so this sits above the clip guard below.\n'
         + '  // A repeat is harmless: the set already holds the code.\n'
         + '  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {\n'
-        + '    e.preventDefault();\n    flyHeld.add(e.code);\n    return;\n  }\n',
+        + '    e.preventDefault();\n    changeFlyKeys(() => flyHeld.add(e.code));\n    return;\n  }\n',
         '',
       ],
       [
         '  flyFast = e.shiftKey;\n  if (isTyping(e.target)) return;',
         '  flyFast = e.shiftKey;\n'
         + '  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {\n'
-        + '    e.preventDefault();\n    flyHeld.add(e.code);\n    return;\n  }\n'
+        + '    e.preventDefault();\n    changeFlyKeys(() => flyHeld.add(e.code));\n    return;\n  }\n'
         + '  if (isTyping(e.target)) return;',
       ],
     ],
     fails: 'a fly key does nothing while a control holds the keyboard',
+    mustFail: 'a fly key does nothing while a control holds the keyboard',
   },
 
   // A key released outside the page never arrives, so without this the camera flies for ever.
@@ -153,16 +156,39 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [["addEventListener('blur', clearFlyKeys);\n", '']],
     fails: 'and losing the page releases the key, so a held fly key stops',
+    mustFail: 'and losing the page releases the key, so a held fly key stops',
   },
 
   // The half of the gate that is the program camera, a gizmo drag and a node drag at once.
   'fly-ignores-the-program-camera': {
     file: 'web/main.js',
     edits: [[
-      'const flying = () => flyHeld.size > 0 && controls.enabled && !exporting;',
-      'const flying = () => flyHeld.size > 0 && !exporting;',
+      'const flying = () => flyInputActive() && controls.enabled && !exporting;',
+      'const flying = () => flyInputActive() && !exporting;',
     ]],
     fails: 'and nothing flies under the program camera, whose pose is the document\'s',
+    mustFail: 'and nothing flies under the program camera, whose pose is the document\'s',
+  },
+
+  // Held keys can cancel exactly. They ask for no movement, so they must not keep the redraw
+  // loop alive merely because the set is non-empty.
+  'fly-redraws-cancelled-keys': {
+    file: 'web/main.js',
+    edits: [[
+      'const flying = () => flyInputActive() && controls.enabled && !exporting;',
+      'const flying = () => flyHeld.size > 0 && controls.enabled && !exporting;',
+    ]],
+    fails: 'opposite fly keys do not keep the redraw loop alive because their requested move is zero',
+    mustFail: 'opposite fly keys do not keep the redraw loop alive because their requested move is zero',
+  },
+
+  // A release and new press can both land between animation frames. Without the event-side reset,
+  // the new hold inherits the old hold's clock and takes the stall cap as its first step.
+  'fly-reuses-old-clock': {
+    file: 'web/main.js',
+    edits: [['  if (!wasActive || !flyInputActive()) flyLastAt = 0;\n', '']],
+    fails: 'a new hold starts a new clock even when its release and press land between frames',
+    mustFail: 'a new hold starts a new clock even when its release and press land between frames',
   },
 
   // The release never arms the accurate seek, so the flight ends on a draft-quality frame.
@@ -170,6 +196,7 @@ const MUTATIONS = {
     file: 'web/main.js',
     edits: [['  else if (flyWasHeld) orbitSettling = true;\n', '']],
     fails: 'and releasing the last key lands the accurate frame',
+    mustFail: 'and releasing the last key lands the accurate frame',
   },
 
   // Reset re-homed on wherever the flight ended, which is the same defect `pick-rehomes-reset`
@@ -181,6 +208,7 @@ const MUTATIONS = {
       '  controls.target.add(flyMove);\n  controls.saveState();\n}',
     ]],
     fails: 'and Reset still goes home after a flight rather than to wherever the flight ended',
+    mustFail: 'and Reset still goes home after a flight rather than to wherever the flight ended',
   },
 
   'fly-ignores-shift': {
@@ -190,6 +218,7 @@ const MUTATIONS = {
       '  const speed = FLY_SPEED_MPS;',
     ]],
     fails: 'holding shift flies faster, by about the three times it claims',
+    mustFail: 'holding shift flies faster, by about the three times it claims',
   },
 
   // ---- section 22, the clip a person adds, selects and deletes ----
@@ -9904,6 +9933,42 @@ try {
       `${w.after.seeks - w.heldSeeks} seeks after the release, against `
       + `${w.heldSeeks - w.before.seeks} during the hold`);
 
+    await focusStage();
+    await page.keyboard.down('w');
+    await page.keyboard.down('s');
+    const cancelledBefore = await rest();
+    await new Promise((r) => setTimeout(r, 300));
+    const cancelledAfter = await rest();
+    await page.keyboard.up('s');
+    await page.keyboard.up('w');
+    await settle();
+    const cancelledMove = Math.hypot(...cancelledAfter.p.map((v, i) => v - cancelledBefore.p[i]));
+    const cancelledRedraws = cancelledAfter.redraws - cancelledBefore.redraws;
+    check(cancelledMove < 1e-6 && cancelledRedraws <= 1,
+      'opposite fly keys do not keep the redraw loop alive because their requested move is zero',
+      `${cancelledMove.toExponential(2)} m and ${cancelledRedraws} navigation redraws over 300 ms`);
+
+    await focusStage();
+    await page.keyboard.down('w');
+    await new Promise((r) => setTimeout(r, 250));
+    const restarted = await page.evaluate(`(async () => {
+      const c = __kinect.freeCamera;
+      dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', key: 'w' }));
+      const until = performance.now() + 150;
+      while (performance.now() < until) {}
+      const before = c.position.toArray();
+      dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', key: 'w' }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const after = c.position.toArray();
+      dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', key: 'w' }));
+      return Math.hypot(...after.map((v, i) => v - before[i]));
+    })()`);
+    await page.keyboard.up('w');
+    await settle();
+    check(restarted < 0.03,
+      'a new hold starts a new clock even when its release and press land between frames',
+      `${restarted.toFixed(4)} m on the first frame after a 150 ms gap`);
+
     const fast = await fly(['w'], { shift: true });
     const slowRate = w.length / w.elapsed;
     const fastRate = fast.length / fast.elapsed;
@@ -12239,11 +12304,21 @@ for (const label of standingGreen) {
 }
 
 if (MUTATE) {
+  const mustFail = MUTATIONS[MUTATE]?.mustFail;
   if (MUTATIONS[MUTATE]?.fails) console.log(`[editor] it should redden: ${MUTATIONS[MUTATE].fails}`);
   if (standingFired.length) {
     console.log(`[editor] ${standingFired.length} of those ${failures} are red on this tree either way, `
       + 'so they are not this mutation being caught:');
     for (const label of standingFired) console.log(`           ${label}`);
+  }
+  if (mustFail && !fired.includes(mustFail)) {
+    console.log(`[editor] NOT CAUGHT - ${MUTATE} left its required row green:`);
+    console.log(`           ${mustFail}`);
+    if (newlyFired.length) {
+      console.log(`[editor] ${newlyFired.length} other assertions fired, but none can stand in for that row:`);
+      for (const label of newlyFired) console.log(`           ${label}`);
+    }
+    process.exit(1);
   }
   if (newlyFired.length === 0) {
     console.log(`[editor] NOT CAUGHT - ${MUTATE} reddened nothing this tree was not already red on, `
@@ -12251,6 +12326,7 @@ if (MUTATE) {
     process.exit(1);
   }
   console.log(`[editor] caught ${MUTATE}, as required (${newlyFired.length} assertions fired beyond the standing set)`);
+  if (mustFail) console.log(`[editor] its required row fired: ${mustFail}`);
   for (const label of newlyFired) console.log(`           ${label}`);
   process.exit(1);
 }

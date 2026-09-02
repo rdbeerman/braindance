@@ -17,7 +17,7 @@ import {
   handleRefusal, foldRefusal, foldFreeX, retimeSourceSecAt, retimeProgramSecAt,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
-import { isFlyKey, flyStep } from './fly.js';
+import { isFlyKey, flyDirection, flyStep } from './fly.js';
 import { verticalFovForFocalLength, focalLengthForVerticalFov } from './lens.js';
 import {
   EXPORT_SIZES, DEFAULT_EXPORT_SIZE, reduceAspect, exportAspects, sizesForAspect,
@@ -4367,9 +4367,21 @@ let flyFast = false;
 let flyLastAt = 0;
 const flyMove = new THREE.Vector3();
 
+/** Whether the held keys ask for a non-zero move. */
+const flyInputActive = () => (
+  flyDirection(flyHeld, freeCamera.quaternion, freeCamera.up, flyMove).lengthSq() > 0
+);
+
 /** Whether a held fly key may move the camera. One gate for the program camera, a gizmo or
  *  node drag, and an export - each of those is already a reason the orbit stands down. */
-const flying = () => flyHeld.size > 0 && controls.enabled && !exporting;
+const flying = () => flyInputActive() && controls.enabled && !exporting;
+
+/** Change the held keys, starting a new clock when the requested move starts or stops. */
+function changeFlyKeys(change) {
+  const wasActive = flyInputActive();
+  change();
+  if (!wasActive || !flyInputActive()) flyLastAt = 0;
+}
 
 /** One frame of flight: the camera and its pivot translate by the same vector. */
 function advanceFly() {
@@ -6515,7 +6527,7 @@ addEventListener('keydown', (e) => {
   // A repeat is harmless: the set already holds the code.
   if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
-    flyHeld.add(e.code);
+    changeFlyKeys(() => flyHeld.add(e.code));
     return;
   }
   if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey && !e.altKey && !EDITING && ui.recGo && !ui.recGo.disabled) {
@@ -6622,13 +6634,15 @@ addEventListener('keydown', (e) => {
 /** A key released outside the page never arrives, so losing the page releases everything. */
 function clearFlyKeys() {
   flyHeld.clear();
+  flyFast = false;
+  flyLastAt = 0;
 }
 
 // Not behind the typing guard: a key released after the focus moved into an input would
 // otherwise stay held for ever.
 addEventListener('keyup', (e) => {
   flyFast = e.shiftKey;
-  flyHeld.delete(e.code);
+  changeFlyKeys(() => flyHeld.delete(e.code));
 });
 addEventListener('blur', clearFlyKeys);
 document.addEventListener('visibilitychange', () => { if (document.hidden) clearFlyKeys(); });

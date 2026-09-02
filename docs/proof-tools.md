@@ -1299,10 +1299,9 @@ rules and reddens the 520px and collapsed-panel rows. These are separate mutatio
 single broken sidebar could otherwise redden all three claims without saying which contract the
 instrument observed.
 
-**Section 24's eight controls each take one half of the fly out.** Holding a fly key translates
-the camera and its orbit pivot by the same vector out of `advanceNavigation`, and that is four
-claims rather than one, so each control removes exactly one of them and the section says which row
-answers it.
+**Section 24's ten controls each break one fly contract.** Holding a fly key translates the camera
+and its orbit pivot by the same vector out of `advanceNavigation`. Each mutation names the exact
+row that must fail. Another red row cannot stand in for it.
 
 - **`fly-leaves-the-pivot`** drops the `controls.target` half of the translation. The camera still
   flies and the row about the view direction stays green; what changes is that the orbit's radius
@@ -1317,6 +1316,10 @@ answers it.
   else stops it.
 - **`fly-ignores-the-program-camera`** takes `controls.enabled` out of the gate, which is the
   program camera, a gizmo drag, a node drag and the crop drag in one term.
+- **`fly-redraws-cancelled-keys`** treats a non-empty held-key set as movement even when opposite
+  keys cancel. The camera stays in place, but the parked loop keeps rebuilding the same frame.
+- **`fly-reuses-old-clock`** removes the event-side clock reset. A release and new press between
+  animation frames then inherit the old hold's time and jump by the stall cap on the first frame.
 - **`fly-never-settles`** removes the `orbitSettling` the release arms, so a flight ends on the
   draft-quality frame the hold was redrawing rather than on an accurate seek.
 - **`fly-rehomes-reset`** calls `saveState()` after the translation. It is `pick-rehomes-reset`'s
@@ -1324,7 +1327,7 @@ answers it.
   is the only way back.
 - **`fly-ignores-shift`** freezes the multiplier at one.
 
-**Two of the eight plant in `web/fly.js` and the rest in `web/main.js`**, which is the split the
+**Two of the ten plant in `web/fly.js` and the rest in `web/main.js`**, which is the split the
 module exists for. The pole and the multiplier are arithmetic `test/fly.test.mjs` states in
 longhand under bare node, and what is left for a browser to answer is whether the page uses them.
 
