@@ -1,13 +1,12 @@
-// Where the six fly keys point the camera, and how far one frame of holding them moves it.
-//
-// Outside `main.js` so a node test can state the directions in longhand: the pole Q and E climb
-// is the caller's, not the camera's own vertical, and that is the part a browser cannot see.
+// Camera displacement from held keys and pivot rotation from a look drag.
 
 import * as THREE from 'three';
 
 export const FLY_SPEED_MPS = 1;
-export const FLY_FAST = 3;
 export const FLY_STALL_S = 0.1;
+
+// How near the pole the view direction may come, which is OrbitControls' own `_EPS`.
+export const LOOK_POLE_EPS = 1e-6;
 
 // Which way each key pushes. The first four are camera-space and turn with the view; the last
 // two take the pole the caller passes, so they climb the room rather than the picture.
@@ -21,6 +20,8 @@ const FLY_KEYS = new Map([
 ]);
 
 const flyAxis = new THREE.Vector3();
+const lookPole = new THREE.Vector3();
+const lookRight = new THREE.Vector3();
 
 /** Whether a key code is one of the six fly keys. */
 function isFlyKey(code) {
@@ -43,13 +44,34 @@ function flyDirection(held, quaternion, up, out) {
 }
 
 /**
- * One frame's displacement into `out`: direction x speed x the elapsed seconds, shift tripling
- * it. The cap is why a stalled tab does not teleport the camera on the frame it comes back.
+ * One frame's displacement into `out`: direction x speed x the elapsed seconds. The cap is why
+ * a stalled tab does not teleport the camera on the frame it comes back.
  */
-function flyStep(held, fast, dtSec, quaternion, up, out) {
+function flyStep(held, dtSec, quaternion, up, out) {
   flyDirection(held, quaternion, up, out);
-  const speed = FLY_SPEED_MPS * (fast ? FLY_FAST : 1);
-  return out.multiplyScalar(speed * Math.min(Math.max(dtSec, 0), FLY_STALL_S));
+  return out.multiplyScalar(FLY_SPEED_MPS * Math.min(Math.max(dtSec, 0), FLY_STALL_S));
 }
 
-export { isFlyKey, flyDirection, flyStep };
+/** Rotate `target - position` in place, at one field of view per viewport height. */
+function lookOffset(offset, up, dxPx, dyPx, fovDeg, heightPx, out) {
+  out.copy(offset);
+  const perPixel = THREE.MathUtils.degToRad(fovDeg) / Math.max(1, heightPx);
+  lookPole.copy(up).normalize();
+  out.applyAxisAngle(lookPole, -dxPx * perPixel);
+  // Off the yawed offset, so a diagonal drag pitches about where the yaw left the view.
+  lookRight.crossVectors(out, lookPole);
+  // An offset already along the pole has no right axis. The clamp below never leaves one there.
+  if (lookRight.lengthSq() < 1e-12) return out;
+  lookRight.normalize();
+  const polar = Math.acos(Math.min(1, Math.max(-1, out.dot(lookPole) / out.length())));
+  // Dragging down looks down, which is the polar angle growing. Clamped as an angle rather than
+  // by rotating and correcting, so a drag past the pole stops at it instead of flipping over it.
+  const wanted = Math.min(
+    Math.PI - LOOK_POLE_EPS, Math.max(LOOK_POLE_EPS, polar + dyPx * perPixel),
+  );
+  return out.applyAxisAngle(lookRight, polar - wanted);
+}
+
+export {
+  isFlyKey, flyDirection, flyStep, lookOffset,
+};

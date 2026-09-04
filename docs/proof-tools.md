@@ -1299,9 +1299,9 @@ rules and reddens the 520px and collapsed-panel rows. These are separate mutatio
 single broken sidebar could otherwise redden all three claims without saying which contract the
 instrument observed.
 
-**Section 24's ten controls each break one fly contract.** Holding a fly key translates the camera
-and its orbit pivot by the same vector out of `advanceNavigation`. Each mutation names the exact
-row that must fail. Another red row cannot stand in for it.
+**Section 24 covers flight, look drags, the lens wheel and control focus.** Shift enables flight
+at one speed. Each mutation names the exact row that must fail. Another red row cannot stand in
+for it.
 
 - **`fly-leaves-the-pivot`** drops the `controls.target` half of the translation. The camera still
   flies and the row about the view direction stays green; what changes is that the orbit's radius
@@ -1311,6 +1311,7 @@ row that must fail. Another red row cannot stand in for it.
   down at the pivot first and asserts the pitch is real before it flies.
 - **`fly-moves-while-typing`** moves the keydown block above the typing guard, so a `w` in a
   filename flies the camera while it is being typed.
+- **`fly-survives-text-focus`** keeps an existing flight hold after a text field gains focus.
 - **`fly-survives-blur`** removes the listener that releases every held key when the page loses
   focus. A key released outside the page never arrives, so the camera then flies until something
   else stops it.
@@ -1325,11 +1326,33 @@ row that must fail. Another red row cannot stand in for it.
 - **`fly-rehomes-reset`** calls `saveState()` after the translation. It is `pick-rehomes-reset`'s
   defect through a second door: Reset stops going anywhere known, which on the Pi's collapsed panel
   is the only way back.
-- **`fly-ignores-shift`** freezes the multiplier at one.
+- **`fly-ignores-the-shift-gate`** allows an unmodified key to fly.
+- **`fly-takes-the-key-only-with-shift`** prevents flight when Shift arrives after W.
+- **`fly-stops-during-a-look`** stops translation while the pointer turns the camera.
+- **`typing-guard-takes-every-control`** makes a focused slider swallow flight shortcuts.
+- **`typing-guard-takes-adjustment-keys`** takes arrow keys away from a focused slider.
+- **`look-orbits-the-camera`** moves the camera instead of turning it in place.
+- **`look-shrinks-the-pivot`** changes the orbit radius during a look drag.
+- **`look-ignores-the-lens`** uses a fixed turn rate instead of the camera's field of view.
+- **`look-drags-backwards`** reverses horizontal look; **`look-pitches-backwards`** reverses pitch.
+- **`look-tips-past-the-pole`** removes the pitch limit. Each pole is reached in one pointer move.
+- **`look-never-settles`** omits the accurate seek after the pointer is released.
+- **`look-survives-blur`**, **`look-survives-capture-loss`** and
+  **`look-survives-camera-switch`** each leave a drag active after its owner has changed.
+- **`lens-wheel-reads-only-the-vertical`** ignores horizontal wheel input.
+- **`lens-wheel-ignores-the-band`** removes the 8–300mm lens limits.
+- **`showlens-reads-the-raw-number`** compares unrounded focal lengths with the displayed limits,
+  so a lens at 8mm can read as outside the range after conversion through field of view.
 
-**Two of the ten plant in `web/fly.js` and the rest in `web/main.js`**, which is the split the
-module exists for. The pole and the multiplier are arithmetic `test/fly.test.mjs` states in
-longhand under bare node, and what is left for a browser to answer is whether the page uses them.
+The arithmetic mutations target `web/fly.js`; the event and rendering mutations target
+`web/main.js`. The unit tests cover the arithmetic, and the browser rows verify its use by the
+page. Pole drags start inside the stage and can finish outside it through pointer capture.
+The slider row opens the Camera tab before focusing the lens control.
+Section 21 also drives flight, look and horizontal wheel input on the recorder, then runs the
+same drag-interruption checks as the editor. These checks use the fake grabber or the server's
+existing stream; they do not prove physical sensor behavior.
+The capture-loss check sends a stationary pointer event after releasing capture, so the browser
+delivers its pending `lostpointercapture` event before the state is read.
 
 **Whole clip is driven through both user paths.** Section 3 narrows the trim, selects
 **Output > Whole clip**, narrows it again, and presses Option-X. Both must restore

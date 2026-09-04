@@ -54,12 +54,27 @@ halves, and [SECURITY.md](../SECURITY.md) has the threat model.
 
 ## Viewer and timeline controls
 
-Drag to orbit, scroll to zoom, right-drag to pan, `H` hides the panel. `W` `A` `S` `D` fly the
-camera, `Q` and `E` take it down and up, and holding shift makes all six three times faster.
-`W` follows the view direction. `Q`/`E` follow the current navigation vertical: the levelled
-room in the normal view and the sensor's vertical in Sensor view. Flying carries the orbit pivot
-with the camera, so a drag afterwards still turns about the same subject rather than about where
-you set off from.
+Drag to orbit, scroll to zoom, right-drag to pan, `H` hides the panel. **Shift is the free
+camera's modifier.** Hold it and `W` `A` `S` `D` fly the camera, `Q` and `E` take it down and up,
+a left-drag turns the camera in place, and the wheel changes the lens. Without shift the six keys
+do nothing at all. `W` follows the view direction. `Q`/`E` follow the current navigation vertical:
+the levelled room in the normal view and the sensor's vertical in Sensor view. Flying carries the
+orbit pivot with the camera, so a drag afterwards still turns about the same subject rather than
+about where you set off from.
+
+**A focused text field keeps the whole keyboard.** Gaining text focus also stops any flight keys
+already held. Sliders, dropdowns and other non-text inputs
+keep the arrows, space, enter, home, end and the page keys, so a focused slider still
+nudges with the arrows while `Shift-W` still flies and `cmd-z` still undoes. Editor shortcuts take
+priority over dropdown letter type-ahead.
+
+**Shift-drag turns the view the way you drag it**, which is the opposite of an orbit: drag right
+and the view turns right, so the scene sweeps left. The camera does not move, and the orbit pivot
+rides a sphere around it at the distance it already had - so letting go of shift orbits whatever
+you are now looking at. A drag the height of the stage turns the view by exactly one field of
+view. A longer lens therefore turns through a smaller angle for the same drag. The view stops just
+short of straight up and straight down rather than tipping over. Releasing or cancelling the
+pointer, losing focus or pointer capture, hiding the page, and changing cameras end the look drag.
 
 **The orbit turns about whatever you pressed on.** A left press reads the depth under the
 pointer and moves the pivot along the view axis to that range, so orbiting a subject four metres
@@ -166,6 +181,9 @@ reason the orbit does the same there: the program camera's lens is what its keys
 follows the playhead through a keyed move rather than taking a new value. The row offers 8mm to
 300mm and says which way it ran out past either end — the angle
 itself is never clamped, because the sensor's intrinsics have to be free to imply anything.
+Shift and the wheel over the stage move the same lens, and that gesture is bounded by those two
+numbers rather than only measured against them: a wheel has no value to type, so it stops where
+the band does.
 `verticalFovForFocalLength` and `focalLengthForVerticalFov` in
 [`web/lens.js`](../web/lens.js) are the conversion, and it is the same arithmetic either way
 round.

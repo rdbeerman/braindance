@@ -101,7 +101,7 @@ const MUTATIONS = {
     ]],
   },
 
-  // ---- section 24, the fly keys ----
+  // ---- section 24, flying, looking and the lens ----
   // The pivot left behind, so the flight changes the orbit's radius instead of the standpoint.
   'fly-leaves-the-pivot': {
     file: 'web/main.js',
@@ -128,27 +128,60 @@ const MUTATIONS = {
     mustFail: 'E climbs the room\'s vertical rather than the camera\'s, however the camera is aimed',
   },
 
-  // The fly read before the typing guard, so a name with a w in it flies the camera.
+  // The fly read before the typing guard, so a name with a w in it flies the camera while it is
+  // being typed. The shift gate travels with the block, or the row would redden about the gate.
   'fly-moves-while-typing': {
     file: 'web/main.js',
     edits: [
       [
         '  // The recorder\'s viewport orbits the same camera, so this sits above the clip guard below.\n'
-        + '  // A repeat is harmless: the set already holds the code.\n'
+        + '  // A repeat is harmless: the set already holds the code. The key is recorded whether or not\n'
+        + '  // shift is down, so pressing shift onto a key already held starts the flight rather than\n'
+        + '  // waiting for the key to be pressed again; shift is what *takes* the key, so without it the\n'
+        + '  // key goes on to whatever else is bound to it.\n'
         + '  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {\n'
-        + '    e.preventDefault();\n    changeFlyKeys(() => flyHeld.add(e.code));\n    return;\n  }\n',
+        + '    changeFlyKeys(() => flyHeld.add(e.code));\n'
+        + '    if (e.shiftKey) {\n      e.preventDefault();\n      return;\n    }\n  }\n',
         '',
       ],
       [
-        '  flyFast = e.shiftKey;\n  if (isTyping(e.target)) return;',
-        '  flyFast = e.shiftKey;\n'
+        '  changeFlyKeys(() => { flyShift = e.shiftKey; });\n'
+        + '  if (controlKeeps(e.target, e.key)) return;',
+        '  changeFlyKeys(() => { flyShift = e.shiftKey; });\n'
         + '  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {\n'
-        + '    e.preventDefault();\n    changeFlyKeys(() => flyHeld.add(e.code));\n    return;\n  }\n'
-        + '  if (isTyping(e.target)) return;',
+        + '    changeFlyKeys(() => flyHeld.add(e.code));\n'
+        + '    if (e.shiftKey) {\n      e.preventDefault();\n      return;\n    }\n  }\n'
+        + '  if (controlKeeps(e.target, e.key)) return;',
       ],
     ],
-    fails: 'a fly key does nothing while a control holds the keyboard',
-    mustFail: 'a fly key does nothing while a control holds the keyboard',
+    fails: 'a fly key does nothing while a text field holds the keyboard',
+    mustFail: 'a fly key does nothing while a text field holds the keyboard',
+  },
+
+  // The guard back to the tag name, which is the build that shipped: a focused slider swallowed
+  // every shortcut in the editor, so a lens nudged by hand left the keyboard dead until
+  // something else took the focus back.
+  'typing-guard-takes-every-control': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (controlKeeps(e.target, e.key)) return;',
+      "  if (e.target instanceof HTMLElement\n"
+      + "    && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;",
+    ]],
+    fails: 'and a fly key still flies while a slider holds the keyboard, because a slider takes no text',
+    mustFail: 'and a fly key still flies while a slider holds the keyboard, because a slider takes no text',
+  },
+
+  'typing-guard-takes-adjustment-keys': {
+    file: 'web/main.js',
+    edits: [['  return SELF_OPERATING_KEYS.has(key);', '  return false;']],
+    mustFail: 'control: a focused slider still takes its own arrow key, which is what it is left holding',
+  },
+
+  'fly-survives-text-focus': {
+    file: 'web/main.js',
+    edits: [["document.addEventListener('focusin', (e) => { if (takesText(e.target)) clearFlyKeys(); });\n", '']],
+    mustFail: 'focusing a text field stops a flight already in progress',
   },
 
   // A key released outside the page never arrives, so without this the camera flies for ever.
@@ -159,15 +192,29 @@ const MUTATIONS = {
     mustFail: 'and losing the page releases the key, so a held fly key stops',
   },
 
-  // The half of the gate that is the program camera, a gizmo drag and a node drag at once.
+  // The half of the gate that is the program camera, a gizmo drag, a node drag and a crop drag at
+  // once. Both terms go, because `lookDrag` on its own still refuses under the program camera and
+  // the row would pass on a build with the gate gone.
   'fly-ignores-the-program-camera': {
     file: 'web/main.js',
     edits: [[
-      'const flying = () => flyInputActive() && controls.enabled && !exporting;',
+      'const flying = () => flyInputActive() && (controls.enabled || lookDrag !== null) && !exporting;',
       'const flying = () => flyInputActive() && !exporting;',
     ]],
     fails: 'and nothing flies under the program camera, whose pose is the document\'s',
     mustFail: 'and nothing flies under the program camera, whose pose is the document\'s',
+  },
+
+  // The other half: a look drag turns the orbit off, and it is the one reason for that which must
+  // not stop the flight. Without the term, flying while you turn is the one thing the mode is not.
+  'fly-stops-during-a-look': {
+    file: 'web/main.js',
+    edits: [[
+      'const flying = () => flyInputActive() && (controls.enabled || lookDrag !== null) && !exporting;',
+      'const flying = () => flyInputActive() && controls.enabled && !exporting;',
+    ]],
+    fails: 'and the flight carries on through a look drag, so you fly the way you are turning',
+    mustFail: 'and the flight carries on through a look drag, so you fly the way you are turning',
   },
 
   // Held keys can cancel exactly. They ask for no movement, so they must not keep the redraw
@@ -175,11 +222,39 @@ const MUTATIONS = {
   'fly-redraws-cancelled-keys': {
     file: 'web/main.js',
     edits: [[
-      'const flying = () => flyInputActive() && controls.enabled && !exporting;',
-      'const flying = () => flyHeld.size > 0 && controls.enabled && !exporting;',
+      '  flyShift && flyDirection(flyHeld, freeCamera.quaternion, freeCamera.up, flyMove).lengthSq() > 0\n',
+      '  flyShift && flyHeld.size > 0\n',
     ]],
     fails: 'opposite fly keys do not keep the redraw loop alive because their requested move is zero',
     mustFail: 'opposite fly keys do not keep the redraw loop alive because their requested move is zero',
+  },
+
+  // The gate itself. Without it the six keys fly bare, which is the whole of what the redesign
+  // took away and what the unshifted control below is for.
+  'fly-ignores-the-shift-gate': {
+    file: 'web/main.js',
+    edits: [[
+      '  flyShift && flyDirection(flyHeld, freeCamera.quaternion, freeCamera.up, flyMove).lengthSq() > 0',
+      '  flyDirection(flyHeld, freeCamera.quaternion, freeCamera.up, flyMove).lengthSq() > 0',
+    ]],
+    fails: 'control: an unshifted fly key moves nothing at all, which is the gate every row above is held by',
+    mustFail: 'control: an unshifted fly key moves nothing at all, which is the gate every row above is held by',
+  },
+
+  // The gate keyed on the keydown rather than on the shift state: the key is only recorded while
+  // shift is already down, so shift arriving onto a key already held finds an empty set.
+  'fly-takes-the-key-only-with-shift': {
+    file: 'web/main.js',
+    edits: [[
+      '  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {\n'
+      + '    changeFlyKeys(() => flyHeld.add(e.code));\n'
+      + '    if (e.shiftKey) {\n      e.preventDefault();\n      return;\n    }\n  }',
+      '  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {\n'
+      + '    if (e.shiftKey) {\n      changeFlyKeys(() => flyHeld.add(e.code));\n'
+      + '      e.preventDefault();\n      return;\n    }\n  }',
+    ]],
+    fails: 'and shift arriving onto a key already held starts the flight',
+    mustFail: 'and shift arriving onto a key already held starts the flight',
   },
 
   // A release and new press can both land between animation frames. Without the event-side reset,
@@ -211,14 +286,149 @@ const MUTATIONS = {
     mustFail: 'and Reset still goes home after a flight rather than to wherever the flight ended',
   },
 
-  'fly-ignores-shift': {
+  // The look written as an orbit about a pivot that happens to be near. The view turns by exactly
+  // the same angle and the radius survives, so position is the only reading that can see it.
+  'look-orbits-the-camera': {
+    file: 'web/main.js',
+    edits: [[
+      '  controls.target.copy(freeCamera.position).add(lookPivot);',
+      '  freeCamera.position.copy(controls.target).sub(lookPivot);',
+    ]],
+    fails: 'the camera stands still through a look, so what turns is the view and not the standpoint',
+    mustFail: 'the camera stands still through a look, so what turns is the view and not the standpoint',
+  },
+
+  // The pivot pulled in rather than rotated, so the turn is right and the orbit afterwards is not.
+  'look-shrinks-the-pivot': {
+    file: 'web/main.js',
+    edits: [[
+      '  controls.target.copy(freeCamera.position).add(lookPivot);',
+      '  controls.target.copy(freeCamera.position).addScaledVector(lookPivot, 0.5);',
+    ]],
+    fails: 'and the pivot rides a sphere about the camera, so the orbit radius survives the turn',
+    mustFail: 'and the pivot rides a sphere about the camera, so the orbit radius survives the turn',
+  },
+
+  // A rate of its own rather than the lens's, which is the figure this started out as. Right at
+  // the default lens and wrong everywhere else: at 300mm the frame is four degrees tall and six
+  // pixels of drag would sweep the picture out of view.
+  'look-ignores-the-lens': {
     file: 'web/fly.js',
     edits: [[
-      '  const speed = FLY_SPEED_MPS * (fast ? FLY_FAST : 1);',
-      '  const speed = FLY_SPEED_MPS;',
+      '  const perPixel = THREE.MathUtils.degToRad(fovDeg) / Math.max(1, heightPx);',
+      '  const perPixel = (2 * Math.PI) / Math.max(1, heightPx);',
     ]],
-    fails: 'holding shift flies faster, by about the three times it claims',
-    mustFail: 'holding shift flies faster, by about the three times it claims',
+    fails: '  and a quarter field of view turns a quarter as far for the same pixels',
+    mustFail: '  and a quarter field of view turns a quarter as far for the same pixels',
+  },
+
+  // The wheel read off the vertical alone. Chrome delivers shift plus a physical wheel as
+  // `deltaX`, so this is the gesture dead on a real mouse and live under every driver.
+  'lens-wheel-reads-only-the-vertical': {
+    file: 'web/main.js',
+    edits: [[
+      '  const pixels = Math.abs(delta.x) > Math.abs(delta.y) ? delta.x : delta.y;',
+      '  const pixels = delta.y;',
+    ]],
+    fails: 'and a wheel that reports its notch sideways moves the lens by the same amount, which is '
+      + 'the axis a real mouse sends under shift',
+    mustFail: 'and a wheel that reports its notch sideways moves the lens by the same amount, which is '
+      + 'the axis a real mouse sends under shift',
+  },
+
+  // The yaw the other way, which is an orbit's sign rather than a look's.
+  'look-drags-backwards': {
+    file: 'web/fly.js',
+    edits: [[
+      '  out.applyAxisAngle(lookPole, -dxPx * perPixel);',
+      '  out.applyAxisAngle(lookPole, dxPx * perPixel);',
+    ]],
+    fails: 'dragging right turns the view right, which puts the scene to the left of where it was',
+    mustFail: 'dragging right turns the view right, which puts the scene to the left of where it was',
+  },
+
+  // And the pitch the other way. A separate control because a build can get one axis right.
+  'look-pitches-backwards': {
+    file: 'web/fly.js',
+    edits: [[
+      '    Math.PI - LOOK_POLE_EPS, Math.max(LOOK_POLE_EPS, polar + dyPx * perPixel),',
+      '    Math.PI - LOOK_POLE_EPS, Math.max(LOOK_POLE_EPS, polar - dyPx * perPixel),',
+    ]],
+    fails: 'dragging down looks down, at the same radians per pixel as across',
+    mustFail: 'dragging down looks down, at the same radians per pixel as across',
+  },
+
+  // The clamp removed, so a drag past the pole rotates through it and comes back facing the
+  // other way. Driven as one pointer move, because a stepped drag on this build oscillates back
+  // towards the pole it went through and a row reading the end of it sees nothing wrong.
+  'look-tips-past-the-pole': {
+    file: 'web/fly.js',
+    edits: [[
+      '  const wanted = Math.min(\n'
+      + '    Math.PI - LOOK_POLE_EPS, Math.max(LOOK_POLE_EPS, polar + dyPx * perPixel),\n'
+      + '  );',
+      '  const wanted = polar + dyPx * perPixel;',
+    ]],
+    fails: 'and the pitch stops just short of either pole rather than tipping over it',
+    mustFail: 'and the pitch stops just short of either pole rather than tipping over it',
+  },
+
+  // The look's release never arms the accurate seek, so a turn ends on the draft frame the drag
+  // was redrawing. `fly-never-settles` through the second door the redesign opened.
+  'look-never-settles': {
+    file: 'web/main.js',
+    edits: [[
+      '  controls.enabled = viewCamera === freeCamera;\n  orbitSettling = true;\n}',
+      '  controls.enabled = viewCamera === freeCamera;\n}',
+    ]],
+    fails: 'and letting the pointer up lands the accurate frame',
+    mustFail: 'and letting the pointer up lands the accurate frame',
+  },
+
+  'look-survives-blur': {
+    file: 'web/main.js',
+    edits: [["addEventListener('blur', stopLookDrag);\n", '']],
+    mustFail: 'editor: blur ends a look drag and rejects its remaining input',
+  },
+  'look-survives-capture-loss': {
+    file: 'web/main.js',
+    edits: [["['pointerup', 'pointercancel', 'lostpointercapture']", "['pointerup', 'pointercancel']"]],
+    mustFail: 'editor: lostpointercapture ends a look drag and rejects its remaining input',
+  },
+  'look-survives-camera-switch': {
+    file: 'web/main.js',
+    edits: [['function setViewCamera(cam) {\n  stopLookDrag();', 'function setViewCamera(cam) {']],
+    mustFail: 'editor: program camera ends a look drag and rejects its remaining input',
+  },
+
+  // The wheel's clamp removed. A wheel has no value to type, so nothing else stops it: the band
+  // is what the gesture is bounded by rather than only measured against.
+  'lens-wheel-ignores-the-band': {
+    file: 'web/main.js',
+    edits: [[
+      '  freeCamera.fov = verticalFovForFocalLength(\n'
+      + '    Math.min(LENS_MAX_MM, Math.max(LENS_MIN_MM, mm)), aspect,\n'
+      + '  );',
+      '  freeCamera.fov = verticalFovForFocalLength(mm, aspect);',
+    ]],
+    fails: 'and the wheel stops at each end of the band, at a reading the row can hold',
+    mustFail: 'and the wheel stops at each end of the band, at a reading the row can hold',
+  },
+
+  // The band read off the raw number rather than off the figure the row prints. A lens the wheel
+  // clamped to exactly 8mm comes back through `fov` as 7.9999999999999982 at 16:9, so the row
+  // says it is wider than the band it is standing in.
+  'showlens-reads-the-raw-number': {
+    file: 'web/main.js',
+    edits: [[
+      '  const shown = Number(mm.toFixed(1));\n'
+      + '  if (shown < LENS_MIN_MM) ui.camLensOut.textContent = `wider than ${LENS_MIN_MM}mm`;\n'
+      + '  else if (shown > LENS_MAX_MM) ui.camLensOut.textContent = `longer than ${LENS_MAX_MM}mm`;',
+      '  if (mm < LENS_MIN_MM) ui.camLensOut.textContent = `wider than ${LENS_MIN_MM}mm`;\n'
+      + '  else if (mm > LENS_MAX_MM) ui.camLensOut.textContent = `longer than ${LENS_MAX_MM}mm`;',
+    ]],
+    fails: 'and the wheel stops at each end of the band, at a reading the row can hold',
+    mustFail: 'and the wheel stops at each end of the band, at a reading the row can hold',
   },
 
   // ---- section 22, the clip a person adds, selects and deletes ----
@@ -2638,6 +2848,97 @@ const focusStage = () => page.evaluate(`(() => {
   if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   document.getElementById('stage')?.focus?.();
 })()`);
+
+async function proveRecorderNavigation(page) {
+  const pose = () => page.evaluate(() => {
+    const k = __kinect, c = k.freeCamera;
+    return { p: c.position.toArray(), t: k.controls.target.toArray(), fov: c.fov };
+  });
+  const distance = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+  await page.evaluate(() => { document.activeElement?.blur(); });
+  const before = await pose();
+  await page.keyboard.down('w');
+  await page.waitForTimeout(250);
+  const bare = await pose();
+  await page.keyboard.down('Shift');
+  await page.waitForTimeout(350);
+  await page.keyboard.up('w');
+  await page.keyboard.up('Shift');
+  const flown = await pose();
+  check(distance(before.p, bare.p) < 1e-6 && distance(bare.p, flown.p) > 0.1,
+    'recorder: Shift enables flight on a key already held',
+    `bare ${distance(before.p, bare.p)}, shifted ${distance(bare.p, flown.p)}`);
+  const box = await page.locator('#stage').boundingBox();
+  const x = box.x + box.width * 0.4, y = box.y + box.height * 0.5;
+  await page.keyboard.down('Shift');
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 100, y, { steps: 6 });
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  await page.waitForTimeout(50);
+  const looked = await pose();
+  check(distance(flown.p, looked.p) < 1e-6 && distance(flown.t, looked.t) > 0.05,
+    'recorder: Shift-drag turns the view without moving the camera');
+  await page.keyboard.down('Shift');
+  await page.mouse.wheel(-100, 0);
+  await page.waitForTimeout(50);
+  await page.keyboard.up('Shift');
+  const wheeled = await pose();
+  check(wheeled.fov < looked.fov * 0.95 && distance(looked.p, wheeled.p) < 1e-6,
+    'recorder: a horizontal Shift-wheel changes the lens without dollying');
+  await proveLookInterruptions(page, 'recorder');
+}
+
+async function proveLookInterruptions(page, label) {
+  const pose = () => page.evaluate(() => {
+    const k = __kinect;
+    return { p: k.freeCamera.position.toArray(), t: k.controls.target.toArray(), enabled: k.controls.enabled };
+  });
+  const distance = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+  for (const reason of ['blur', 'pointercancel', 'lostpointercapture', 'program camera']) {
+    await page.evaluate(() => { document.activeElement?.blur(); __kinect.setViewCamera(__kinect.freeCamera); });
+    const box = await page.locator('#stage').boundingBox();
+    const x = box.x + box.width * 0.4, y = box.y + box.height * 0.5;
+    await page.evaluate(() => {
+      addEventListener('pointerdown', (e) => {
+        globalThis.__proofPointer = e.pointerId;
+      }, { capture: true, once: true });
+    });
+    await page.keyboard.down('Shift');
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 30, y, { steps: 3 });
+    const held = await pose();
+    check(!held.enabled, `${label}: ${reason} starts with a live look drag`);
+    await page.evaluate((reason) => {
+      const stage = document.getElementById('stage');
+      if (reason === 'blur') dispatchEvent(new Event('blur'));
+      else if (reason === 'program camera') __kinect.setViewCamera(__kinect.programCamera);
+      else if (reason === 'lostpointercapture') stage.releasePointerCapture(globalThis.__proofPointer);
+      else stage.dispatchEvent(new PointerEvent('pointercancel', { pointerId: globalThis.__proofPointer }));
+    }, reason);
+    // Capture loss is delivered before the next pointer event, which can outlive a timed wait.
+    if (reason === 'lostpointercapture') await page.mouse.move(x + 30, y);
+    await page.waitForTimeout(50);
+    const stopped = await pose();
+    await page.mouse.move(x + 80, y + 30, { steps: 3 });
+    if (reason === 'program camera') await page.keyboard.down('w');
+    await page.waitForTimeout(200);
+    const later = await pose();
+    if (reason === 'program camera') await page.keyboard.up('w');
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    check(stopped.enabled === (reason !== 'program camera')
+      && distance(stopped.p, later.p) < 1e-6 && distance(stopped.t, later.t) < 1e-6,
+    `${label}: ${reason} ends a look drag and rejects its remaining input`,
+    `enabled ${stopped.enabled}, camera ${distance(stopped.p, later.p)}, pivot ${distance(stopped.t, later.t)}`);
+  }
+  await page.evaluate(() => {
+    __kinect.setViewCamera(__kinect.freeCamera);
+    document.getElementById('menuCameraReset').click();
+  });
+}
 
 try {
   await settle();
@@ -9598,6 +9899,8 @@ try {
             'and the dock\'s sensor lands the pose Framing\'s own sensor view lands',
             `dock ${sensorByDock.join(', ')} against panel ${sensorByPanel.join(', ')}`);
         }
+        await proveRecorderNavigation(recorder.page);
+        check(recErrors.length === 0, 'recorder navigation raises no page errors', recErrors.join(' | '));
       } finally {
         // Closed before the editor is put back, so the last gesture of this section goes to the
         // page section 22 inherits and nothing is left holding a socket on the shooting server.
@@ -9839,7 +10142,7 @@ try {
   }
 
   // -------------------------------------------------------------------------------------------
-  console.log('\n[24] the fly keys');
+  console.log('\n[24] flying, looking and the lens');
   {
     await page.evaluate('__kinect.timeline.transport().pause()');
     await page.evaluate('__kinect.timeline.transport().seek(4.0)');
@@ -9855,12 +10158,20 @@ try {
       k.controls.update(0);
       k.controls.enableDamping = damped;
       const c = k.freeCamera;
+      const V = c.position.constructor;
       return {
         p: c.position.toArray(),
         up: c.up.clone().normalize().toArray(),
-        fwd: c.getWorldDirection(new (c.position.constructor)()).toArray(),
+        fwd: c.getWorldDirection(new V()).toArray(),
         target: k.controls.target.toArray(),
         offset: k.controls.target.clone().sub(c.position).toArray(),
+        radius: k.controls.target.distanceTo(c.position),
+        fov: c.fov,
+        // The height the look divides the drag by, which is the renderer's own size and not the
+        // element's box: a row expecting a turn has to ask the number the code used.
+        stageH: k.renderer.getSize({ set(x, y) { this.x = x; this.y = y; return this; } }).y,
+        lens: document.getElementById('camLens').value,
+        lensOut: document.getElementById('camLensOut').textContent,
         redraws: k.timeline.counters.navigationRedraws,
         seeks: k.timeline.counters.seeks,
         autoRotate: k.controls.autoRotate,
@@ -9869,12 +10180,27 @@ try {
       };
     })()`);
 
+    const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const cross3 = (a, b) => [
+      a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0],
+    ];
+    const unit = (a) => { const l = Math.hypot(...a) || 1; return a.map((v) => v / l); };
+    const flat = (v, pole) => { const k = dot3(v, pole); return unit(v.map((x, i) => x - k * pole[i])); };
+    /** The signed angle from `a` to `b` about `pole`, which is what a yaw is and a pitch is not. */
+    const yawAbout = (a, b, pole) => {
+      const [x, y] = [flat(a, pole), flat(b, pole)];
+      return Math.atan2(dot3(cross3(x, y), pole), dot3(x, y));
+    };
+    /** How far off the pole a direction points, in radians. Grows as the view goes down. */
+    const polarTo = (v, pole) => Math.acos(Math.min(1, Math.max(-1, dot3(v, pole))));
+    const apart = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+
     /**
      * Hold `keys` for about `ms` and report what the camera did over it. `seeks` is read between
      * the last frame of the hold and the release, so the release's own seek can be told from a
-     * redraw that fell back to one.
+     * redraw that fell back to one. `shift` is not decoration: it is what takes the six keys.
      */
-    const fly = async (keys, { ms = 400, shift = false, focus = true } = {}) => {
+    const fly = async (keys, { ms = 400, shift = true, focus = true } = {}) => {
       if (focus) await focusStage();
       const before = await rest();
       const began = Date.now();
@@ -9891,6 +10217,46 @@ try {
       return { before, after, moved, elapsed, heldSeeks, length: Math.hypot(...moved) };
     };
 
+    const stage = await page.evaluate(`(() => {
+      const r = document.getElementById('stage').getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, top: r.y, bottom: r.y + r.height };
+    })()`);
+
+    /**
+     * A drag across the stage, shifted or bare, and the poses either side of it.
+     * `steps` of 1 is one pointer move, which is what the pole rows need: a build with no clamp
+     * turns back towards the pole it went through, so a stepped drag past it ends up reading as
+     * though it had stopped there.
+     */
+    const drag = async (dxPx, dyPx, { shift = true, steps = 8, from = null } = {}) => {
+      const at = from ?? { x: stage.x - dxPx / 2, y: stage.y - dyPx / 2 };
+      const before = await rest();
+      if (shift) await page.keyboard.down('Shift');
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      await page.mouse.move(at.x + dxPx, at.y + dyPx, { steps });
+      await page.mouse.up();
+      if (shift) await page.keyboard.up('Shift');
+      await settle();
+      const after = await rest();
+      return { before, after, moved: apart(after.p, before.p) };
+    };
+
+    /**
+     * One wheel notch over the middle of the stage, shifted or bare. `axis` is not decoration:
+     * Chrome turns shift plus a physical wheel into `deltaX`, so the horizontal branch is the
+     * one a real mouse takes and rows driven on `deltaY` alone leave it untested.
+     */
+    const wheel = async (delta, { shift = true, axis = 'y' } = {}) => {
+      const before = await rest();
+      await page.mouse.move(stage.x, stage.y);
+      if (shift) await page.keyboard.down('Shift');
+      await page.mouse.wheel(axis === 'x' ? delta : 0, axis === 'x' ? 0 : delta);
+      if (shift) await page.keyboard.up('Shift');
+      await settle();
+      return { before, after: await rest() };
+    };
+
     const armed = await rest();
     // The trail is a precondition and not decoration: `redrawNow` falls back to a full seek while
     // one is up, which would take the seek pair below away without saying so.
@@ -9903,12 +10269,12 @@ try {
     const w = await fly(['w']);
     const along = w.moved.reduce((n, v, i) => n + v * w.before.fwd[i], 0);
     const across = Math.hypot(...w.moved.map((v, i) => v - along * w.before.fwd[i]));
-    note('holding W at a parked playhead',
+    note('holding shift and W at a parked playhead',
       `${w.length.toFixed(3)} m over ${w.elapsed.toFixed(2)}s held, `
       + `${w.after.redraws - w.before.redraws} navigation redraws, `
       + `${w.heldSeeks - w.before.seeks} seeks during the hold`);
     check(along > 0.1 && along < 0.8,
-      'holding W flies the camera along the view direction',
+      'holding shift and W flies the camera along the view direction',
       `${along.toFixed(3)} m along the way it was pointing, over ${w.elapsed.toFixed(2)}s held`);
     check(w.length > 0 && across < 0.05 * w.length,
       '  and next to nothing across it, so it flies the view rather than a world axis',
@@ -9933,7 +10299,38 @@ try {
       `${w.after.seeks - w.heldSeeks} seeks after the release, against `
       + `${w.heldSeeks - w.before.seeks} during the hold`);
 
+    // The falsification control for every row above: with the gate gone they all still pass, and
+    // only this one can see it. The key is still recorded while it is down, so an unshifted hold
+    // is a build that took the key and refused to move on it rather than one that never saw it.
+    const bare = await fly(['w'], { shift: false });
+    check(bare.length < 1e-6 && bare.after.redraws === bare.before.redraws,
+      'control: an unshifted fly key moves nothing at all, which is the gate every row above is held by',
+      `${bare.length.toExponential(2)} m and ${bare.after.redraws - bare.before.redraws} navigation `
+      + `redraws over ${bare.elapsed.toFixed(2)}s held`);
+
+    // Shift onto a key already down. A different failure from the gate: a build that reads shift
+    // on the keydown alone never records the key, so this hold has nothing to start.
     await focusStage();
+    const beforeLate = await rest();
+    await page.keyboard.down('w');
+    await new Promise((r) => setTimeout(r, 300));
+    const heldBare = await page.evaluate('__kinect.freeCamera.position.toArray()');
+    await page.keyboard.down('Shift');
+    await new Promise((r) => setTimeout(r, 350));
+    const heldShifted = await page.evaluate('__kinect.freeCamera.position.toArray()');
+    await page.keyboard.up('w');
+    await page.keyboard.up('Shift');
+    await settle();
+    check(apart(heldBare, beforeLate.p) < 1e-6,
+      'control: the key on its own flew nothing over the 300 ms before shift arrived',
+      `${apart(heldBare, beforeLate.p).toExponential(2)} m`);
+    check(apart(heldShifted, heldBare) > 0.1,
+      'and shift arriving onto a key already held starts the flight',
+      `${apart(heldShifted, heldBare).toFixed(3)} m over the 350 ms after shift went down`);
+
+    // Shifted, or the keys cancel for the second reason and the row passes on the gate instead.
+    await focusStage();
+    await page.keyboard.down('Shift');
     await page.keyboard.down('w');
     await page.keyboard.down('s');
     const cancelledBefore = await rest();
@@ -9941,42 +10338,44 @@ try {
     const cancelledAfter = await rest();
     await page.keyboard.up('s');
     await page.keyboard.up('w');
+    await page.keyboard.up('Shift');
     await settle();
-    const cancelledMove = Math.hypot(...cancelledAfter.p.map((v, i) => v - cancelledBefore.p[i]));
+    const cancelledMove = apart(cancelledAfter.p, cancelledBefore.p);
     const cancelledRedraws = cancelledAfter.redraws - cancelledBefore.redraws;
     check(cancelledMove < 1e-6 && cancelledRedraws <= 1,
       'opposite fly keys do not keep the redraw loop alive because their requested move is zero',
       `${cancelledMove.toExponential(2)} m and ${cancelledRedraws} navigation redraws over 300 ms`);
 
+    // Every synthetic event carries the shift, including the keyup: `flyShift` is written from
+    // `e.shiftKey` on both, so a release without it puts the gate down and the re-press flies
+    // nothing at all - which is the row passing for the opposite of its reason.
     await focusStage();
+    await page.keyboard.down('Shift');
     await page.keyboard.down('w');
     await new Promise((r) => setTimeout(r, 250));
     const restarted = await page.evaluate(`(async () => {
       const c = __kinect.freeCamera;
-      dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', key: 'w' }));
+      const shift = { code: 'KeyW', key: 'w', shiftKey: true };
+      dispatchEvent(new KeyboardEvent('keyup', shift));
       const until = performance.now() + 150;
       while (performance.now() < until) {}
       const before = c.position.toArray();
-      dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', key: 'w' }));
+      dispatchEvent(new KeyboardEvent('keydown', shift));
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      const after = c.position.toArray();
-      dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', key: 'w' }));
-      return Math.hypot(...after.map((v, i) => v - before[i]));
+      const one = c.position.toArray();
+      for (let i = 0; i < 3; i++) await new Promise((resolve) => requestAnimationFrame(resolve));
+      const four = c.position.toArray();
+      dispatchEvent(new KeyboardEvent('keyup', shift));
+      const d = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+      return { first: d(one, before), overFour: d(four, before) };
     })()`);
     await page.keyboard.up('w');
+    await page.keyboard.up('Shift');
     await settle();
-    check(restarted < 0.03,
+    check(restarted.first < 0.03 && restarted.overFour > 0.002,
       'a new hold starts a new clock even when its release and press land between frames',
-      `${restarted.toFixed(4)} m on the first frame after a 150 ms gap`);
-
-    const fast = await fly(['w'], { shift: true });
-    const slowRate = w.length / w.elapsed;
-    const fastRate = fast.length / fast.elapsed;
-    check(slowRate > 0 && fastRate > 1.8 * slowRate,
-      'holding shift flies faster, by about the three times it claims',
-      `${fastRate.toFixed(3)} m per second held against ${slowRate.toFixed(3)}, `
-      + `a ratio of ${(fastRate / Math.max(slowRate, 1e-9)).toFixed(2)} over `
-      + `${fast.length.toFixed(3)} m and ${w.length.toFixed(3)} m`);
+      `${restarted.first.toFixed(4)} m on the first frame after a 150 ms gap, and `
+      + `${restarted.overFour.toFixed(4)} m over the four frames after it, so it did fly`);
 
     // Pitched hard down, which is the pose that tells the room's vertical from the camera's.
     const pitched = await page.evaluate(`(() => {
@@ -10008,21 +10407,71 @@ try {
     })()`);
     await settle();
 
-    // `tRate` and not a text field: the guard is on the tag name, so a slider with the keyboard
-    // is the same case as a name being typed into, and it needs no dialog opened over the stage.
-    await page.evaluate("document.getElementById('tRate').focus()");
-    const focused = await page.evaluate('document.activeElement && document.activeElement.id');
+    // The keyboard guard is two claims and not one: a text field keeps the whole keyboard, and
+    // every other control keeps only the keys it works itself. Both are driven, because the
+    // build that took every control's keyboard passed the first of them for years.
+    //
+    // The editor has no text field standing on the page, so this opens the one the export
+    // dialog carries and puts its value back afterwards - the refused key would otherwise be
+    // typed into the name a later section reads.
+    await focusStage();
+    const exportName = await page.evaluate('document.getElementById("tExportName").value');
+    const beforeTextFocus = await rest();
+    await page.keyboard.down('Shift');
+    await page.keyboard.down('w');
+    await page.waitForTimeout(150);
+    await page.locator('#outputMenuButton').click();
+    await page.locator('#menuExport').click();
+    await page.evaluate("document.getElementById('tExportName').focus()");
+    const atTextFocus = await rest();
+    await page.waitForTimeout(200);
+    const afterTextFocus = await rest();
+    await page.keyboard.up('w');
+    await page.keyboard.up('Shift');
+    check(apart(beforeTextFocus.p, atTextFocus.p) > 0.05,
+      'control: the camera was flying before the text field took focus');
+    check(apart(atTextFocus.p, afterTextFocus.p) < 1e-6,
+      'focusing a text field stops a flight already in progress',
+      `${apart(atTextFocus.p, afterTextFocus.p)} m while the filename held focus`);
+    const inText = await page.evaluate('document.activeElement && document.activeElement.id');
     const whileTyping = await fly(['w'], { focus: false });
-    check(focused === 'tRate',
-      'control: a panel control holds the keyboard, which is the case the typing guard is about',
-      `the focus is on ${JSON.stringify(focused)}`);
+    await page.evaluate(`(() => {
+      const el = document.getElementById('tExportName');
+      el.value = ${JSON.stringify(exportName)};
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      document.getElementById('exportDialog').close();
+    })()`);
+    await settle();
+    check(inText === 'tExportName',
+      'control: a text field holds the keyboard, which is the case the guard is about',
+      `the focus is on ${JSON.stringify(inText)}`);
     check(whileTyping.length < 1e-6,
-      'a fly key does nothing while a control holds the keyboard',
+      'a fly key does nothing while a text field holds the keyboard',
       `${whileTyping.length.toExponential(2)} m over ${whileTyping.elapsed.toFixed(2)}s held`);
+
+    // A slider is not a text field, so it keeps the arrows it works itself and nothing else.
+    // `camLens` rather than `tRate`: this section already puts the lens back on the way out,
+    // where a nudged clip speed would be an edit left behind in the document.
+    await page.locator('#panelTabCamera').click();
+    await page.locator('#camLens').focus();
+    const onSlider = await page.evaluate('document.activeElement && document.activeElement.id');
+    const nudgeFrom = await page.evaluate('document.getElementById("camLens").value');
+    await page.keyboard.press('ArrowRight');
+    const nudgeTo = await page.evaluate('document.getElementById("camLens").value');
+    const whileSliding = await fly(['w'], { focus: false });
+    check(onSlider === 'camLens' && Number(nudgeTo) > Number(nudgeFrom),
+      'control: a focused slider still takes its own arrow key, which is what it is left holding',
+      `the focus is on ${JSON.stringify(onSlider)} and the right arrow took it from `
+      + `${nudgeFrom} to ${nudgeTo}`);
+    check(whileSliding.length > 0.1,
+      'and a fly key still flies while a slider holds the keyboard, because a slider takes no text',
+      `${whileSliding.length.toFixed(3)} m over ${whileSliding.elapsed.toFixed(2)}s held, against `
+      + `${whileTyping.length.toExponential(2)} m with the text field focused`);
     await focusStage();
 
     // A key released outside the page never arrives, so the blur has to be the release.
     const beforeBlur = await rest();
+    await page.keyboard.down('Shift');
     await page.keyboard.down('w');
     await new Promise((r) => setTimeout(r, 250));
     const atBlur = await page.evaluate('__kinect.freeCamera.position.toArray()');
@@ -10032,9 +10481,10 @@ try {
     await new Promise((r) => setTimeout(r, 300));
     const laterAfterBlur = await page.evaluate('__kinect.freeCamera.position.toArray()');
     await page.keyboard.up('w');
+    await page.keyboard.up('Shift');
     await settle();
-    const flewBeforeBlur = Math.hypot(...atBlur.map((v, i) => v - beforeBlur.p[i]));
-    const flewAfterBlur = Math.hypot(...laterAfterBlur.map((v, i) => v - settledAfterBlur[i]));
+    const flewBeforeBlur = apart(atBlur, beforeBlur.p);
+    const flewAfterBlur = apart(laterAfterBlur, settledAfterBlur);
     check(flewBeforeBlur > 0.05,
       'control: the hold was flying when the window lost the page',
       `${flewBeforeBlur.toFixed(3)} m over the 250 ms before the blur`);
@@ -10048,19 +10498,21 @@ try {
       return { enabled: k.controls.enabled, p: k.freeCamera.position.toArray() };
     })()`);
     await focusStage();
+    await page.keyboard.down('Shift');
     await page.keyboard.down('w');
     await new Promise((r) => setTimeout(r, 400));
     const underProgram = await page.evaluate('__kinect.freeCamera.position.toArray()');
     // Released before the free camera comes back, or the restored gate flies it on the next frame.
     await page.keyboard.up('w');
+    await page.keyboard.up('Shift');
     await page.evaluate('__kinect.setViewCamera(__kinect.freeCamera)');
     await settle();
     check(onProgram.enabled === false,
       'control: the program camera turns the orbit off, which is the gate the fly reads',
       `controls.enabled is ${onProgram.enabled} under the program camera`);
-    check(Math.hypot(...underProgram.map((v, i) => v - onProgram.p[i])) < 1e-6,
+    check(apart(underProgram, onProgram.p) < 1e-6,
       'and nothing flies under the program camera, whose pose is the document\'s',
-      `${Math.hypot(...underProgram.map((v, i) => v - onProgram.p[i])).toExponential(2)} m over a 400 ms hold`);
+      `${apart(underProgram, onProgram.p).toExponential(2)} m over a 400 ms hold`);
 
     // Reset first, so "home" is a pose the camera is standing at rather than one it has left.
     await page.evaluate("document.getElementById('menuCameraReset').click()");
@@ -10079,6 +10531,247 @@ try {
       `${rehomed.p.map((v) => v.toFixed(4)).join(', ')} against a home of `
       + `${home.p.map((v) => v.toFixed(4)).join(', ')}`);
 
+    // ---- the look ----
+    // A look and an orbit of the same pixels turn the view by the same angle in the same
+    // direction, so the direction rows below cannot tell them apart and the standpoint is the
+    // only reading that can. That is why the position row is the first one here and why the
+    // plain-drag control at the end of the block is the one that gives it a scale.
+    const turned = await drag(100, 0);
+    const right0 = unit(cross3(turned.before.fwd, turned.before.up));
+    const yaw = yawAbout(turned.before.fwd, turned.after.fwd, turned.before.up);
+    // The rate is the lens: a drag the height of the stage turns exactly one field of view, so
+    // the angle a row expects is read off the camera rather than written down here. A baked
+    // figure would be a second copy of the rule and would break the day the default lens moves.
+    const perPixel = ((turned.before.fov * Math.PI) / 180) / turned.before.stageH;
+    const yawWanted = 100 * perPixel;
+    note('a 100 px shift-drag across a stage the renderer sizes',
+      `${turned.before.stageH} px tall at a ${turned.before.fov.toFixed(4)} degree field of view, `
+      + `so the turn asked for is ${((yawWanted * 180) / Math.PI).toFixed(3)} degrees; the view `
+      + `turned ${((-yaw * 180) / Math.PI).toFixed(3)} and the camera moved `
+      + `${turned.moved.toExponential(2)} m`);
+    check(turned.moved < 1e-6,
+      'the camera stands still through a look, so what turns is the view and not the standpoint',
+      `${turned.moved.toExponential(2)} m, against the metres a plain drag of the same pixels `
+      + 'moves it below');
+    check(dot3(turned.after.fwd, right0) > 0 && yaw < -1e-4,
+      'dragging right turns the view right, which puts the scene to the left of where it was',
+      `the view direction ended dotting the right axis at ${dot3(turned.after.fwd, right0).toFixed(4)}`);
+    check(Math.abs(Math.abs(yaw) - yawWanted) < 1e-3,
+      '  and a drag the height of the stage turns exactly one field of view',
+      `${((Math.abs(yaw) * 180) / Math.PI).toFixed(4)} degrees against `
+      + `${((yawWanted * 180) / Math.PI).toFixed(4)} asked for, at a `
+      + `${turned.before.fov.toFixed(4)} degree lens over ${turned.before.stageH} px`);
+    check(Math.abs(turned.after.radius - turned.before.radius) < 1e-6,
+      'and the pivot rides a sphere about the camera, so the orbit radius survives the turn',
+      `${turned.before.radius.toFixed(9)} m before, ${turned.after.radius.toFixed(9)} m after`);
+
+    const dipped = await drag(0, 60);
+    const pitch = polarTo(dipped.after.fwd, dipped.before.up)
+      - polarTo(dipped.before.fwd, dipped.before.up);
+    const pitchWanted = 60 * (((dipped.before.fov * Math.PI) / 180) / dipped.before.stageH);
+    check(pitch > 0 && Math.abs(pitch - pitchWanted) < 1e-3 && dipped.moved < 1e-6,
+      'dragging down looks down, at the same radians per pixel as across',
+      `${((pitch * 180) / Math.PI).toFixed(4)} degrees down against `
+      + `${((pitchWanted * 180) / Math.PI).toFixed(4)} asked for, with the camera `
+      + `${dipped.moved.toExponential(2)} m from where it stood`);
+
+    // The lens is the rate, so the same pixels at a long lens have to turn a smaller angle. The
+    // control for that rule: a build with a rate of its own passes both rows above and answers
+    // the same angle here.
+    const longLens = await page.evaluate(`(() => {
+      const k = __kinect, c = k.freeCamera;
+      const was = c.fov;
+      c.fov = was / 4;
+      c.updateProjectionMatrix();
+      return was;
+    })()`);
+    const dippedLong = await drag(0, 60);
+    const pitchLong = polarTo(dippedLong.after.fwd, dippedLong.before.up)
+      - polarTo(dippedLong.before.fwd, dippedLong.before.up);
+    await page.evaluate(`(() => {
+      const c = __kinect.freeCamera;
+      c.fov = ${longLens};
+      c.updateProjectionMatrix();
+    })()`);
+    await settle();
+    check(pitchLong > 0 && Math.abs(pitchLong * 4 - pitch) < 1e-3,
+      '  and a quarter field of view turns a quarter as far for the same pixels',
+      `${((pitchLong * 180) / Math.PI).toFixed(4)} degrees at `
+      + `${(longLens / 4).toFixed(4)} degrees of view against `
+      + `${((pitch * 180) / Math.PI).toFixed(4)} at ${longLens.toFixed(4)}`);
+
+    // Both poles in one row, and each reached in a single pointer move: a stepped drag on a
+    // build with no clamp turns back through the pole it went past and reads as though it had
+    // stopped there. The widest lens the wheel offers first, because the reach of a drag *is*
+    // the lens now - at the default 50 degrees a pixel is worth so little that 150 degrees of
+    // pitch would need a drag longer than the window is tall.
+    const poleLens = await page.evaluate('__kinect.freeCamera.fov');
+    await wheel(1200);
+    const poles = {};
+    for (const [name, sign] of [['down', 1], ['up', -1]]) {
+      await page.evaluate(`(() => {
+        const k = __kinect, c = k.freeCamera;
+        c.position.set(0, 1, 3);
+        k.controls.target.set(0, 1, 0);
+        k.controls.update(0);
+        c.updateMatrixWorld(true);
+      })()`);
+      await settle();
+      const level = await rest();
+      // 150 degrees of pitch onto a level view, so a build with no clamp ends up 60 degrees the
+      // other side of the pole - which reads -0.5 where the clamp reads -1.
+      const far = Math.round((150 / level.fov) * level.stageH);
+      const top = stage.top + 10;
+      const past = await drag(0, far * sign, {
+        steps: 1, from: { x: stage.x, y: sign > 0 ? top : stage.bottom - 10 },
+      });
+      poles[name] = {
+        at: dot3(past.after.fwd, level.up), far: far * sign, fov: level.fov,
+        asked: (far / level.stageH) * level.fov, from: dot3(level.fwd, level.up),
+      };
+    }
+    await page.evaluate(`(() => {
+      const c = __kinect.freeCamera;
+      c.fov = ${poleLens};
+      c.updateProjectionMatrix();
+    })()`);
+    await settle();
+    check(poles.down.at < -0.9999 && poles.up.at > 0.9999,
+      'and the pitch stops just short of either pole rather than tipping over it',
+      `${poles.down.far} px down at a ${poles.down.fov.toFixed(2)} degree lens asks for `
+      + `${poles.down.asked.toFixed(1)} degrees of pitch and landed the view direction at `
+      + `${poles.down.at.toFixed(6)} of the pole; ${poles.up.far} px up landed at `
+      + `${poles.up.at.toFixed(6)}, from ${poles.down.from.toFixed(4)} level - a build that ran `
+      + 'past either lands about -0.5 and 0.5');
+
+    await page.evaluate("document.getElementById('menuCameraReset').click()");
+    await settle();
+    const orbited = await drag(100, 0, { shift: false });
+    check(orbited.moved > 0.1,
+      'control: a plain drag still orbits, so the camera moves where a look leaves it standing',
+      `${orbited.moved.toFixed(4)} m, against ${turned.moved.toExponential(2)} m for the same `
+      + 'pixels with shift down');
+
+    // The draft-per-frame and one-seek-on-release pair the fly hold has, asked of the look.
+    await page.evaluate('__kinect.timeline.transport().seek(4.0)');
+    await settle();
+    const lookBefore = await rest();
+    await page.keyboard.down('Shift');
+    await page.mouse.move(stage.x - 50, stage.y);
+    await page.mouse.down();
+    await page.mouse.move(stage.x, stage.y, { steps: 5 });
+    await new Promise((r) => setTimeout(r, 200));
+    await page.mouse.move(stage.x + 50, stage.y, { steps: 5 });
+    const lookHeld = await page.evaluate(`(() => ({
+      redraws: __kinect.timeline.counters.navigationRedraws,
+      seeks: __kinect.timeline.counters.seeks,
+    }))()`);
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    await settle();
+    const lookAfter = await rest();
+    check(lookHeld.redraws > lookBefore.redraws && lookHeld.seeks === lookBefore.seeks,
+      'a look redraws while the pointer is down and does not seek, so the seek below is the release',
+      `${lookHeld.redraws - lookBefore.redraws} navigation redraws and `
+      + `${lookHeld.seeks - lookBefore.seeks} seeks over the drag`);
+    check(lookAfter.seeks > lookHeld.seeks,
+      'and letting the pointer up lands the accurate frame',
+      `${lookAfter.seeks - lookHeld.seeks} seeks after the release`);
+
+    // Flight and look at once, which is the pair the gate change is about. Both readings are
+    // taken with the pointer still down: shift and W fly perfectly well either side of the drag,
+    // so a window that reaches past the release cannot see the term that keeps them together.
+    await focusStage();
+    await page.keyboard.down('Shift');
+    await page.keyboard.down('w');
+    await page.mouse.move(stage.x - 60, stage.y);
+    await page.mouse.down();
+    await new Promise((r) => setTimeout(r, 150));
+    const bothStart = await page.evaluate(`(() => {
+      const k = __kinect, c = k.freeCamera, V = c.position.constructor;
+      return {
+        p: c.position.toArray(), fwd: c.getWorldDirection(new V()).toArray(),
+        up: c.up.clone().normalize().toArray(), enabled: k.controls.enabled,
+      };
+    })()`);
+    await page.mouse.move(stage.x + 60, stage.y, { steps: 6 });
+    await new Promise((r) => setTimeout(r, 250));
+    const bothEnd = await page.evaluate(`(() => {
+      const k = __kinect, c = k.freeCamera, V = c.position.constructor;
+      return { p: c.position.toArray(), fwd: c.getWorldDirection(new V()).toArray() };
+    })()`);
+    await page.mouse.up();
+    await page.keyboard.up('w');
+    await page.keyboard.up('Shift');
+    await settle();
+    const bothFlew = apart(bothEnd.p, bothStart.p);
+    const bothTurned = Math.abs(yawAbout(bothStart.fwd, bothEnd.fwd, bothStart.up));
+    check(bothStart.enabled === false,
+      'control: a look drag turns the orbit off, which is the term the flight has to read past',
+      `controls.enabled is ${bothStart.enabled} with the look drag up`);
+    check(bothFlew > 0.1 && bothTurned > 0.01,
+      'and the flight carries on through a look drag, so you fly the way you are turning',
+      `${bothFlew.toFixed(3)} m flown and ${((bothTurned * 180) / Math.PI).toFixed(1)} degrees `
+      + 'turned between two readings taken with the pointer down');
+
+    // ---- the lens ----
+    const lensHome = await rest();
+    const zoomed = await wheel(-100);
+    check(zoomed.after.fov < zoomed.before.fov * 0.95
+      && apart(zoomed.after.p, zoomed.before.p) < 1e-9
+      && Math.abs(zoomed.after.radius - zoomed.before.radius) < 1e-9,
+      'shift and the wheel change the lens, and leave the camera where it is standing',
+      `${zoomed.before.lensOut} -> ${zoomed.after.lensOut}, fov ${zoomed.before.fov.toFixed(4)} -> `
+      + `${zoomed.after.fov.toFixed(4)}, camera ${apart(zoomed.after.p, zoomed.before.p).toExponential(2)} m `
+      + `and radius ${(zoomed.after.radius - zoomed.before.radius).toExponential(2)} m from where it was`);
+    const backAgain = await wheel(100);
+    check(Math.abs(backAgain.after.fov - zoomed.before.fov) < 1e-9,
+      '  and a notch back is the same lens again, so the gesture is a ratio and not a step',
+      `fov ${zoomed.before.fov.toFixed(9)} -> ${zoomed.after.fov.toFixed(9)} -> `
+      + `${backAgain.after.fov.toFixed(9)}`);
+
+    // Chrome turns shift plus a physical wheel into `deltaX`, so this is the branch a real mouse
+    // takes and the one no hand-drive here has ever reached.
+    const sideways = await wheel(-100, { axis: 'x' });
+    check(Math.abs(sideways.after.fov - zoomed.after.fov) < 1e-9,
+      'and a wheel that reports its notch sideways moves the lens by the same amount, which is '
+      + 'the axis a real mouse sends under shift',
+      `deltaX -100 left the fov at ${sideways.after.fov.toFixed(9)}, where deltaY -100 left it `
+      + `at ${zoomed.after.fov.toFixed(9)}, both from ${zoomed.before.fov.toFixed(9)}`);
+    await wheel(100, { axis: 'x' });
+
+    const dollied = await wheel(-100, { shift: false });
+    check(dollied.after.radius < dollied.before.radius * 0.99
+      && dollied.after.fov === dollied.before.fov,
+      'control: a plain wheel still dollies, and leaves the lens exactly where it was',
+      `radius ${dollied.before.radius.toFixed(5)} -> ${dollied.after.radius.toFixed(5)} m, `
+      + `fov ${dollied.before.fov} -> ${dollied.after.fov}, readout ${dollied.after.lensOut}`);
+
+    // From the 8mm clamp, -2600 asks for 395mm; -2400 only reaches 293mm.
+    const wide = await wheel(1200);
+    const long = await wheel(-2600);
+    check(wide.after.lensOut === '8.0mm' && long.after.lensOut === '300.0mm',
+      'and the wheel stops at each end of the band, at a reading the row can hold',
+      `${wide.after.lensOut} at the wide end and ${long.after.lensOut} at the long end, from `
+      + `${lensHome.lensOut}; the readings either end must be the band's own numbers rather than `
+      + 'the words for running past it');
+    note('the lens the clamps landed on',
+      `fov ${wide.after.fov.toFixed(4)} wide and ${long.after.fov.toFixed(4)} long, `
+      + `with the slider at ${wide.after.lens} and ${long.after.lens}`);
+
+    // The lens back where the section found it, exactly, and the row repainted through the
+    // control's own handler so the panel is not left showing the clamp.
+    await page.evaluate(`(() => {
+      const k = __kinect, c = k.freeCamera;
+      const el = document.getElementById('camLens');
+      el.value = ${JSON.stringify(lensHome.lens)};
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      c.fov = ${lensHome.fov};
+      c.updateProjectionMatrix();
+    })()`);
+    await page.evaluate("document.getElementById('menuCameraReset').click()");
+    await settle();
+
     await page.evaluate('__kinect.editor.setClipRange(4, 9)');
     await settle();
     await focusStage();
@@ -10095,11 +10788,11 @@ try {
     await page.evaluate('__kinect.editor.setClipRange(0, null)');
     await page.evaluate('__kinect.editor.view.fit()');
     // Nothing held on the way out, whatever a row above left behind.
+    await proveLookInterruptions(page, 'editor');
     await page.evaluate("dispatchEvent(new Event('blur'))");
     await settle();
   }
 
-  // -------------------------------------------------------------------------------------------
   console.log('\n[22] adding, selecting, moving and deleting a clip');
   {
     const library = await (await fetch(`${URL_BASE}/library/takes`)).json();
@@ -10122,8 +10815,8 @@ try {
 
     let one = await read();
     console.log(`  the stack: ${one.rows.join(', ')}`);
-    check(one.rows[0] === 'clips' && one.rows.includes('clip:c1'),
-      'the lane stack opens with a clip bar and a row for the clip that is open',
+    check(one.rows[0] === `clip:${one.clips[0].id}` && one.rows.includes('clip-add'),
+      'the lane stack opens with the clip row and offers a row to add another clip',
       one.rows.slice(0, 3).join(', '));
     check(one.boxes === one.clips.length,
       'and one box is drawn per clip', `${one.boxes} boxes for ${one.clips.length} clips`);
