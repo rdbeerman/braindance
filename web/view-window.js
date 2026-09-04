@@ -222,11 +222,5 @@ export function makeViewWindow({ durationSec, bedRect }) {
     },
 
     fit() { return this.set(0, 1); },
-
-    /** Frames a range with a margin, so the two markers are not on the very edges. */
-    frame(fromSec, toSec) {
-      const pad = Math.max(MIN_VIEW_SEC, (toSec - fromSec) * 0.05);
-      return this.set((fromSec - pad) / this.duration, (toSec + pad) / this.duration);
-    },
   };
 }

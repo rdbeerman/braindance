@@ -17,6 +17,9 @@ import {
   handleRefusal, foldRefusal, foldFreeX, retimeSourceSecAt, retimeProgramSecAt,
 } from './curve.js';
 import { tiltQuaternion } from './world-tilt.js';
+import {
+  isFlyKey, flyDirection, flyStep, lookOffset,
+} from './fly.js';
 import { verticalFovForFocalLength, focalLengthForVerticalFov } from './lens.js';
 import {
   EXPORT_SIZES, DEFAULT_EXPORT_SIZE, reduceAspect, exportAspects, sizesForAspect,
@@ -408,6 +411,7 @@ function setDeliverableSize(text) {
 
 // Which camera the viewport draws. Navigation is off under the program camera.
 function setViewCamera(cam) {
+  stopLookDrag();
   useViewCamera(cam);
   if (gizmo) gizmo.camera = cam;
   renderPass.camera = cam;
@@ -4357,8 +4361,54 @@ function renderProgramFrame(t) {
 // Navigation's own clock, kept out of the seam.
 let lastNavTime = 0;
 
+// Which fly keys are down, and whether shift is with them. Written from events and read by the
+// loop, because nothing but the loop may start a redraw.
+const flyHeld = new Set();
+let flyShift = false;
+// Wall clock at the previous fly frame, or 0 when the hold has not started. The free camera is
+// interactive, so it takes real seconds where auto-orbit takes the program delta.
+let flyLastAt = 0;
+const flyMove = new THREE.Vector3();
+// The look drag's live state, written by the pointer handlers far below and read here. Null
+// when no look drag is up; otherwise the last pointer position, since the turn is per-move.
+let lookDrag = null;
+
+/** Whether the held keys ask for a non-zero move. Shift gates the six, so it is a held key. */
+const flyInputActive = () => (
+  flyShift && flyDirection(flyHeld, freeCamera.quaternion, freeCamera.up, flyMove).lengthSq() > 0
+);
+
+/** Whether a held fly key may move the camera. `controls.enabled` is the program camera, a
+ *  gizmo drag, a node drag and a crop drag in one term - each already a reason the orbit stands
+ *  down. A look drag turns it off too and is the one that must not stop the flight, because
+ *  flying while you turn is what the mode is. */
+const flying = () => flyInputActive() && (controls.enabled || lookDrag !== null) && !exporting;
+
+/** Change the held keys or the shift they need, starting a new clock when the move starts or
+ *  stops. Shift comes through here for the same reason a key does: a resumed hold that kept the
+ *  old clock takes the stall cap as its first step. */
+function changeFlyKeys(change) {
+  const wasActive = flyInputActive();
+  change();
+  if (!wasActive || !flyInputActive()) flyLastAt = 0;
+}
+
+/** One frame of flight: the camera and its pivot translate by the same vector. */
+function advanceFly() {
+  if (!flying()) { flyLastAt = 0; return; }
+  const now = performance.now();
+  const dt = flyLastAt === 0 ? 0 : (now - flyLastAt) / 1000;
+  flyLastAt = now;
+  flyStep(flyHeld, dt, freeCamera.quaternion, freeCamera.up, flyMove);
+  freeCamera.position.add(flyMove);
+  // The pivot travels with the camera. `update()` rebuilds the position out of the target, so
+  // moving the camera alone would change the orbit's radius instead of where you are standing.
+  controls.target.add(flyMove);
+}
+
 // Auto-orbit gets the program delta, so the same orbit renders the same at any speed.
 function advanceNavigation(t) {
+  advanceFly();
   controls.update(Math.max(0, t - lastNavTime));
   lastNavTime = t;
 }
@@ -6454,20 +6504,49 @@ function clearClipRange() {
   history.commit();
 }
 
-const TYPING_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
-const isTyping = (el) => el instanceof HTMLElement && (TYPING_TAGS.has(el.tagName) || el.isContentEditable);
+// An input type that is not a text field. Anything else counts as text, including a type this
+// list has never heard of, so a text-like type added later defaults to keeping its keyboard.
+const NON_TEXT_INPUT_TYPES = new Set([
+  'range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file', 'image',
+]);
+// The keys a slider, a dropdown or a checkbox uses to operate itself. Everything else reaches
+// the editor, so a focused lens slider does not swallow cmd-z and the fly keys.
+const SELF_OPERATING_KEYS = new Set([
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Enter', 'Home', 'End', 'PageUp', 'PageDown',
+]);
+
+/** Whether a focused control takes text, which is the case that keeps the whole keyboard. */
+function takesText(el) {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.isContentEditable) return true;
+  if (el.tagName === 'TEXTAREA') return true;
+  if (el.tagName !== 'INPUT') return false;
+  return !NON_TEXT_INPUT_TYPES.has(el.type);
+}
+
+/** Whether the focused control has this key, so the editor must not take it off the control. */
+function controlKeeps(el, key) {
+  if (takesText(el)) return true;
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.tagName !== 'INPUT' && el.tagName !== 'SELECT') return false;
+  return SELF_OPERATING_KEYS.has(key);
+}
 
 const SHORTCUTS = 'space play/pause · arrows step a frame, with shift a second · '
   + 'home/end · i/o set in/out, with shift jump to them · option-x uses the whole clip · '
   + 'del removes the selected key · '
   + 'm marks, [/] jump to the previous and next mark · '
-  + '+/- zoom the ruler, ,/. pan it, f fits the clip, z frames in..out · '
+  + '+/- zoom the ruler, ,/. pan it, f fits the clip · '
+  + 'shift-wasd fly, shift-q/e down and up, shift-drag turns the view, shift-wheel the lens · '
   + 'g moves and turns the selected clip · '
   + 'cmd-z undoes · h hides the panel';
 
 /** The editor's keyboard, and the guard that has to come with it. */
 addEventListener('keydown', (e) => {
-  if (isTyping(e.target)) return;
+  // Above the typing guard: shift on its own arrives as a keydown, and releasing it as a keyup
+  // with `shiftKey` already false.
+  changeFlyKeys(() => { flyShift = e.shiftKey; });
+  if (controlKeeps(e.target, e.key)) return;
   if (e.defaultPrevented) return;
 
   if (e.key === 'h' || e.key === 'H') {
@@ -6478,6 +6557,18 @@ addEventListener('keydown', (e) => {
     e.preventDefault();
     history.undo();
     return;
+  }
+  // The recorder's viewport orbits the same camera, so this sits above the clip guard below.
+  // A repeat is harmless: the set already holds the code. The key is recorded whether or not
+  // shift is down, so pressing shift onto a key already held starts the flight rather than
+  // waiting for the key to be pressed again; shift is what *takes* the key, so without it the
+  // key goes on to whatever else is bound to it.
+  if (isFlyKey(e.code) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    changeFlyKeys(() => flyHeld.add(e.code));
+    if (e.shiftKey) {
+      e.preventDefault();
+      return;
+    }
   }
   if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey && !e.altKey && !EDITING && ui.recGo && !ui.recGo.disabled) {
     e.preventDefault();
@@ -6575,14 +6666,29 @@ addEventListener('keydown', (e) => {
     case ',': case '<': e.preventDefault(); if (view.panBy(-0.25)) viewChanged(); return;
     case '.': case '>': e.preventDefault(); if (view.panBy(0.25)) viewChanged(); return;
     case 'f': case 'F': e.preventDefault(); if (view.fit()) viewChanged(); return;
-    case 'z': case 'Z':
-      e.preventDefault();
-      if (view.frame(clipIn, clipOut ?? view.duration)) viewChanged();
-      return;
     case '?': e.preventDefault(); say(SHORTCUTS); return;
     default:
   }
 });
+
+/** A key released outside the page never arrives, so losing the page releases everything. */
+function clearFlyKeys() {
+  flyHeld.clear();
+  flyShift = false;
+  flyLastAt = 0;
+}
+
+// Not behind the typing guard: a key released after the focus moved into an input would
+// otherwise stay held for ever.
+addEventListener('keyup', (e) => {
+  changeFlyKeys(() => {
+    flyShift = e.shiftKey;
+    flyHeld.delete(e.code);
+  });
+});
+addEventListener('blur', clearFlyKeys);
+document.addEventListener('focusin', (e) => { if (takesText(e.target)) clearFlyKeys(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearFlyKeys(); });
 
 /** How wide the 1.00x detent is, in pixels of the control it lives on. */
 const DETENT_PX = 3;
@@ -6740,6 +6846,8 @@ let orbiting = false;
 let orbitSettling = false;
 // A flag rather than a position, since reading the transport from a control event is the loop.
 let orbitRedrawWanted = false;
+// Whether a fly key was held on the previous frame, so the release can be seen at all.
+let flyWasHeld = false;
 // Through `onNav`, because the object does not outlive a change of navigation's up.
 onNav('start', () => { orbiting = true; orbitSettling = false; });
 onNav('change', () => {
@@ -6774,9 +6882,16 @@ function pumpParkedDraft() {
     draftWanted = null;
     orbitRedrawWanted = false;
     orbitSettling = false;
+    flyWasHeld = false;
     gizmoWriteWanted = false;
     return;
   }
+  // A hold takes the same two paths a pointer orbit does: a draft-quality redraw per frame, and
+  // one accurate seek on the frame it ends.
+  const flyingNow = flying();
+  if (flyingNow) orbitRedrawWanted = true;
+  else if (flyWasHeld) orbitSettling = true;
+  flyWasHeld = flyingNow;
   // Before the drafts, because the gizmo's write is what the repaint below would be drawing.
   pumpGizmo();
   if (draftWanted !== null) {
@@ -9751,6 +9866,61 @@ addEventListener('pointerdown', (e) => {
   setPivotDistance(hit.distance);
 }, true);
 
+// The camera turning in place, where the orbit turns it about the pivot. `lookDrag` is declared
+// with the fly state, because the fly gate has to read it.
+const lookPivot = new THREE.Vector3();
+
+// After the pick above, so `nodeDrag` and `cropDrag` are already set by the time this reads them.
+addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || !e.shiftKey || e.ctrlKey || e.metaKey
+    || e.target !== renderer.domElement) return;
+  if (lookDrag || nodeDrag || cropDrag) return;
+  if (viewCamera !== freeCamera || !controls.enabled) return;
+  const view = viewUnder(e.clientX, e.clientY);
+  if (!view || view.plan) return;
+  e.preventDefault();
+  e.stopPropagation();
+  renderer.domElement.setPointerCapture(e.pointerId);
+  controls.enabled = false;
+  // Or the damping residual turns the camera under the first frames of the drag.
+  finishOrbitDrift();
+  // Decided here and never mid-gesture: a look stays a look when shift lets go, and an orbit
+  // stays an orbit when shift arrives. Changing meaning under the pointer would jump the camera.
+  lookDrag = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+}, true);
+
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!lookDrag || e.pointerId !== lookDrag.pointerId) return;
+  const dx = e.clientX - lookDrag.x;
+  const dy = e.clientY - lookDrag.y;
+  lookDrag.x = e.clientX;
+  lookDrag.y = e.clientY;
+  // The pivot rides a sphere about the camera, so letting go of shift orbits whatever is now in
+  // front of you at the distance it already had.
+  lookPivot.subVectors(controls.target, freeCamera.position);
+  lookOffset(lookPivot, freeCamera.up, dx, dy, freeCamera.fov, stageSize().h, lookPivot);
+  controls.target.copy(freeCamera.position).add(lookPivot);
+  // Never a render here: `renderProgramFrame` advances navigation, so it would ask for another.
+  orbitRedrawWanted = true;
+});
+
+function stopLookDrag() {
+  if (!lookDrag) return;
+  const { pointerId } = lookDrag;
+  lookDrag = null;
+  if (renderer.domElement.hasPointerCapture(pointerId)) renderer.domElement.releasePointerCapture(pointerId);
+  controls.enabled = viewCamera === freeCamera;
+  orbitSettling = true;
+}
+
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+  renderer.domElement.addEventListener(type, (e) => {
+    if (e.pointerId === lookDrag?.pointerId) stopLookDrag();
+  });
+}
+addEventListener('blur', stopLookDrag);
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopLookDrag(); });
+
 function keyCameraHere() {
   if (!timeline) return;
   if (refuseEdit('keying the camera')) return;
@@ -9791,8 +9961,12 @@ const LENS_MAX_MM = 300;
 /** The lens row: a focal length the slider can hold, or which way it ran out of band. */
 function showLens(mm) {
   ui.camLens.value = Math.min(LENS_MAX_MM, Math.max(LENS_MIN_MM, mm)).toFixed(1);
-  if (mm < LENS_MIN_MM) ui.camLensOut.textContent = `wider than ${LENS_MIN_MM}mm`;
-  else if (mm > LENS_MAX_MM) ui.camLensOut.textContent = `longer than ${LENS_MAX_MM}mm`;
+  // The band is read at the resolution the row shows. A lens the wheel clamped to exactly 8mm
+  // comes back from `fov` as 7.99999999, and comparing the raw number called that wider than
+  // the band it had just been held inside.
+  const shown = Number(mm.toFixed(1));
+  if (shown < LENS_MIN_MM) ui.camLensOut.textContent = `wider than ${LENS_MIN_MM}mm`;
+  else if (shown > LENS_MAX_MM) ui.camLensOut.textContent = `longer than ${LENS_MAX_MM}mm`;
   else ui.camLensOut.textContent = `${mm.toFixed(1)}mm`;
 }
 
@@ -9827,6 +10001,34 @@ ui.camLens.addEventListener('input', () => {
   showLens(mm);
   requestRepaint();
 });
+
+// How much of the lens a pixel of wheel is worth. Multiplicative in millimetres, so a notch is
+// the same fraction of the lens at 8mm and at 300mm.
+const LENS_ZOOM_PER_PIXEL = 0.0015;
+
+// Captured on the window, because OrbitControls listens for the wheel on the canvas and would
+// dolly the same event.
+addEventListener('wheel', (e) => {
+  if (!e.shiftKey || e.ctrlKey || e.metaKey || e.target !== renderer.domElement) return;
+  if (viewCamera !== freeCamera || !controls.enabled) return;
+  const view = viewUnder(e.clientX, e.clientY);
+  if (!view || view.plan) return;
+  e.preventDefault();
+  e.stopPropagation();
+  // Shift and a wheel arrive with the axes swapped in some browsers, so the gesture reads
+  // whichever axis moved rather than the vertical one.
+  const delta = wheelPixels(e);
+  const pixels = Math.abs(delta.x) > Math.abs(delta.y) ? delta.x : delta.y;
+  const aspect = targetAspect();
+  const mm = focalLengthForVerticalFov(freeCamera.fov, aspect)
+    * Math.exp(-pixels * LENS_ZOOM_PER_PIXEL);
+  freeCamera.fov = verticalFovForFocalLength(
+    Math.min(LENS_MAX_MM, Math.max(LENS_MIN_MM, mm)), aspect,
+  );
+  freeCamera.updateProjectionMatrix();
+  paintLens();
+  requestRepaint();
+}, { capture: true, passive: false });
 
 // How far down the optical axis the orbit target lands.
 const SENSOR_VIEW_DISTANCE = 2.2;
@@ -10691,8 +10893,8 @@ addEventListener('keydown', (event) => {
     closeApplicationMenus({ restore: true });
     return;
   }
-  // `isTyping` stays below Escape: shutting a menu is right wherever the caret is.
-  if (isTyping(event.target) || !(event.metaKey || event.ctrlKey)) return;
+  // The guard stays below Escape: shutting a menu is right wherever the caret is.
+  if (controlKeeps(event.target, event.key) || !(event.metaKey || event.ctrlKey)) return;
   const key = event.key.toLowerCase();
   if (key === 'o' && EDITING) {
     event.preventDefault();
