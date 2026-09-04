@@ -164,7 +164,7 @@ exit code (rule 3).
 | `index-check.mjs` | the index, the hash, the frame API | `--url`, and a fixture past 2 GiB |
 | `registry-check.mjs` | one registry, sliders as views of it, every look term live | `--url` |
 | `timeline-check.mjs` | seek equals playback | `--url`, a take of ≥12s |
-| `keyframe-check.mjs` | tracks, the retime curve, undo | `--url`, a take of ≥24s |
+| `keyframe-check.mjs` | tracks, undo | `--url`, a take of ≥24s |
 | `export-check.mjs` | resolution, export, the file | `--url`, ffmpeg and ffprobe |
 | `editor-check.mjs` | the editor's controls exist, and pressing them changes something | `--url`, a take of ≥32s |
 | `library-check.mjs` | the library, the recorder, the routes | a free port span |

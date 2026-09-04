@@ -937,7 +937,10 @@ async function onFreshPage(what, work, attempts = 3) {
  * goes with the viewport, because the editor is letterboxed to the export aspect.
  */
 async function setStage(page, size) {
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  // The default lane height is a fraction of the viewport this loop is changing, so this is a
+  // fixed-point iteration. Six steps are enough at the current 35%; twelve leaves room for a
+  // taller future strip without turning each intermediate size into a ten-second timeout.
+  for (let attempt = 1; attempt <= 12; attempt++) {
     // Settled before the strip is measured, and the buffer read again after it lands: the lane
     // stack is built after the transport exists, so a strip measured before it has its rows grows
     // under the viewport that was just sized to it. That left the editor reading pixels at one
@@ -956,25 +959,17 @@ async function setStage(page, size) {
       height: size.height + furniture.strip + furniture.shell,
     });
     await page.evaluate(`globalThis.__kinect.setOutputSize?.(${JSON.stringify(`${size.width}x${size.height}`)})`);
-    try {
-      await page.waitForFunction(
-        `(() => {
-          const gl = globalThis.__kinect.renderer.getContext();
-          return gl.drawingBufferWidth === ${size.width} && gl.drawingBufferHeight === ${size.height};
-        })()`,
-        null, { timeout: attempt === 1 ? 5000 : 10000 },
-      );
+    await page.evaluate('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    const held = await page.evaluate(`(() => {
+      const gl = globalThis.__kinect.renderer.getContext();
+      return [gl.drawingBufferWidth, gl.drawingBufferHeight];
+    })()`);
+    if (held[0] === size.width && held[1] === size.height) {
       await page.evaluate('globalThis.__kinect.timeline.settled()').catch(() => {});
-      const held = await page.evaluate(`(() => {
-        const gl = globalThis.__kinect.renderer.getContext();
-        return [gl.drawingBufferWidth, gl.drawingBufferHeight];
-      })()`);
-      if (held[0] === size.width && held[1] === size.height) return;
-      if (attempt === 4) {
-        throw new Error(`the stage settled at ${held.join('x')} rather than ${size.width}x${size.height}`);
-      }
-    } catch (err) {
-      if (attempt === 4) throw err;
+      return;
+    }
+    if (attempt === 12) {
+      throw new Error(`the stage settled at ${held.join('x')} rather than ${size.width}x${size.height}`);
     }
   }
 }
@@ -2087,7 +2082,7 @@ console.log('\n[9] an edit is refused while a render runs, and the file is the d
         ['a look value', () => k.params.set('opacity', 0.93)],
         ['an undo', () => k.keyframes.undo.pop()],
         ['a keyframe', () => k.keyframes.toggle('opacity')],
-        ['a retime', () => k.keyframes.setRetime({ rate: 2, keys: [] })],
+        ['a speed change', () => k.keyframes.setSpeed(2)],
         ['a trim', () => k.editor.setClipRange(0.1, 0.4)],
         ['a project load', () => k.library.loadProject('check-guard-doc', JSON.parse(before))],
       ];

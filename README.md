@@ -186,8 +186,8 @@ camera is standing. The keyframe arrows beside the transport step between keys w
 hunting for the diamonds.
 
 Two clocks read under the transport. **program** is a position in the output, **source** a
-position in the capture; at 1.00× they agree, and pulling **speed** or keying the retime
-lane makes them diverge, so the footage slows while the camera keeps its own pace. See
+position in the capture; at 1.00× they advance together, and pulling **speed** makes them
+diverge, so the footage slows while the camera keeps its own pace. See
 [program time](docs/architecture.md#program-time-is-the-edit-coordinate).
 
 Nearly every slider carries a keyframe button, so a clip can dissolve from depth into

@@ -41,7 +41,7 @@ node tools/index-check.mjs --stage                        # ... the same run aga
                                                           #   the conditions their failure happened in
 node tools/registry-check.mjs --url http://localhost:8080 # step 3: one registry, sliders as views
 node tools/timeline-check.mjs --url http://localhost:8080 --take fixture-1g # step 4: seek equals playback
-node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, retime curve, undo
+node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, undo
 node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, export, the file
 node tools/library-check.mjs                              # step 7: library, recorder, routes
 node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g # the editor's controls: that they exist, that pressing them changes something
@@ -339,12 +339,12 @@ named with the URL and the byte count, `library-has-no-way-to-the-menu` among th
 and was tracked in #28.
 That is closed and the fix is worth knowing, because it is not the one a reader would guess: the
 duplicate is still there in `web/main.js`, once at four spaces of indentation and once at six,
-and `c757210` re-anchored the entry onto a leading newline and four spaces, which by that alone
-cannot match the six-space copy inside the
-`miniMarks` map. So the anchor matches exactly once now, which is what `syntax-check`'s anchor
-row reports across all 406 anchors in the suite. Whether the mutation *delivers* has not been
-re-measured — the anchor being constructible is the weaker claim, and only the weaker one is
-stated here.
+and `c757210` first re-anchored the entry onto a leading newline and four spaces. The current
+entry also includes the following `const el = document.createElement('button');` statement,
+which exists only in the ruler loop and not in the `miniMarks` map. So the anchor matches exactly
+once now, which is what `syntax-check`'s anchor row reports across all 661 anchors in the suite.
+Whether the mutation *delivers* has not been re-measured — the anchor being constructible is the
+weaker claim, and only the weaker one is stated here.
 The control for the delivery refusal is to stop staging `web/` files and run a page mutation:
 it names the file, the URL and both byte counts, and exits 2 without printing an assertion.
 
@@ -606,19 +606,19 @@ across the two `main` revisions this branch was rebased over and it reports 0 of
 looks unmoved by `main` itself, which is context for reading the 120 rather than a second
 control, since a null result cannot demonstrate sensitivity.
 
-**`timeline-check` runs 169 assertions, 0 failed.** Section 7 is 54 of them and covers more than
+**`timeline-check` runs 170 assertions, 0 failed.** Section 7 is 71 of them and covers more than
 one clip: the composite, the cut, and what a clip enters holding. Its fixture is five clips over
 two takes, listed in an order that is deliberately not the order of their ids, and every clip in
-it is uncomfortable on purpose - a two-second half-speed head, a head shorter than the look asks
-for, one entering mid-hold, one whose footage starts at source 0, and one placed to stand on the
-same source frame as another clip of the same take. Four of them overlap at 6.5s, which is the
-budget `tools/layering-ab.mjs` measures against.
+it is uncomfortable on purpose - a half-speed clip with a deep in-point, a head shorter than the
+look asks for, a different `sourceStart` on each, one whose footage starts at source 0, and one placed to
+stand on the same source frame as another clip of the same take. Four of them overlap at 6.5s,
+which is the budget `tools/layering-ab.mjs` measures against.
 
 **That fixture names its primary take instead of inheriting the selected clip's take.** A prior
 version copied the first open clip before replacing the clip list. A short live capture selected
-by an earlier section therefore put every later retime on its held final frame and made both the
+by an earlier section therefore put every later clip on its held final frame and made both the
 warm-history control and the growing-cache arm inert. The tool now clears inherited tracks, owns
-the take for every generated clip, and requires the eight retimes to reach eight distinct frames.
+the take for every generated clip, and requires eight placements to reach eight distinct frames.
 
 Six mutations belong to it and each fires: `warm-skipped` **3 rows**, `warm-without-reset` **8**,
 `draw-order-by-array` **3**, `take-not-shared` **2**, `look-broadcast` **6** and
@@ -701,14 +701,10 @@ its own checkout, all produced the identical `626x352`, and a probe reading the 
 builds returns the same numbers at both viewports — strip 252, bar 38, stage 110, buffer 196x110
 at 640x400; strip 339, stage 273, buffer 485x273 at 640x650.
 
-**With the stage right, `keyframe-check` reads 166 assertions and 5 failed, and those five are not
-this branch's either.** All five are section 6g's clip-drag block declining to run — `did not run:
-program 5s does not hit-test back to the clip box`, which is a guarded refusal rather than a wrong
-reading, and it is the press-point-in-program-time class this page already records against
-`editor-check`'s deselect rows: 5s of a 243.3s program is 2% along the lane and the clip box is not
-under it. Held to the same instrument across two builds — the patched tool copied into the `HEAD`
-tree and run against a server spawned from it — both come back **161 passed, the same 5 failed,
-with identical readings.**
+**With the stage right, `keyframe-check` reads 133 assertions, 0 failed.** Its lane census excludes
+the clip rows and the full-width add row because those are edit structure rather than keyed
+parameters. Counting the add row as a parameter reddens all four section 6 lane-shape rows on a
+correct page, while the DOM and the registry both agree about the three keyed lanes.
 
 **Section 7 moved every one of those totals and none of the names.** With it the tool runs 124
 assertions, and the mutations that were counted against 75 redden more because there are now more
@@ -928,7 +924,7 @@ suspect first on a contended machine now that the boot sleep no longer stands be
 page load and that fetch. Stated rather than measured: that row passed on all six runs behind
 this paragraph, and every one of them was on an idle machine.
 
-**`export-check` has the same shape and a bigger number: 10 of its 66 rows are red on the
+**`export-check` has the same shape and a bigger number: 10 of its 85 rows are red on the
 synthetic sample and none of them is about the build.** Nine are the resolution-invariance
 family — `trails`, `rgbsplit`, `scanlines`, `grain`, `bloom`, `nobloom`, `full`, `regionpush`
 and `regionmask` each asking that 1920x1200 is 960x600 at twice the size — and the tenth is the
@@ -2363,12 +2359,10 @@ The paragraph above says 9.3fps; `keyframe-check`'s header said 284 frames over 
 section 6d said 49.79s; the file in this tree is 284 frames over **9.42s at 30.03fps**. One
 frame count, four durations, all of them written down as facts.
 
-The damage is not the prose. `timeline-check` targets 12s, `editor-check` seeks to 30s and
-`keyframe-check` retimes through source 20s. On a 9.42s take every one clamps: one row reddens in
-`timeline-check`, ten in `editor-check` and four in `keyframe-check` against a build with nothing
-wrong with it. The quieter half is that two more `keyframe-check` rows *pass*, because the key they
-drag has left the ruler and a gesture that never happened also never slid a key under its
-neighbour. The long fixture makes those fixture failures go away with nothing in `web/` changed.
+The damage is not the prose. `timeline-check` targets 12s and `editor-check` seeks to 30s, and
+`keyframe-check` seeks past the sample as well. On a 9.42s take every one clamps: one row reddens
+in `timeline-check` and ten in `editor-check` against a build with nothing wrong with it. The long
+fixture makes those fixture failures go away with nothing in `web/` changed.
 
 So all three declare a `NEEDS_TAKE_SEC` and exit 2 naming the shortfall, in the same direction and
 for the same reason as `requireMutationDelivered`: a red row reads as a catch, so a fixture

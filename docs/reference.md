@@ -113,22 +113,19 @@ one.
 **The two edges do different things.** The right edge moves where the edit stops using the take,
 which is the clip's own `length`. The left edge is a head trim: the clip starts later in the take,
 its out-point stays where it is, and the footage under what is left does not move — the same
-project second stands on the same source frame afterwards. That in-point is written as the clip's
-retime curve, one key at the origin, because a clip states where it starts in the take through its
-curve rather than through a field of its own; trimming back to the head of the take removes the
-key again. A curve of one key is still a rate, so the speed slider goes on working through a head
-trim and only goes quiet once a clip carries a curve that says more than an in-point. **On such a
-clip the head edge refuses and says so** — moving a keyed curve's domain is a different edit and
-this build does not do it from the edge.
+project second stands on the same source frame afterwards. That in-point is the clip's
+`sourceStart`, which is source seconds at the clip's head, and trimming back to the head of the
+take returns it to 0. A trim writes no keyframe and touches no lane, so the speed slider goes on
+working through one.
 
 **Which clip is selected is the session's and not the document's.** It decides what the panel
-writes to, which curve the retime lane draws, and which clip the ruler's marks are drawn against
-— and it is deliberately not saved, because which clip you are looking at is not part of the edit
-and a document recording it would make two people's saves of the same work differ. Opening a take
-selects its clip, because a take builds a project of one clip of footage you have just chosen and
-there is nothing there to choose between; loading a project selects nothing, because a document
-does not record which clip was being worked on and picking one would be a guess. Pressing on the
-empty part of the lane stack takes the selection off every clip.
+writes to and which clip the ruler's marks are drawn against — and it is deliberately not saved,
+because which clip you are looking at is not part of the edit and a document recording it would
+make two people's saves of the same work differ. Opening a take selects its clip, because a take
+builds a project of one clip of footage you have just chosen and there is nothing there to choose
+between; loading a project selects nothing, because a document does not record which clip was
+being worked on and picking one would be a guess. Pressing on the empty part of the lane stack
+takes the selection off every clip.
 
 **With no clip selected the panel keeps its clip half on screen and greys it out.** That is where
 a loaded project of several clips lands you, which is the case worth showing the split in. The rows
@@ -161,8 +158,8 @@ the clip along the strip carries the move it was given with it.
 
 **Marks stay keyed by the take and are drawn against the selected clip.** A mark is a fact about
 footage, so two clips of one take share them; where a mark ticks on the ruler is that source
-second put through the selected clip's curve *and* its placement, which is why the same mark sits
-somewhere else when you select the other clip of the same take.
+second put back through the selected clip's `sourceStart` and `speed` *and* its placement, which
+is why the same mark sits somewhere else when you select the other clip of the same take.
 
 **mark** plants one at the playhead and presses again to take that one away, and `M` does the
 same from the keyboard. "Already at the playhead" means within half an output frame either side,
@@ -235,9 +232,7 @@ the segments either side. `+pt` is exact: the extra handle appears, every other 
 keep the curve exactly where it was, and not a rendered frame changes — so it is safe to press
 while judging a move. `−pt` cannot be exact, because a curve of one degree is not generally a
 curve of the degree below, so removing a point moves the shape. Four points a side is the
-ceiling. The retime curve is deliberately excluded from both: the argument that a handle
-inside the unit box cannot run source time backwards is an argument about a cubic, and it does
-not survive the extra degree.
+ceiling.
 
 **Glitch** tears bands of the feed sideways, and it is seven controls rather than
 one because the interesting looks live off the diagonal. `amount` is the master and the one
@@ -1043,9 +1038,9 @@ validates, so `editor-check` section 12 drives the round trip in a browser, with
 
 Documents from before the readings are version 3 and will not open, and there is nothing to
 run: the one-shot conversion this repo used to ship was deleted once every document it could
-act on had already been converted. This build reads version 7 alone — a version 6 document
-carried one take at the top and one undivided look under it rather than a `clips` array, and a
-version 5 document still spelled its parameters bare (`glyphTone` rather than `glyph.tone`) and
-carried no `requires` list, so both are refused the same way a version 3 or 4 one is, and there
-is no conversion for either: every document this project holds was re-authored at 7. A file from
-any older version is refused, naming its own version, and stays refused.
+act on had already been converted. This build reads version 8 alone. Version 8 places footage
+with each clip's `speed` and `sourceStart`; version 7 used a keyframed retime curve. A version 6
+document carried one take at the top and one undivided look under it rather than a `clips` array,
+and a version 5 document still spelled its parameters bare (`glyphTone` rather than
+`glyph.tone`) and carried no `requires` list. A file from any older version is refused, naming
+its own version, and stays refused. This build has no conversion for it.
