@@ -197,7 +197,7 @@ const MUTATIONS = {
   // A clip warms and is shown without ever being put back to nothing, so it builds on whatever
   // its ping-pong pair last held. Both clears go, because on every path this build can reach the
   // reset clears the pair a moment before the entry does and either one alone still leaves it
-  // empty - `docs/instruments.md` carries the measurement that says so.
+  // empty.
   'warm-without-reset': { file: 'web/main.js', edits: [
     [
       '  clearFeedback(\n'
@@ -520,7 +520,7 @@ page.on('response', (res) => { if (!res.ok()) errors.push(`${res.status()} ${res
 // The rejection is caught rather than left floating. A `fulfill` that loses its race - the page
 // gone, the request already answered - rejects with nobody holding it, node takes an unhandled
 // rejection as fatal, and the run dies mid-evaluate reporting `Resulting promise was garbage
-// collected` with zero failed assertions on a non-zero exit. `docs/instruments.md` has the case.
+// collected` with zero failed assertions on a non-zero exit.
 await page.route('**/favicon.ico', (route) => route.fulfill({ status: 204, body: '' }).catch(() => {}));
 
 let mutantServed = 0;
@@ -576,7 +576,7 @@ for (let attempt = 0; attempt < 12; attempt++) {
   // The predicate answers *false* on a page with no renderer rather than throwing, because
   // a throw inside `waitForFunction` is not caught by it: the twenty seconds a wait is
   // given are never spent, and the failure arrives instantly wearing the shape of a
-  // finding. `docs/instruments.md` records that costing a round on its own.
+  // finding.
   const landed = await page.waitForFunction((want) => {
     const gl = globalThis.__kinect?.renderer?.getContext?.();
     return !!gl && gl.drawingBufferWidth === want.w && gl.drawingBufferHeight === want.h;

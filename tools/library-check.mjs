@@ -874,7 +874,7 @@ const MUTATIONS = {
     'const carriesRefusals = (take) => Array.isArray(take.openRefusals)\n  && take.openRefusals.length > 0\n',
   ]],
     fails: 'and a healthy node not refused for being healthy (wide: takes the link off, so it '
-      + 'stops at 125 of 392 - read the rows, not the total. docs/instruments.md says why)',
+      + 'stops at 125 of 392 - read the rows, not the total)',
   },
   // The link admits a manifest from the build before the refusals moved.
   'node-admits-an-old-manifest': { file: 'server/library.js', edits: [[
@@ -1556,7 +1556,7 @@ async function loadPlaywright() {
 }
 
 // Playwright drops the page's execution context on this rig, and it is not the code:
-// `docs/instruments.md` records it as a measured flake. Retried on that signature alone and
+// it is a measured flake. Retried on that signature alone and
 // with the count printed, because a check that retried real failures would report whichever
 // attempt it liked.
 async function retryOnContextLoss(label, work) {
@@ -2528,8 +2528,8 @@ async function runChecks() {
       'and it is the sentence about the frame it does not have rather than the one about bracketing a position',
       JSON.stringify(buttonWhy));
 
-    // The second surface that badges a refusal, and the reason there has to be one is in
-    // `docs/instruments.md`: the refusal moved to the server so that one take gets one sentence
+    // The second surface that badges a refusal. The refusal moved to the server so that one take
+    // gets one sentence
     // everywhere, and a control mutating a single surface left the other one's hard-coded copy
     // uncaught. The menu used to be that second surface and no longer composes a sentence at all;
     // the media picker draws the library's warning badges now, so the class has two members again
@@ -3767,8 +3767,7 @@ async function runChecks() {
       const names = k.params.names('look').filter((n) => n.startsWith('glyph.'));
       // Read off the live registry rather than off \`spec\`, which answers with a projection
       // carrying \`default\` and not \`def\` - a probe pointed at a field that has never existed
-      // reads \`undefined\` on a correct build, which is the shape docs/instruments.md files
-      // under a reading that is not a finding. \`get\` cannot answer with anything the
+      // reads \`undefined\` on a correct build, which is a probe pointed at nothing, not a finding. \`get\` cannot answer with anything the
       // parameter could not hold.
       // Into the clip's block, because glyph binds the cloud - the two refused cases above
       // are one key short of this document and have to be short of it in the same block.
