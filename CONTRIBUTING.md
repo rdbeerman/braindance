@@ -1,13 +1,7 @@
 # Contributing
 
-Braindance is a personal project that got large. Contributions are welcome, but the hardware
-situation and the way this repository argues about evidence are both unusual enough to be worth
-reading before you spend an evening on a patch.
+Braindance is a personal project. Contributions are welcome, If possible please always test your contributions on a real Kinect V2!
 
-## You probably do not have the hardware
-
-Most of this needs a Kinect v2, which has not been manufactured since 2017. A lot of it also
-needs a capture, and none ships in the repository.
 
 What you can work on with nothing but a checkout:
 
