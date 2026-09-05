@@ -2202,7 +2202,7 @@ console.log('\n[9] an edit is refused while a render runs, and the file is the d
         ['a look value', () => k.params.set('opacity', 0.93)],
         ['an undo', () => k.keyframes.undo.pop()],
         ['a keyframe', () => k.keyframes.toggle('opacity')],
-        ['a retime', () => k.keyframes.setRetime({ rate: 2, keys: [] })],
+        ['a speed change', () => k.keyframes.setSpeed(2)],
         ['a trim', () => k.editor.setClipRange(0.1, 0.4)],
         ['a project load', () => k.library.loadProject('check-guard-doc', JSON.parse(before))],
       ];

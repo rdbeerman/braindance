@@ -7,10 +7,8 @@ depth sensor saw, then lets you fly a camera through the recording afterwards.
 yellow, the far wall cool blue, and the two slide past each other as the camera
 moves.](media/flythrough.gif)
 
-That move was never shot. The sensor never left its mount: the arc is five camera keyframes
-laid over the recording and rendered through the editor's export.
 
-**Status: complete and working, maintained as a personal project.** macOS (Apple Silicon)
+**Status: Still experimental! Maintained as a personal project.** macOS (Apple Silicon)
 and Raspberry Pi capture nodes. No release cadence, no support commitment; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -186,8 +184,8 @@ camera is standing. The keyframe arrows beside the transport step between keys w
 hunting for the diamonds.
 
 Two clocks read under the transport. **program** is a position in the output, **source** a
-position in the capture; at 1.00× they agree, and pulling **speed** or keying the retime
-lane makes them diverge, so the footage slows while the camera keeps its own pace. See
+position in the capture; at 1.00× they advance together, and pulling **speed** makes them
+diverge, so the footage slows while the camera keeps its own pace. See
 [program time](docs/architecture.md#program-time-is-the-edit-coordinate).
 
 Nearly every slider carries a keyframe button, so a clip can dissolve from depth into

@@ -1770,8 +1770,8 @@ whole tool says nothing about which question the tool was asking.
 through `process.platform`, so a macOS developer and a Linux CI run check different strings
 and neither checks the third. And the minimap's copy of the mark conversion still has no
 control over it at all: `markTicks()` only ever reads the ruler strip, so that second site
-could stop going through the retime curve entirely and every row in the suite would stay
-green. Two sites doing one conversion is what made this anchor stale in the first place.
+could stop going through the selected clip's timing entirely and every row in the suite would
+stay green. Two sites doing one conversion is what made this anchor stale in the first place.
 
 **And reading a table by importing the tool's prefix made this row need what the tool needs,
 which CI found and a developer's machine cannot.** The cut ran from the top of the file so that a
@@ -2150,8 +2150,9 @@ A third flaw came out of this on step 5: a mutation replacing the pre-roll's win
 with the tangent it replaced was caught by only one of five probe positions, because four of
 them sat inside a single straight segment of the retime curve where the tangent *is* the
 curve. The probes were moved onto the knees and onto an eased ramp and the same mutation now
-fails four. Ask what the wrong implementation would agree with, and probe somewhere it
-cannot.
+fails four. The live section went when the retime curve was removed, so this record is what
+survives of the finding. Ask what the wrong implementation would agree with, and probe somewhere
+it cannot.
 
 ### A probe can be in the right place and still start one link past the break
 
@@ -3346,10 +3347,12 @@ before, when the letterbox arrived, and the comment beside it says so.
 
 Bumping the constant would close the instance and leave the class: the next row added to the
 strip breaks it again, identically. `keyframe-check` had the answer already - its
-`CHROME_H_GUESS` is documented as a first guess and the real height is measured after load and
-the viewport corrected - so `openPage` now goes through `setStage`, which measures. **When a
-tool needs a number the page owns, have it ask the page once rather than agree with it in a
-comment.**
+`CHROME_H_GUESS` is documented as a first guess and the real height is measured after load.
+`export-check` now goes through `setStage`, which measures and corrects the viewport until the
+drawing buffer itself reads the requested size. The repeat matters because the default lane
+height is a fraction of the viewport being corrected: one measurement changes the answer.
+**When a tool needs a number the page owns, have it ask the page and read the result rather than
+agree with it in a comment.**
 
 **Letterboxing the editor stage moved every pointer coordinate and every buffer-size
 expectation, and four proof tools found out one at a time.** `export-check` needed two separate

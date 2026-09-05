@@ -437,31 +437,15 @@ const MUTATIONS = {
   'head-trim-slides-the-footage': {
     file: 'web/main.js',
     edits: [[
-      '  const sourceAtHead = held + (start - clip.start) * rate;',
-      '  const sourceAtHead = held;',
+      '  const sourceDuration = clip.source.streaming ? Infinity : clip.source.duration;\n'
+        + '  Object.assign(clip, headTrim(clip, wantStart, holdEnd, MIN_CLIP_SEC, sourceDuration));',
+      '  const priorStart = clip.start;\n'
+        + '  const sourceDuration = clip.source.streaming ? Infinity : clip.source.duration;\n'
+        + '  Object.assign(clip, headTrim(clip, wantStart, holdEnd, MIN_CLIP_SEC, sourceDuration));\n'
+        + '  if (clip.start > priorStart) clip.sourceStart += 0.25;',
     ]],
     fails: 'a head trim that moves the clip and lets the footage travel with it, which is a slip '
       + 'and not a trim',
-  },
-
-  'head-trim-drops-single-key-offset': {
-    file: 'web/main.js',
-    edits: [[
-      '    key.value = sourceAtHead + key.t * rate;',
-      '    key.value = sourceAtHead;',
-    ]],
-    fails: 'a head trim writing the source-at-head value directly onto a single retime key away '
-      + 'from zero. The offset-key footage row reddens alone',
-  },
-
-  // The head edge takes a keyed curve's clip anyway, silently, which is the shape this refusal
-  // exists to avoid. Must redden the two refusal rows of 22.
-  'head-trim-ignores-the-curve': {
-    file: 'web/main.js',
-    edits: [["    if (side === 'head' && clip.retime.keys.length > 1) {",
-             '    if (false) {']],
-    fails: 'the head edge taking a keyed clip anyway and silently, which is the shape the '
-      + 'refusal exists to avoid',
   },
 
   // A clip lands at the head of the edit rather than under the playhead. Must redden 'it lands
@@ -641,16 +625,16 @@ const MUTATIONS = {
       + 'project row reddens on a capped tick set instead of one sized to the viewport',
   },
 
-  // A mark is drawn through its clip's curve and not through where that clip sits.
+  // A mark is drawn through the clip-local map and not through where that clip sits.
   // Must redden both mark rows of 22 and nothing else there.
   'marks-ignore-the-placement': {
     file: 'web/main.js',
     edits: [[
       'const programSecOfSource = (sourceSec) => selectedClip.start\n'
-      + '  + selectedClip.retime.programSecAt(sourceSec);',
-      'const programSecOfSource = (sourceSec) => selectedClip.retime.programSecAt(sourceSec);',
+      + '  + clipProgramSecAt(selectedClip, sourceSec);',
+      'const programSecOfSource = (sourceSec) => clipProgramSecAt(selectedClip, sourceSec);',
     ]],
-    fails: 'a mark drawn through its clip\'s curve and not through where that clip sits, so two '
+    fails: 'a mark drawn through its clip-local map and not through where that clip sits, so two '
       + 'clips of one take draw their marks on top of each other',
   },
 
@@ -679,7 +663,7 @@ const MUTATIONS = {
   },
 
   // Selecting a row moves the strip's idea of the selection and not the page's.
-  // Must redden 'the panel and the retime binding follow it' and the mark rows with it.
+  // Must redden 'the panel and speed binding follow it' and the mark rows with it.
   'select-row-does-not-select-the-clip': {
     file: 'web/main.js',
     edits: [['  clipRow = clip;\n  selectClip(clip);',
@@ -889,7 +873,6 @@ const MUTATIONS = {
     edits: [
       ['    refuseFolds(owner, ready);\n', ''],
       ["  refuseFolds('track camera', camera);\n", ''],
-      ["    refuseFolds('the retime curve', keys);\n", ''],
     ],
     fails: 'that check: whole-curve monotonicity asked once per segment with both handles in '
       + 'hand. The per-side ordering rule it replaced refused the legal crossed polygons '
@@ -1175,6 +1158,24 @@ const MUTATIONS = {
         + '}',
       'function clearClipRange() {\n  if (refuseEdit(\'clearing the trim\')) return;\n  history.commit();\n}',
     ]],
+  },
+
+  // Must redden section 3's lane hit tests and, when the press lands inside the zone, section 22's
+  // deselect cluster. Only the below-ruler probes distinguish a full-height marker hit zone.
+  'grab-zone-over-the-lanes': {
+    file: 'web/index.html',
+    edits: [
+      ['  .tcut { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent);\n'
+        + '    pointer-events: none; z-index: 4; }',
+      '  .tcut { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent);\n'
+        + '    pointer-events: auto; z-index: 4; }'],
+      ['  .tcut::after { content: ""; position: absolute; top: 0; height: var(--ruler-h);\n'
+        + '    pointer-events: auto; cursor: ew-resize; }',
+      '  .tcut::after { content: ""; position: absolute; top: 0; bottom: 0;\n'
+        + '    pointer-events: auto; cursor: ew-resize; }'],
+    ],
+    fails: 'the markers\' grab zone running the whole column again, so lane whitespace beside the '
+      + 'line belongs to the marker and a press aimed at a lane trims the range instead',
   },
 
   // Must redden: the Escape row in section 1. Other focus transfers stay intact, so the failure
@@ -1807,16 +1808,6 @@ const MUTATIONS = {
     ]],
   },
 
-  'rate-keys-ignore-retime-pivot': {
-    file: 'web/main.js',
-    edits: [[
-      '  rescaleClipKeys(was.keys, k, was.pivot);',
-      '  rescaleClipKeys(was.keys, k, 0);',
-    ]],
-    fails: 'the nonzero-pivot row in section 4: the look key lands at local 3s/source 7s instead '
-      + 'of local 4s/source 9s',
-  },
-
   'rate-window-stays-fractional': {
     file: 'web/main.js',
     edits: [[
@@ -2014,7 +2005,7 @@ const MUTATIONS = {
       '  if (dur !== null) {\n'
       + '    clipIn = Math.max(0, Math.min(clipIn, dur));\n'
       + '    // `null` still means "to the end", which is a different statement from a number that\n'
-      + '    // happens to equal the duration: "whole clip" has to survive a retime that lengthens\n'
+      + '    // happens to equal the duration: "whole clip" has to survive a speed change that lengthens\n'
       + '    // the program, and a duration written in here would freeze it at today\'s length.\n'
       + '    if (clipOut !== null) clipOut = Math.max(clipIn, Math.min(clipOut, dur));\n'
       + '  }\n',
@@ -2175,8 +2166,10 @@ const MUTATIONS = {
   'pose-handle-overshoots': {
     file: 'web/main.js',
     edits: [[
-      "    if (row.owner === 'retime' || !KINDS[row.kind].overshoots) h[1] = Math.min(1, Math.max(0, h[1]));",
-      "    if (row.owner === 'retime') h[1] = Math.min(1, Math.max(0, h[1]));",
+      "    if (KINDS[row.kind].overshoots) h[1] = Math.min(2, Math.max(-1, h[1]));\n"
+        + '    else h[1] = Math.min(1, Math.max(0, h[1]));',
+      "    if (KINDS[row.kind].overshoots || row.kind === 'pose') h[1] = Math.min(2, Math.max(-1, h[1]));\n"
+        + '    else h[1] = Math.min(1, Math.max(0, h[1]));',
     ]],
     fails: 'a pose handle leaving the unit box, which sends the camera past the pose it was '
       + 'keyed at',
@@ -2294,16 +2287,6 @@ const MUTATIONS = {
     fails: 'the quintic dropped to a cubic, whose rate still reaches zero at the key - so every '
       + 'velocity row stays green and only the degree is gone with the acceleration claim '
       + 'resting on it',
-  },
-
-  'points-reach-the-retime': {
-    file: 'web/main.js',
-    edits: [[
-      "  if (!state || selection.owner === 'retime') return [];",
-      '  if (!state) return [];',
-    ]],
-    fails: 'and the point controls offered on the retime, whose unit-box monotonicity proof is a '
-      + 'proof about a cubic and nothing else',
   },
 
   'ease-preset-ignored': {
@@ -2452,7 +2435,7 @@ const DRIVER_RULES = [
     key: 'keyframe',
     what: 'a keyframe toggle',
     by: 'keyframe-check, and section 5 here deletes what it creates',
-    match: (row) => row.kf && row.id !== 'tRateKey',
+    match: (row) => row.kf,
   },
   {
     key: 'recorder',
@@ -2626,13 +2609,12 @@ const DRIVER_IDS = {
   tCamView: 'section 1 - looks through the program camera and reads the orbit back',
   effectRackOpen: 'section 1 - opens the installed-effect search, adds every effect, and removes one',
   menuWholeClip: 'section 3 - clears the range through both its menu command and keyboard shortcut',
-  tRateKey: 'section 5 - plants and removes a retime key',
   // `tFps` is deliberately not here: it moved into Project settings with the rate itself, so
   // the `shelldialogs` rule covers it and section 1 drives it.
   tMark: 'library-check writes a mark and reads the sidecar back',
   tDeleteKey: 'section 5 - removes the selected key',
   tAddPoint: 'section 5 - grows a segment\'s degree and reads the curve back unmoved',
-  tDropPoint: 'section 5 - shrinks it again, and both are read dead on the retime',
+  tDropPoint: 'section 5 - shrinks it again',
   tPrevKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tNextKey: 'section 18 - walks the selected track and reads which key the playhead landed on',
   tPreset: 'library-check applies a preset and compares the look',
@@ -4326,7 +4308,12 @@ try {
     const el = document.getElementById(elId);
     if (!el) return 0;
     const r = el.getBoundingClientRect();
-    const mid = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    // The ruler row's mid-height rather than the marker's. The marker box still runs the whole
+    // column, so its own middle is deep in the lanes where the zone deliberately does not reach.
+    const bed = document.getElementById('tBed');
+    if (!bed) return 0;
+    const bedR = bed.getBoundingClientRect();
+    const mid = { x: r.x + r.width / 2, y: bedR.y + bedR.height / 2 };
     let n = 0;
     for (let dx = -18; dx <= 18; dx++) {
       const hit = document.elementFromPoint(mid.x + dx, mid.y);
@@ -4360,7 +4347,8 @@ try {
   } else {
     const outMid = await page.evaluate(`(() => {
       const r = document.getElementById('tOut').getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      const bedR = document.getElementById('tBed').getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: bedR.y + bedR.height / 2 };
     })()`);
     await page.mouse.move(outMid.x, outMid.y);
     await page.mouse.down();
@@ -4421,6 +4409,91 @@ try {
   const shortcutCleared = await range();
   check(shortcutCleared.out === null && shortcutCleared.in === 0,
     'Option-X restores the whole clip through the same user action', JSON.stringify(shortcutCleared));
+  // Where the zone must not reach. `elementFromPoint` rather than a box measurement, for the same
+  // reason the reach probe uses one: the zone is a pseudo-element and no box reports it. The walk
+  // steps past a key, an ease handle or a clip box, because all three sit at or above the markers
+  // and a probe under one cannot see this zone at all - what it is looking for is bare lane.
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
+  await settle();
+  const laneProbe = await page.evaluate(`(${(() => {
+    const beds = document.getElementById('tBeds');
+    const bed = document.getElementById('tBed');
+    if (!beds || !bed) return null;
+    const bedsR = beds.getBoundingClientRect();
+    const rulerR = bed.getBoundingClientRect();
+    const lanes = document.getElementById('tLanes');
+    const lanesR = lanes ? lanes.getBoundingClientRect() : null;
+    const ys = [];
+    if (lanesR && lanesR.height > 2) {
+      for (const lane of document.querySelectorAll('#tLanes .tlane')) {
+        const r = lane.getBoundingClientRect();
+        const y = r.y + r.height / 2;
+        if (y > lanesR.y + 1 && y < lanesR.bottom - 1) ys.push({ y, from: 'a keyed lane' });
+      }
+    }
+    // Then every row of the column below the ruler, so a run whose lanes are all covered still
+    // has somewhere bare to ask about rather than declining to ask.
+    for (let y = rulerR.bottom + 4; y < bedsR.bottom - 2; y += 8) ys.push({ y, from: 'below the ruler' });
+    const name = (el) => (el ? (el.id ? `#${el.id}` : `${el.tagName.toLowerCase()}.${el.getAttribute('class') || '(no class)'}`) : 'nothing');
+    const probe = (elId, inward) => {
+      const el = document.getElementById(elId);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const x = r.x + r.width / 2 + inward;
+      let last = null;
+      for (const cand of ys) {
+        const hit = document.elementFromPoint(x, cand.y);
+        const isMarker = Boolean(hit && hit.closest('.tcut'));
+        const covered = Boolean(hit && !isMarker && hit.closest('.tkey, .thandle, .tclip'));
+        last = { x, y: cand.y, from: cand.from, isMarker, covered, what: name(hit),
+          whitespace: Boolean(hit && !isMarker && !covered && hit.closest('#tBeds')) };
+        // A marker answering is the finding; bare lane is the answer this wants. Anything drawn
+        // over the zone is neither, so the walk carries on to the next row.
+        if (isMarker || last.whitespace) return last;
+      }
+      return last;
+    };
+    return { in: probe('tIn', 8), out: probe('tOut', -8) };
+  }).toString()})()`);
+  const laneReach = (side) => {
+    const at = laneProbe && laneProbe[side];
+    if (!at) return 'there is no marker to probe';
+    return `at (${Math.round(at.x)}, ${Math.round(at.y)}) ${at.from}, the press reaches ${at.what}`;
+  };
+  check(Boolean(laneProbe && laneProbe.in && !laneProbe.in.isMarker),
+    'the in marker answers no press 8px inward of its line once the ruler row has ended',
+    laneReach('in'));
+  check(Boolean(laneProbe && laneProbe.out && !laneProbe.out.isMarker),
+    'and neither does the out marker, on the side its own zone reaches',
+    laneReach('out'));
+
+  // Asked only where the press would land on bare lane. On a clip it would be a clip drag, which
+  // moves the edit and poisons every section after this one - named and skipped rather than run.
+  if (laneProbe && laneProbe.in && laneProbe.in.whitespace) {
+    const heldSelection = await page.evaluate('__kinect.editor.clipSelection()');
+    const beforeLaneDrag = await range();
+    await page.mouse.move(laneProbe.in.x, laneProbe.in.y);
+    await page.mouse.down();
+    await page.mouse.move(laneProbe.in.x + 300, laneProbe.in.y, { steps: 8 });
+    await page.mouse.up();
+    await settle();
+    const afterLaneDrag = await range();
+    check(near(afterLaneDrag.in, beforeLaneDrag.in, 1e-6) && afterLaneDrag.out === beforeLaneDrag.out,
+      'and a 300px drag from that lane point leaves the export range where it was',
+      `${JSON.stringify(beforeLaneDrag)} -> ${JSON.stringify(afterLaneDrag)}`);
+    // The press deselects, which is the gesture this change hands back to the lane. Put the
+    // selection and the range back so the sections after this one get the fixture they expect.
+    await page.evaluate(`(${((id) => {
+      __kinect.editor.setClipRange(0, null);
+      if (id) __kinect.editor.selectClipRow(id);
+    }).toString()})(${JSON.stringify(heldSelection)})`);
+    await settle();
+  } else {
+    note('a drag from that point is not asked',
+      `it reaches ${laneProbe && laneProbe.in ? laneProbe.in.what : 'nothing'} rather than bare lane, `
+      + 'and dragging a clip there would move the edit under the sections after this one');
+  }
+
   // Cleanup is not another claim. On `whole-clip-does-nothing` both user paths have already
   // reddened; leave the later transport sections their ordinary whole-clip fixture rather than
   // turning one missing action into unrelated speed and playback failures.
@@ -4431,7 +4504,7 @@ try {
   // This block runs at the head of the section rather than at its tail, and the placement is
   // load-bearing: at the tail it left section 5's ease-handle drag dead on a page whose state was
   // byte-identical to a passing run's.
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await settle();
   await page.evaluate("document.getElementById('tRate').focus()");
   await page.evaluate('__kinect.timeline.transport().play()');
@@ -4440,7 +4513,7 @@ try {
     playing: __kinect.timeline.transport().playing,
     depth: __kinect.keyframes.undo.depth(),
     seeks: __kinect.timeline.counters.seeks,
-    rate: __kinect.timeline.retime.rate,
+    rate: __kinect.timeline.read().speed,
   }))()`);
   await page.evaluate(`(() => {
     const el = document.getElementById('tRate');
@@ -4472,7 +4545,7 @@ try {
     playing: __kinect.timeline.transport().playing,
     depth: __kinect.keyframes.undo.depth(),
     seeks: __kinect.timeline.counters.seeks,
-    rate: __kinect.timeline.retime.rate,
+    rate: __kinect.timeline.read().speed,
   }))()`);
   check(heldBefore.playing && heldAfter.rate > heldBefore.rate,
     'a held arrow key moves the speed, so the two counters below are counting a gesture that happened',
@@ -4492,11 +4565,11 @@ try {
   // the source to go back, which reddens the page-errors row at the end of the file.
   await focusStage();
   await page.evaluate('__kinect.timeline.transport().pause()');
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await page.evaluate('__kinect.timeline.transport().seek(0)');
   await settle();
 
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await settle();
   await page.evaluate('__kinect.timeline.transport().play()');
   await new Promise((r) => setTimeout(r, 300));
@@ -4525,7 +4598,7 @@ try {
     '  and a navigation arriving inside its pre-roll keeps it stopped, rather than the resume starting it again',
     `playing ${runningBefore} -> ${afterNav}`);
   await page.evaluate('__kinect.timeline.transport().pause()');
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await settle();
 
 
@@ -4538,14 +4611,14 @@ try {
       el.dispatchEvent(new Event('change'));
     })()`);
     await settle();
-    const landed = await page.evaluate('__kinect.timeline.retime.rate');
+    const landed = await page.evaluate('__kinect.timeline.read().speed');
     check(near(landed, rate, 1e-6), `  the slider went to ${rate}x when it was asked for ${rate}x`,
       `landed at ${landed}x`);
     return landed;
   };
 
   const rateArm = async (parkAt, to) => {
-    await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+    await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
     await driveRate(1);
     await page.evaluate(`__kinect.timeline.transport().seek(${parkAt})`);
     await settle();
@@ -4617,7 +4690,7 @@ try {
   };
   const strip = () => page.evaluate(`(${STRIP})()`);
 
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await page.evaluate(`__kinect.keyframes.setTracks({ bloom: [ { t: 2, value: 0.2 }, { t: 6, value: 0.9 } ] })`);
   await page.evaluate(`(() => {
     const body = __kinect.library.serialiseProjectBody();
@@ -4696,40 +4769,8 @@ try {
   check(undone.clipKeys === at120.clipKeys && undone.clipKeyTimes === at120.clipKeyTimes,
     "  and the selected clip's keys", `${at120.clipKeyTimes} -> ${undone.clipKeyTimes}`);
 
-  const pivoted = await page.evaluate(`(async () => {
-    const k = globalThis.__kinect;
-    const original = k.library.serialiseProjectBody();
-    const selected = k.editor.clipSelection();
-    k.keyframes.setRetime({ rate: 1, keys: [{ t: 2, value: 5 }] });
-    k.keyframes.setTracks({ pointSize: [{ t: 6, value: 12 }] });
-    await k.timeline.transport().seek(4);
-    await k.timeline.settled();
-    return { original, selected };
-  })()`);
-  await driveRate(2);
-  const pivotResult = await page.evaluate(`(() => {
-    const k = globalThis.__kinect;
-    const clip = k.library.serialiseProjectBody().clips
-      .find((candidate) => candidate.id === k.editor.clipSelection());
-    const key = clip.tracks.pointSize[0];
-    return {
-      keyTime: key.t,
-      sourceAtKey: k.timeline.retime.sourceSecAt(key.t),
-      pivot: k.timeline.retime.keys[0].t,
-    };
-  })()`);
-  check(near(pivotResult.pivot, 2, 1e-9) && near(pivotResult.keyTime, 4, 1e-9)
-      && near(pivotResult.sourceAtKey, 9, 1e-9),
-    'a speed change rescales clip-local keys around a nonzero retime pivot and keeps their source association',
-    `pivot ${pivotResult.pivot}s, key ${pivotResult.keyTime}s at source ${pivotResult.sourceAtKey}s`);
-  await page.evaluate(({ original, selected }) => {
-    __kinect.library.restoreProject(original);
-    __kinect.editor.selectClipRow(selected);
-  }, pivoted);
-  await settle();
-
   // The detent at 1.00x, the one rate that has to be reachable exactly rather than approximately:
-  // `slopeAt` reports it to the audio gate, and a take playing at 0.9995 reads as retimed.
+  // the audio gate reads it too, and a take playing at 0.9995 is not normal speed.
   const atSlider = async (offset) => {
     await page.evaluate(`(() => {
       const el = document.getElementById('tRate');
@@ -4738,7 +4779,7 @@ try {
       el.dispatchEvent(new Event('change'));
     })()`);
     await settle();
-    return page.evaluate('__kinect.timeline.retime.rate');
+    return page.evaluate('__kinect.timeline.read().speed');
   };
   // Driven by pixel as well as by value, because a detent is a hit target: the band was stated as
   // +/-3% of rate, which on a travel spanning a factor of 40 is 0.74px each side of the 92px
@@ -4791,26 +4832,26 @@ try {
   // and the first small input in the same neighbourhood came through the band and
   // returned exactly 1.00.
   const nudged = await page.evaluate(`(async () => {
-    __kinect.keyframes.setRetime({ rate: 1.02, keys: [] });
+    (__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1.02));
     await __kinect.timeline.settled();
     const el = document.getElementById('tRate');
-    const loaded = { rate: __kinect.timeline.retime.rate, value: Number(el.value) };
+    const loaded = { rate: __kinect.timeline.read().speed, value: Number(el.value) };
     el.focus();
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     el.value = String(loaded.value + 0.001);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     await __kinect.timeline.settled();
-    const nudge = __kinect.timeline.retime.rate;
+    const nudge = __kinect.timeline.read().speed;
     // Out of the band and back in, which is a gesture that aimed at 1.00x rather than one
     // that started next to it - the snap has to still happen there or the band is gone.
     el.value = String(__kinect.editor.rateSlider.toValue(1.5));
     el.dispatchEvent(new Event('input', { bubbles: true }));
     await __kinect.timeline.settled();
-    const away = __kinect.timeline.retime.rate;
+    const away = __kinect.timeline.read().speed;
     el.value = String(__kinect.editor.rateSlider.toValue(1.005));
     el.dispatchEvent(new Event('input', { bubbles: true }));
     await __kinect.timeline.settled();
-    const returned = __kinect.timeline.retime.rate;
+    const returned = __kinect.timeline.read().speed;
     el.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
     el.blur();
     await __kinect.timeline.settled();
@@ -4827,7 +4868,7 @@ try {
   check(nudged.returned === 1,
     '  and coming back into it from outside still snaps, which is what the band is for',
     `landed at ${nudged.returned}x`);
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await settle();
 
   await page.evaluate('__kinect.timeline.counters.seeks = 0');
@@ -4840,7 +4881,7 @@ try {
   const seeks = await page.evaluate('__kinect.timeline.counters.seeks');
   check(seeks <= 2, 'twenty slider steps cost one accurate seek, not twenty', `${seeks} seeks`);
 
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await page.evaluate(`__kinect.keyframes.setTracks({ bloom: [
     { t: 1, value: 0.2 }, { t: 5, value: 0.9 }, { t: 9, value: 0.3 } ] })`);
   await settle();
@@ -4861,7 +4902,7 @@ try {
   // A gesture lasts as long as a finger or a key is down, which is long enough for a load started
   // before it to land in the middle of it.
   const snap = () => page.evaluate(`(() => ({
-    rate: __kinect.timeline.retime.rate,
+    rate: __kinect.timeline.read().speed,
     depth: __kinect.keyframes.undo.depth(),
     lanes: JSON.stringify(__kinect.keyframes.lanes()),
     range: JSON.stringify(__kinect.editor.clipRange()),
@@ -4871,7 +4912,7 @@ try {
   }))()`);
 
   const heldGesture = async ({ interrupt }) => {
-    await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+    await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
     await page.evaluate(`(() => {
       const body = __kinect.library.serialiseProjectBody();
       const clip = body.clips.find((entry) => entry.id === __kinect.editor.clipSelection());
@@ -4882,7 +4923,7 @@ try {
     await page.evaluate('__kinect.editor.setClipRange(0, null)');
     await page.evaluate('__kinect.keyframes.undo.commit()');
     await driveRate(2);
-    const committed = await page.evaluate('__kinect.timeline.retime.rate');
+    const committed = await page.evaluate('__kinect.timeline.read().speed');
     await page.evaluate('__kinect.timeline.transport().seek(2)');
     await settle();
     await page.evaluate('__kinect.timeline.transport().play()');
@@ -4896,12 +4937,12 @@ try {
       el.dispatchEvent(new Event('input'));
     })()`);
     await settle();
-    const held = await page.evaluate('__kinect.timeline.retime.rate');
+    const held = await page.evaluate('__kinect.timeline.read().speed');
     if (interrupt) {
       await page.evaluate('__kinect.keyframes.undo.pop()');
       await settle();
     }
-    const afterInterrupt = await page.evaluate('__kinect.timeline.retime.rate');
+    const afterInterrupt = await page.evaluate('__kinect.timeline.read().speed');
     const before = await snap();
     if (interrupt === 'then-more-input') {
       await page.evaluate(`(() => {
@@ -4962,7 +5003,7 @@ try {
 
   await focusStage();
   await page.evaluate('__kinect.timeline.transport().pause()');
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await page.evaluate('__kinect.keyframes.setTracks({})');
   await page.evaluate(`(() => {
     const body = __kinect.library.serialiseProjectBody();
@@ -5011,26 +5052,6 @@ try {
   await page.mouse.click(dbl.x + dbl.width / 2, dbl.y + dbl.height / 2);
   await settle();
   check(await keyCount('bloom') === 2, 'and a double click on a key removes it', `${await keyCount('bloom')} keys left`);
-
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [
-    { t: 0, value: 0 }, { t: 10, value: 8 }, { t: 20, value: 20 } ] })`);
-  await settle();
-  await page.evaluate(`__kinect.editor.select('retime', 0)`);
-  await settle();
-  await page.keyboard.press('Delete');
-  await settle();
-  const retimeKeys = () => page.evaluate('__kinect.timeline.retime.keys.length');
-  check(await retimeKeys() === 3, 'the retime origin will not delete while keys follow it',
-    `${await retimeKeys()} keys, note "${(await text('#tNote')).trim().slice(0, 60)}"`);
-  check((await text('#tNote')).trim().length > 10, 'and it says why rather than doing nothing quietly');
-  await page.evaluate(`__kinect.editor.select('retime', 2)`);
-  await page.keyboard.press('Delete');
-  await settle();
-  await page.evaluate(`__kinect.editor.select('retime', 1)`);
-  await page.keyboard.press('Delete');
-  await settle();
-  check(await retimeKeys() === 0, 'and the curve empties once the last one after it has gone',
-    `${await retimeKeys()} keys`);
 
   const EXPECTED = {
     linear: { out: [[1 / 3, 1 / 3]], in: [[2 / 3, 2 / 3]] },
@@ -5235,25 +5256,6 @@ try {
   check(JSON.stringify(pairFirst.easeOut) === glideOut && JSON.stringify(pairLast.easeIn) === glideIn,
     'on a two-key move `ends` shapes both ends of the one segment there is',
     `first-out ${JSON.stringify(pairFirst.easeOut)}, last-in ${JSON.stringify(pairLast.easeIn)}`);
-
-  // `assertMonotonic` argues that a handle anywhere in the unit box cannot run source time
-  // backwards, and that argument is about a cubic - a quintic with ordinates
-  // 0,1,0,1,0,1 oscillates.
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [
-    { t: 0, value: 0 }, { t: 6, value: 4 }, { t: 12, value: 11 } ] })`);
-  await page.evaluate(`__kinect.editor.select('retime', 1)`);
-  await settle();
-  const retimePoints = await page.evaluate(`(() => {
-    const add = document.getElementById('tAddPoint').disabled;
-    const drop = document.getElementById('tDropPoint').disabled;
-    const smooth = document.querySelector('#tEase button[data-ease=smooth]').disabled;
-    return { add, drop, smooth };
-  })()`);
-  check(retimePoints.add && retimePoints.drop && !retimePoints.smooth,
-    'both point controls are dead on a retime key while the ordinary presets stay live, '
-    + 'because the monotonicity proof the retime rests on is a proof about a cubic',
-    `add ${retimePoints.add ? 'dead' : 'LIVE'}, drop ${retimePoints.drop ? 'dead' : 'LIVE'}, `
-    + `smooth ${retimePoints.smooth ? 'DEAD' : 'live'}`);
 
   await plant({ bloom: [{ t: 1, value: 0.5 }, { t: 5, value: 0.5 }, { t: 9, value: 0.9 }] });
   await page.evaluate(`__kinect.editor.select('bloom', 0)`);
@@ -5557,7 +5559,7 @@ try {
     return res.json();
   })()`);
 
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await page.evaluate(`__kinect.keyframes.setTracks({ bloom: [{ t: 2, value: 0.2 }, { t: 6, value: 0.9 }] })`);
   await settle();
   // The far trim is read off the take rather than written down: `setClipInOut` holds a trim
@@ -5607,7 +5609,7 @@ try {
     el.dispatchEvent(new Event('input', { bubbles: true }));
   })()`);
   await settle();
-  const heldRate = await page.evaluate('__kinect.timeline.retime.rate');
+  const heldRate = await page.evaluate('__kinect.timeline.read().speed');
   const swapped = await pick('editor-check-near');
   check(near(swapped.in ?? -1, 2, 1e-3) && near(swapped.out ?? -1, 8, 1e-3),
     '  even while a speed gesture is held, and as the stored program times rather than rescaled',
@@ -5624,7 +5626,7 @@ try {
     '  and the gesture that continues keeps that project trim at its authored times',
     `${JSON.stringify(afterSwap)}, wanted in 2.0000 out 8.0000`);
 
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await settle();
   const pastDur = (await read()).duration;
   check(pastIn > pastDur,
@@ -5711,7 +5713,7 @@ try {
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }).toString()})(${JSON.stringify(menuBefore)})`);
   await settle();
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await page.evaluate('__kinect.keyframes.setTracks({})');
   // And the trim, which nothing below resets: leaving it at the near deliverable's range
   // moved section 8's crop numbers, and those rows read as a rendering change rather than
@@ -5728,7 +5730,7 @@ try {
   await page.evaluate('__kinect.editor.setClipRange(0, null)');
   await page.evaluate('__kinect.setOutputSize("1920x1080")');
   await page.evaluate('__kinect.keyframes.setTracks({})');
-  await page.evaluate('__kinect.keyframes.setRetime({ rate: 1, keys: [] })');
+  await page.evaluate('(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))');
   await page.evaluate("__kinect.params.reset(__kinect.params.names('look'))");
   await page.evaluate('__kinect.sensorView()');
   await page.evaluate('__kinect.keyframes.chrome.set(false)');
@@ -6656,7 +6658,7 @@ try {
   check((await page.evaluate('__kinect.editor.shortcuts()')).includes(',/. pan it'),
     '  and the shortcut list says so too', await page.evaluate('__kinect.editor.shortcuts()'));
 
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await settle();
   const slowRate = await driveRate(0.1);
   await page.evaluate('__kinect.editor.view.set(0.5, 0.5)');
@@ -6677,7 +6679,7 @@ try {
   check(near(atBack.spanSec, atMin.spanSec, 1e-6),
     '  and comes back to exactly the window it started at, rather than to what the clamp left',
     `${atMin.spanSec.toFixed(6)}s -> ${atBack.spanSec.toFixed(6)}s`);
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await page.evaluate('__kinect.editor.view.fit()');
   await settle();
 
@@ -6714,7 +6716,7 @@ try {
   // boundary is a float and the playhead is a frame, so one that was exactly on `clipIn` can land
   // a fraction of a frame outside the rescaled one and `setClipInOut` buys a full accurate seek
   // for it on every `input`.
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await settle();
   await page.evaluate('__kinect.timeline.transport().seek(10)');
   await settle();
@@ -6743,7 +6745,7 @@ try {
     '  and twelve slider steps from there still cost one accurate seek, not one per step',
     `${boundarySeeks} seeks`);
   await page.evaluate('__kinect.editor.setClipRange(0, null)');
-  await page.evaluate(`__kinect.keyframes.setRetime({ rate: 1, keys: [] })`);
+  await page.evaluate(`(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))`);
   await settle();
 
   // A wheel notch is not three pixels, and on Firefox that is what it reports: `deltaMode` is
@@ -7833,7 +7835,7 @@ try {
       { id: 'em1', sourceMs: 3000, label: 'second' },
       { id: 'em2', sourceMs: 5000, label: 'third' },
     ];
-    await page.evaluate('__kinect.keyframes.setRetime({ rate: 1, keys: [] })');
+    await page.evaluate('(__kinect.keyframes.setSourceStart(0), __kinect.keyframes.setSpeed(1))');
     await page.evaluate(`(() => {
       const el = document.getElementById('tRate');
       el.value = String(__kinect.editor.rateSlider.toValue(${RATE}));
@@ -7849,10 +7851,10 @@ try {
     const geometry = await page.evaluate(`(() => {
       const total = __kinect.editor.view.window().duration;
       return {
-        rate: __kinect.timeline.retime.rate,
+        rate: __kinect.timeline.read().speed,
         total,
         program: ${JSON.stringify(MARKS)}.map((m) => Math.max(0, Math.min(total,
-          __kinect.timeline.retime.programSecAt(m.sourceMs / 1000)))),
+          __kinect.editor.markProgramSec(m.sourceMs / 1000)))),
         source: ${JSON.stringify(MARKS)}.map((m) => m.sourceMs / 1000),
         ticks: __kinect.library.markTicks().length,
       };
@@ -7877,7 +7879,7 @@ try {
       `playhead ${pressed.toFixed(3)}s against the tick's ${geometry.program[1].toFixed(3)}s`
       + ` (the source second is ${geometry.source[1].toFixed(3)}s)`);
     check(!near(pressed, geometry.source[1], TOL),
-      'and not on the mark\'s own source second, which is where the retime would be undone',
+      'and not on the mark\'s own source second, which would ignore its clip timing',
       `${pressed.toFixed(3)}s against ${geometry.source[1].toFixed(3)}s`);
 
     await page.evaluate('__kinect.timeline.transport().seek(0)');
@@ -7951,7 +7953,7 @@ try {
     const trim = await page.evaluate(`(() => {
       const window0 = __kinect.editor.view.window();
       const total = window0.duration;
-      const at = (s) => Math.max(0, Math.min(total, __kinect.timeline.retime.programSecAt(s)));
+      const at = (s) => Math.max(0, Math.min(total, __kinect.editor.markProgramSec(s)));
       const outside = at(2);
       const inside = at(8);
       const inAt = (outside + inside) / 2;
@@ -10802,7 +10804,8 @@ try {
       const k = globalThis.__kinect;
       return {
         clips: k.timeline.clips().map((c) => ({ id: c.id, take: c.take && c.take.id,
-          start: c.start, end: c.end, length: c.length, selected: c.selected })),
+          start: c.start, end: c.end, trim: c.trim, length: c.length,
+          speed: c.speed, sourceStart: c.sourceStart, selected: c.selected })),
         selection: k.editor.clipSelection(),
         rows: k.keyframes.lanes().map((l) => l.owner),
         boxes: [...document.querySelectorAll('.tclip')].length,
@@ -11472,7 +11475,7 @@ try {
     // pass on the defect it exists to catch.
     check(picked.clips[0].selected === true && picked.clips[1].selected === false
       && two.clips.find((c) => c.selected)?.id !== picked.clips.find((c) => c.selected)?.id,
-    'and the panel and the retime binding move with it, so the selection is one fact rather than two',
+    'and the panel and the speed binding move with it, so the selection is one fact rather than two',
     `${two.clips.find((c) => c.selected)?.id} then `
       + picked.clips.map((c) => `${c.id}:${c.selected}`).join(' '));
 
@@ -11507,10 +11510,10 @@ try {
       + `drawn at ${marked.ticks.map((t) => t.left.toFixed(2)).join(', ')}%`);
     check(marked.start > 0.5,
       'the selected clip is placed away from the head of the edit, which is what makes the two '
-      + 'rows below a claim about placement rather than about a curve',
+      + 'rows below a claim about placement rather than about source timing',
       `${marked.start.toFixed(3)}s`);
     check(near(marked.program, marked.start + MARK_SOURCE_MS / 1000, 0.05),
-      'a mark ticks at the selected clip\'s placement plus its curve, because a mark is a fact '
+      'a mark ticks at the selected clip\'s placement plus its source timing, because a mark is a fact '
       + 'about footage and which clip of it the ruler is drawing is the selection',
       `${marked.program.toFixed(3)}s against ${(marked.start + MARK_SOURCE_MS / 1000).toFixed(3)}s`);
     // Against the placement and the source second rather than against `markProgramSec`: a build
@@ -11518,11 +11521,11 @@ try {
     // the row would pass on the defect it exists to catch.
     const wantLeft = ((marked.start + MARK_SOURCE_MS / 1000) / marked.duration) * 100;
     check(marked.ticks.length === 1 && near(marked.ticks[0].left, wantLeft, 0.5),
-      'and the tick is drawn where that says, rather than where the curve alone would put it',
+      'and the tick is drawn where that says, rather than where the source second alone would put it',
       `${marked.ticks[0]?.left.toFixed(2)}% against ${wantLeft.toFixed(2)}%`);
 
     // Both write gestures at a program second before this placed clip. The sidecar stores source
-    // time, so extrapolating the retime curve here would write a negative time the take has never
+    // time, so extrapolating the clip timing here would write a negative time the take has never
     // contained. The route returns the submitted list and keeps the real sidecar untouched.
     const markWrites = [];
     const markPattern = '**/capture/*/marks';
@@ -11702,121 +11705,208 @@ try {
         'it needs a second take so the selected take can change while the first take writes');
     }
 
+    console.log('\n[22b] the handles that move a clip, and the half of a preset that is shared');
 
-    // The head, which moves the clip's in-point and must not move its footage.
-    const bed = await page.locator('#tBed').boundingBox();
-    const insideBody = () => page.evaluate(`(() => {
-      const k = globalThis.__kinect;
-      const c = k.timeline.clips().find((x) => x.selected);
-      // A source time sampled inside what will still be the body after the trim, so the row is
-      // about the mapping holding rather than about a position that left the clip.
-      const at = c.start + c.length - 0.5;
-      return { id: c.id, start: c.start, end: c.end, length: c.length,
-        keys: k.timeline.retime.keys.map((key) => [key.t, key.value]),
-        rateDisabled: document.getElementById('tRate').disabled,
-        at, sourceSec: k.timeline.retime.sourceSecAt(at - c.start) };
-    })()`);
+    // Stage one ordinary clip with no keys. Head trims must change timing fields, not grow a
+    // hidden timing lane or key that the current document format does not have.
     await page.mouse.click((await boxAt(1)).x, (await boxAt(1)).y);
     await settle();
-    const beforeHead = await insideBody();
-    {
-      const r = (await boxAt(1)).r;
-      await page.mouse.move(r.x + 3, r.y + r.height / 2);
-      await page.mouse.down();
-      for (let i = 1; i <= 6; i++) {
-        await page.mouse.move(r.x + 3 + (bed.width * 0.04 * i) / 6, r.y + r.height / 2);
-      }
-      await page.mouse.up();
-      await settle();
-    }
-    const afterHead = await insideBody();
-    console.log(`  head trim: ${beforeHead.start.toFixed(3)}s -> ${afterHead.start.toFixed(3)}s, `
-      + `out-point ${beforeHead.end.toFixed(3)} -> ${afterHead.end.toFixed(3)}, `
-      + `curve ${JSON.stringify(afterHead.keys)}, source time at ${afterHead.at.toFixed(2)}s `
-      + `${beforeHead.sourceSec.toFixed(4)}s -> ${afterHead.sourceSec.toFixed(4)}s`);
-    check(afterHead.start > beforeHead.start + 0.2,
-      'dragging a clip\'s head edge moves its in-point later in the edit',
-      `${beforeHead.start.toFixed(3)}s to ${afterHead.start.toFixed(3)}s`);
-    check(near(afterHead.end, beforeHead.end, 1e-6),
-      'and leaves its out-point where it was, so a head trim shortens the clip rather than moving it',
-      `${beforeHead.end.toFixed(4)} against ${afterHead.end.toFixed(4)}`);
-    check(near(afterHead.sourceSec, beforeHead.sourceSec, 1e-9),
-      'and the footage under what is left holds still, which is what makes it a trim rather than '
-      + 'a slip: the same project second stands on the same source time',
-      `source ${beforeHead.sourceSec.toFixed(4)}s against ${afterHead.sourceSec.toFixed(4)}s `
-      + `at ${afterHead.at.toFixed(2)}s`);
-    check(afterHead.keys.length === 1 && afterHead.keys[0][0] === 0 && afterHead.keys[0][1] > 0,
-      'the in-point is written as the curve\'s single key at the origin, because a clip states '
-      + 'where it starts in the take through its curve rather than through a field of its own',
-      JSON.stringify(afterHead.keys));
-    check(afterHead.rateDisabled === false,
-      'and the speed slider still answers, because a curve of one key is still a rate',
-      `disabled ${afterHead.rateDisabled}`);
-
-    await page.evaluate(`globalThis.__kinect.keyframes.setRetime({
-      rate: 1.25, keys: [{ t: 2, value: 5 }],
-    })`);
-    await settle();
-    const beforeOffsetHead = await insideBody();
-    {
-      const r = (await boxAt(1)).r;
-      await page.mouse.move(r.x + 3, r.y + r.height / 2);
-      await page.mouse.down();
-      await page.mouse.move(r.x + 3 + bed.width * 0.04, r.y + r.height / 2);
-      await page.mouse.up();
-      await settle();
-    }
-    const afterOffsetHead = await insideBody();
-    check(afterOffsetHead.start > beforeOffsetHead.start + 0.2
-      && afterOffsetHead.keys.length === 1 && afterOffsetHead.keys[0][0] === 2
-      && near(afterOffsetHead.sourceSec, beforeOffsetHead.sourceSec, 1e-9),
-    'a head trim preserves the offset of an imported single retime key and holds the remaining footage still',
-    `start ${beforeOffsetHead.start.toFixed(3)} -> ${afterOffsetHead.start.toFixed(3)}, `
-      + `key ${JSON.stringify(beforeOffsetHead.keys)} -> ${JSON.stringify(afterOffsetHead.keys)}, `
-      + `source ${beforeOffsetHead.sourceSec.toFixed(4)}s -> ${afterOffsetHead.sourceSec.toFixed(4)}s`);
-
-    // Keep the two edge handles apart. The two trims above can leave this clip at the minimum
-    // length, where a real pointer cannot distinguish the head from the tail.
-    const refusalLength = await page.evaluate(`(() => {
+    const TRIM_PROBE = '__editor-check-pointer-trim__';
+    const timingFixture = await page.evaluate(`(() => {
       const k = globalThis.__kinect;
       const body = k.library.serialiseProjectBody();
+      body.look.tracks = {};
+      body.composition.camera = [];
+      for (const clip of body.clips) clip.tracks = {};
       const clip = body.clips.find((candidate) => candidate.id === k.editor.clipSelection());
-      clip.length = Math.max(4, clip.length ?? 0);
+      clip.length = 8;
+      clip.speed = 1;
+      clip.sourceStart = 0;
       k.library.restoreProject(body);
       k.editor.selectClipRow(clip.id);
-      return k.timeline.clips().find((candidate) => candidate.id === clip.id).length;
+      k.editor.view.fit();
+      k.keyframes.undo.begin();
+      return clip.id;
     })()`);
-    check(refusalLength >= 4,
-      'the keyed-curve refusal arm gives the head and tail separate pointer targets',
-      `${refusalLength.toFixed(3)}s of clip`);
-
-    // The same edge on a clip whose curve says more than an in-point.
-    await page.evaluate(`globalThis.__kinect.keyframes.setRetime({ rate: 1, keys: [
-      { t: 0, value: 2 }, { t: 4, value: 6 } ] })`);
     await settle();
-    const beforeRefusal = await insideBody();
-    {
+
+    const bed = await page.locator('#tBed').boundingBox();
+    const selectedTiming = () => page.evaluate(() => {
+      const k = globalThis.__kinect;
+      const c = k.timeline.clips().find((candidate) => candidate.selected);
+      return {
+        id: c.id,
+        start: c.start,
+        end: c.end,
+        trim: c.trim,
+        length: c.length,
+        speed: c.speed,
+        sourceStart: c.sourceStart,
+        keys: document.querySelectorAll('#tLanes .tkey').length,
+        rateKey: document.getElementById('tRateKey') !== null,
+        rateDisabled: document.getElementById('tRate').disabled,
+        undo: k.keyframes.undo.depth(),
+      };
+    });
+    const sourceAt = async (programSec) => {
+      await page.evaluate((at) => __kinect.timeline.transport().seek(at), programSec);
+      await settle();
+      return page.evaluate('__kinect.timeline.read().sourceSec');
+    };
+    const dragSelected = async (side, delta, destination = null) => {
       const r = (await boxAt(1)).r;
-      await page.mouse.move(r.x + 3, r.y + r.height / 2);
+      const x = side === 'head' ? r.x + 3
+        : side === 'tail' ? r.x + r.width - 3 : r.x + r.width / 2;
+      const y = r.y + r.height / 2;
+      await page.mouse.move(x, y);
       await page.mouse.down();
-      await page.mouse.move(r.x + 3 + bed.width * 0.04, r.y + r.height / 2);
+      await page.mouse.move(destination ?? x + delta, y, { steps: 8 });
       await page.mouse.up();
       await settle();
-    }
-    const afterRefusal = await insideBody();
-    const refusal = await page.evaluate("document.getElementById('tNote').textContent");
-    console.log(`  head trim on a keyed curve: "${refusal}"`);
-    check(near(afterRefusal.start, beforeRefusal.start, 1e-9),
-      'the head edge of a clip carrying a retime curve moves nothing',
-      `${beforeRefusal.start.toFixed(4)} against ${afterRefusal.start.toFixed(4)}`);
-    check(/retime curve/.test(refusal) && /head/.test(refusal),
-      'and says why rather than being an edge that silently does nothing on some clips',
-      refusal);
-    check(afterRefusal.rateDisabled === true,
-      'and that clip\'s speed slider has gone quiet, because a curve of two keys is not a rate',
-      `disabled ${afterRefusal.rateDisabled}`);
-    await page.evaluate('globalThis.__kinect.keyframes.setRetime({ rate: 1, keys: [] })');
+    };
+
+    const beforeHead = await selectedTiming();
+    const fixedBodyPosition = beforeHead.start + beforeHead.length - 0.5;
+    const beforeHeadSource = await sourceAt(fixedBodyPosition);
+    await dragSelected('head', bed.width * 0.04);
+    const afterHead = await selectedTiming();
+    const afterHeadSource = await sourceAt(fixedBodyPosition);
+    console.log(`  head trim on ${timingFixture}: ${beforeHead.start.toFixed(3)}s -> `
+      + `${afterHead.start.toFixed(3)}s, in-point ${beforeHead.sourceStart.toFixed(3)}s -> `
+      + `${afterHead.sourceStart.toFixed(3)}s, fixed source ${beforeHeadSource.toFixed(4)}s -> `
+      + `${afterHeadSource.toFixed(4)}s`);
+    check(afterHead.start > beforeHead.start + 0.2 && afterHead.sourceStart > beforeHead.sourceStart,
+      'dragging a clip\'s head later moves both its project in-point and its source in-point',
+      `start ${beforeHead.start.toFixed(3)}s -> ${afterHead.start.toFixed(3)}s, source `
+        + `${beforeHead.sourceStart.toFixed(3)}s -> ${afterHead.sourceStart.toFixed(3)}s`);
+    check(near(afterHead.end, beforeHead.end, 1e-6)
+      && afterHead.length < beforeHead.length - 0.2,
+    'and leaves its out-point where it was, so the head shortens the clip rather than moving it',
+    `end ${beforeHead.end.toFixed(4)}s -> ${afterHead.end.toFixed(4)}s, length `
+      + `${beforeHead.length.toFixed(4)}s -> ${afterHead.length.toFixed(4)}s`);
+    check(near(afterHeadSource, beforeHeadSource, 1e-9),
+      'and the footage under what is left holds still, which is what makes it a trim rather than '
+        + 'a slip: the same project second stands on the same source time',
+      `source ${beforeHeadSource.toFixed(4)}s against ${afterHeadSource.toFixed(4)}s `
+        + `at ${fixedBodyPosition.toFixed(2)}s`);
+    check(beforeHead.keys === 0 && afterHead.keys === 0 && !afterHead.rateKey,
+      'and the trim creates no timing key in the strip and no removed speed-key control in the DOM',
+      `${beforeHead.keys} keys before, ${afterHead.keys} after, speed-key control ${afterHead.rateKey}`);
+    check(afterHead.rateDisabled === false,
+      'while the speed slider still answers on the trimmed clip',
+      `disabled ${afterHead.rateDisabled}`);
+
+    const draggedTiming = {
+      start: afterHead.start,
+      trim: afterHead.trim,
+      length: afterHead.length,
+      speed: afterHead.speed,
+      sourceStart: afterHead.sourceStart,
+    };
+    await page.evaluate(`(async () => {
+      const k = __kinect;
+      const res = await __ecWrite('/projects/${TRIM_PROBE}', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(k.library.serialiseProjectBody()),
+      });
+      if (!res.ok) throw new Error('the pointer-trim project could not be saved: ' + res.status);
+      await k.library.loadProject('${TRIM_PROBE}');
+      await k.timeline.settled();
+    })()`);
     await settle();
+    const reloadedDrag = await page.evaluate((id) => {
+      const clip = __kinect.timeline.clips().find((candidate) => candidate.id === id);
+      return { start: clip.start, trim: clip.trim, length: clip.length,
+        speed: clip.speed, sourceStart: clip.sourceStart };
+    }, timingFixture);
+    check(['start', 'trim', 'length', 'speed', 'sourceStart']
+      .every((name) => near(reloadedDrag[name], draggedTiming[name], 1e-9)),
+    'saving and loading the project preserves the timing produced by the pointer head trim',
+    `${JSON.stringify(draggedTiming)} -> ${JSON.stringify(reloadedDrag)}`);
+    await page.evaluate((id) => __kinect.editor.selectClipRow(id), timingFixture);
+    await settle();
+
+    const anchorAt = afterHead.start + Math.min(2, afterHead.length / 2);
+    await page.evaluate((at) => __kinect.timeline.transport().seek(at), anchorAt);
+    await settle();
+    const beforeSpeed = await page.evaluate('__kinect.timeline.read()');
+    await driveRate(1.5);
+    const afterSpeed = await page.evaluate('__kinect.timeline.read()');
+    const speedAnchorDrift = Math.abs(afterSpeed.sourceSec - beforeSpeed.sourceSec);
+    const speedAnchorBound = afterSpeed.speed / (2 * afterSpeed.outputFps);
+    check(speedAnchorDrift <= speedAnchorBound + 1e-9
+      && near(afterSpeed.sourceStart, beforeSpeed.sourceStart, 1e-9)
+      && Math.abs(afterSpeed.programSec - beforeSpeed.programSec) > 0.1,
+    'changing speed on the trimmed clip holds the source frame to the nearest output frame by '
+      + 'moving the playhead, not its in-point',
+    `source ${beforeSpeed.sourceSec.toFixed(4)}s -> ${afterSpeed.sourceSec.toFixed(4)}s, `
+      + `program ${beforeSpeed.programSec.toFixed(4)}s -> ${afterSpeed.programSec.toFixed(4)}s, `
+      + `in-point ${beforeSpeed.sourceStart.toFixed(4)}s -> ${afterSpeed.sourceStart.toFixed(4)}s, `
+      + `drift ${(speedAnchorDrift * 1000).toFixed(2)}ms against a `
+      + `${(speedAnchorBound * 1000).toFixed(2)}ms output-grid bound`);
+
+    const beforeTail = await selectedTiming();
+    await dragSelected('tail', -bed.width * 0.025);
+    const afterTail = await selectedTiming();
+    check(afterTail.end < beforeTail.end - 0.1 && afterTail.length < beforeTail.length - 0.1,
+      'dragging the tail earlier moves the out-point and shortens the clip',
+      `end ${beforeTail.end.toFixed(3)}s -> ${afterTail.end.toFixed(3)}s, length `
+        + `${beforeTail.length.toFixed(3)}s -> ${afterTail.length.toFixed(3)}s`);
+    check(near(afterTail.start, beforeTail.start, 1e-9)
+      && near(afterTail.sourceStart, beforeTail.sourceStart, 1e-9)
+      && near(afterTail.speed, beforeTail.speed, 1e-9),
+    'and the tail leaves the project in-point, source in-point and speed alone',
+    `start ${beforeTail.start.toFixed(4)}s -> ${afterTail.start.toFixed(4)}s, source `
+      + `${beforeTail.sourceStart.toFixed(4)}s -> ${afterTail.sourceStart.toFixed(4)}s, speed `
+      + `${beforeTail.speed}x -> ${afterTail.speed}x`);
+
+    const beforeBody = await selectedTiming();
+    await dragSelected('body', bed.width * 0.03);
+    const afterBody = await selectedTiming();
+    const bodyStartMove = afterBody.start - beforeBody.start;
+    const bodyEndMove = afterBody.end - beforeBody.end;
+    check(bodyStartMove > 0.1 && near(bodyStartMove, bodyEndMove, 1e-6),
+      'dragging the clip body moves both ends by the same project time',
+      `start moved ${bodyStartMove.toFixed(4)}s, end moved ${bodyEndMove.toFixed(4)}s`);
+    check(near(afterBody.length, beforeBody.length, 1e-9)
+      && near(afterBody.sourceStart, beforeBody.sourceStart, 1e-9)
+      && near(afterBody.speed, beforeBody.speed, 1e-9),
+    'and the body leaves its length, source in-point and speed alone',
+    `length ${beforeBody.length.toFixed(4)}s -> ${afterBody.length.toFixed(4)}s, source `
+      + `${beforeBody.sourceStart.toFixed(4)}s -> ${afterBody.sourceStart.toFixed(4)}s, speed `
+      + `${beforeBody.speed}x -> ${afterBody.speed}x`);
+
+    await page.evaluate('__kinect.editor.view.fit()');
+    await settle();
+    const beforeHeadBack = await selectedTiming();
+    await dragSelected('head', 0, bed.x - 20);
+    const afterHeadBack = await selectedTiming();
+    const sourceHead = Math.max(0,
+      beforeHeadBack.start - beforeHeadBack.sourceStart / beforeHeadBack.speed);
+    check(afterHeadBack.sourceStart === 0 && near(afterHeadBack.start, sourceHead, 1e-9)
+      && near(afterHeadBack.end, beforeHeadBack.end, 1e-6),
+    'dragging the head back to the take starts at source zero and still holds the out-point',
+    `start ${beforeHeadBack.start.toFixed(4)}s -> ${afterHeadBack.start.toFixed(4)}s `
+      + `(floor ${sourceHead.toFixed(4)}s), source ${beforeHeadBack.sourceStart.toFixed(4)}s -> `
+      + `${afterHeadBack.sourceStart.toFixed(4)}s, end ${beforeHeadBack.end.toFixed(4)}s -> `
+      + `${afterHeadBack.end.toFixed(4)}s`);
+    check(afterHeadBack.undo === beforeHeadBack.undo + 1,
+      'and that head trim costs one undo step',
+      `depth ${beforeHeadBack.undo} -> ${afterHeadBack.undo}`);
+
+    await page.evaluate('__kinect.keyframes.undo.pop()');
+    await settle();
+    const undoneHeadBack = await selectedTiming();
+    check(undoneHeadBack.undo === beforeHeadBack.undo
+      && ['start', 'end', 'trim', 'length', 'speed', 'sourceStart']
+        .every((name) => near(undoneHeadBack[name], beforeHeadBack[name], 1e-9)),
+    'undo puts the clip timing from before that head trim back as one unit',
+    `depth ${afterHeadBack.undo} -> ${undoneHeadBack.undo}; `
+      + `timing ${JSON.stringify({ start: beforeHeadBack.start, trim: beforeHeadBack.trim,
+        speed: beforeHeadBack.speed, sourceStart: beforeHeadBack.sourceStart })} -> `
+      + JSON.stringify({ start: undoneHeadBack.start, trim: undoneHeadBack.trim,
+        speed: undoneHeadBack.speed, sourceStart: undoneHeadBack.sourceStart }));
 
     // The delete, and the undo of it.
     const before = await read();
@@ -11949,7 +12039,7 @@ try {
       'the edit is as long as its furthest clip reaches, so the window fits the film rather than '
       + 'the first clip', `${framed.duration.toFixed(3)}s against ends ${framed.ends.map((e) => e.toFixed(2)).join(', ')}`);
 
-    console.log('\n[22b] the handles that move a clip, and the half of a preset that is shared');
+    console.log('\n  clip presets keep their scope and provenance');
 
     // Two clips, staged rather than inherited: section 22 above finishes on whatever its undo
     // sequence left, and both arms below are comparisons between two clips.
@@ -11977,10 +12067,12 @@ try {
       const body = k.library.serialiseProjectBody();
       body.clips[0].start = 0;
       body.clips[0].length = 10;
-      body.clips[0].retime = { rate: 1, keys: [] };
+      body.clips[0].speed = 1;
+      body.clips[0].sourceStart = 0;
       body.clips[1].start = 10;
       body.clips[1].length = null;
-      body.clips[1].retime = { rate: 1, keys: [] };
+      body.clips[1].speed = 1;
+      body.clips[1].sourceStart = 0;
       k.library.restoreProject(body);
       k.editor.selectClipRow('gz2');
       const duration = k.timeline.transport().duration;
@@ -12639,6 +12731,21 @@ try {
     // `restoreProject`: the restore door is what undo arrives by and it must keep the selection,
     // so driving that one would report the opposite of what this row claims.
     const PROBE = '__editor-check-selection__';
+    const savedClipTiming = await page.evaluate(`(() => {
+      const k = globalThis.__kinect;
+      const body = k.library.serialiseProjectBody();
+      const clip = body.clips.find((candidate) => candidate.id === 'gz2');
+      clip.start = 4.25;
+      clip.length = 5.75;
+      clip.speed = 1.6;
+      clip.sourceStart = 2.25;
+      k.library.restoreProject(body);
+      k.editor.selectClipRow(clip.id);
+      const staged = k.timeline.clips().find((candidate) => candidate.id === clip.id);
+      return { start: staged.start, trim: staged.trim, length: staged.length,
+        speed: staged.speed, sourceStart: staged.sourceStart };
+    })()`);
+    await settle();
     await page.evaluate(`(async () => {
       const k = globalThis.__kinect;
       const res = await __ecWrite('/projects/${PROBE}', {
@@ -12656,6 +12763,11 @@ try {
       clips: __kinect.timeline.clips().length,
       greyed: __kinect.editor.scopeOff(),
       clipControl: document.getElementById('pointSize').disabled,
+      timing: (() => {
+        const clip = __kinect.timeline.clips().find((candidate) => candidate.id === 'gz2');
+        return { start: clip.start, trim: clip.trim, length: clip.length,
+          speed: clip.speed, sourceStart: clip.sourceStart };
+      })(),
     }))()`);
     console.log(`  a project of ${loaded.clips} clips loaded by name: `
       + `selection ${loaded.selection}, ${loaded.greyed} greyed rows`);
@@ -12663,6 +12775,10 @@ try {
       'the probe project came back with both its clips, so the row below is about a load that '
       + 'happened rather than one that failed',
       `${loaded.clips} clips`);
+    check(['start', 'trim', 'length', 'speed', 'sourceStart']
+      .every((name) => near(loaded.timing[name], savedClipTiming[name], 1e-9)),
+    'and a named save and load preserves the clip placement, trim, speed and source in-point',
+    `${JSON.stringify(savedClipTiming)} -> ${JSON.stringify(loaded.timing)}`);
     check(loaded.selection === null && loaded.greyed > 20 && loaded.clipControl === true,
       'and loading a project selects no clip, because a document does not record which clip was '
       + 'being worked on and picking one would be a guess - which is the case the clip/project '
@@ -12671,6 +12787,9 @@ try {
     // The content type goes on the DELETE: the document routes answer 415 without one, and a
     // swallowed refusal leaves the probe in `projects/` for the next reader to wonder about.
     await writeProjectDoc(PROBE, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    }).catch(() => {});
+    await writeProjectDoc(TRIM_PROBE, {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' },
     }).catch(() => {});
     await page.evaluate(`__kinect.editor.selectClipRow('gz2')`);
@@ -12735,7 +12854,7 @@ try {
           parent: button.parentElement?.className ?? '' };
       })(),
       clipCommands: ['tDeleteClip', 'tMoveClip', 'tRotateClip', 'tKeyClip',
-        'tRate', 'tRateKey', 'tPreset', 'tPresetSave', 'tPresetExport', 'tPresetImport',
+        'tRate', 'tPreset', 'tPresetSave', 'tPresetExport', 'tPresetImport',
         'tMark', 'camSensor', 'cropFit'].map((id) => [id, document.getElementById(id)?.disabled]),
       rateInClipOptions: document.getElementById('tRate').closest('#tClipOptions') !== null,
       clipOptionsDisplay: getComputedStyle(document.getElementById('tClipOptions')).display,
