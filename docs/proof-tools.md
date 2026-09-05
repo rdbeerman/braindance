@@ -227,7 +227,7 @@ node tools/preview-check.mjs --url http://localhost:8080 --take fixture-1g
 
 Needs `--url`, a GPU browser, and a take with at least nine seconds of
 footage. It uses an isolated browser profile and leaves its screenshot and assertion report in
-a temporary directory printed at exit. It drives the preview menu and Play button, compares
+a temporary directory printed at exit. It drives the preview settings in View and the Play button, compares
 every RGB byte against an accurate live render, checks the preview's visible position and its
 removal on pause and resize, then checks cache boundaries, invalidation, animated keys,
 free-camera views, reload persistence, overlapping clips, and storage failures. The top-down
@@ -249,6 +249,10 @@ The timeline, editor, export, and boot tools turn idle rendering off in their is
 profiles. Their foreground checks must not compete with a second renderer; `preview-check`
 drives that renderer and its idle preference explicitly.
 
+The coverage rows compare the visible band against ruler ticks and the playhead while zooming
+and panning. They remove stored frames to expose a gap, check the readiness percentage, and
+scrub through the band. The preview controls must belong to View, with no popup on the timeline.
+
 Its controls are `--mutate cache-never-displays`, `--mutate edits-keep-old-previews`,
 `--mutate preview-skips-history`, `--mutate preview-ignores-free-camera`,
 `--mutate first-frame-is-skipped`, `--mutate late-decode-survives-camera-change`,
@@ -258,7 +262,8 @@ Its controls are `--mutate cache-never-displays`, `--mutate edits-keep-old-previ
 `--mutate clear-allows-stale-render`, `--mutate preview-error-stops-loop`,
 `--mutate manual-render-skips-settle`, `--mutate camera-drag-rebuilds-identity`, and
 `--mutate storage-changes-stay-local`, `--mutate stale-storage-error-survives`, and
-`--mutate clear-keeps-frame-blobs`.
+`--mutate clear-keeps-frame-blobs`, `--mutate coverage-uses-whole-clip`,
+`--mutate coverage-hides-gaps`, and `--mutate coverage-stays-in-overview`.
 Each intercepts the changed module in both browser contexts and must fail its declared assertion.
 A mutation exits zero only when that assertion
 fails and the browser loaded the changed module. The ordinary run exits zero only with no

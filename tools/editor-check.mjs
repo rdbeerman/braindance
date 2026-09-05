@@ -2596,7 +2596,6 @@ function inGroup(row, ...groups) {
 }
 
 const DRIVER_IDS = {
-  tPreviewOpen: 'preview-check opens the preview controls and checks they are closed at boot',
   tPreviewRender: 'preview-check renders a range and reads the cached pixels during playback',
   tPreviewAuto: 'preview-check starts idle rendering and interrupts it through this checkbox',
   tPreviewClear: 'preview-check clears during a render and refuses late results',

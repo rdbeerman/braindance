@@ -7,7 +7,7 @@ const yieldTask = () => new Promise((resolve) => setTimeout(resolve, 0));
 const cancelled = () => new DOMException('Preview rendering was interrupted.', 'AbortError');
 
 /** Coordinates one disposable renderer, a disk cache, and the editor's playback canvas. */
-export function createPreviews({ describe, viewStamp, state, pause, settle, stage }) {
+export function createPreviews({ describe, viewStamp, state, pause, settle, stage, closeMenu }) {
   let store = new PreviewStore();
   const images = new PreviewImages();
   const canvas = document.createElement('canvas');
@@ -16,17 +16,18 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
   canvas.setAttribute('aria-hidden', 'true');
   stage.after(canvas);
   const context = canvas.getContext('2d', { alpha: false });
-  const menu = document.getElementById('tPreviewMenu');
+  const readout = document.getElementById('tPreviewReadout');
   const renderButton = document.getElementById('tPreviewRender');
   const auto = document.getElementById('tPreviewAuto');
   const clearButton = document.getElementById('tPreviewClear');
   const status = document.getElementById('tPreviewStatus');
   const playback = document.getElementById('tPreviewPlayback');
   const coverage = document.getElementById('tPreviewCoverage');
+  const percent = document.getElementById('tPreviewPercent');
   const viewLabel = document.getElementById('tPreviewView');
   let automatic = true;
   try { automatic = localStorage.getItem(AUTO_KEY) !== 'off'; } catch { /* Session preference. */ }
-  auto.checked = automatic;
+  auto.setAttribute('aria-checked', String(automatic));
   let version = null;
   let snapshot = null;
   let signature = null;
@@ -188,7 +189,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
   function paint() {
     const current = state();
     if (!current) return;
-    const { from, to, fps, duration } = current;
+    const { from, to, fps, viewStart, viewEnd } = current;
     const ranges = previewRanges(available);
     const ready = ranges.reduce((n, [a, b]) => n + Math.max(0, Math.min(b, to) - Math.max(a, from) + 1), 0);
     const total = to - from + 1;
@@ -200,26 +201,32 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
             : `${ready}/${total} frames ready`;
     if (status.textContent !== text) status.textContent = text;
     status.dataset.state = error ? 'error' : full ? 'full' : task && !task.cancelled ? 'rendering' : ready === total ? 'ready' : 'partial';
-    menu.title = `${text} · ${Math.round(storageBytes / 1024 / 1024)} MB stored`;
+    readout.dataset.state = status.dataset.state;
+    percent.textContent = error ? '!' : loaded ? `${Math.floor(100 * ready / total)}%` : '—';
+    readout.title = `${text} · ${Math.round(storageBytes / 1024 / 1024)} MB stored`;
     viewLabel.textContent = snapshot?.camera.kind === 'free' ? 'Free camera' : 'Camera path';
     renderButton.textContent = manual && (manualWaiting || task && !task.cancelled) ? 'Stop rendering' : 'Render range';
     renderButton.disabled = !loaded || !snapshot || Boolean(current.blocked);
-    const key = JSON.stringify([ranges, from, to, fps, duration, task && !task.cancelled ? task.frame : null, signature]);
+    const key = JSON.stringify([ranges, from, to, fps, viewStart, viewEnd, task && !task.cancelled ? task.frame : null, signature]);
     if (coverageKey === key) return;
     coverageKey = key;
-    const end = Math.max(1, duration * fps);
-    const bars = ranges.map(([a, b]) => {
+    const start = viewStart * fps;
+    const span = Math.max(1, (viewEnd - viewStart) * fps);
+    const bars = [];
+    function addBar(a, b, kind) {
+      const left = Math.max(0, 100 * (a - start) / span);
+      const right = Math.min(100, 100 * (b + 1 - start) / span);
+      if (right <= left) return;
       const bar = document.createElement('i');
-      bar.style.left = `${100 * a / end}%`;
-      bar.style.width = `${100 * (b - a + 1) / end}%`;
-      return bar;
-    });
-    if (task && !task.cancelled && task.frame !== null) {
-      const bar = document.createElement('i');
-      bar.className = 'rendering';
-      bar.style.left = `${100 * task.frame / end}%`;
-      bar.style.width = `${100 / end}%`;
+      bar.className = kind;
+      bar.style.left = `${left}%`;
+      bar.style.width = `${right - left}%`;
       bars.push(bar);
+    }
+    addBar(from, to, 'pending');
+    for (const [a, b] of ranges) addBar(a, b, 'ready');
+    if (task && !task.cancelled && task.frame !== null) {
+      addBar(task.frame, task.frame, 'rendering');
     }
     coverage.replaceChildren(...bars);
     coverage.setAttribute('aria-label', `Rendered previews: ${ready} of ${total} frames in the playback range`);
@@ -484,12 +491,20 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     paint();
   }
 
-  renderButton.addEventListener('click', () => renderRange().catch(fail));
-  clearButton.addEventListener('click', () => clear().catch(fail));
-  auto.addEventListener('change', () => {
-    automatic = auto.checked;
+  renderButton.addEventListener('click', () => {
+    closeMenu({ restore: true });
+    renderRange().catch(fail);
+  });
+  clearButton.addEventListener('click', () => {
+    closeMenu({ restore: true });
+    clear().catch(fail);
+  });
+  auto.addEventListener('click', () => {
+    automatic = !automatic;
+    auto.setAttribute('aria-checked', String(automatic));
     if (!manual) activity();
     try { localStorage.setItem(AUTO_KEY, automatic ? 'on' : 'off'); } catch { /* Session preference. */ }
+    closeMenu({ restore: true });
   });
   for (const event of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'input']) {
     addEventListener(event, interaction, { capture: true, passive: true });

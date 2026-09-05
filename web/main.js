@@ -5514,6 +5514,7 @@ function previewView() {
 function setupPreviews() {
   previews = createPreviews({
     stage: renderer.domElement,
+    closeMenu: closeApplicationMenus,
     pause: pauseTransport,
     settle: () => timeline.idle(),
     describe: () => (timeline && takeOpened ? {
@@ -5522,6 +5523,7 @@ function setupPreviews() {
     viewStamp: () => JSON.stringify(previewView()),
     state: () => (timeline ? {
       frame: timeline.frame, fps: timeline.outputFps, duration: timeline.duration,
+      viewStart: view.startSec, viewEnd: view.endSec,
       from: timeline.frameAt(timeline.clipInSec), to: timeline.frameAt(timeline.clipOutSec),
       playing: timeline.playing || timeline.pendingPlay,
       busy: timeline.working || repaintBusy || draftBusy || presetGesture,

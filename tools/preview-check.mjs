@@ -16,6 +16,25 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const TMP = mkdtempSync(join(tmpdir(), 'preview-check-'));
 
 const MUTATIONS = {
+  'coverage-uses-whole-clip': {
+    file: 'web/previews.js',
+    edits: [['    const start = viewStart * fps;\n    const span = Math.max(1, (viewEnd - viewStart) * fps);',
+      '    const start = 0;\n    const span = Math.max(1, current.duration * fps);']],
+    fails: 'preview coverage follows the zoomed ruler and playhead',
+  },
+  'coverage-hides-gaps': {
+    file: 'web/previews.js',
+    edits: [["    for (const [a, b] of ranges) addBar(a, b, 'ready');",
+      "    if (ranges.length) addBar(ranges[0][0], ranges.at(-1)[1], 'ready');"]],
+    fails: 'preview coverage leaves missing frames visibly unrendered',
+  },
+  'coverage-stays-in-overview': {
+    file: 'web/index.html',
+    edits: [['          <div id="tPreviewCoverage" role="img" aria-label="No rendered previews"></div>\n', ''],
+      ['      <div class="tminibed" id="tMini">',
+        '      <div class="tminibed" id="tMini">\n        <div id="tPreviewCoverage" role="img" aria-label="No rendered previews"></div>']],
+    fails: 'preview coverage sits directly under the time ruler',
+  },
   'clear-keeps-frame-blobs': {
     file: 'web/preview-cache.js',
     edits: [["        tx.objectStore('frames').clear();", '        /* mutation: leave the encoded images stored */']],
@@ -144,9 +163,10 @@ if (MUTATE) {
     if (source.split(from).length !== 2) throw new Error(`Mutation ${MUTATE} does not match exactly once.`);
     source = source.replace(from, () => to);
   }
-  await context.route(`**/${mutation.file.slice(4)}`, (route) => {
+  const html = mutation.file.endsWith('.html');
+  await context.route(html ? '**/edit?*' : `**/${mutation.file.slice(4)}`, (route) => {
     served++;
-    return route.fulfill({ contentType: 'text/javascript', body: source });
+    return route.fulfill({ contentType: html ? 'text/html' : 'text/javascript', body: source });
   });
   console.log(`[preview] MUTATED ${MUTATE}: must fail ${mutation.fails}`);
 }
@@ -172,17 +192,82 @@ async function range(from, to) {
     await __kinect.timeline.settled();
   }, { from, to });
 }
-async function renderRange() {
-  if (!await page.locator('#tPreviewMenu').getAttribute('open').then((v) => v !== null)) {
-    await page.locator('#tPreviewOpen').click();
+async function previewCommand(id) {
+  if (!await page.locator('#viewMenu').isVisible()) await page.locator('#viewMenuButton').click();
+  await page.locator(id).click();
+}
+async function setAutomatic(enabled) {
+  if (await page.locator('#tPreviewAuto').getAttribute('aria-checked') !== String(enabled)) {
+    await previewCommand('#tPreviewAuto');
   }
-  await page.locator('#tPreviewRender').click();
+}
+async function renderRange() {
+  await previewCommand('#tPreviewRender');
   return waitFor(() => {
     const p = __kinect.previews.state();
     const t = __kinect.timeline.transport();
     const a = t.frameAt(t.clipInSec), b = t.frameAt(t.clipOutSec);
     return p.error || p.full || Array.from({ length: b - a + 1 }, (_, i) => a + i).every((n) => p.ready.includes(n));
   }, 60000);
+}
+
+async function checkCoverage() {
+  await range(1, 5);
+  await page.evaluate(() => {
+    const duration = __kinect.timeline.transport().duration;
+    __kinect.editor.view.set(1 / duration, 5 / duration);
+  });
+  await waitFor(() => document.querySelector('#tPreviewPercent')?.textContent === '50%');
+  const positions = () => page.evaluate(() => {
+    const box = (el) => el?.getBoundingClientRect().toJSON() ?? null;
+    const tick = (sec) => [...document.querySelectorAll('#tRuler .ttick')]
+      .find((el) => parseFloat(el.textContent) === sec)?.getBoundingClientRect().left ?? null;
+    return { bed: box(document.querySelector('#tBed')), coverage: box(document.querySelector('#tPreviewCoverage')),
+      bars: [...document.querySelectorAll('#tPreviewCoverage .ready')].map(box),
+      two: tick(2), three: tick(3), four: tick(4), head: box(document.querySelector('#tPlayhead')),
+      percent: document.querySelector('#tPreviewPercent')?.textContent };
+  });
+  let p = await positions();
+  check(p.coverage.height >= 6 && p.coverage.top >= p.bed.top && p.coverage.bottom <= p.bed.bottom
+    && Math.abs(p.coverage.left - p.bed.left) < 1 && Math.abs(p.coverage.width - p.bed.width) < 1,
+  'preview coverage sits directly under the time ruler', JSON.stringify({ bed: p.bed, coverage: p.coverage }));
+  await page.mouse.click(p.three, p.bed.bottom - 4);
+  await waitFor(() => __kinect.timeline.transport().frame === 90);
+  await page.evaluate(() => __kinect.timeline.settled());
+  await waitFor(() => __kinect.previews.state().loaded
+    && document.querySelector('#tPreviewPercent')?.textContent === '50%');
+  p = await positions();
+  const frameWidth = (p.three - p.two) / 30;
+  check(p.bars.length === 1 && Math.abs(p.bars[0].left - p.two) < 1
+    && Math.abs(p.bars[0].right - p.four - frameWidth) < 1 && Math.abs(p.head.left - p.three) < 1,
+  'preview coverage follows the zoomed ruler and playhead', JSON.stringify(p));
+  check((await read()).frame === 90, 'the preview band preserves ruler scrubbing');
+  check(p.percent === '50%', 'the ruler shows readiness for the selected playback range');
+
+  await page.evaluate(async () => {
+    const { PreviewStore } = await import('/preview-cache.js');
+    const disk = new PreviewStore();
+    for (let frame = 90; frame < 100; frame++) await disk.remove(__kinect.previews.state().signature, frame);
+    await disk.close();
+  });
+  await waitFor(() => !__kinect.previews.state().ready.includes(90)
+    && document.querySelector('#tPreviewPercent')?.textContent === '42%');
+  p = await positions();
+  const gap = p.three + (p.three - p.two) * .15;
+  check(p.bars.length === 2 && !p.bars.some((bar) => bar.left <= gap && bar.right > gap)
+    && p.percent === '42%', 'preview coverage leaves missing frames visibly unrendered', JSON.stringify(p));
+  await page.evaluate(() => {
+    const duration = __kinect.timeline.transport().duration;
+    __kinect.editor.view.set(2.5 / duration, 6.5 / duration);
+  });
+  await page.waitForTimeout(50);
+  p = await positions();
+  check(p.bars.length > 0 && Math.abs(p.bars[0].left - p.bed.left) < 1,
+    'panning clips preview coverage at the visible window edge');
+  await page.screenshot({ path: join(TMP, 'coverage.png') });
+  await page.evaluate(() => __kinect.editor.view.fit());
+  await range(2, 4);
+  await renderRange();
 }
 async function pixelsAt(frame) {
   return page.evaluate(async (frame) => {
@@ -260,11 +345,16 @@ try {
   if (duration < 9) throw new Error(`The fixture needs at least 9 seconds; ${TAKE} has ${duration}.`);
   check(await page.locator('#stage').isVisible(), 'the editor shows the real stage');
   check(!await page.locator('#tPreviewRender').isVisible(), 'the preview menu is closed at boot');
+  await page.locator('#viewMenuButton').click();
+  check(await page.locator('#viewMenu #tPreviewSettings').isVisible()
+    && await page.locator('#timeline details').count() === 0,
+  'View contains the preview settings and the timeline has no popup');
+  await page.keyboard.press('Escape');
   await range(0, 0);
   await renderRange();
   let p = await read();
   check(p.ready.includes(0), 'a range containing only frame zero renders that frame', p.status);
-  await page.locator('#tPreviewClear').click();
+  await previewCommand('#tPreviewClear');
   check(await waitFor(() => __kinect.previews.state().ready.length === 0), 'Clear previews removes the rendered range');
 
   await page.evaluate(async () => {
@@ -285,6 +375,7 @@ try {
   check(p.ready.filter((n) => n >= 60 && n <= 120).length === 61, 'Render range fills only the selected range', p.status);
   check(p.frame === before.frame && p.counters.renders === before.counters.renders,
     'background rendering leaves the editor playhead and renderer untouched', `${before.frame}->${p.frame}; renders ${before.counters.renders}->${p.counters.renders}`);
+  await checkCoverage();
   await compareCached(90, 'cached pixels equal an accurate render including effect history');
 
   await range(2, 4);
@@ -309,7 +400,7 @@ try {
     });
     await page.locator('#tPlay').click();
     await waitFor(() => __kinect.timeline.transport().previewed);
-    await page.locator('#tPreviewRender').click();
+    await previewCommand('#tPreviewRender');
     check(await waitFor(() => __kinect.previews.state().ready.includes(150), 12000),
       'Render range waits for cached playback to restore the live editor');
     await page.evaluate(() => window.__restorePreviewSeek());
@@ -401,30 +492,30 @@ try {
   check(delayed && p.memoryBytes === 0 && !p.playing, 'a delayed decode cannot enter the new camera cache', `${p.memoryBytes} decoded bytes; playing ${p.playing}`);
 
   await range(5, 8);
-  await page.locator('#tPreviewAuto').check();
+  await setAutomatic(true);
   check(await waitFor(() => __kinect.previews.state().rendered > 71 && __kinect.previews.state().rendering, 15000),
     'a settled free camera starts rendering while idle');
-  await page.locator('#tPreviewAuto').uncheck();
+  await setAutomatic(false);
   const stopped = (await read()).rendered;
   await page.waitForTimeout(500);
   p = await read();
   check(!p.rendering && p.rendered <= stopped + 1, 'turning off idle rendering interrupts the active render');
-  await page.locator('#tPreviewRender').click();
+  await previewCommand('#tPreviewRender');
   check(await waitFor(() => __kinect.previews.state().rendering, 3000), 'manual rendering works with idle rendering off');
-  await page.locator('#tPreviewAuto').check();
+  await setAutomatic(true);
   await page.waitForTimeout(100);
   check((await read()).rendering, 'enabling idle rendering preserves a manual render');
-  await page.locator('#tPreviewAuto').uncheck();
+  await setAutomatic(false);
   check((await read()).rendering, 'disabling idle rendering preserves a manual render');
   await page.mouse.move(990, 20);
   await page.waitForTimeout(100);
   check((await read()).rendering, 'moving the pointer preserves a manual render');
-  await page.locator('#tPreviewRender').click();
+  await previewCommand('#tPreviewRender');
   await page.waitForTimeout(150);
   check(!(await read()).rendering, 'Stop rendering interrupts the manual render');
-  await page.locator('#tPreviewRender').click();
+  await previewCommand('#tPreviewRender');
   await waitFor(() => __kinect.previews.state().rendering, 3000);
-  await page.locator('#tPreviewClear').click();
+  await previewCommand('#tPreviewClear');
   await page.waitForTimeout(500);
   p = await read();
   check(!p.rendering && p.ready.length === 0 && p.storageBytes === 0, 'clearing during a render prevents late frames from returning', p.status);
@@ -599,11 +690,11 @@ try {
     await page.locator('#tPlay').click();
     const unreadable = await waitFor(() => Boolean(__kinect.previews.state().warning || __kinect.previews.state().error), 3000);
     await waitFor(() => !__kinect.timeline.transport().playing);
-    await page.locator('#tPreviewAuto').check();
+    await setAutomatic(true);
     const repaired = await waitFor(() => __kinect.previews.state().ready.includes(1)
       && !__kinect.previews.state().warning && !__kinect.previews.state().error, 12000);
     check(unreadable && repaired, 'idle rendering repairs an unreadable cached frame');
-    await page.locator('#tPreviewAuto').uncheck();
+    await setAutomatic(false);
 
     await page.evaluate(async () => {
       __kinect.setViewCamera(__kinect.freeCamera);

@@ -159,14 +159,17 @@ pre-roll it had computed. `reportCappedSeek` in [`web/main.js`](../web/main.js) 
 
 ### Rendered previews
 
-**Previews** renders the in/out range into images held by this browser. **Render range** starts
+The **Previews** settings in **View** render the in/out range into images held by this browser. **Render range** starts
 at the playhead, continues to the out-point, then fills the earlier part. Press **Stop rendering**
 to interrupt a manual render. **Render while idle** is on by default and starts after 2.5 seconds
 without interaction. Playback, camera movement, editing, and hiding the tab interrupt the work.
 Changing the idle preference leaves a manual render running. Starting a manual render during
 playback first waits for the editor to stop and restore its live frame.
-The thin strip above the overview marks completed frames; **Cached** means playback is showing
-one of them. A missing frame renders live, with effect history rebuilt before playback continues.
+The band under the time ruler follows its zoom and pan. Solid teal marks completed frames,
+hatching marks unrendered frames in the playback range, and amber marks the frame being rendered.
+The percentage beside the ruler is the ready share of the playback range. **Cached** beside the
+transport means playback is showing a preview. A missing frame renders live, with effect history
+rebuilt before playback continues.
 Playback fetches source frames ahead of a known cache boundary; rebuilding the effect history
 still costs a live seek. An unreadable preview falls back to live rendering and can be rebuilt
 while idle.
