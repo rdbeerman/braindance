@@ -67,9 +67,8 @@ fixture, server or browser first (`timeline-check`, `keyframe-check`, `export-ch
 `sensor-view-check`, `editor-check`) need those in place before they reach the name.
 `tools/sweep-all.mjs` reads its inventory out of exactly that line.
 
-A mutated run prints the row it should have reddened only for the 247 entries that carry a
-`fails:` field; the other 383 print no expected row, and their catch is read off which assertions
-fired.
+A mutated run prints the expected failure row when its entry carries a `fails:` field.
+For other entries, read the catch from the assertions that fired.
 
 Four tables are too large to reproduce here — `editor-check` declares 202, `library-check` 114,
 `registry-check` 54 and `effect-check` 42. Their sections give the count and the enumerate
@@ -286,6 +285,21 @@ node tools/export-check.mjs --url http://localhost:8080
 Section 9 drives refused edits on purpose and its refusals are DOM-only, so it needs no render.
 `--before` drives the cross-build arm.
 
+The lens rows compare the center half of a 50-degree frame with a full 26.25-degree frame
+reduced by two, both rendered at 1728x1080 at program time 4s. Bloom, trails and vignette are off.
+They require a different image without the crop and modeled sprite sizes clear of the clamps.
+
+| row | look | coarse mean limit, out of 255 | luminance ratio tolerance |
+| --- | --- | --- | --- |
+| `lens-points` | depth-writing points, `pointSize` 24 | 3 | 0.01 |
+| `lens-splat` | additive points, `pointSize` 40 | 6 | 0.01 |
+| `lens-glyph` | depth-writing points, `pointSize` 64, glyph 0.25, cell 0.12 m | 6 | 0.01 |
+
+The glyph arm requires every modeled sprite above the 16-pixel legibility band. `splat-large`
+checks resolution scaling with additive points at `pointSize` 60, exposure 0.25 and a 50-degree
+camera, requiring the smallest sprite above the 10.8-reference-pixel normalization threshold.
+`docs/performance.md` carries the lens and mutation measurements.
+
 - **`edits-during-an-export-are-not-refused`** — the guard removed at its source, so every door
   lets a write through while a render is reading the document.
 - **`the-progress-bar-is-never-painted`** — the bar and the chip stop following the render they
@@ -293,6 +307,9 @@ Section 9 drives refused edits on purpose and its refusals are DOM-only, so it n
 - **`prores-writes-h264`** — the container is kept and the stream swapped.
 - **`pngseq-writes-one-file`** — the sequence stops being a directory.
 - **`pointsize-absolute`** — the dominant screen-space term goes back to framebuffer pixels.
+- **`lens-absolute`** — ordinary points stop following the lens; fails `lens-points` and `lens-splat`.
+- **`glyph-base-lens-absolute`** — the glyph branch's base stops following the lens; fails `lens-glyph`.
+- **`vsize-lensed`** — additive normalization includes lens magnification; fails `lens-splat`.
 - **`vsize-framebuffer`** — the additive normalisation reads the drawn size, so the look sums four
   times too bright at twice the resolution.
 - **`grade-absolute`** — grain and scanlines go back to framebuffer pixels.
@@ -335,7 +352,7 @@ Section 9 drives refused edits on purpose and its refusals are DOM-only, so it n
   1080, and every term follows it.
 - **`export-fail-unlinks-output`** — the failure path reaches back to an output it did not write.
 
-**Known reds.** Ten of 85 rows are red on a `make-sample` fixture and none is about the build.
+**Known reds.** The recorded `make-sample` baseline has ten fixture-dependent failures.
 
 | commit | rows | cause |
 | --- | --- | --- |
@@ -361,6 +378,7 @@ node tools/editor-check.mjs --url http://localhost:8080 --take fixture-1g --no-r
 | --- | --- |
 | server | `--url`, default `http://localhost:8080` |
 | take | `--take`, at least 32s, or it exits 2 naming the shortfall |
+| library | four openable takes: the selected take, another clip, and two uncached takes for delayed-open checks; fewer fail a fixture assertion and skip that interaction |
 | browser | a GPU browser |
 | binaries | ffmpeg for section 7's real export, which `--no-render` skips |
 

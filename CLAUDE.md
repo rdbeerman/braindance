@@ -205,8 +205,9 @@ decode.
 - **Cite a function by name, never by line.** `syntax-check` walks every `docs/` page and `web/`
   module the prose and the source cite, and fails one that does not resolve. A citation is checked
   for resolving, never for being right.
-- **`pointSize` is pixels at 1080p**, and so is every screen-space term beside it. The shaders in
-  `web/cloud-shader.js` read `bufferHeight / 1080.0`.
+- **`pointSize` is pixels at 1080p through the camera's 50-degree boot lens.** Keep that reference
+  in `lensReference` in `web/cloud-shader.js`; `export-check` holds the lens scaling. Every
+  screen-space term uses `bufferHeight / 1080.0` for output size.
 - **The glyph field's legibility band is 8 to 16 pixels of whichever reading is smaller** — the
   drawn framebuffer sprite, or that sprite back in reference pixels. The vertex stage writes
   `outsideCrop ? 0.0 : gl_PointSize / max(k, 1.0)` into `vLegiblePx`, so a point outside the crop

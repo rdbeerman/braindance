@@ -143,7 +143,10 @@ into, so the file route judges a name by what it is and refuses a symlink.
 `server/effect-door.js` runs the real assembler against the set that would exist after an install.
 A package that would not assemble, would bind a uniform no program declares, names an identifier
 this build has not got, or carries a `def` or `max` off its own step grid is refused with the
-reason and never reaches disk. A fork naming a joint a later build dropped throws out of
+reason and never reaches disk. The door also refuses declarations that collide in an assembled
+scope, including a chunk redeclaring a spine local such as `zoom` or `k`. Chunks may not carry
+preprocessor directives, because macros and conditionals can hide declarations from that check.
+A fork naming a joint a later build dropped throws out of
 `assembleShaders` while `web/main.js` is still evaluating, so no surface opens.
 `refuseIncompatiblePackages` re-runs that door over the user root at every start and renames what
 it now refuses to `<id>.<seq>.incompatible`, keeping it on disk, because a fork is authored work.
@@ -237,7 +240,7 @@ not. A project carries `aspect` as a reduced integer pair — `[16, 9]`, `[256, 
 camera was keyed against a frame, so reopening a 65:24 edit at 16:9 would be a different shot. A
 deliverable carries the resolution, because every screen-space term is expressed against 1080p and
 bloom's chain is frozen at 600 whatever the buffer is, so two sizes of one shape reopen
-identically.
+identically. Point sizes also use the camera's 50-degree boot lens as their reference.
 
 `PROJECT_VERSION` is 8 and presets share it. `aspect` and `outputFps` are additive and bump
 nothing, so an absent `aspect` means the shape of the `outputSize` beside it and an absent

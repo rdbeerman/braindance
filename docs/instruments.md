@@ -140,6 +140,8 @@ is the normal state.
   damping before comparing frames and hit-test the region a comparison covers.
 - A tool holding its own copy of a layout constant fails looking exactly like a product regression;
   ask the page for the number and read the drawing buffer back until it is the size you asked for.
+- Wait for the take to open and resize events to run before accepting that size. `export-check`
+  records the settled buffer and refuses every frame read after it moves, including cross-build pages.
 - Writing `.value` by hand stops meaning what it says the moment a control's scale changes, and it
   fails in the passing direction, so check the quantity that came out against the one that went in.
 - `camera.project()` answers in canvas coordinates and `page.mouse` takes viewport ones; they are
