@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PreviewImages, previewIdentity, previewRanges } from '../web/preview-cache.js';
+import { createHash } from 'node:crypto';
+import { PreviewImages, previewIdentity, previewRanges, sha256Hex } from '../web/preview-cache.js';
 
 const snapshot = () => ({
   version: 'renderer-a', renderer: 'gpu-a', effects: 'rain revision-a', width: 640, height: 360,
@@ -56,6 +57,22 @@ test('every input that changes the picture changes the preview identity', () => 
     change(altered);
     assert.notEqual(previewIdentity(snapshot()), previewIdentity(altered), name);
   }
+});
+
+test('the identity is a SHA-256 digest, so a storage key stays 64 characters however large the edit', () => {
+  const vectors = {
+    '': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    abc: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq: '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1',
+  };
+  for (const [input, digest] of Object.entries(vectors)) assert.equal(sha256Hex(input), digest, JSON.stringify(input));
+  // The padding boundaries and a multi-byte input, against the reference implementation.
+  for (const input of ['x'.repeat(55), 'x'.repeat(56), 'x'.repeat(64), 'ünïcödé 日本語 '.repeat(40), 'y'.repeat(5000)]) {
+    assert.equal(sha256Hex(input), createHash('sha256').update(input).digest('hex'), `${input.length} characters`);
+  }
+  const big = snapshot();
+  big.project.clips = Array.from({ length: 40 }, (_, at) => ({ ...structuredClone(big.project.clips[0]), id: `c${at}` }));
+  assert.match(previewIdentity(big), /^[0-9a-f]{64}$/);
 });
 
 test('coverage preserves holes and includes both ends of each completed run', () => {

@@ -5167,6 +5167,8 @@ class TimelineTransport {
       }
       if (this.previewed) {
         const gen = this.playGen;
+        // A frame the cache holds but has not decoded yet is a stall, like a source frame in flight.
+        if (previews.pending(next)) return false;
         this.seek(t).then(() => {
           if (this.playing && gen === this.playGen) this.nextDueMs = performance.now() + 1000 / this.outputFps;
         }).catch(showTimelineError);
@@ -5517,7 +5519,8 @@ function setupPreviews() {
     closeMenu: closeApplicationMenus,
     pause: pauseTransport,
     settle: () => timeline.idle(),
-    describe: () => (timeline && takeOpened ? {
+    report: say,
+    describe: () => (timeline && takeOpened && clips.length > 0 ? {
       project: serialiseProjectBody(), ...previewView(), renderer: previewRendererIdentity(),
     } : null),
     viewStamp: () => JSON.stringify(previewView()),

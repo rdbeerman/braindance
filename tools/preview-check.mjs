@@ -16,6 +16,31 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const TMP = mkdtempSync(join(tmpdir(), 'preview-check-'));
 
 const MUTATIONS = {
+  'late-decode-forces-live-seek': {
+    file: 'web/main.js',
+    edits: [['        if (previews.pending(next)) return false;\n', '']],
+    fails: 'a frame still decoding stalls cached playback instead of seeking live',
+  },
+  'parked-coverage-repaints': {
+    file: 'web/previews.js',
+    edits: [['    if (unchanged) return;\n', '']],
+    fails: 'a parked timeline leaves the coverage band untouched',
+  },
+  'hover-counts-as-interaction': {
+    file: 'web/previews.js',
+    edits: [['if (event.buttons !== 0) interaction();', 'interaction();']],
+    fails: 'a pointer drifting across the page does not postpone idle rendering',
+  },
+  'identity-stays-plain': {
+    file: 'web/preview-cache.js',
+    edits: [['  return sha256Hex(JSON.stringify(ordered(copy)));', '  return JSON.stringify(ordered(copy));']],
+    fails: 'the storage key is a 64-character digest of the edit',
+  },
+  'preview-error-stays-in-menu': {
+    file: 'web/previews.js',
+    edits: [['    if (reported !== error) { reported = error; report?.(status.textContent); }\n', '']],
+    fails: 'a preview failure reaches the editor status line',
+  },
   'coverage-uses-whole-clip': {
     file: 'web/previews.js',
     edits: [['    const start = viewStart * fps;\n    const span = Math.max(1, (viewEnd - viewStart) * fps);',
@@ -133,7 +158,7 @@ const MUTATIONS = {
 };
 const ADVANCED = !MUTATE || ['cache-boundary-stays-cold', 'corrupt-frame-stops-idle', 'clear-allows-stale-render',
   'preview-error-stops-loop', 'manual-render-skips-settle', 'camera-drag-rebuilds-identity', 'storage-changes-stay-local',
-  'stale-storage-error-survives'].includes(MUTATE);
+  'stale-storage-error-survives', 'late-decode-forces-live-seek', 'preview-error-stays-in-menu'].includes(MUTATE);
 
 if (MUTATE && !MUTATIONS[MUTATE]) {
   console.error(`Unknown mutation: ${MUTATE}. Choose ${Object.keys(MUTATIONS).join(', ')}`);
@@ -354,6 +379,7 @@ try {
   await renderRange();
   let p = await read();
   check(p.ready.includes(0), 'a range containing only frame zero renders that frame', p.status);
+  check(/^[0-9a-f]{64}$/.test(p.signature), 'the storage key is a 64-character digest of the edit', `${p.signature.length} characters`);
   await previewCommand('#tPreviewClear');
   check(await waitFor(() => __kinect.previews.state().ready.length === 0), 'Clear previews removes the rendered range');
 
@@ -389,6 +415,17 @@ try {
   await page.evaluate(() => __kinect.timeline.settled());
   check(!await page.locator('#previewStage').isVisible(), 'pausing removes the cached image from the visible page');
   check(p.memoryBytes <= p.memoryLimit && p.storageBytes <= p.storageLimit, 'both preview caches stay within their byte limits');
+  const parked = await page.evaluate(async () => {
+    const before = __kinect.previews.state();
+    let rebuilt = 0;
+    const observer = new MutationObserver((records) => { rebuilt += records.length; });
+    observer.observe(document.querySelector('#tPreviewCoverage'), { childList: true, attributes: true, subtree: true });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    observer.disconnect();
+    const after = __kinect.previews.state();
+    return { rebuilt, ticks: after.ticks - before.ticks, msPerTick: (after.tickMs - before.tickMs) / (after.ticks - before.ticks) };
+  });
+  check(parked.ticks > 30 && parked.rebuilt === 0, 'a parked timeline leaves the coverage band untouched', JSON.stringify(parked));
 
   if (ADVANCED) {
     await range(2, 5);
@@ -493,6 +530,14 @@ try {
 
   await range(5, 8);
   await setAutomatic(true);
+  const drifted = await read();
+  for (let step = 0; step < 35; step++) {
+    await page.mouse.move(900 + (step % 7) * 12, 40 + (step % 5) * 9);
+    await page.waitForTimeout(100);
+  }
+  p = await read();
+  check(p.rendering && p.rendered > drifted.rendered, 'a pointer drifting across the page does not postpone idle rendering',
+    `rendering ${p.rendering}; rendered ${drifted.rendered}->${p.rendered}`);
   check(await waitFor(() => __kinect.previews.state().rendered > 71 && __kinect.previews.state().rendering, 15000),
     'a settled free camera starts rendering while idle');
   await setAutomatic(false);
@@ -649,6 +694,9 @@ try {
     p = await read();
     check(p.error?.includes('Injected full disk') && p.ready.length === 0 && await page.locator('#stage').isVisible(),
       'storage quota failure preserves the live editor and reports the error', p.status);
+    const note = await page.locator('#tNote').textContent();
+    check(note.includes('Preview unavailable') && note.includes('Injected full disk'),
+      'a preview failure reaches the editor status line', note);
     await page.evaluate(() => window.__restorePreviewStore());
     await renderRange();
     check((await read()).ready.includes(0), 'manual retry recovers after storage becomes writable');
@@ -677,6 +725,31 @@ try {
     }, 10000);
     check(cold && prefetched, 'source prefetch fills live history before cached playback reaches the boundary');
     await page.evaluate(async () => { __kinect.timeline.transport().pause(); await __kinect.timeline.settled(); });
+
+    await page.evaluate(() => __kinect.previews.clear());
+    await range(0, 2);
+    await renderRange();
+    const slow = await page.evaluate(async () => {
+      const original = window.createImageBitmap.bind(window);
+      window.createImageBitmap = async (...args) => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return original(...args);
+      };
+      const t = __kinect.timeline.transport();
+      const before = { seeks: __kinect.timeline.counters.seeks, ...__kinect.previews.state() };
+      await t.play();
+      const began = performance.now();
+      while (t.playing && t.frame < 30 && performance.now() - began < 8000) await new Promise((resolve) => setTimeout(resolve, 20));
+      const during = { frame: t.frame, previewed: t.previewed, playing: t.playing, seeks: __kinect.timeline.counters.seeks, ...__kinect.previews.state() };
+      t.pause();
+      window.createImageBitmap = original;
+      await __kinect.timeline.settled();
+      return { before, during };
+    });
+    check(slow.during.frame >= 30 && slow.during.previewed && slow.during.seeks === slow.before.seeks
+      && slow.during.stalls > slow.before.stalls && slow.during.resumes === slow.before.resumes,
+    'a frame still decoding stalls cached playback instead of seeking live',
+    `frame ${slow.during.frame}; previewed ${slow.during.previewed}; seeks ${slow.before.seeks}->${slow.during.seeks}; stalls ${slow.before.stalls}->${slow.during.stalls}; resumes ${slow.before.resumes}->${slow.during.resumes}`);
 
     await page.evaluate(() => __kinect.previews.clear());
     await range(0, 1);

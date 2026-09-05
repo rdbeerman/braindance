@@ -3,11 +3,32 @@ import { PreviewImages, PreviewStore, previewIdentity, previewRanges } from './p
 const IDLE_MS = 2500;
 const RENDERER_IDLE_MS = 30000;
 const AUTO_KEY = 'braindance.preview.auto';
-const yieldTask = () => new Promise((resolve) => setTimeout(resolve, 0));
 const cancelled = () => new DOMException('Preview rendering was interrupted.', 'AbortError');
 
+// A macrotask yield that lets input run without the 4 ms clamp nested timers carry.
+const yieldTask = globalThis.scheduler?.yield
+  ? () => scheduler.yield()
+  : () => new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => { channel.port1.close(); resolve(); };
+    channel.port2.postMessage(null);
+  });
+
+/** The frames the store holds for the current edit, with their runs computed once per change. */
+class Coverage {
+  constructor() { this.frames = new Set(); this.version = 0; this.runs = null; }
+  has(frame) { return this.frames.has(frame); }
+  add(frame) { if (!this.frames.has(frame)) { this.frames.add(frame); this.touch(); } }
+  delete(frame) { if (this.frames.delete(frame)) this.touch(); }
+  clear() { if (this.frames.size) { this.frames.clear(); this.touch(); } }
+  replace(frames) { this.frames = frames; this.touch(); }
+  touch() { this.version++; this.runs = null; }
+  ranges() { return this.runs ??= previewRanges(this.frames); }
+  sorted() { return [...this.frames].sort((a, b) => a - b); }
+}
+
 /** Coordinates one disposable renderer, a disk cache, and the editor's playback canvas. */
-export function createPreviews({ describe, viewStamp, state, pause, settle, stage, closeMenu }) {
+export function createPreviews({ describe, viewStamp, state, pause, settle, stage, closeMenu, report }) {
   let store = new PreviewStore();
   const images = new PreviewImages();
   const canvas = document.createElement('canvas');
@@ -34,7 +55,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
   let stamp = null;
   let dirty = true;
   let generation = 0;
-  let available = new Set();
+  const available = new Coverage();
   let loaded = false;
   let lastActivity = performance.now();
   let manual = false;
@@ -55,7 +76,12 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
   let shownCount = 0;
   let renderedCount = 0;
   let interruptions = 0;
-  let coverageKey = '';
+  let painted = null;
+  let reported = null;
+  let tickMs = 0;
+  let ticks = 0;
+  let stalls = 0;
+  let resumes = 0;
   let storageBytes = 0;
   let storageEpoch = null;
   let storageDirty = true;
@@ -104,7 +130,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
       if (closed || mine !== generation || key !== signature) { storageDirty = true; return; }
       storageBytes = result.bytes;
       storageEpoch = result.epoch;
-      available = result.frames;
+      available.replace(result.frames);
       loaded = key !== null;
     }).catch((problem) => {
       if (!closed && mine === generation && key === signature) fail(problem);
@@ -118,6 +144,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     cancel();
     status.textContent = `Preview unavailable: ${error}`;
     status.dataset.state = 'error';
+    if (reported !== error) { reported = error; report?.(status.textContent); }
   }
 
   function hide() {
@@ -174,7 +201,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     generation++;
     snapshot = next;
     signature = key;
-    available = new Set();
+    available.clear();
     loaded = false;
     full = false;
     error = null;
@@ -186,30 +213,41 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     syncStorage();
   }
 
+  function write(node, property, value) {
+    if (node[property] !== value) node[property] = value;
+  }
+
   function paint() {
     const current = state();
     if (!current) return;
     const { from, to, fps, viewStart, viewEnd } = current;
-    const ranges = previewRanges(available);
-    const ready = ranges.reduce((n, [a, b]) => n + Math.max(0, Math.min(b, to) - Math.max(a, from) + 1), 0);
+    const rendering = task && !task.cancelled;
+    const renderingFrame = rendering ? task.frame : null;
+    const next = { version: available.version, from, to, fps, viewStart, viewEnd, renderingFrame, signature };
+    const same = (...names) => painted !== null && names.every((name) => painted[name] === next[name]);
+    const ranges = available.ranges();
+    const ready = same('version', 'from', 'to') ? painted.ready
+      : ranges.reduce((n, [a, b]) => n + Math.max(0, Math.min(b, to) - Math.max(a, from) + 1), 0);
+    next.ready = ready;
     const total = to - from + 1;
     const text = error ? `Preview unavailable: ${error}`
       : warning ? warning
       : full ? `Cache full · ${ready}/${total} frames ready`
-        : task && !task.cancelled ? `Rendering · ${ready}/${total} frames`
+        : rendering ? `Rendering · ${ready}/${total} frames`
           : ready === total ? `Ready · ${total} frame${total === 1 ? '' : 's'}`
             : `${ready}/${total} frames ready`;
-    if (status.textContent !== text) status.textContent = text;
-    status.dataset.state = error ? 'error' : full ? 'full' : task && !task.cancelled ? 'rendering' : ready === total ? 'ready' : 'partial';
-    readout.dataset.state = status.dataset.state;
-    percent.textContent = error ? '!' : loaded ? `${Math.floor(100 * ready / total)}%` : '—';
-    readout.title = `${text} · ${Math.round(storageBytes / 1024 / 1024)} MB stored`;
-    viewLabel.textContent = snapshot?.camera.kind === 'free' ? 'Free camera' : 'Camera path';
-    renderButton.textContent = manual && (manualWaiting || task && !task.cancelled) ? 'Stop rendering' : 'Render range';
-    renderButton.disabled = !loaded || !snapshot || Boolean(current.blocked);
-    const key = JSON.stringify([ranges, from, to, fps, viewStart, viewEnd, task && !task.cancelled ? task.frame : null, signature]);
-    if (coverageKey === key) return;
-    coverageKey = key;
+    write(status, 'textContent', text);
+    const kind = error ? 'error' : full ? 'full' : rendering ? 'rendering' : ready === total ? 'ready' : 'partial';
+    write(status.dataset, 'state', kind);
+    write(readout.dataset, 'state', kind);
+    write(percent, 'textContent', error ? '!' : loaded ? `${Math.floor(100 * ready / total)}%` : '—');
+    write(readout, 'title', `${text} · ${Math.round(storageBytes / 1024 / 1024)} MB stored`);
+    write(viewLabel, 'textContent', snapshot?.camera.kind === 'free' ? 'Free camera' : 'Camera path');
+    write(renderButton, 'textContent', manual && (manualWaiting || rendering) ? 'Stop rendering' : 'Render range');
+    write(renderButton, 'disabled', !loaded || !snapshot || Boolean(current.blocked));
+    const unchanged = same('version', 'from', 'to', 'fps', 'viewStart', 'viewEnd', 'renderingFrame', 'signature');
+    painted = next;
+    if (unchanged) return;
     const start = viewStart * fps;
     const span = Math.max(1, (viewEnd - viewStart) * fps);
     const bars = [];
@@ -225,9 +263,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     }
     addBar(from, to, 'pending');
     for (const [a, b] of ranges) addBar(a, b, 'ready');
-    if (task && !task.cancelled && task.frame !== null) {
-      addBar(task.frame, task.frame, 'rendering');
-    }
+    if (renderingFrame !== null) addBar(renderingFrame, renderingFrame, 'rendering');
     coverage.replaceChildren(...bars);
     coverage.setAttribute('aria-label', `Rendered previews: ${ready} of ${total} frames in the playback range`);
   }
@@ -285,7 +321,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     refresh(current?.moving || current?.busy || current?.blocked);
     if (!signature || state()?.blocked) return false;
     const held = images.get(frame);
-    if (!held) { prefetch(frame); return false; }
+    if (!held) { decode(frame); prefetch(frame + 1); return false; }
     if (canvas.width !== held.image.width || canvas.height !== held.image.height) {
       canvas.width = held.image.width;
       canvas.height = held.image.height;
@@ -379,7 +415,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
             available.delete(evicted);
             if (evicted >= run.from && evicted <= run.to) full = true;
           }
-          storageBytes = (await store.usage()).bytes;
+          storageBytes = saved.total;
           paint();
           if (full) return;
         }
@@ -402,6 +438,8 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
 
   function tick(now = performance.now()) {
     guarded(() => advance(now));
+    tickMs += performance.now() - now;
+    ticks++;
   }
 
   function guarded(action, fallback = null) {
@@ -448,7 +486,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     if (!snapshot || !loaded || task || manualWaiting || full || error || document.hidden || current.playing
         || current.moving || current.busy || current.blocked || (!manual && (!automatic || now - lastActivity < IDLE_MS))) return;
     const { from, to, frame } = current;
-    if (previewRanges(available).some(([a, b]) => a <= from && b >= to)) { manual = false; return; }
+    if (available.ranges().some(([a, b]) => a <= from && b >= to)) { manual = false; return; }
     task = { snapshot, signature, generation, epoch: storageEpoch, request: manualRequest,
       from, to, start: Math.max(from, Math.min(to, frame)), frame: null, cancelled: false };
     render(task);
@@ -506,9 +544,11 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     try { localStorage.setItem(AUTO_KEY, automatic ? 'on' : 'off'); } catch { /* Session preference. */ }
     closeMenu({ restore: true });
   });
-  for (const event of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'input']) {
+  for (const event of ['pointerdown', 'keydown', 'wheel', 'input']) {
     addEventListener(event, interaction, { capture: true, passive: true });
   }
+  // A pointer drifting across the page is not work; a press or a drag is.
+  addEventListener('pointermove', (event) => { if (event.buttons !== 0) interaction(); }, { capture: true, passive: true });
   document.addEventListener('visibilitychange', activity);
   addEventListener('pagehide', () => {
     closed = true;
@@ -535,6 +575,11 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
   return {
     tick, changed, activity, hide, renderRange, clear,
     show: (frame) => guarded(() => show(frame), false),
+    pending: (frame) => {
+      const waiting = !faulted && signature !== null && available.has(frame) && pending.has(frame);
+      if (waiting) stalls++; else resumes++;
+      return waiting;
+    },
     warm: (from) => guarded(() => warm(from)),
     prefetch: (from) => guarded(() => prefetch(from)),
     firstMissing: (from, to) => {
@@ -543,8 +588,9 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     },
     plan: (clip) => shownPlans?.[clip] ?? null,
     inspect: () => ({
-      automatic, ready: [...available].sort((a, b) => a - b), loaded, rendering: Boolean(task && !task.cancelled),
+      automatic, ready: available.sorted(), loaded, rendering: Boolean(task && !task.cancelled),
       rendered: renderedCount, shown: shownCount, interruptions, error, warning, full, faulted, renderer: Boolean(worker),
+      tickMs, ticks, stalls, resumes,
       memoryBytes: images.bytes, memoryLimit: images.limit, storageBytes, storageLimit: store.limit,
       view: snapshot?.camera.kind ?? null, width: snapshot?.width ?? null, height: snapshot?.height ?? null,
       cached: !canvas.hidden, generation, signature,

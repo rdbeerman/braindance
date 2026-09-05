@@ -326,12 +326,17 @@ receives a small depth sample for each clip, so it follows the displayed frame t
 has separate renderer and transport state but shares the browser thread and GPU. It yields
 between frames and during pre-roll; an individual GPU render or readback can still delay input.
 
-`web/preview-cache.js` holds PNGs in IndexedDB under a canonical representation of the complete
-document, source hashes, effect revisions, renderer identity, output dimensions, and camera view.
-The key is used directly so previews also work on ordinary LAN HTTP, where Web Crypto is absent.
-The renderer
+`web/preview-cache.js` holds PNGs in IndexedDB under `previewIdentity`, a SHA-256 digest of the
+canonical document, source hashes, effect revisions, renderer identity, output dimensions, and
+camera view. The digest comes from `sha256Hex` in the same module, a synchronous implementation,
+because `crypto.subtle` is absent on the plain-HTTP origins a LAN editor runs on and a
+kilobytes-long key would be copied into every stored row and both indexes. The renderer
 identity includes the reported GPU, WebGL version, and browser build. The code revision comes
-from `GET /preview/renderer`, which hashes the shipped web files and Three.js renderer files.
+from `GET /preview/renderer`, which hashes the shipped web files and Three.js renderer files;
+`renderVersion` in `server/render-version.js` keeps the last digest and re-reads contents only
+when a stat walk finds a size or mtime changed. Every write transaction asks for relaxed
+durability, because a preview is a cache the renderer can remake and the fsync a document store
+needs cost more than the render.
 Animated values are normalized to their tracks when computing identity, so evaluating the next
 frame does not change its cache. Camera and slider gestures defer full document identity work
 until the editor settles. Generation checks discard renders and image decodes that finish after
@@ -340,10 +345,19 @@ writes from renders started before a clear. BroadcastChannel notifies other edit
 changes. The editor closes decoded bitmaps on eviction and recreates its store after a preserved
 page is restored. Clear and 30 seconds without rendering release the hidden renderer.
 
-Cache misses and stopping cached playback seek through the live transport to restore its source
-and feedback state. Cached playback prefetches a known boundary's seek window without using the
-source cursor left behind by the last live frame. Preview exceptions disable previews and report
-the error while the editor's animation loop continues. Export bypasses the preview path.
+The coordinator runs once per animation frame. `Coverage` in `web/previews.js` owns the set of
+stored frames and recomputes its runs only when the set changes, and `paint` writes a DOM
+property only when its value changed, so a parked timeline costs no layout. `inspect` reports
+`tickMs` and `ticks` for that cost, and `stalls` and `resumes` for the two ways cached playback
+misses.
+
+A cache miss during playback is one of two things. A frame the store holds but the page has
+not decoded yet stalls the transport for a frame, the way a source frame still in flight does,
+and `pending` is that question. A frame the store does not hold, and stopping cached playback,
+seek through the live transport to restore its source and feedback state. Cached playback
+prefetches a known boundary's seek window without using the source cursor left behind by the
+last live frame. Preview exceptions disable previews and report the error while the editor's
+animation loop continues. Export bypasses the preview path.
 
 ## Projects, and which one is open
 

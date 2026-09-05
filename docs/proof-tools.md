@@ -252,6 +252,12 @@ drives that renderer and its idle preference explicitly.
 The coverage rows compare the visible band against ruler ticks and the playhead while zooming
 and panning. They remove stored frames to expose a gap, check the readiness percentage, and
 scrub through the band. The preview controls must belong to View, with no popup on the timeline.
+A parked timeline is watched through a `MutationObserver` on the band for one second and must
+rebuild nothing. The storage key must be a 64-character digest. A pointer moved across the
+page for 3.5 seconds must not postpone idle rendering. The decode-stall row slows
+`createImageBitmap` to 150 ms and plays a cached range: playback must hold for the decode,
+counting `stalls`, with no live seek and no `resumes`. The quota row also reads the editor's
+status line for the failure.
 
 Its controls are `--mutate cache-never-displays`, `--mutate edits-keep-old-previews`,
 `--mutate preview-skips-history`, `--mutate preview-ignores-free-camera`,
@@ -263,7 +269,10 @@ Its controls are `--mutate cache-never-displays`, `--mutate edits-keep-old-previ
 `--mutate manual-render-skips-settle`, `--mutate camera-drag-rebuilds-identity`, and
 `--mutate storage-changes-stay-local`, `--mutate stale-storage-error-survives`, and
 `--mutate clear-keeps-frame-blobs`, `--mutate coverage-uses-whole-clip`,
-`--mutate coverage-hides-gaps`, and `--mutate coverage-stays-in-overview`.
+`--mutate coverage-hides-gaps`, `--mutate coverage-stays-in-overview`,
+`--mutate late-decode-forces-live-seek`, `--mutate parked-coverage-repaints`,
+`--mutate hover-counts-as-interaction`, `--mutate identity-stays-plain`, and
+`--mutate preview-error-stays-in-menu`.
 Each intercepts the changed module in both browser contexts and must fail its declared assertion.
 A mutation exits zero only when that assertion
 fails and the browser loaded the changed module. The ordinary run exits zero only with no
