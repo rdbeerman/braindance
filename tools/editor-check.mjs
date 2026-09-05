@@ -847,11 +847,8 @@ const MUTATIONS = {
     ]],
   },
 
-  // Must redden: section 3's two lane hit-test rows, and on a take long enough to put the press
-  // inside the zone, section 22's deselect cluster with them - 15 rows on a 246s fixture, 2 on a
-  // 76s one, where 5s along the lane is already clear of the marker. Section 3's reach rows stay
-  // green either way, because a zone running the whole column still covers the ruler, so a hit
-  // test below the ruler is the only arm here that can see this.
+  // Must redden section 3's lane hit tests and, when the press lands inside the zone, section 22's
+  // deselect cluster. Only the below-ruler probes distinguish a full-height marker hit zone.
   'grab-zone-over-the-lanes': {
     file: 'web/index.html',
     edits: [
