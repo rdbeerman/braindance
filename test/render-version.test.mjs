@@ -48,12 +48,17 @@ test('the renderer version is stable across calls and changes with any shipped f
 
 test('a copy that preserves size and mtime still changes the version', async () => {
   const { web, three } = tree();
-  const before = await renderVersion(web, three);
   const path = join(web, 'main.js');
-  const { mtime, atime } = statSync(path);
+  // A whole-millisecond mtime first, so restoring it through a Date restores it exactly.
+  const kept = new Date(Math.floor(Date.now() / 1000) * 1000 - 60000);
+  utimesSync(path, kept, kept);
+  const { mtimeMs, size } = statSync(path);
+  const before = await renderVersion(web, three);
   writeFileSync(path, 'export const a = 9;\n');
-  utimesSync(path, atime, mtime);
-  assert.equal(statSync(path).mtimeMs, mtime.getTime(), 'the rewrite kept its mtime');
+  utimesSync(path, kept, kept);
+  const after = statSync(path);
+  assert.equal(after.mtimeMs, mtimeMs, 'the rewrite kept its mtime');
+  assert.equal(after.size, size, 'the rewrite kept its size');
   assert.notEqual(await renderVersion(web, three), before);
 });
 
