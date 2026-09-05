@@ -37,14 +37,11 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
   canvas.setAttribute('aria-hidden', 'true');
   stage.after(canvas);
   const context = canvas.getContext('2d', { alpha: false });
-  const readout = document.getElementById('tPreviewReadout');
   const renderButton = document.getElementById('tPreviewRender');
   const auto = document.getElementById('tPreviewAuto');
   const clearButton = document.getElementById('tPreviewClear');
   const status = document.getElementById('tPreviewStatus');
-  const playback = document.getElementById('tPreviewPlayback');
   const coverage = document.getElementById('tPreviewCoverage');
-  const percent = document.getElementById('tPreviewPercent');
   const viewLabel = document.getElementById('tPreviewView');
   let automatic = true;
   try { automatic = localStorage.getItem(AUTO_KEY) !== 'off'; } catch { /* Session preference. */ }
@@ -150,7 +147,6 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
   function hide() {
     canvas.hidden = true;
     shownPlans = null;
-    playback.hidden = true;
   }
 
   function cancel() {
@@ -240,9 +236,6 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     write(status, 'textContent', text);
     const kind = error ? 'error' : full ? 'full' : rendering ? 'rendering' : ready === total ? 'ready' : 'partial';
     write(status.dataset, 'state', kind);
-    write(readout.dataset, 'state', kind);
-    write(percent, 'textContent', error ? '!' : loaded ? `${Math.floor(100 * ready / total)}%` : '—');
-    write(readout, 'title', `${text} · ${Math.round(storageBytes / 1024 / 1024)} MB stored`);
     write(viewLabel, 'textContent', snapshot?.camera.kind === 'free' ? 'Free camera' : 'Camera path');
     write(renderButton, 'textContent', manual && (manualWaiting || rendering) ? 'Stop rendering' : 'Render range');
     write(renderButton, 'disabled', !loaded || !snapshot || Boolean(current.blocked));
@@ -332,7 +325,6 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     canvas.hidden = false;
     shownPlans = held.plans;
     shownCount++;
-    playback.hidden = false;
     prefetch(frame + 1);
     return true;
   }

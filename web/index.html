@@ -74,26 +74,17 @@
   #previewStage[hidden] { display: none; }
   .preview-renderer { position: fixed; left: -10000px; top: 0; width: 1px; height: 1px;
     border: 0; pointer-events: none; }
-  #tPreviewReadout { display: flex; align-items: center; gap: 6px; width: 100%;
-    font-size: 11px; color: var(--dim); white-space: nowrap; }
-  #tPreviewPercent { margin-left: auto; font-size: 10px; font-variant-numeric: tabular-nums; color: var(--accent); }
-  #tPreviewReadout[data-state="rendering"] #tPreviewPercent,
-  #tPreviewReadout[data-state="error"] #tPreviewPercent,
-  #tPreviewReadout[data-state="full"] #tPreviewPercent { color: var(--warn); }
-  #tPreviewPlayback[hidden] { display: none; }
   .preview-settings-heading { display: flex; justify-content: space-between; gap: 16px;
     padding: 6px 12px; color: var(--dim); font-size: 11px; }
   #tPreviewView { color: var(--faint); }
   #tPreviewStatus { display: block; padding: 4px 12px 6px; max-width: 300px;
     color: var(--faint); font-size: 10px; overflow-wrap: anywhere; }
   #tPreviewStatus[data-state="error"] { color: var(--warn); }
-  #tPreviewPlayback { color: var(--accent); font-size: 10px; }
-  #tPreviewCoverage { position: absolute; left: 0; right: 0; bottom: 1px; height: 8px; overflow: hidden;
+  #tPreviewCoverage { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; overflow: hidden;
     pointer-events: none; z-index: 3; }
-  #tPreviewCoverage i { position: absolute; height: 100%; min-width: 1px; background: var(--accent); }
-  #tPreviewCoverage i.pending { background: repeating-linear-gradient(135deg,
-    var(--line-2) 0 1px, var(--paper-2) 1px 4px); }
-  #tPreviewCoverage i.rendering { min-width: 3px; background: var(--warn); }
+  #tPreviewCoverage i { position: absolute; height: 100%; min-width: 1px; background: var(--dim); }
+  #tPreviewCoverage i.pending { height: 1px; bottom: 0; background: var(--line-2); }
+  #tPreviewCoverage i.rendering { min-width: 2px; background: var(--dim); }
 
   /* Two boxes rather than one scrolling box, and the split is what makes the way out
      of this surface reachable. The panel fills the window's height and its content is
@@ -1533,7 +1524,6 @@
         <div class="tclock"><small>playback</small><output id="tProgram">00:00.000</output></div>
         <div class="tclock derived"><small>source</small><output id="tSource">00:00.000</output></div>
       </div>
-      <span id="tPreviewPlayback" hidden>Cached</span>
       <button class="tmark" id="tMark" type="button" aria-label="Mark here">
         <svg width="10" height="12" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M1 1l8 0 0 7-4 3-4-3z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>
@@ -1613,9 +1603,7 @@
          out of the rebuild's reach by construction rather than by remembering. -->
     <div class="tlanes">
       <div class="tcol rail" id="tRail">
-        <div class="trow ruler">
-          <div id="tPreviewReadout">Previews <output id="tPreviewPercent">—</output></div>
-        </div>
+        <div class="trow ruler"></div>
         <div class="tstack" id="tRailLanes"></div>
       </div>
       <div class="tcol beds" id="tBeds">
