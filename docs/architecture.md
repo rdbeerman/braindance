@@ -148,7 +148,9 @@ a chunk that declares a name in the scope it is spliced into that the spine alre
 a chunk lands inside the spine's own function body, so a local of the spine's such as `zoom` or `k`
 is a redefinition the compiler refuses, and the door walks the assembled programs' scopes to find
 it before the page does — a build that adds a local can thereby set aside a package written before
-the local existed, rather than failing to link at boot.
+the local existed, rather than failing to link at boot. A chunk carrying a preprocessor directive
+is refused outright, because a macro can expand to a declaration that walk never sees and a
+conditional can hide one from it; no shipped chunk has ever needed one.
 A parameter whose `def` or `max` is not on the step grid its own `min` anchors is refused there
 too, and the door asks by running `snapScalar` — the arithmetic the registry snaps with — rather
 than by describing it: a default the snap would move is a number the manifest states and the

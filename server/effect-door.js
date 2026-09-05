@@ -375,6 +375,12 @@ export function doorRefusal(candidate, { beside = [], spines }) {
       return `effect ${id} declares the chunk ${JSON.stringify(file)} and its text did not arrive - `
         + 'a package assembled without one of its chunks is a program with a block missing';
     }
+    // A macro can expand to a declaration the scope walk below never sees, and a conditional can
+    // hide one from it, so the compiler would be the first thing to read what the door accepted.
+    if (/^\s*#/m.test(withoutComments(chunks[file]))) {
+      return `effect ${id}'s ${file} carries a preprocessor directive - a chunk is spliced into a program the spine `
+        + 'writes, and a directive can produce or hide a declaration this door cannot see, so none is accepted';
+    }
   }
   for (const file of Object.keys(chunks)) {
     if (!declaredFiles.has(file)) {
