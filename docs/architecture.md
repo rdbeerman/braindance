@@ -374,7 +374,8 @@ count is not. A project carries `aspect` as a reduced integer pair — `[16, 9]`
 — because the camera was keyed against a frame, so reopening a 65:24 edit at 16:9 would be a
 different shot with the same keys. A deliverable carries the resolution, because every
 screen-space term is expressed against 1080p and bloom's chain is frozen at 600 whatever the
-buffer is, so two sizes of one shape reopen identically. Both fields are additive and neither
+buffer is, so two sizes of one shape reopen identically. Point sizes also use the camera's
+50-degree boot lens as their reference. Both fields are additive and neither
 bumps `PROJECT_VERSION`, which presets share: absent `aspect` means the shape of the legacy
 `outputSize` beside it, and absent `outputFps` means 30. Deliverables have their own version
 and it is 2 — a version 1 document names a rate this build ignores, so it would parse

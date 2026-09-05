@@ -188,6 +188,22 @@ the band does.
 [`web/lens.js`](../web/lens.js) are the conversion, and it is the same arithmetic either way
 round.
 
+**A longer lens magnifies the splats with the scene.** The frame through a 50mm lens is the
+centre of the 22.7mm frame at 2.2 times the size, points included, so a surface keeps the
+brightness it was graded at instead of thinning into dots as the points spread apart. Point
+sizes use the camera's 50-degree boot lens as their reference, and the shader
+reads any other lens as magnification against it: `lensReference` in
+[`web/cloud-shader.js`](../web/cloud-shader.js) is that lens, and `export-check`'s lens rows
+hold the picture to it. The focal-length equivalents here assume a 16:9 frame.
+
+The one-pixel floor prevents a point from shrinking further, and the 64-pixel ceiling limits
+ordinary points at long lenses. Their onset depends on point size, depth and output size;
+brightness can still change when either bound applies. Bloom and the vignette keep their
+existing screen-space behavior and can still change a surface's brightness as the lens changes.
+The glyph legibility band also keeps its screen-space behavior. A point that draws dust through
+the boot lens can become a character through a longer lens. Existing shots at other lenses therefore
+change appearance. Sensor view uses the take's intrinsics and receives the same correction.
+
 **Easing a move.** Select a key and the `key options` row shapes the segments either side of
 it: `lin`, `in`, `out`, `smooth`, `glide` and `hold`, or drag the handles in the lane for
 anything in between. `in` writes the incoming side and `out` the outgoing one, so they are two

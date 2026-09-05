@@ -9,7 +9,8 @@
 
 import * as THREE from 'three';
 import { DEPTH_H, DEPTH_W, POINTS } from './format.js';
-import { scene } from './scene.js';
+import { scene, PROGRAM_FOV } from './scene.js';
+import { projectionScaleForVerticalFov } from './lens.js';
 
 // The depth pair's defaults, named once because three things have to agree about them: the two
 // uniforms in the table below, the registry entries that overwrite them at boot, and
@@ -100,6 +101,8 @@ export function createPointCloud(sourceCells, stateTexture, program) {
     // What this hardware will rasterise a point sprite at - a bound on the machine rather than a
     // value anybody chose, so not a registry parameter. The 64 is the literal it stands in for.
     pointCeiling: { value: 64 },
+    // The lens every look is graded through; the shader reads any other lens as magnification.
+    lensReference: { value: projectionScaleForVerticalFov(PROGRAM_FOV) },
     pointSize: { value: 9 },
     opacity: { value: 1 },
     exposure: { value: 1.15 },

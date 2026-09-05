@@ -360,6 +360,12 @@ therefore the point after which the stack has its rows. **A retry loop cannot re
 landing on a transient, because landing is what ends it** - so the wait belongs before the loop
 rather than inside it.
 
+`export-check` needed the same wait. With the marks response delayed by 1s, two interleaved
+old/fixed runs read 194x109 after the old helper had accepted 640x360; the fixed helper held
+640x360 for all five post-open animation frames in each run. Without the delay, both helpers
+passed, so those fast runs did not falsify the old one. The helper now waits for the take to
+open and for resize events to run before it checks the drawing buffer.
+
 ### A fixture that writes into a read-only snapshot stages nothing
 
 `editor-check` section 22's two-undo sequence needs one edit made on top of a delete, so the undo
@@ -1926,7 +1932,7 @@ predicate now, and it is the same class as the `**/main.js` glob one level up.
 **The one that syntax-check could not see, and now can.** `v.pointSize` and
 `f.mark` are slots: the spine carries the text to use when nothing claims them, and the glyph
 package's chunk carries an `else` branch that is the same statement again. So
-`export-check`'s `pointsize-absolute`, whose anchor is `gl_PointSize = clamp(pointSize * k /
+`export-check`'s `pointsize-absolute`, whose anchor is `gl_PointSize = clamp(pointSize * zoom * k /
 max(0.15, -mv.z), 1.0, 64.0);` with no leading whitespace, went on matching **exactly once** in
 `web/cloud-shader.js` after the split — against the fallback, which is text nothing compiles while
 the glyph package is installed. The anchor row is green either way, because "matches once in the

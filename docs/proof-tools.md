@@ -368,6 +368,9 @@ a80e035827ce`, where without the refusal the same state is a green run.
 **`editor-check`** takes `--no-render`, which skips section 7's real export and the saved copy.
 Every control is caught with it on; the ten clip controls were listed without it in `df30ed1`
 and that was an oversight rather than a claim about those ten.
+Its library must contain four openable takes: the selected take, another clip, and two takes
+whose indexes are not yet cached for the two delayed-open checks. The selected take needs at
+least 32 seconds. Fewer takes fail a fixture assertion and skip the corresponding interaction.
 
 **`timeline-check`** takes `--take`, and every one of its controls is driven with one.
 
@@ -376,6 +379,45 @@ so it needs `--before` pointing at a commit before step 1.
 
 **`export-check`** needs ffmpeg and ffprobe (`--ffmpeg`, `--ffprobe`; 8.1.1 at
 `/opt/homebrew/bin`) and writes into `exports/`, which is gitignored.
+
+**The lens rows compare the same surface through two lenses.** At program time 4s, they crop
+the center half of the 50-degree frame and compare it with the full 26.25-degree frame reduced
+by two. Both render at 1728x1080. The depth-writing arm uses `pointSize` 24; the additive arm
+uses 40. Bloom, trails and the vignette are off. The vignette must be off because it shades the
+frame's edges, which cover different parts of the scene after a lens change. The rows also
+require a different image when the wide frame is reduced without being cropped, and refuse a
+fixture whose modeled point sizes reach either clamp.
+
+Measured on the synthetic `sample`, one image per lens after an accurate seek on already-used
+pages, with no additional warmup discarded: coarse mean differences were 0.631 and 1.117 of
+255, with luminance ratios 1.0049 and 1.0017. The coarse limits are 3 and 6; both ratio limits
+are 0.01. Using point size 12 for the depth-writing arm had produced a 1.3% difference from
+rasterizing small discs, so the arm uses larger points. On unfixed `194ae972`, the same rows
+fail at ratios 0.6270 and 0.4019. `--mutate lens-absolute` removes lens scaling from point size
+and fails both rows; `--mutate vsize-lensed` leaves lens scaling in the size used to normalize
+alpha and fails only the additive row, at ratio 0.4883. The latter separation is why both arms
+exist. These runs retain the same ten synthetic-fixture failures described below. On the
+recorded `2026-08-12-take1`, the same method gives ratios 1.0037 and 1.0004, against 0.9149
+and 0.5459 on HEAD; both builds retain the crop-culling failure.
+
+The original resolution rows missed `--mutate vsize-framebuffer` on the synthetic fixture:
+their sprites stayed below the 10.8-reference-pixel normalization threshold. The added
+`splat-large` row uses `pointSize` 60, exposure 0.25 and a 50-degree camera; its smallest
+sprite is 12.50 reference pixels, which is a required precondition. At 4s, one accurate
+frame per output size on warm pages gives coarse differences of 0.287/255 clean and
+17.567 mutated, with brightness ratios 1.0001 and 0.6267 across 960x600 and 1920x1200.
+The mutation now adds a failure in that row to the same ten fixture failures.
+
+A wider recorded-take sweep held program time at 4s and measured a center square whose size
+followed lens magnification. It used six looks, lenses 8/16/22.7446/50/90/300mm, exact
+1920x1080 and 3840x2160 buffers, and three interleaved HEAD/fix repeats after discarding one
+warmup per build and lens, with warm page caches: 432 retained reads. All 36 default-lens
+frame pairs were byte-identical. At 1080p the additive arm at `pointSize` 40 read 32.837/255 at the
+boot lens and 32.625 at 50mm, against 12.081 on HEAD at 50mm. At 4K its 90mm reading fell
+to 23.857 from 32.826 at the boot lens as point-size clamping entered; the correction does
+not remove that bound. The unmodified Blackwall preset also retained a large brightness
+change, so the rows above claim particle coverage with bloom, trails and vignette disabled,
+not invariance of every shipped look. This used recorded Kinect footage, not a live sensor.
 
 **Section 9 drives refused edits on purpose, and the refusals are DOM-only.** It presses six
 document doors from inside the render's own progress callback, one per frame, and each one is

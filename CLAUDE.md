@@ -286,10 +286,13 @@ thing that should be touching capture bytes.
   words, it will not hold together when the next person changes it.
 - Commits: imperative subject, then a body explaining the why and carrying the measurements with
   their methods.
-- **`pointSize` is pixels at 1080p**, and every screen-space term with it. A project saved before
-  step 6 needs its point size scaled by the buffer height it was authored at, and `registry-check`
-  asserts the 1080/600 rebase factor rather than skipping the value, so a preset re-tuned by hand
-  to something near it fails.
+- **`pointSize` is pixels at 1080p through the 50-degree lens the camera boots with.** A longer
+  lens magnifies the splats along with the room, which keeps a surface's brightness with the
+  surface rather than with the point density;
+  `lensReference` in the shader is that lens and `export-check`'s lens rows hold it. A project
+  saved before step 6 needs its point size scaled by the buffer height it was authored at, and
+  `registry-check` asserts the 1080/600 rebase factor rather than skipping the value, so a preset
+  re-tuned by hand to something near it fails.
 - **There are three screen-space references and not two, and the third is the newest.** The
   glyph field's legibility band is 8 to 16 pixels of *whichever reading is smaller* — the drawn
   framebuffer sprite, or that sprite back in reference pixels — which the vertex stage writes as
