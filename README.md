@@ -7,10 +7,8 @@ depth sensor saw, then lets you fly a camera through the recording afterwards.
 yellow, the far wall cool blue, and the two slide past each other as the camera
 moves.](media/flythrough.gif)
 
-That move was never shot. The sensor never left its mount: the arc is five camera keyframes
-laid over the recording and rendered through the editor's export.
 
-**Status: complete and working, maintained as a personal project.** macOS (Apple Silicon)
+**Status: Still experimental! Maintained as a personal project.** macOS (Apple Silicon)
 and Raspberry Pi capture nodes. No release cadence, no support commitment; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
