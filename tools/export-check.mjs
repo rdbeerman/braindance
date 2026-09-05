@@ -191,7 +191,7 @@ const MUTATIONS = {
     fails: 'the glow\'s chain following the buffer, which is the only live catcher in this suite '
       + 'for the reference the chain is frozen at. Its sibling `bloom-reference-1080` is NOT '
       + 'caught by anything here and is not a regression - `test/bloom-chain.test.mjs` is '
-      + 'what holds that half, and docs/instruments.md has the measurement',
+      + 'what holds that half',
   },
   // The chain frozen against 1080 rather than the height the look was graded at, so every output
   // size gets the same halo.
