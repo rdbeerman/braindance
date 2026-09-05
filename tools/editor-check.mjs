@@ -1160,6 +1160,24 @@ const MUTATIONS = {
     ]],
   },
 
+  // Must redden section 3's lane hit tests and, when the press lands inside the zone, section 22's
+  // deselect cluster. Only the below-ruler probes distinguish a full-height marker hit zone.
+  'grab-zone-over-the-lanes': {
+    file: 'web/index.html',
+    edits: [
+      ['  .tcut { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent);\n'
+        + '    pointer-events: none; z-index: 4; }',
+      '  .tcut { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent);\n'
+        + '    pointer-events: auto; z-index: 4; }'],
+      ['  .tcut::after { content: ""; position: absolute; top: 0; height: var(--ruler-h);\n'
+        + '    pointer-events: auto; cursor: ew-resize; }',
+      '  .tcut::after { content: ""; position: absolute; top: 0; bottom: 0;\n'
+        + '    pointer-events: auto; cursor: ew-resize; }'],
+    ],
+    fails: 'the markers\' grab zone running the whole column again, so lane whitespace beside the '
+      + 'line belongs to the marker and a press aimed at a lane trims the range instead',
+  },
+
   // Must redden: the Escape row in section 1. Other focus transfers stay intact, so the failure
   // names the return path rather than making every rack action lose its caret.
   'effect-rack-strands-focus': {
@@ -4290,7 +4308,12 @@ try {
     const el = document.getElementById(elId);
     if (!el) return 0;
     const r = el.getBoundingClientRect();
-    const mid = { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    // The ruler row's mid-height rather than the marker's. The marker box still runs the whole
+    // column, so its own middle is deep in the lanes where the zone deliberately does not reach.
+    const bed = document.getElementById('tBed');
+    if (!bed) return 0;
+    const bedR = bed.getBoundingClientRect();
+    const mid = { x: r.x + r.width / 2, y: bedR.y + bedR.height / 2 };
     let n = 0;
     for (let dx = -18; dx <= 18; dx++) {
       const hit = document.elementFromPoint(mid.x + dx, mid.y);
@@ -4324,7 +4347,8 @@ try {
   } else {
     const outMid = await page.evaluate(`(() => {
       const r = document.getElementById('tOut').getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      const bedR = document.getElementById('tBed').getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: bedR.y + bedR.height / 2 };
     })()`);
     await page.mouse.move(outMid.x, outMid.y);
     await page.mouse.down();
@@ -4385,6 +4409,91 @@ try {
   const shortcutCleared = await range();
   check(shortcutCleared.out === null && shortcutCleared.in === 0,
     'Option-X restores the whole clip through the same user action', JSON.stringify(shortcutCleared));
+  // Where the zone must not reach. `elementFromPoint` rather than a box measurement, for the same
+  // reason the reach probe uses one: the zone is a pseudo-element and no box reports it. The walk
+  // steps past a key, an ease handle or a clip box, because all three sit at or above the markers
+  // and a probe under one cannot see this zone at all - what it is looking for is bare lane.
+  await page.evaluate('__kinect.editor.setClipRange(0, null)');
+  await settle();
+  const laneProbe = await page.evaluate(`(${(() => {
+    const beds = document.getElementById('tBeds');
+    const bed = document.getElementById('tBed');
+    if (!beds || !bed) return null;
+    const bedsR = beds.getBoundingClientRect();
+    const rulerR = bed.getBoundingClientRect();
+    const lanes = document.getElementById('tLanes');
+    const lanesR = lanes ? lanes.getBoundingClientRect() : null;
+    const ys = [];
+    if (lanesR && lanesR.height > 2) {
+      for (const lane of document.querySelectorAll('#tLanes .tlane')) {
+        const r = lane.getBoundingClientRect();
+        const y = r.y + r.height / 2;
+        if (y > lanesR.y + 1 && y < lanesR.bottom - 1) ys.push({ y, from: 'a keyed lane' });
+      }
+    }
+    // Then every row of the column below the ruler, so a run whose lanes are all covered still
+    // has somewhere bare to ask about rather than declining to ask.
+    for (let y = rulerR.bottom + 4; y < bedsR.bottom - 2; y += 8) ys.push({ y, from: 'below the ruler' });
+    const name = (el) => (el ? (el.id ? `#${el.id}` : `${el.tagName.toLowerCase()}.${el.getAttribute('class') || '(no class)'}`) : 'nothing');
+    const probe = (elId, inward) => {
+      const el = document.getElementById(elId);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const x = r.x + r.width / 2 + inward;
+      let last = null;
+      for (const cand of ys) {
+        const hit = document.elementFromPoint(x, cand.y);
+        const isMarker = Boolean(hit && hit.closest('.tcut'));
+        const covered = Boolean(hit && !isMarker && hit.closest('.tkey, .thandle, .tclip'));
+        last = { x, y: cand.y, from: cand.from, isMarker, covered, what: name(hit),
+          whitespace: Boolean(hit && !isMarker && !covered && hit.closest('#tBeds')) };
+        // A marker answering is the finding; bare lane is the answer this wants. Anything drawn
+        // over the zone is neither, so the walk carries on to the next row.
+        if (isMarker || last.whitespace) return last;
+      }
+      return last;
+    };
+    return { in: probe('tIn', 8), out: probe('tOut', -8) };
+  }).toString()})()`);
+  const laneReach = (side) => {
+    const at = laneProbe && laneProbe[side];
+    if (!at) return 'there is no marker to probe';
+    return `at (${Math.round(at.x)}, ${Math.round(at.y)}) ${at.from}, the press reaches ${at.what}`;
+  };
+  check(Boolean(laneProbe && laneProbe.in && !laneProbe.in.isMarker),
+    'the in marker answers no press 8px inward of its line once the ruler row has ended',
+    laneReach('in'));
+  check(Boolean(laneProbe && laneProbe.out && !laneProbe.out.isMarker),
+    'and neither does the out marker, on the side its own zone reaches',
+    laneReach('out'));
+
+  // Asked only where the press would land on bare lane. On a clip it would be a clip drag, which
+  // moves the edit and poisons every section after this one - named and skipped rather than run.
+  if (laneProbe && laneProbe.in && laneProbe.in.whitespace) {
+    const heldSelection = await page.evaluate('__kinect.editor.clipSelection()');
+    const beforeLaneDrag = await range();
+    await page.mouse.move(laneProbe.in.x, laneProbe.in.y);
+    await page.mouse.down();
+    await page.mouse.move(laneProbe.in.x + 300, laneProbe.in.y, { steps: 8 });
+    await page.mouse.up();
+    await settle();
+    const afterLaneDrag = await range();
+    check(near(afterLaneDrag.in, beforeLaneDrag.in, 1e-6) && afterLaneDrag.out === beforeLaneDrag.out,
+      'and a 300px drag from that lane point leaves the export range where it was',
+      `${JSON.stringify(beforeLaneDrag)} -> ${JSON.stringify(afterLaneDrag)}`);
+    // The press deselects, which is the gesture this change hands back to the lane. Put the
+    // selection and the range back so the sections after this one get the fixture they expect.
+    await page.evaluate(`(${((id) => {
+      __kinect.editor.setClipRange(0, null);
+      if (id) __kinect.editor.selectClipRow(id);
+    }).toString()})(${JSON.stringify(heldSelection)})`);
+    await settle();
+  } else {
+    note('a drag from that point is not asked',
+      `it reaches ${laneProbe && laneProbe.in ? laneProbe.in.what : 'nothing'} rather than bare lane, `
+      + 'and dragging a clip there would move the edit under the sections after this one');
+  }
+
   // Cleanup is not another claim. On `whole-clip-does-nothing` both user paths have already
   // reddened; leave the later transport sections their ordinary whole-clip fixture rather than
   // turning one missing action into unrelated speed and playback failures.
