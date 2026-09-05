@@ -143,7 +143,12 @@ are.
 What may be written at all is decided before any of it: the door in
 `server/effect-door.js` runs the real assembler against the set that would exist after the
 install, and a package that would not assemble, would bind a uniform no program declares or would
-name an identifier this build has not got is refused with the reason and never reaches disk.
+name an identifier this build has not got is refused with the reason and never reaches disk. So is
+a chunk that declares a name in the scope it is spliced into that the spine already declares there:
+a chunk lands inside the spine's own function body, so a local of the spine's such as `zoom` or `k`
+is a redefinition the compiler refuses, and the door walks the assembled programs' scopes to find
+it before the page does — a build that adds a local can thereby set aside a package written before
+the local existed, rather than failing to link at boot.
 A parameter whose `def` or `max` is not on the step grid its own `min` anchors is refused there
 too, and the door asks by running `snapScalar` — the arithmetic the registry snaps with — rather
 than by describing it: a default the snap would move is a number the manifest states and the

@@ -366,6 +366,13 @@ old/fixed runs read 194x109 after the old helper had accepted 640x360; the fixed
 passed, so those fast runs did not falsify the old one. The helper now waits for the take to
 open and for resize events to run before it checks the drawing buffer.
 
+The wait for the open is a predicate the pinned cross-build page cannot answer, because that
+module predates `takeOpened`, and no readiness condition guessed from an old module's internals
+is worth trusting. So the measurement carries its own size check instead: `setStage` records the
+size it settled at and `grab` throws when the drawing buffer has moved from it, on every page this
+tool opens. A stage that moves between the settle and the read is then a named crash rather than
+a rebase row comparing two buffer sizes and reporting the difference as the look.
+
 ### A fixture that writes into a read-only snapshot stages nothing
 
 `editor-check` section 22's two-undo sequence needs one edit made on top of a delete, so the undo

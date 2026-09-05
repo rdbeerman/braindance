@@ -141,6 +141,12 @@ const MUTATIONS = {
     'gl_PointSize = clamp(pointSize * zoom * k / max(0.15, -mv.z), 1.0, 64.0);',
     'gl_PointSize = clamp(pointSize * k / max(0.15, -mv.z), 1.0, 64.0);',
   ]] },
+  // The glyph branch's own base stops following the lens, so a half-mixed field thins under a
+  // longer one while the fully mixed cell term still follows it.
+  'glyph-base-lens-absolute': { file: 'effects-builtin/glyph/size.vert.glsl', edits: [[
+    'float base = clamp(pointSize * zoom * k / dist, 1.0, 64.0);',
+    'float base = clamp(pointSize * k / dist, 1.0, 64.0);',
+  ]] },
   // The additive normalisation reads the size through the lens, so a big splat sums dimmer
   // through a longer one.
   'vsize-lensed': { file: 'web/cloud-shader.js', edits: [[
@@ -560,6 +566,11 @@ const INSTALL = `(() => {
       const gl = k.renderer.getContext();
       const w = gl.drawingBufferWidth;
       const h = gl.drawingBufferHeight;
+      // A frame at any other size than the one staged is a measurement, not a finding.
+      if (this.staged && (w !== this.staged[0] || h !== this.staged[1])) {
+        throw new Error('the stage moved to ' + w + 'x' + h + ' after settling at ' + this.staged.join('x')
+          + ', so ' + label + ' would be read at the wrong size');
+      }
       const px = new Uint8Array(w * h * 4);
       gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
       this.shots.set(label, { px, w, h });
@@ -803,6 +814,7 @@ const RES_ARM = `async ({ label, look, at, resLook, camera }) => {
   // pipeline looks alone, where the rebase arms never see it.
   const REGION_BASE = {
     'noise.amount': 0, 'push.amount': 0, 'noise.region': 0, 'mask.amount': 0, 'datamosh.amount': 0,
+    'glyph.amount': 0,
   };
   const merged = { ...REGION_BASE, ...resLook, ...look };
   const dropped = Object.keys(merged).filter((n) => !known.has(n));
@@ -827,6 +839,12 @@ const RES_ARM = `async ({ label, look, at, resLook, camera }) => {
     kScale,
     refHeight: k.uniforms.bufferHeight ? k.uniforms.bufferHeight.value : null,
     pointSize: k.uniforms.pointSize.value,
+    // The lens as the shader reads it and the cell the glyph field tiles, for modelling the
+    // glyph branch's sprite the way drawnPointSizes models the plain one.
+    zoom: k.uniforms.lensReference
+      ? k.programCamera.projectionMatrix.elements[5] / k.uniforms.lensReference.value : 1,
+    lensReference: k.uniforms.lensReference ? k.uniforms.lensReference.value : null,
+    latticeCell: k.uniforms.latticeCell ? k.uniforms.latticeCell.value : null,
     sizes: ex.drawnPointSizes(kScale),
     tiles: ex.tiles(label, 8, 5),
     pointRange: Array.from(gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)),
@@ -997,7 +1015,10 @@ async function setStage(page, size) {
       const gl = globalThis.__kinect.renderer.getContext();
       return [gl.drawingBufferWidth, gl.drawingBufferHeight];
     })()`);
-    if (held[0] === size.width && held[1] === size.height) return;
+    if (held[0] === size.width && held[1] === size.height) {
+      await page.evaluate(`globalThis.__ex.staged = ${JSON.stringify(held)}`);
+      return;
+    }
     if (attempt === STAGE_ATTEMPTS) {
       throw new Error(`the stage settled at ${held.join('x')} rather than ${size.width}x${size.height}`);
     }
@@ -1422,13 +1443,29 @@ const LENS_ZOOM = 2;
 const PROGRAM_FOV = await main.page.evaluate("globalThis.__kinect.params.spec('camera').default.fov");
 const LENS_LONG_FOV = (2 * Math.atan(Math.tan((PROGRAM_FOV * Math.PI) / 360) / LENS_ZOOM) * 180) / Math.PI;
 // The vignette is frame-space; leaving it on would compare different shading on the same surface.
+// The glyph arm is a quarter mixed, so the branch's own base term carries three quarters of
+// every sprite: a half mix caught the base mutation at 1.7x the tolerance, this at 2.4x. The
+// point size and cell put the farthest sprite above the 16-pixel legibility band on this
+// fixture, where at 40 and 0.05 m it was 10.2 px and the row read the crossfade.
+const LENS_GLYPH = 0.25;
 const LENS_PIPELINES = [
   ['lens-points', { look: { ...OFF, 'vignette.amount': 0, additive: false, pointSize: 24 } }],
   ['lens-splat', { look: { ...OFF, 'vignette.amount': 0, additive: true, pointSize: 40 } }],
+  ['lens-glyph', {
+    look: { ...OFF, 'vignette.amount': 0, additive: false, pointSize: 64, cell: 0.12, 'glyph.amount': LENS_GLYPH },
+  }],
 ];
 const LENS_TOLERANCE = {
   'lens-points': { mean: 3.0, ratio: 0.01 },
   'lens-splat': { mean: 6.0, ratio: 0.01 },
+  'lens-glyph': { mean: 6.0, ratio: 0.01 },
+};
+// The glyph branch's sprite at a view distance, as size.vert.glsl writes it: the plain sprite
+// mixed with the cell, both through the lens.
+const glyphSpriteAt = (arm, d) => {
+  const base = Math.min(64, Math.max(1, (arm.pointSize * arm.kScale * arm.zoom) / Math.max(0.15, d)));
+  const cell = (arm.latticeCell * arm.lensReference * 540 * arm.kScale * arm.zoom) / Math.max(0.15, d);
+  return { base, mixed: base * (1 - LENS_GLYPH) + cell * LENS_GLYPH };
 };
 
 {
@@ -1478,6 +1515,20 @@ const LENS_TOLERANCE = {
       : `lens-splat: ${one.wide.sizes.smallest.toFixed(2)}..${one.wide.sizes.largest.toFixed(1)}px at `
         + `${fixed(PROGRAM_FOV, 2)} degrees, ${one.long.sizes.smallest.toFixed(2)}..`
         + `${one.long.sizes.largest.toFixed(1)}px at ${fixed(LENS_LONG_FOV, 2)}`);
+  // The glyph sprite has to sit above the 16-pixel legibility band through both lenses and
+  // under the base clamp and the hardware ceiling through the long one, or a point would
+  // change from character to dust between the two frames for a reason that is not the lens.
+  {
+    const g = measured.get('lens-glyph');
+    const wideFar = glyphSpriteAt(g.wide, g.wide.sizes.farthest);
+    const longNear = glyphSpriteAt(g.long, g.long.sizes.nearest);
+    const ceiling = Math.min(255 * g.long.kScale, g.long.pointRange[1]);
+    check(wideFar.mixed >= 16 && longNear.base < 64 && longNear.mixed < ceiling,
+      'the glyph sprite is legible through both lenses and clamped through neither, so the glyph row is about the lens',
+      `mixed ${wideFar.mixed.toFixed(1)}px at the farthest point through ${fixed(PROGRAM_FOV, 2)} degrees, `
+      + `base ${longNear.base.toFixed(1)}px and mixed ${longNear.mixed.toFixed(1)}px at the nearest through `
+      + `${fixed(LENS_LONG_FOV, 2)}, against 16, 64 and ${ceiling}`);
+  }
 
   for (const [name, m] of measured) {
     const tol = LENS_TOLERANCE[name];

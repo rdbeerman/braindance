@@ -400,6 +400,19 @@ exist. These runs retain the same ten synthetic-fixture failures described below
 recorded `2026-08-12-take1`, the same method gives ratios 1.0037 and 1.0004, against 0.9149
 and 0.5459 on `194ae972`; both builds retain the crop-culling failure.
 
+A third arm, `lens-glyph`, holds the glyph branch's own base term, which neither of the two
+above reaches: they leave glyph off, and `lens-absolute` edits only the `else` branch. It
+draws depth-writing points at `pointSize` 64 with the glyph master at 0.25 and a 0.12 m cell,
+and a row ahead of it models the mixed sprite as `size.vert.glsl` writes it and requires the
+farthest point above the 16-pixel legibility band through the wide lens and the nearest under
+the base clamp and the hardware ceiling through the long one. At 40 and 0.05 m the far sprite
+was 10.2 px, and the row read the legibility crossfade flipping between lenses at ratio
+0.9579. Measured on `sample` as above: coarse mean 0.325, ratio 1.0022. `--mutate
+glyph-base-lens-absolute` removes lens scaling from the base term alone and fails only this
+row, at ratio 0.9758 against 0.01, while `lens-absolute` leaves it green and reddens the other
+two. The catch is 2.4x the tolerance and no wider, because overlapping sprites on a dense field
+hide most of a size change; at a 0.5 mix it was 1.7x.
+
 The original resolution rows missed `--mutate vsize-framebuffer` on the synthetic fixture:
 their sprites stayed below the 10.8-reference-pixel normalization threshold. The added
 `splat-large` row uses `pointSize` 60, exposure 0.25 and a 50-degree camera; its smallest
