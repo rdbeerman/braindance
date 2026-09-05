@@ -805,8 +805,7 @@ const MUTATIONS = {
       + 'pre-roll holds either way. The generation guard protects a resume queued by '
       + '*another* gesture, and in each of those the transport is already paused, so the '
       + 'button is a play rather than a pause. The fix is consistency with the helper this '
-      + 'file\'s own comment mandates, not a demonstrated defect - docs/instruments.md has '
-      + 'the measurement',
+      + 'file\'s own comment mandates, not a demonstrated defect',
   },
 
   // Must redden the pending-play outcome row and leave the pending-window row above it green,
@@ -10156,8 +10155,7 @@ try {
     await settle();
 
     // The damping residual is paid off before every reading, because an orbit still travelling
-    // reads here as flight - `docs/instruments.md`, "A settled flag that could not see the end
-    // of what it was settling".
+    // reads here as flight.
     const rest = () => page.evaluate(`(() => {
       const k = __kinect;
       const damped = k.controls.enableDamping;

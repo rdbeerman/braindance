@@ -4375,7 +4375,7 @@ function streamMirrorPose() {
 // one-clip edit caches exactly what it always did.
 const CACHE_FRAMES = 192;
 // What one decoded frame costs resident: a depth block at two bytes a cell, plus the same grid
-// as an RGBA bitmap. Measured at 1.26 MiB against 1.24 by construction - docs/performance.md.
+// as an RGBA bitmap. Measured at 1.23 MiB against 1.24 by construction - docs/performance.md.
 const FRAME_BYTES = POINTS * 2 + POINTS * 4;
 // What a take's decoded frames may cost. Generous on purpose: it covers the eight clips
 // `CLIP_CEILING` allows, each pre-rolling two and a half seconds of persistence at 30fps.
