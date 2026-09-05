@@ -23,6 +23,10 @@ held*, the second asserts resident memory against a ceiling and a growth bound. 
 broken implementation would have to do to still pass, and close that. **Every proof tool needs a
 falsification control**: something that must FAIL if the thing under test were not doing the work.
 
+The preview check once read `canvas.hidden` and compared the image bytes while an inline
+`display: block` kept the old canvas visible over the live renderer. Check actual page visibility
+after pause and resize; `hidden-preview-stays-visible` restores the style copy that caused it.
+
 ### A rule with two terms, driven only through the term the code already handled
 
 The panel's store rule is a comparison: an override is kept where it disagrees with what the

@@ -41,6 +41,7 @@ node tools/index-check.mjs --stage                        # ... the same run aga
                                                           #   the conditions their failure happened in
 node tools/registry-check.mjs --url http://localhost:8080 # step 3: one registry, sliders as views
 node tools/timeline-check.mjs --url http://localhost:8080 --take fixture-1g # step 4: seek equals playback
+node tools/preview-check.mjs --url http://localhost:8080 --take fixture-1g # rendered previews and live fallback
 node tools/keyframe-check.mjs --url http://localhost:8080 --take fixture-1g # step 5: tracks, undo
 node tools/export-check.mjs --url http://localhost:8080   # step 6: resolution, export, the file
 node tools/library-check.mjs                              # step 7: library, recorder, routes
@@ -368,8 +369,51 @@ a80e035827ce`, where without the refusal the same state is a green run.
 **`editor-check`** takes `--no-render`, which skips section 7's real export and the saved copy.
 Every control is caught with it on; the ten clip controls were listed without it in `df30ed1`
 and that was an oversight rather than a claim about those ten.
+The library must contain four openable takes: the current take, the ordinary Add Clip choice,
+and separate uncached takes for the export race and moving-playhead race.
 
 **`timeline-check`** takes `--take`, and every one of its controls is driven with one.
+Its current startup guard asks for twelve seconds, but the multi-clip cases read through source
+second 44. Use the long fixture for the complete run.
+
+**`preview-check`** needs `--url`, a GPU browser, and a take with at least nine seconds of
+footage. It uses an isolated browser profile and leaves its screenshot and assertion report in
+a temporary directory printed at exit. It drives the preview menu and Play button, compares
+every RGB byte against an accurate live render, checks the preview's visible position and its
+removal on pause and resize, then checks cache boundaries, invalidation, animated keys,
+free-camera views, reload persistence, overlapping clips, and storage failures. The top-down
+inset must match the live pixels for either selected clip. Other rows drive cross-tab eviction
+and clear, corrupt-frame repair, error containment, source prefetch before a cache boundary,
+and preserved-page lifecycle events. The ordinary run also waits for the renderer's idle release.
+The pixel comparisons use a 1000 by 700 browser viewport at device scale 1; their source is
+whichever take `--take` names. The overlap/feedback row uses the timeline tool's 2/255
+tolerance and repeats the sequential-versus-seek comparison on the live renderer beside it;
+the other cached-image rows require exact equality. These establish correctness, not a sensor
+performance claim.
+
+Add `--http-origin` to run the editor at `http://preview.local` through a browser-only resolver
+mapping to the host at `--url`. This is a real non-secure browser origin using the same server;
+the tool asserts that Web Crypto is absent. It does not open a LAN listener or test a physical
+network link.
+
+The timeline, editor, export, and boot tools turn idle rendering off in their isolated browser
+profiles. Their foreground checks must not compete with a second renderer; `preview-check`
+drives that renderer and its idle preference explicitly.
+
+Its controls are `--mutate cache-never-displays`, `--mutate edits-keep-old-previews`,
+`--mutate preview-skips-history`, `--mutate preview-ignores-free-camera`,
+`--mutate first-frame-is-skipped`, `--mutate late-decode-survives-camera-change`,
+`--mutate live-resume-skips-history`, `--mutate hidden-preview-stays-visible`,
+`--mutate preview-is-misplaced`, `--mutate preview-plan-is-empty`,
+`--mutate cache-boundary-stays-cold`, `--mutate corrupt-frame-stops-idle`,
+`--mutate clear-allows-stale-render`, `--mutate preview-error-stops-loop`,
+`--mutate manual-render-skips-settle`, `--mutate camera-drag-rebuilds-identity`, and
+`--mutate storage-changes-stay-local`, `--mutate stale-storage-error-survives`, and
+`--mutate clear-keeps-frame-blobs`.
+Each intercepts the changed module in both browser contexts and must fail its declared assertion.
+A mutation exits zero only when that assertion
+fails and the browser loaded the changed module. The ordinary run exits zero only with no
+failed assertions. Run one GPU proof at a time and keep served code unchanged during it.
 
 **`determinism-check --clock`** refuses a rev whose `main.js` already contains the transport,
 so it needs `--before` pointing at a commit before step 1.

@@ -100,6 +100,35 @@ at its end: reaching the out-point seeks back to the in-point and playback carri
 whenever the editor opens, because the transport is built fresh each time and a loop you set on
 one take is not a fact about the next one.
 
+**Previews** renders the in/out range into images held by this browser. **Render range** starts
+at the playhead, continues to the out-point, then fills the earlier part. Press **Stop rendering**
+to interrupt a manual render. **Render while idle** is on by default and starts after 2.5 seconds
+without interaction. Playback, camera movement, editing, and hiding the tab interrupt the work.
+Changing the idle preference leaves a manual render running. Starting a manual render during
+playback first waits for the editor to stop and restore its live frame.
+The thin strip above the overview marks completed frames; **Cached** means playback is showing
+one of them. A missing frame renders live, with effect history rebuilt before playback continues.
+Playback fetches source frames ahead of a known cache boundary; rebuilding the effect history
+still costs a live seek. An unreadable preview falls back to live rendering and can be rebuilt
+while idle.
+
+The program view caches the authored camera path. The free view caches its current position,
+orientation, and lens once the camera stops moving. Moving again returns to live rendering;
+the first press during cached playback keeps the existing orbit pivot until live depth is
+restored. Edits, effect revisions, renderer changes, and viewport resolution select a different
+cache. Returning to an unchanged edit can reuse its images, including after a reload. Invalidation
+currently covers the whole edit, even when a change affects only one clip.
+
+**Clear previews** removes this browser's previews for every project and releases the background
+renderer. The renderer also releases its resources after 30 seconds without work. Other editor
+tabs update their coverage when frames are cleared or evicted. Encoded images, depth samples,
+and estimated metadata share a 2 GiB budget; decoded images have a 96 MiB limit per editor.
+The browser's physical storage overhead is additional. Older frames are evicted first.
+A range that fills the cache stops rendering and reports its partial coverage. Browser storage
+may impose a smaller limit or be unavailable; the menu reports the error and playback remains
+live. Previews are disposable: they are absent from project files, and export always renders
+through the full renderer.
+
 **Clips are the rows at the head of the lane stack**, one box each from where a clip starts to
 where it ends, above the curves that animate them. The full-width `+` below the last clip opens
 the media library's takes even when no row is selected. The first one you choose lands at the

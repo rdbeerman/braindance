@@ -195,6 +195,12 @@ Blackwall under the playhead. `depth ÷`, `every Nth` and `render %` are the exc
 they change what you are looking at rather than what the frame is, so they are neither
 saved with the clip nor exported.
 
+**Previews**, below the timeline, renders the in/out range for cached playback. It follows
+the authored camera path, or the current free-camera view when you leave that camera still.
+**Render while idle** starts after you stop interacting; **Render range** starts immediately.
+The thin strip marks ready frames and **Cached** appears during playback. Changing the edit
+or viewpoint returns to live rendering until matching previews are ready.
+
 ### 5. Get a video out
 
 Set **in** and **out** on the timeline bar, then open **Output → Export** (`⌘E`), choose

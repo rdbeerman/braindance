@@ -70,6 +70,29 @@
      boundary is invisible - which makes it a guide nobody can use. An outline rather
      than a border because it must not enter the layout the letterbox just computed. */
   #stage { outline: 1px solid rgba(120, 220, 210, 0.28); }
+  #previewStage { position: fixed; pointer-events: none; z-index: 1; }
+  #previewStage[hidden] { display: none; }
+  .preview-renderer { position: fixed; left: -10000px; top: 0; width: 1px; height: 1px;
+    border: 0; pointer-events: none; }
+  .preview-menu { position: relative; align-self: center; padding: 0 10px; font-size: 11px; }
+  .preview-menu summary { cursor: pointer; color: var(--faint); white-space: nowrap; }
+  .preview-menu summary::marker { font-size: 9px; }
+  .preview-menu:not([open]) [data-preview-popover] { display: none; }
+  #tPreviewPlayback[hidden] { display: none; }
+  .preview-menu [data-preview-popover] { position: absolute; bottom: 25px; left: 4px; width: 244px;
+    padding: 10px; border: 1px solid var(--line-2); background: var(--paper-2);
+    display: grid; gap: 8px; z-index: 30; }
+  .preview-menu [data-preview-popover] button { text-align: left; font: inherit; padding: 6px 8px;
+    color: var(--ink); background: var(--accent-low); border: 1px solid var(--line); cursor: pointer; }
+  .preview-menu button:disabled { opacity: .45; cursor: default; }
+  .preview-menu label { display: flex; align-items: center; gap: 6px; }
+  #tPreviewStatus { color: var(--faint); font-size: 10px; overflow-wrap: anywhere; }
+  #tPreviewStatus[data-state="error"] { color: var(--warn); }
+  #tPreviewPlayback { color: var(--accent); font-size: 9px; margin-left: 3px; }
+  #tPreviewCoverage { position: absolute; inset: 0 0 auto; height: 3px; overflow: hidden;
+    pointer-events: none; z-index: 3; }
+  #tPreviewCoverage i { position: absolute; height: 3px; min-width: 1px; background: var(--accent); }
+  #tPreviewCoverage i.rendering { background: var(--warn); }
 
   /* Two boxes rather than one scrolling box, and the split is what makes the way out
      of this surface reachable. The panel fills the window's height and its content is
@@ -1604,8 +1627,18 @@
          and the playhead. It carries the same 96px rail offset as the lanes so its
          coordinates line up with theirs by construction rather than by arithmetic. -->
     <div class="tmini">
-      <span>timeline</span>
+      <details class="preview-menu" id="tPreviewMenu">
+        <summary id="tPreviewOpen">Previews <span id="tPreviewPlayback" hidden>cached</span></summary>
+        <div data-preview-popover>
+          <span id="tPreviewView">Camera path</span>
+          <button type="button" id="tPreviewRender">Render range</button>
+          <label><input type="checkbox" id="tPreviewAuto" checked>Render while idle</label>
+          <button type="button" id="tPreviewClear">Clear previews</button>
+          <output id="tPreviewStatus" aria-live="polite">Loading previews</output>
+        </div>
+      </details>
       <div class="tminibed" id="tMini">
+        <div id="tPreviewCoverage" role="img" aria-label="No rendered previews"></div>
         <div class="tminirange" id="tMiniRange"></div>
         <div class="tminimarks" id="tMiniMarks"></div>
         <div class="tminihead" id="tMiniHead"></div>

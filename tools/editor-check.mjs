@@ -2597,6 +2597,10 @@ function inGroup(row, ...groups) {
 }
 
 const DRIVER_IDS = {
+  tPreviewOpen: 'preview-check opens the preview controls and checks they are closed at boot',
+  tPreviewRender: 'preview-check renders a range and reads the cached pixels during playback',
+  tPreviewAuto: 'preview-check starts idle rendering and interrupts it through this checkbox',
+  tPreviewClear: 'preview-check clears during a render and refuses late results',
   tAddClip: 'section 22 - opens the picker, chooses a take, and reads the clip that landed',
   tDeleteClip: 'section 22 - deletes the selected clip and undoes it',
   tMoveClip: 'section 22b - arms the move handles, drags them and reads where the clip went',
@@ -2733,6 +2737,7 @@ async function openEditor() {
   });
   const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1, acceptDownloads: true });
   await context.addInitScript(PICKER_STUB);
+  await context.addInitScript(() => localStorage.setItem('braindance.preview.auto', 'off'));
   await armDocumentWrites(context);
   const page = await context.newPage();
   const errors = [];
