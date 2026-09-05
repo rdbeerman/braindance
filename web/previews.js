@@ -205,6 +205,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     loaded = false;
     full = false;
     error = null;
+    reported = null;
     warning = null;
     images.clear();
     hide();
@@ -321,7 +322,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     refresh(current?.moving || current?.busy || current?.blocked);
     if (!signature || state()?.blocked) return false;
     const held = images.get(frame);
-    if (!held) { decode(frame); prefetch(frame + 1); return false; }
+    if (!held) { prefetch(frame); return false; }
     if (canvas.width !== held.image.width || canvas.height !== held.image.height) {
       canvas.width = held.image.width;
       canvas.height = held.image.height;
@@ -498,6 +499,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     refresh();
     faulted = false;
     error = null;
+    reported = null;
     full = false;
     manual = true;
     manualWaiting = true;
@@ -516,6 +518,7 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
     available.clear();
     full = false;
     error = null;
+    reported = null;
     warning = null;
     faulted = false;
     releaseWorker = true;
@@ -575,11 +578,12 @@ export function createPreviews({ describe, viewStamp, state, pause, settle, stag
   return {
     tick, changed, activity, hide, renderRange, clear,
     show: (frame) => guarded(() => show(frame), false),
-    pending: (frame) => {
-      const waiting = !faulted && signature !== null && available.has(frame) && pending.has(frame);
-      if (waiting) stalls++; else resumes++;
+    // The frame playback needs now: queued past the prefetch limit, one at a time, and waited for.
+    pending: (frame) => guarded(() => {
+      const waiting = signature !== null && available.has(frame) && !images.get(frame);
+      if (waiting) { decode(frame); stalls++; } else resumes++;
       return waiting;
-    },
+    }, false),
     warm: (from) => guarded(() => warm(from)),
     prefetch: (from) => guarded(() => prefetch(from)),
     firstMissing: (from, to) => {

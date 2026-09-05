@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync } from 'node:fs';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { renderVersion } from '../server/render-version.js';
@@ -45,6 +46,17 @@ test('the renderer version is stable across calls and changes with any shipped f
   assert.notEqual(fourth, third, 'the three version');
 });
 
+test('a copy that preserves size and mtime still changes the version', async () => {
+  const { web, three } = tree();
+  const before = await renderVersion(web, three);
+  const path = join(web, 'main.js');
+  const { mtime, atime } = statSync(path);
+  writeFileSync(path, 'export const a = 9;\n');
+  utimesSync(path, atime, mtime);
+  assert.equal(statSync(path).mtimeMs, mtime.getTime(), 'the rewrite kept its mtime');
+  assert.notEqual(await renderVersion(web, three), before);
+});
+
 test('a file outside the shipped extensions does not enter the version', async () => {
   const { web, three } = tree();
   const before = await renderVersion(web, three);
@@ -55,13 +67,20 @@ test('a file outside the shipped extensions does not enter the version', async (
 test('an unchanged tree answers from the memo without reading a file', async () => {
   const { web, three } = tree();
   const digest = await renderVersion(web, three);
-  // Unreadable but statable: a call that reads contents throws, a call that trusts the memo does not.
-  chmodSync(join(web, 'main.js'), 0o000);
+  // Count the module's own readFile calls: the builtin's ESM bindings resync from the CJS object.
+  const promises = createRequire(import.meta.url)('node:fs/promises');
+  const original = promises.readFile;
+  let reads = 0;
+  promises.readFile = (...args) => { reads++; return original(...args); };
+  syncBuiltinESMExports();
   try {
     assert.equal(await renderVersion(web, three), digest);
+    assert.equal(reads, 0, 'an unchanged tree reads no contents');
     rewrite(join(web, 'index.html'), '<html><body></body></html>\n');
-    await assert.rejects(renderVersion(web, three), /EACCES|EPERM/, 'a changed tree reads every file again');
+    assert.notEqual(await renderVersion(web, three), digest);
+    assert.equal(reads, 6, 'a changed tree reads all six shipped files again');
   } finally {
-    chmodSync(join(web, 'main.js'), 0o644);
+    promises.readFile = original;
+    syncBuiltinESMExports();
   }
 });

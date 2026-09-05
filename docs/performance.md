@@ -93,7 +93,7 @@ repainting; "new" is this tree.
 | Render range, 91 frames at 2 to 5 s, wall time | 9,795 ms | 1,986 ms | `previews.render()` after Clear, polled at 20 ms until 91 frames are ready; no warmup discarded, the hidden renderer boots inside the first arm's number |
 | the coordinator's tick, playhead parked, 2,969 frames cached | 0.137 ms | 0.041 ms | `tickMs / ticks` over a 5 s window of ~600 ticks, frames planted straight into the `entries` and `frames` stores |
 | `status()` of one edit, 2,000 stored frames | 196 to 551 ms | 56 to 76 ms | the key at 3,683 characters against 64, three rounds each, 4 KiB blobs; `put` and `read` unchanged at 42 to 57 ms under default durability |
-| `GET /preview/renderer` | 220 to 730 ms | 7 ms warm, 143 ms cold | six `curl` calls in a row against the running server, the first after restart |
+| `GET /preview/renderer` | 220 to 730 ms | 7 ms warm, 143 ms cold | six `curl` calls in a row against the running server, the first after restart; the memo key is every shipped file's path, size, mtime and ctime |
 
 The render time is mostly the fsync: a default-durability IndexedDB write costs 40 to 50 ms on
 this disk, and the old path paid it once for the frame and once more reading the total back. The

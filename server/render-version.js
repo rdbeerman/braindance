@@ -4,8 +4,9 @@ import { join } from 'node:path';
 
 const SHIPPED = /\.(js|html|json)$/;
 
-// The last digest per root pair, keyed by every hashed file's path, size and mtime: a request
-// pays a stat walk, and only a file that changed on disk pays the read.
+// The last digest per root pair, keyed by every hashed file's path, size, mtime and ctime: a
+// request pays a stat walk, and only a file that changed on disk pays the read. ctime is in the
+// key because a copy that preserves mtime cannot preserve it.
 const known = new Map();
 
 async function shippedFiles(web, three) {
@@ -29,7 +30,7 @@ async function shippedFiles(web, three) {
 export async function renderVersion(web, three) {
   const files = await shippedFiles(web, three);
   const stats = await Promise.all(files.map(([, path]) => stat(path)));
-  const fingerprint = files.map(([file], at) => `${file}\0${stats[at].size}\0${stats[at].mtimeMs}`).join('\n');
+  const fingerprint = files.map(([file], at) => `${file}\0${stats[at].size}\0${stats[at].mtimeMs}\0${stats[at].ctimeMs}`).join('\n');
   const slot = `${web}\0${three}`;
   const cached = known.get(slot);
   if (cached?.fingerprint === fingerprint) return cached.digest;

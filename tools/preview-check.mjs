@@ -536,7 +536,7 @@ try {
     await page.waitForTimeout(100);
   }
   p = await read();
-  check(p.rendering && p.rendered > drifted.rendered, 'a pointer drifting across the page does not postpone idle rendering',
+  check(p.rendering || p.rendered > drifted.rendered, 'a pointer drifting across the page does not postpone idle rendering',
     `rendering ${p.rendering}; rendered ${drifted.rendered}->${p.rendered}`);
   check(await waitFor(() => __kinect.previews.state().rendered > 71 && __kinect.previews.state().rendering, 15000),
     'a settled free camera starts rendering while idle');

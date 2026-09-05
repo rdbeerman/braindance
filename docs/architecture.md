@@ -352,8 +352,9 @@ property only when its value changed, so a parked timeline costs no layout. `ins
 misses.
 
 A cache miss during playback is one of two things. A frame the store holds but the page has
-not decoded yet stalls the transport for a frame, the way a source frame still in flight does,
-and `pending` is that question. A frame the store does not hold, and stopping cached playback,
+not decoded yet stalls the transport for a frame, the way a source frame still in flight does;
+`pending` is that question, and asking it queues that one frame's decode past the prefetch
+limit. A frame the store does not hold, and stopping cached playback,
 seek through the live transport to restore its source and feedback state. Cached playback
 prefetches a known boundary's seek window without using the source cursor left behind by the
 last live frame. Preview exceptions disable previews and report the error while the editor's
