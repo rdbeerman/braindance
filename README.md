@@ -54,12 +54,12 @@ Pick **Record**, then press **record** to arm. The recorder waits for the sensor
 a take, so every capture carries the sensor's calibration. The panel counts frames and
 shows how much recording time the disk has left.
 
-![The record surface in Blackwall: a room drawn as a crimson point cloud filling the
-frame, with an application bar across the top reading Record, File, Output and View, and
-a panel down the left whose four tabs are Record, Framing, Look and Region. The Record
-tab is open, showing the record and mark buttons, "not recording", colour camera and low
-light toggles, monitor decimation and the OBS output settings. The bar's right-hand end
-reads the sensor serial, its firmware and "29 fps in".](media/viewer.png)
+![The record surface in Blackwall: a room drawn as a crimson point cloud, with an
+application bar across the top reading Record, File, Output and View, a top-down inset in
+the corner, and a panel down the left whose four tabs are Record, Framing, Effects and
+Region. The Record tab is open, showing the record and mark buttons, "not recording", the
+recording time left, colour camera and low light toggles, the monitor's depth and every Nth
+sliders, and the OBS output settings with both source URLs.](media/viewer.png)
 
 - **mark** drops a mark at the current frame. Marks show up on the media library's scrub bar
   and the editor's ruler.
@@ -78,11 +78,10 @@ and **import** move presets between machines as JSON. Every slider underneath st
 adjustable, and a changed row grows a **↺** that resets just that one.
 [Presets](docs/reference.md#presets) lists the twelve.
 
-![The same surface with the Effects tab open. A Preset picker is expanded over the panel,
-listing none, blackwall, contour, depth, ghost and rgb with blackwall highlighted, and a
-plus button for saving a new one. Underneath it the Style parameters — ghost, contour,
-blackwall, ghost rim, ghost fill, bands, thickness, wall sweep, scan, rim, thermal and
-edges — each carry a slider and a value.](media/look.png)
+![The same surface with the Effects tab open. The Preset picker is expanded over the
+panel, listing none, blackwall, cascade, contour, depth, ember, ghost, grille, rgb, rift and
+tearline with blackwall highlighted. Underneath it the Blackwall, Glitch and Points groups
+each carry sliders with values, and a changed row shows a reset arrow.](media/look.png)
 
 Effects are packages on disk. Press **+ add effect** in the sidebar to search the installed
 packages. **Remove** takes one out of the project, resetting its values and deleting its
@@ -159,10 +158,10 @@ Aspect ratio and frame rate belong to the project: set them under **Project sett
 application bar. Then set **in** and **out** on the timeline bar, open **Output → Export**
 (`⌘E`), pick a resolution, a format and a name, and press **Export**.
 
-![The Export dialog. Aspect ratio runs across the top as 16:9, 1.90:1, 4:3, 1:1 and
-65:24 with 16:9 selected; below it a Resolution of 1920x1080 and a Frame rate of 30, then
-a Format row of MP4, MOV and PNG sequence with MP4 selected, an Output name whose
-placeholder is the take's id, and save a copy and render at the
+![The Export dialog. A Deliverable select with a new button, reading 1920x1080 h264
+underneath; a Resolution of 1920x1080; a Format row of MP4, MOV and PNG sequence with MP4
+selected; an Output name whose placeholder is the take's id; a Trim line reading
+00:00.000 to end, 10.80s at 30fps; and save a copy and Export at the
 foot.](media/export.png)
 
 | Format | What it is | Use it for |
